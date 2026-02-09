@@ -1,0 +1,35 @@
+# THIS FILE IS GENERATED. DO NOT EDIT.
+
+[solution]
+[solution.context]
+solved = true
+[[solution.state]]
+crate = "sha2"
+fulfilment = "solved"
+pinned = false
+transitivity = "direct"
+versions = "^2.0.0"
+[solution.state.release]
+authors = [
+"Anton Fediushin",
+]
+description = "Secure Hash Algorithm 2 implemented in Ada"
+licenses = "ISC"
+maintainers = [
+"Anton Fediushin <imantonmeep@gmail.com>",
+]
+maintainers-logins = [
+"AntonMeep",
+]
+name = "sha2"
+tags = [
+"cryptography",
+"security",
+"sha2",
+]
+version = "2.0.0"
+website = "https://github.com/AntonMeep/sha2"
+[solution.state.release.origin]
+commit = "73c2cd73e440b1e36d1b5c8b741fcb0e3fc4046c"
+url = "git+https://github.com/AntonMeep/sha2.git"
+

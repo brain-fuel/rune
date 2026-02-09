@@ -1,0 +1,3 @@
+rune_ast.adb:1:01: error: spec of this package does not allow a body
+rune_ast.adb:1:01: error: either remove the body or add pragma Elaborate_Body in the spec
+rune_ast.ads:18:80: (style) this line is too long: 82 [-gnatyM]

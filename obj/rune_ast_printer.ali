@@ -1,0 +1,168 @@
+V "GNAT Lib v15"
+A -gnatA
+A -mtune=generic
+A -march=x86-64
+P SS ZX
+
+RN
+RV NO_DISPATCHING_CALLS
+RV NO_EXCEPTION_HANDLERS
+RV NO_EXCEPTIONS
+RV NO_IO
+RV NO_LOCAL_ALLOCATORS
+RV NO_NESTED_FINALIZATION
+RV NO_RECURSION
+RV NO_SECONDARY_STACK
+RV NO_STANDARD_STORAGE_POOLS
+RV NO_DYNAMIC_SIZED_OBJECTS
+RV NO_IMPLEMENTATION_PRAGMAS
+
+U rune_ast_printer%b	rune_ast_printer.adb	a31a4d21 NE OO PK
+W ada%s			ada.ads			ada.ali
+Z ada.exceptions%s	a-except.adb		a-except.ali
+W ada.strings%s		a-string.ads		a-string.ali
+Z ada.strings.text_buffers%s  a-sttebu.adb	a-sttebu.ali
+W ada.strings.unbounded%s  a-strunb.adb		a-strunb.ali
+Z ada.tags%s		a-tags.adb		a-tags.ali
+W ada.text_io%s		a-textio.adb		a-textio.ali
+W rune_ast%s		rune_ast.ads		rune_ast.ali
+Z system%s		system.ads		system.ali
+Z system.concat_2%s	s-conca2.adb		s-conca2.ali
+Z system.concat_3%s	s-conca3.adb		s-conca3.ali
+Z system.finalization_primitives%s  s-finpri.adb  s-finpri.ali
+Z system.img_int%s	s-imgint.ads		s-imgint.ali
+Z system.secondary_stack%s  s-secsta.adb	s-secsta.ali
+Z system.soft_links%s	s-soflin.adb		s-soflin.ali
+
+U rune_ast_printer%s	rune_ast_printer.ads	826f715f EE NE OO PK
+W rune_ast%s		rune_ast.ads		rune_ast.ali
+
+D ada.ads		20250808065140 76789da1 ada%s
+D a-charac.ads		20250808065140 2d3ec45b ada.characters%s
+D a-chlat1.ads		20250808065140 e0d72e76 ada.characters.latin_1%s
+D a-contai.ads		20250808065140 61e5e089 ada.containers%s
+D a-conhel.ads		20250808065140 46fe1ce3 ada.containers.helpers%s
+D a-convec.ads		20250808065140 91fb49f3 ada.containers.vectors%s
+D a-except.ads		20250808065140 e7970cd9 ada.exceptions%s
+D a-finali.ads		20250808065140 bf4f806b ada.finalization%s
+D a-ioexce.ads		20250808065140 40018c65 ada.io_exceptions%s
+D a-iteint.ads		20250808065140 49a8bee2 ada.iterator_interfaces%s
+D a-stream.ads		20250808065140 17477cbd ada.streams%s
+D a-string.ads		20250808065140 90ac6797 ada.strings%s
+D a-strmap.ads		20250808065140 1f91ebb6 ada.strings.maps%s
+D a-strsea.ads		20250808065140 18c3c634 ada.strings.search%s
+D a-sttebu.ads		20250808065140 f1ad67a2 ada.strings.text_buffers%s
+D a-strunb.ads		20250808065140 b10770ab ada.strings.unbounded%s
+D a-stuten.ads		20250808065140 c6ced0ae ada.strings.utf_encoding%s
+D a-tags.ads		20250808065140 fbca0ad5 ada.tags%s
+D a-textio.ads		20250808065140 34ef47de ada.text_io%s
+D a-unccon.ads		20250808065140 0e9b276f ada.unchecked_conversion%s
+D a-uncdea.ads		20250808065140 c3a8ac65 ada.unchecked_deallocation%s
+D interfac.ads		20250808065140 9111f9c1 interfaces%s
+D i-c.ads		20250808065140 e94c966a interfaces.c%s
+D i-cstrea.ads		20250808065140 ffd01b9d interfaces.c_streams%s
+D rune_ast.ads		20260209023522 65331342 rune_ast%s
+D rune_ast_printer.ads	20260209023524 e75c621d rune_ast_printer%s
+D rune_ast_printer.adb	20260209023528 a49d0b0b rune_ast_printer%b
+D system.ads		20250808065140 14286b0f system%s
+D s-atocou.ads		20250808065140 dc18efc3 system.atomic_counters%s
+D s-conca2.ads		20250808065140 b5fb73f7 system.concat_2%s
+D s-conca3.ads		20250808065140 8a7a19a2 system.concat_3%s
+D s-crtl.ads		20250808065140 beb39b9e system.crtl%s
+D s-exctab.ads		20250808065140 91bef6ef system.exception_table%s
+D s-ficobl.ads		20250808065140 dc5161d4 system.file_control_block%s
+D s-finpri.ads		20250808065140 5970d55a system.finalization_primitives%s
+D s-finroo.ads		20250808065140 0a7c3ed4 system.finalization_root%s
+D s-imagei.ads		20250808065140 5e131ce0 system.image_i%s
+D s-imgint.ads		20250808065140 67e4edfb system.img_int%s
+D s-oscons.ads		20250827122531 068e1a91 system.os_constants%s
+D s-oslock.ads		20250808065140 13fa6b78 system.os_locks%s
+D s-parame.ads		20250808065140 3597fc11 system.parameters%s
+D s-pooglo.ads		20250808065140 91708d21 system.pool_global%s
+D s-putima.ads		20250808065140 17291fe4 system.put_images%s
+D s-retsta.ads		20250808065140 0f6b06cb system.return_stack%s
+D s-secsta.ads		20250808065140 578279f5 system.secondary_stack%s
+D s-soflin.ads		20250808065140 5d88fdea system.soft_links%s
+D s-stache.ads		20250808065140 0b81c1fe system.stack_checking%s
+D s-stalib.ads		20250808065140 1c9580f6 system.standard_library%s
+D s-stoele.ads		20250808065140 ccded4e8 system.storage_elements%s
+D s-stopoo.ads		20250808065140 e9fa2dd8 system.storage_pools%s
+D s-stratt.ads		20250808065140 516607ae system.stream_attributes%s
+D s-string.ads		20250808065140 582aac7d system.strings%s
+D s-ststop.ads		20250808065140 c569db7c system.strings.stream_ops%s
+D s-traent.ads		20250808065140 c81cbf8c system.traceback_entries%s
+D s-unstyp.ads		20250808065140 fa2a7f59 system.unsigned_types%s
+D s-valspe.ads		20250808065140 f810d31c system.val_spec%s
+D s-vaispe.ads		20250808065140 8280550e system.value_i_spec%s
+D s-vauspe.ads		20250808065140 89269ba5 system.value_u_spec%s
+D s-vs_int.ads		20250808065140 06b6b724 system.vs_int%s
+D s-vs_uns.ads		20250808065140 e7f47a27 system.vs_uns%s
+D s-wchcon.ads		20250808065140 d9032363 system.wch_con%s
+G a e
+G c Z s b [print rune_ast_printer 5 14 none]
+G c Z b b [print_indent rune_ast_printer 8 14 none]
+X 1 ada.ads
+18K9*Ada 22e8 27|1r6 2r6 11r10 19r10 27r10 30r10 30r55 33r10 39r10 45r10
+. 45r53 48r10 48r58 50r10 55r10 59r10 63r10 63r52 65r10 70r10
+X 6 a-convec.ads
+91R9*Vector<8|43R9>
+X 10 a-iteint.ads
+24h9 Forward_Iterator
+32h9 Reversible_Iterator<24R9[6|119]>
+X 12 a-string.ads
+16K13*Strings 35e16 27|2r10 30r59 45r57 48r62 63r56
+X 16 a-strunb.ads
+91K21*Unbounded 1641e26 27|2w18 30r67 45r65 48r70 63r64
+135V13*To_String{string} 27|30s77 45s75 48s80 63s74
+X 18 a-tags.ads
+653V13 CW_Membership{boolean} 27|27s77 30s96 34s14 40s14 45s94 48s99 51s14
+. 56s25 60s25 63s93 66s14
+X 19 a-textio.ads
+58K13*Text_IO 785e16 27|1w10 11r14 19r14 27r14 30r14 33r14 39r14 45r14 48r14
+. 50r14 55r14 59r14 63r14 65r14 70r14
+515U14*Put 27|11s22
+565U14*Put_Line 27|19s22 27s22 30s22 33s22 39s22 45s22 48s22 50s22 55s22
+. 59s22 63s22 65s22 70s22
+X 25 rune_ast.ads
+5K9*Rune_AST 74e13 26|1w6 5r28 27|3w6 6r13 15r28 26r22 27r69 29r25 30r88
+. 32r25 34r27 38r25 40r24 44r25 45r86 47r25 48r91 51r23 56r17 58r25 60r17
+. 62r25 63r85 66r21
+8P9*AST_Node_Access(7R9) 26|5r37 27|6r22 15r37
+15R12*AST_Node_Vector{6|91R9[11]}
+20R9*Integer_Literal<7R9> 22e14 27|26r31 27r78
+21i7*Value{integer} 27|27r105
+24R9*String_Literal<7R9> 26e14 27|29r34 30r97
+25r7*Value{16|105R9} 27|30r123
+31R9*Seq_Block<7R9> 33e14 27|32r34 34r36
+32r7*Statements{15R12} 27|34r57
+35R9*Fork_Join_Block<7R9> 37e14 27|38r34 40r33
+36r7*Branches{15R12} 27|40r60
+42R9*Parameter_Decl<7R9> 45e14 27|44r34 45r95
+43r7*Name{16|105R9} 27|45r121
+51R12*Parameter_List{6|91R9[47]}
+53R9*Argument_Expr<7R9> 55e14 27|58r34 60r26
+54p7*Value{8P9} 27|60r51
+61R12*Argument_List{6|91R9[57]}
+63R9*Function_Definition<7R9> 67e14 27|47r34 48r100 51r32 56r26
+64r7*Name{16|105R9} 27|48r131
+65r7*Parameters{51R12} 27|51r63
+66p7*Function_Body{8P9} 27|56r57
+69R9*Function_Call<7R9> 72e14 27|62r34 63r94 66r30
+70r7*Name{16|105R9} 27|63r119
+71r7*Arguments{61R12} 27|66r55
+X 26 rune_ast_printer.ads
+3K9*Rune_AST_Printer 7l5 7e21 27|5b14 74l5 74t21
+5U14*Print 5>21 5>54 27|15b14 35s13 41s13 52s13 56s10 60s10 67s13 72l8 72t13
+5p21 Node{25|8P9} 27|15b21 17r10 26r10 27r95 29r13 30r113 32r13 34r47 38r13
+. 40r50 44r13 45r111 47r13 48r121 51r53 56r47 58r13 60r41 62r13 63r109 66r45
+5i54 Indent{natural} 27|15b54 18r24 23r21 35r31 41r28 49r24 52r27 54r24 56r72
+. 60r58 64r24 67r25
+X 27 rune_ast_printer.adb
+8U14 Print_Indent 8b14 8>28 13l8 13t20 18s10 23s7 49s10 54s10 64s10
+8i28 Indent{natural} 10r21
+10i11 I{integer}
+34p14 Statement{25|8P9} 35r20
+40p14 Branch{25|8P9} 41r20
+51p14 Param{25|8P9} 52r20
+66p14 Arg{25|8P9} 67r20
+

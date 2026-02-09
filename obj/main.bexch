@@ -1,0 +1,20 @@
+[GENERATED OBJECT FILE]
+b__main.o
+[PROJECT FILES]
+/home/brainfuel/gastown/rune/rune/rune.gpr
+20260209023517 48cd2338dc0ad30d4a9ebe595afed6fb
+[BOUND OBJECT FILES]
+/home/brainfuel/gastown/rune/rune/obj/rune_ast.o
+/home/brainfuel/gastown/rune/rune/obj/rune_ast_printer.o
+/home/brainfuel/gastown/rune/rune/obj/main.o
+[GENERATED SOURCE FILES]
+b__main.ads
+b__main.adb
+b__main.ali
+[RESULTING OPTIONS]
+-L/home/brainfuel/gastown/rune/rune/obj/
+-L/home/brainfuel/gastown/rune/rune/obj/
+-L/home/brainfuel/.local/share/alire/toolchains/gnat_native_15.2.1_4640d4b3/lib/gcc/x86_64-pc-linux-gnu/15.2.0/adalib/
+-static
+/home/brainfuel/.local/share/alire/toolchains/gnat_native_15.2.1_4640d4b3/lib/gcc/x86_64-pc-linux-gnu/15.2.0/adalib/libgnat.a
+-ldl

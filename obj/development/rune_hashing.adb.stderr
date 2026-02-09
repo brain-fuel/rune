@@ -1,0 +1,5 @@
+rune_hashing.adb:4:06: error: file "sha2-generic_hmac.ads" not found
+rune_hashing.adb:8:48: (style) space required [-gnatyt]
+rune_hashing.adb:11:26: (style) space required [-gnatyt]
+rune_hashing.adb:14:10: (style) space required [-gnatyc]
+rune_hashing.adb:15:34: (style) space required [-gnatyt]

@@ -1,0 +1,5 @@
+dependency:sha2=2.0.0=8980dc3771b68aedd1653e3d6c7094147063cde1c8ec07d8ea512d2b1fa09e1e
+external:LIBRARY_TYPE=default
+external:RUNE_LIBRARY_TYPE=default
+profile:rune=DEVELOPMENT
+switches:rune=-Og,-fdata-sections,-ffunction-sections,-g,-gnatVa,-gnatW8,-gnatw.X,-gnatwa,-gnaty-d,-gnaty3,-gnatyA,-gnatyB,-gnatyI,-gnatyO,-gnatyS,-gnatya,-gnatyb,-gnatyc,-gnatye,-gnatyf,-gnatyh,-gnatyi,-gnatyk,-gnatyl,-gnatym,-gnatyn,-gnatyp,-gnatyr,-gnatyt,-gnatyu,-gnatyx
