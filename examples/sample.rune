@@ -1,11 +1,30 @@
 -- the polymorphic identity function
-id : (A : U) -> A -> A = \A x -> x
+id : (A : U) -> A -> A is
+  fn (A : U) (x : A) is x end
+end
 
--- the constant function, referencing id
-const : (A : U) -> (B : U) -> A -> B -> A = \A B x y -> x
+-- the constant function
+const : (A : U) -> (B : U) -> A -> B -> A is
+  fn (A : U) (B : U) (x : A) (y : B) is x end
+end
 
-idU = id U
+idU : U is
+  id U
+end
 
-apply = \f x -> f x
+apply : (A : U) -> (B : U) -> (A -> B) -> A -> B is
+  fn (A : U) (B : U) (f : A -> B) (x : A) is f x end
+end
 
-prod : U -> U -> U = \A B -> (P : U) -> (A -> B -> P) -> P
+prod : U -> U -> U is
+  fn (A : U) (B : U) is (P : U) -> (A -> B -> P) -> P end
+end
+
+-- explicit sequencing desugars to nested let ... in
+example : U is
+  seq
+    let a = U
+    let b : U = a
+    b
+  end
+end

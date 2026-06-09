@@ -30,9 +30,10 @@ func genExp(t *rapid.T, scope []string, fuel int) surface.Exp {
 	switch rapid.IntRange(0, 6).Draw(t, "form") {
 	case 0:
 		return genAtom(t, scope)
-	case 1: // lambda
+	case 1: // lambda: fn (n : Dom) is Body end; Dom is drawn in the outer scope
 		n := pickName(t)
-		return surface.ELam{Param: n, Body: genExp(t, append(scope, n), fuel-1)}
+		dom := genExp(t, scope, fuel-1)
+		return surface.ELam{Param: n, Dom: dom, Body: genExp(t, append(scope, n), fuel-1)}
 	case 2: // application
 		return surface.EApp{Fn: genExp(t, scope, fuel-1), Arg: genExp(t, scope, fuel-1)}
 	case 3: // dependent function type
@@ -104,7 +105,11 @@ func (c *renamer) rename(e surface.Exp, env map[string]string) surface.Exp {
 		return x
 	case surface.ELam:
 		nn := c.fresh()
-		return surface.ELam{Param: nn, Body: c.rename(x.Body, extend(env, x.Param, nn))}
+		out := surface.ELam{Param: nn, Body: c.rename(x.Body, extend(env, x.Param, nn))}
+		if x.Dom != nil {
+			out.Dom = c.rename(x.Dom, env)
+		}
+		return out
 	case surface.EApp:
 		return surface.EApp{Fn: c.rename(x.Fn, env), Arg: c.rename(x.Arg, env)}
 	case surface.EPi:

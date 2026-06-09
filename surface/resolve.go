@@ -40,6 +40,13 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 	case EUniv:
 		return core.Univ{}, nil
 	case ELam:
+		// The binder's domain annotation is scope-checked in the enclosing context and
+		// then discarded: the Phase-0 core lambda is un-annotated (GRAMMAR.md §6).
+		if x.Dom != nil {
+			if _, err := r.resolve(x.Dom, ctx); err != nil {
+				return nil, err
+			}
+		}
 		body, err := r.resolve(x.Body, push(x.Param, ctx))
 		if err != nil {
 			return nil, err
@@ -120,6 +127,9 @@ func FreeIdents(e Exp) []string {
 			}
 		case EUniv:
 		case ELam:
+			if x.Dom != nil {
+				walk(x.Dom, bound)
+			}
 			walk(x.Body, with(bound, x.Param))
 		case EApp:
 			walk(x.Fn, bound)

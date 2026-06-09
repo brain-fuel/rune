@@ -65,28 +65,28 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 			p.print(sb, x.Arg, names, precAtom)
 		})
 	case core.Lam:
-		p.wrap(sb, prec, precLow, func() {
-			body := core.Tm(x)
-			cur := names
-			sb.WriteByte('\\')
-			first := true
-			for {
-				lam, ok := body.(core.Lam)
-				if !ok {
-					break
-				}
-				n := fresh(lam.Body.Name, cur)
-				if !first {
-					sb.WriteByte(' ')
-				}
-				sb.WriteString(n)
-				cur = prepend(n, cur)
-				body = lam.Body.Body
-				first = false
+		// fn (x : U) (y : U) … is BODY end. The core lambda is un-annotated, so the
+		// printer emits the sole base type U for every binder domain (GRAMMAR.md §8);
+		// re-resolution discards it. The block is self-delimiting, hence an atom — it
+		// needs no surrounding parentheses at any precedence.
+		body := core.Tm(x)
+		cur := names
+		sb.WriteString("fn")
+		for {
+			lam, ok := body.(core.Lam)
+			if !ok {
+				break
 			}
-			sb.WriteString(" -> ")
-			p.print(sb, body, cur, precLow)
-		})
+			n := fresh(lam.Body.Name, cur)
+			sb.WriteString(" (")
+			sb.WriteString(n)
+			sb.WriteString(" : U)")
+			cur = prepend(n, cur)
+			body = lam.Body.Body
+		}
+		sb.WriteString(" is ")
+		p.print(sb, body, cur, precLow)
+		sb.WriteString(" end")
 	case core.Pi:
 		if occursVar(x.Cod.Body, 0) {
 			p.wrap(sb, prec, precArrow, func() {
@@ -136,6 +136,63 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		p.print(sb, x.Term, names, precApp)
 		sb.WriteString(" : ")
 		p.print(sb, x.Ty, names, precLow)
+		sb.WriteByte(')')
+	default:
+		sb.WriteString("?")
+	}
+}
+
+// DebugCore renders a core term in explicit locally-nameless form: bound variables as
+// their de Bruijn index (#n), references as @hash, binders unnamed (λ, Π). It is the
+// REPL's :core debug view and deliberately is not a sentence of the surface grammar.
+func DebugCore(t core.Tm) string {
+	var sb strings.Builder
+	debugCore(&sb, t)
+	return sb.String()
+}
+
+func debugCore(sb *strings.Builder, t core.Tm) {
+	switch x := t.(type) {
+	case core.Var:
+		sb.WriteString("#")
+		sb.WriteString(strconv.Itoa(x.Idx))
+	case core.Ref:
+		sb.WriteString("@")
+		sb.WriteString(x.Hash.Short())
+	case core.Univ:
+		sb.WriteString("U")
+	case core.App:
+		sb.WriteByte('(')
+		debugCore(sb, x.Fn)
+		sb.WriteByte(' ')
+		debugCore(sb, x.Arg)
+		sb.WriteByte(')')
+	case core.Lam:
+		sb.WriteString("(λ. ")
+		debugCore(sb, x.Body.Body)
+		sb.WriteByte(')')
+	case core.Pi:
+		sb.WriteString("(Π ")
+		debugCore(sb, x.Dom)
+		sb.WriteString(". ")
+		debugCore(sb, x.Cod.Body)
+		sb.WriteByte(')')
+	case core.Let:
+		sb.WriteString("(let")
+		if x.Ty != nil {
+			sb.WriteString(" : ")
+			debugCore(sb, x.Ty)
+		}
+		sb.WriteString(" = ")
+		debugCore(sb, x.Val)
+		sb.WriteString(" in ")
+		debugCore(sb, x.Body.Body)
+		sb.WriteByte(')')
+	case core.Ann:
+		sb.WriteByte('(')
+		debugCore(sb, x.Term)
+		sb.WriteString(" : ")
+		debugCore(sb, x.Ty)
 		sb.WriteByte(')')
 	default:
 		sb.WriteString("?")

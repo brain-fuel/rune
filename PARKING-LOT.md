@@ -35,10 +35,10 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
   rather than on `e`'s full content would recover reuse across harmless body edits,
   but reintroduces a validation procedure (invalidation logic). Explicitly out of
   scope; the cache asserts only "this exact configuration of bodies checks."
-- **Multi-binder surface sugar / richer layout.** `\x y -> e` desugars to nested
-  lambdas; otherwise the surface is exactly: variables, lambda, application, Pi,
-  let, U, annotation. No data types, implicits, or modules beyond a flat list of
-  definitions until a phase needs them.
+- **Richer surface beyond the v0.2.0 calculus.** The surface is exactly: variables,
+  lambda (`fn (x : A) is e end`, curried), application, Pi, inline `let`, `seq`, `U`,
+  and parenthesized ascription (see `ref_docs/GRAMMAR.md`). No data types, implicits,
+  or modules beyond a flat list of definitions until a phase needs them.
 - **Sigma types, pairs, equality formers in the surface.** The v1 design's `Tm`
   includes `Sig`/`Pair`/`Eq`/`Cast`; Phase 0's surface and core deliberately omit
   them (no consumer yet). They enter with their phases.
@@ -46,3 +46,24 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
   persistence has no Phase-0 consumer.
 - **Readable error spans / source positions in core.** Tokens carry offsets; the
   core does not thread positions yet. Deferred until the checker needs them.
+
+## Tempted in v0.2.0 (surface grammar + REPL), not built
+
+These are named in `ref_docs/GRAMMAR.md §9` and the v0.2.0 prompt. Each is ergonomics
+or a later-phase feature with no current consumer.
+
+- **Inline arrow lambda** (`fn x => body`). One lambda form (`fn … is … end`) is
+  enough; the `=>` shorthand is parked.
+- **Unannotated lambda parameters** (`fn x is …`). v0.2.0 binders are `(name : Type)`.
+  Note the annotation is scope-checked then discarded — the Phase-0 core lambda is
+  un-annotated — so it constrains nothing yet; a core home arrives with Phase-1 types.
+- **Multi-binder Pi telescopes** (`(x : A) (y : B) -> C`). Chain with `->` for now.
+- **Operators / infix, multi-clause definitions, pattern matching, literals.** Later
+  phases; the surface has no notion of any of them.
+- **REPL line editing: readline, history, completion.** The REPL reads with `bufio`
+  only. No `golang.org/x/term` or readline dependency — the one-dependency posture
+  holds; ergonomics wait.
+- **REPL evaluation.** `:type`/`:t` is an honest forward-compat stub
+  (`type checking arrives in Phase 1`); the default expression action is resolve +
+  pretty-print, and the single dispatch point in `internal/repl` is marked as the
+  Phase-1 insertion site. No fake eval before NbE exists.

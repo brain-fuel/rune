@@ -12,10 +12,15 @@ const (
 	tIdent
 	tLParen
 	tRParen
-	tLambda // \
-	tArrow  // ->
-	tColon  // :
-	tEquals // =
+	tArrow   // ->
+	tColon   // :
+	tEquals  // =
+	tSemi    // ;
+	tNewline // a line break; a seq item separator, insignificant elsewhere
+	tFn
+	tIs
+	tEnd
+	tSeq
 	tLet
 	tIn
 	tU
@@ -25,7 +30,6 @@ type token struct {
 	kind tokKind
 	text string
 	pos  int
-	col  int // column within its line; col 0 marks a top-level definition start
 }
 
 func (k tokKind) String() string {
@@ -38,14 +42,24 @@ func (k tokKind) String() string {
 		return "'('"
 	case tRParen:
 		return "')'"
-	case tLambda:
-		return "'\\'"
 	case tArrow:
 		return "'->'"
 	case tColon:
 		return "':'"
 	case tEquals:
 		return "'='"
+	case tSemi:
+		return "';'"
+	case tNewline:
+		return "newline"
+	case tFn:
+		return "'fn'"
+	case tIs:
+		return "'is'"
+	case tEnd:
+		return "'end'"
+	case tSeq:
+		return "'seq'"
 	case tLet:
 		return "'let'"
 	case tIn:
@@ -65,68 +79,107 @@ func isIdentCont(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '\''
 }
 
-// lex turns source into a token slice. It is intentionally small: the surface
-// language is exactly variables, lambda, application, Pi, let, U, and annotation.
-//
-// Each token records its column. A column-0 token marks the start of a top-level
-// definition; continuation lines are indented. This layout rule is how a flat list
-// of definitions is delimited without statement terminators.
+// lex turns source into a token slice for the v0.2.0 surface grammar (see
+// ref_docs/GRAMMAR.md §2). Whitespace separates tokens; a line break becomes a
+// tNewline token, which the parser skips everywhere except while collecting the
+// items of a seq block. Line comments (-- …) and nestable block comments ({- … -})
+// are discarded. The lexer takes the longest match, so -> is one token, -- opens a
+// line comment, and {- opens a block comment.
 func lex(src string) ([]token, error) {
 	var toks []token
 	rs := []rune(src)
 	i := 0
-	lineStart := 0
 	for i < len(rs) {
 		r := rs[i]
-		col := i - lineStart
 		switch {
 		case r == '\n':
+			toks = append(toks, token{tNewline, "\n", i})
 			i++
-			lineStart = i
 		case r == ' ', r == '\t', r == '\r':
 			i++
 		case r == '-' && i+1 < len(rs) && rs[i+1] == '-':
 			for i < len(rs) && rs[i] != '\n' {
 				i++
 			}
+		case r == '{' && i+1 < len(rs) && rs[i+1] == '-':
+			end, err := skipBlockComment(rs, i)
+			if err != nil {
+				return nil, err
+			}
+			i = end
 		case r == '(':
-			toks = append(toks, token{tLParen, "(", i, col})
+			toks = append(toks, token{tLParen, "(", i})
 			i++
 		case r == ')':
-			toks = append(toks, token{tRParen, ")", i, col})
-			i++
-		case r == '\\':
-			toks = append(toks, token{tLambda, "\\", i, col})
+			toks = append(toks, token{tRParen, ")", i})
 			i++
 		case r == ':':
-			toks = append(toks, token{tColon, ":", i, col})
+			toks = append(toks, token{tColon, ":", i})
 			i++
 		case r == '=':
-			toks = append(toks, token{tEquals, "=", i, col})
+			toks = append(toks, token{tEquals, "=", i})
+			i++
+		case r == ';':
+			toks = append(toks, token{tSemi, ";", i})
 			i++
 		case r == '-' && i+1 < len(rs) && rs[i+1] == '>':
-			toks = append(toks, token{tArrow, "->", i, col})
+			toks = append(toks, token{tArrow, "->", i})
 			i += 2
 		case isIdentStart(r):
 			start := i
 			for i < len(rs) && isIdentCont(rs[i]) {
 				i++
 			}
-			word := string(rs[start:i])
-			switch word {
-			case "let":
-				toks = append(toks, token{tLet, word, start, col})
-			case "in":
-				toks = append(toks, token{tIn, word, start, col})
-			case "U":
-				toks = append(toks, token{tU, word, start, col})
-			default:
-				toks = append(toks, token{tIdent, word, start, col})
-			}
+			toks = append(toks, keyword(string(rs[start:i]), start))
 		default:
 			return nil, fmt.Errorf("unexpected character %q at offset %d", string(r), i)
 		}
 	}
-	toks = append(toks, token{tEOF, "", len(rs), 0})
+	toks = append(toks, token{tEOF, "", len(rs)})
 	return toks, nil
+}
+
+// keyword classifies an identifier word: the reserved words of §2 become their own
+// token kinds, everything else is an identifier.
+func keyword(word string, pos int) token {
+	switch word {
+	case "fn":
+		return token{tFn, word, pos}
+	case "is":
+		return token{tIs, word, pos}
+	case "end":
+		return token{tEnd, word, pos}
+	case "seq":
+		return token{tSeq, word, pos}
+	case "let":
+		return token{tLet, word, pos}
+	case "in":
+		return token{tIn, word, pos}
+	case "U":
+		return token{tU, word, pos}
+	default:
+		return token{tIdent, word, pos}
+	}
+}
+
+// skipBlockComment consumes a nestable {- … -} comment starting at i (positioned on
+// the '{') and returns the offset just past the matching -}.
+func skipBlockComment(rs []rune, i int) (int, error) {
+	depth := 0
+	for i < len(rs) {
+		switch {
+		case rs[i] == '{' && i+1 < len(rs) && rs[i+1] == '-':
+			depth++
+			i += 2
+		case rs[i] == '-' && i+1 < len(rs) && rs[i+1] == '}':
+			depth--
+			i += 2
+			if depth == 0 {
+				return i, nil
+			}
+		default:
+			i++
+		}
+	}
+	return i, fmt.Errorf("unterminated block comment")
 }

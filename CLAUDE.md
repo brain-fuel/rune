@@ -19,15 +19,23 @@ resolution** (surface → core): binders to de Bruijn indices, free identifiers 
 definition refs. There is no type elaboration in Phase 0.
 
 ```
-surface/   lexer, parser, named AST, pretty-printer, name resolution  (names live here)
-core/      locally-nameless Tm; glued Val domain (shape only); structural Merkle hash
-store/     sealed bodies, the Unfold gateway, content-addressed map, SCC hashing
-equality/  the EQUALITY stratum interface (+ Phase-3 stub)
-quantity/  the QUANTITY stratum interface (+ default 0/1/ω semiring)
-codegen/   the CODEGEN stratum interface (Backend; erased IR -> target source)
-harness/   property-test scaffolding — the gate from day one
-cmd/rune/  the CLI: `rune fmt`, `rune hash`
+surface/          lexer, parser, named AST, pretty-printer, name resolution  (names live here)
+core/             locally-nameless Tm; glued Val domain (shape only); structural Merkle hash
+store/            sealed bodies, the Unfold gateway, content-addressed map, SCC hashing
+equality/         the EQUALITY stratum interface (+ Phase-3 stub)
+quantity/         the QUANTITY stratum interface (+ default 0/1/ω semiring)
+codegen/          the CODEGEN stratum interface (Backend; erased IR -> target source)
+harness/          property-test scaffolding — the gate from day one
+internal/session  the shared parse -> resolve -> hash pipeline (file commands + REPL)
+internal/repl     the `rune repl` read -> resolve -> show loop
+cmd/rune/         the CLI: `rune fmt`, `rune hash`, `rune repl`
 ```
+
+**`ref_docs/GRAMMAR.md` is authoritative for the surface language.** The lexer, parser,
+named AST, name resolution, and pretty-printer conform to it; resolve any gap there
+before touching code. As of v0.2.0 the surface is Elixir-style block syntax —
+`fn (x : A) is e end` lambdas, `name : T is e end` definitions, and `seq … end`
+sequencing that desugars to nested `let` — over the same unchanged core.
 
 The core term encoding is the conventional Go AST encoding: a **sealed interface
 with an unexported marker method, one small struct per constructor, matched by type
@@ -59,7 +67,12 @@ are not implemented in Phase 0.
 - **Phase 0 (done):** lock the irreversibles + walking skeleton — term/value/hashing
   shapes, the strata interfaces, the body barrier, name resolution, pretty-printer,
   `rune fmt`/`rune hash`, the property harness.
-- **Phase 1:** the MLTT core with glued NbE (eval, quote, conversion).
+- **v0.2.0 (done):** surface conforms to `ref_docs/GRAMMAR.md` (`fn … is … end`,
+  `seq … end`); `rune repl` front-end over the existing pipeline. Still no eval,
+  quote, conversion, or type checking — the core is unchanged.
+- **Phase 1:** the MLTT core with glued NbE (eval, quote, conversion). The REPL's
+  single dispatch point (`internal/repl`, `runExpr`) is the marked insertion site:
+  the default expression action upgrades from resolve+print to typecheck+normalize+print.
 - **Later:** metavariables/unification/implicits; the OTT equality stratum; data,
   coverage, totality; turn on QTT; universe hierarchy; codegen + a backend.
 - The equality stratum is then **extended** (v2 quotients) and a second equality

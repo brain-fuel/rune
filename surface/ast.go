@@ -22,9 +22,13 @@ type EVar struct {
 // EUniv is the universe U.
 type EUniv struct{}
 
-// ELam is \x -> Body. The parser desugars multi-binder \x y -> e into nested ELam.
+// ELam is one parameter of a lambda: fn (Param : Dom) is Body end. The parser
+// desugars a curried fn (x : A) (y : B) is e end into nested ELam. Dom is the binder's
+// domain annotation; resolution scope-checks it and then discards it, since the
+// Phase-0 core lambda is un-annotated (see GRAMMAR.md §6). Dom is never nil.
 type ELam struct {
 	Param string
+	Dom   Exp
 	Body  Exp
 }
 
