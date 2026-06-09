@@ -1,0 +1,11 @@
+-- the polymorphic identity function
+id : (A : U) -> A -> A = \A x -> x
+
+-- the constant function, referencing id
+const : (A : U) -> (B : U) -> A -> B -> A = \A B x y -> x
+
+idU = id U
+
+apply = \f x -> f x
+
+prod : U -> U -> U = \A B -> (P : U) -> (A -> B -> P) -> P
