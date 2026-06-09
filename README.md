@@ -37,9 +37,11 @@ core deliberately is not, and `PARKING-LOT.md` for what was deferred.
 ## Build, test, run
 
 ```sh
+go install goforge.dev/rune/cmd/rune@latest   # installs the `rune` binary into $GOBIN
+
 go test ./...          # all green
 go vet ./...           # clean
-go build -o rune ./cmd/rune
+go build -o rune ./cmd/rune                    # or build from source
 
 ./rune fmt  examples/sample.rune    # parse -> resolve to core -> pretty-print back
 ./rune hash examples/sample.rune    # print each definition's content hash
@@ -58,7 +60,7 @@ equality/ the equality stratum interface (+ Phase-3 stub)
 quantity/ the quantity stratum interface (+ default 0/1/ω semiring)
 codegen/  the codegen stratum interface (Backend)
 harness/  property-test scaffolding
-cmd/rune/ the CLI
+cmd/rune/ the CLI (`rune fmt`, `rune hash`)
 ```
 
 ## Dependencies
