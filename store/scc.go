@@ -1,11 +1,15 @@
 package store
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 
+	"goforge.dev/blake3sum/components/blake3"
 	"goforge.dev/rune/core"
 )
+
+// newHasher returns the streaming BLAKE3 hasher backing every definition digest,
+// matching the algorithm core.HashTerm uses for terms.
+func newHasher() *blake3.Hasher { return blake3.New(32, nil) }
 
 // content is the hashable content of one definition: its (optional) type and its
 // body. A definition's identity is the Merkle hash of this content, with internal
@@ -16,7 +20,9 @@ type content struct {
 	Body core.Tm
 }
 
-const defFormatVersion byte = 0x00
+// defFormatVersion is the preimage tag for definition and SCC digests. 0x01: BLAKE3
+// (0x00 was sha256).
+const defFormatVersion byte = 0x01
 
 // hashContent hashes a single, self-contained definition (no intra-group
 // references). This is the acyclic singleton case and what Store.Add uses.
@@ -24,7 +30,7 @@ const defFormatVersion byte = 0x00
 // NEVER hash modulo conversion: hashContent calls only core.HashTerm, which is
 // structural. Identity is syntax.
 func hashContent(c content) core.Hash {
-	h := sha256.New()
+	h := newHasher()
 	h.Write([]byte{defFormatVersion, 'd'})
 	if c.Type == nil {
 		h.Write([]byte{0})
@@ -59,7 +65,7 @@ func HashSCC(group []content) []core.Hash {
 	if len(group) == 1 && !referencesPlaceholder(group[0]) {
 		return []core.Hash{hashContent(group[0])}
 	}
-	g := sha256.New()
+	g := newHasher()
 	g.Write([]byte{defFormatVersion, 's'})
 	writeUint(g, uint64(len(group)))
 	for _, c := range group {
@@ -71,7 +77,7 @@ func HashSCC(group []content) []core.Hash {
 
 	out := make([]core.Hash, len(group))
 	for i := range group {
-		m := sha256.New()
+		m := newHasher()
 		m.Write([]byte{defFormatVersion, 'm'})
 		m.Write(groupHash[:])
 		writeUint(m, uint64(i))
@@ -86,7 +92,7 @@ func HashSCC(group []content) []core.Hash {
 // group is being hashed. Intra-group references are rewritten to Placeholder(i)
 // before HashSCC so the group content is self-contained and position-stable.
 func Placeholder(i int) core.Hash {
-	h := sha256.New()
+	h := newHasher()
 	h.Write([]byte{defFormatVersion, 'p'})
 	writeUint(h, uint64(i))
 	var out core.Hash

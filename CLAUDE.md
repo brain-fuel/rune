@@ -83,8 +83,10 @@ are not implemented in Phase 0.
 
 ## Engineering conventions
 
-- Go standard library only, plus one property-testing library
-  (`pgregory.net/rapid`). No other dependency without recording why.
+- Go standard library plus two recorded direct dependencies: the property-testing
+  library `pgregory.net/rapid`, and `goforge.dev/blake3sum` for BLAKE3 content
+  hashing (behind `core.Hash`; pulls `klauspost/cpuid` and `golang.org/x/sys` as
+  indirect deps for its SIMD dispatch). No further dependency without recording why.
 - The harness is the gate from day one: `parse ∘ pretty = id` and hash-invariance
   under alpha-renaming hold now; the Phase-1+ invariants (type preservation,
   conversion as equivalence + congruence, the proof-cache Frame Lemma) exist as

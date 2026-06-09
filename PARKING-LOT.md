@@ -23,10 +23,6 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
 
 ## Tempted in Phase 0, not built
 
-- **BLAKE3 content hashing.** Phase 0 uses `crypto/sha256` to honour the
-  one-dependency rule; `goforge.dev/blake3sum` exists and could be swapped in behind
-  `core.Hash` later (bump the preimage tag — it changes every hash). Rationale:
-  no measured need yet; stdlib keeps the dependency surface at one (rapid).
 - **Recursive-definition resolution.** `store.HashSCC` and positional `Placeholder`
   lay down SCC-as-unit hashing, but the resolver wires only the acyclic case; the
   CLI rejects recursive groups. Cyclic resolution (placeholder rewriting in the

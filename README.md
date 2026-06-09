@@ -63,4 +63,5 @@ cmd/rune/ the CLI
 
 ## Dependencies
 
-Go standard library, plus one property-testing library: `pgregory.net/rapid`.
+Go standard library, plus two direct dependencies: `pgregory.net/rapid` (property
+testing) and `goforge.dev/blake3sum` (BLAKE3 content hashing, behind `core.Hash`).

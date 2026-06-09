@@ -1,19 +1,23 @@
 package core
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"hash"
+
+	"goforge.dev/blake3sum/components/blake3"
 )
 
 // Hash is a content hash: the Merkle digest of a piece of elaborated core.
 //
-// Phase 0 uses crypto/sha256 from the standard library to honour the one-dependency
-// rule (only pgregory.net/rapid is a non-stdlib dependency). The digest width and
-// algorithm are an implementation detail behind this type; see PARKING-LOT.md for
-// the note on swapping in BLAKE3.
+// Hashing uses BLAKE3 (goforge.dev/blake3sum); blake3.New(32, nil) is an unkeyed
+// 256-bit streaming hasher implementing hash.Hash. The digest width and algorithm
+// are an implementation detail behind this type — changing them changes every
+// content hash, which is what the preimage tag (hashFormatVersion) versions.
 type Hash [32]byte
+
+// newHasher returns the streaming hasher backing every content digest.
+func newHasher() hash.Hash { return blake3.New(32, nil) }
 
 // String renders the hash as lowercase hex.
 func (h Hash) String() string { return hex.EncodeToString(h[:]) }
@@ -23,8 +27,9 @@ func (h Hash) Short() string { return hex.EncodeToString(h[:])[:12] }
 
 // hashFormatVersion is the preimage tag that prefixes every term digest. Bumping it
 // changes every content hash, which is the intended migration lever if the core's
-// serialization changes. NEVER reuse a tag across incompatible encodings.
-const hashFormatVersion byte = 0x00
+// serialization or hash algorithm changes. NEVER reuse a tag across incompatible
+// encodings. 0x01: BLAKE3 (0x00 was sha256).
+const hashFormatVersion byte = 0x01
 
 // Constructor tags. Each core constructor gets a distinct, stable byte so that
 // differently-shaped terms cannot collide by accident. Append-only: never renumber.
@@ -47,7 +52,7 @@ const (
 // Bruijn, alpha-equivalent terms are literally equal here and therefore hash equal;
 // Scope.Name is a pretty-printing hint and is deliberately not fed to the digest.
 func HashTerm(t Tm) Hash {
-	h := sha256.New()
+	h := newHasher()
 	h.Write([]byte{hashFormatVersion})
 	writeTerm(h, t)
 	var out Hash
