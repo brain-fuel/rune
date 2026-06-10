@@ -1,0 +1,72 @@
+-- Chapter 9 — Two levels.
+-- A second equality stratum: alongside the strict, proof-irrelevant Eq (which
+-- validates UIP and stays exactly as it was), an INNER layer of fibrant types
+-- with its own identity type. The strict layer reasons about the fibrant
+-- layer; the two never meet, so they never contradict. The fibrant universe
+-- is Tarski-style: UF holds CODES, El decodes a code to the outer type of its
+-- elements, and decoding COMPUTES.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- Small outer types are fibrant (sets are discrete spaces): fib embeds them.
+natF : UF is fib Nat end
+
+-- El (fib Nat) IS Nat, definitionally — an element of the fibrant naturals
+-- is just a natural.
+two : El natF is succ (succ zero) end
+
+-- UF is closed under Pi, and decoding computes through it: El (piF A B) is
+-- the genuine function type, so inner functions are written as plain lambdas
+-- and APPLIED as plain functions.
+doubleF : El (piF natF (fn (x : El natF) is natF end)) is
+  fn (n : Nat) is add n n end
+end
+
+four : Nat is doubleF two end
+
+-- The inner identity type: pathF A x y is itself a fibrant type. Its
+-- reflexivity is preflF; its induction principle pathJ computes on preflF —
+-- the inner layer's J has the β-rule J A x P d x (preflF A x) = d.
+pathRefl4 : El (pathF natF four four) is preflF natF four end
+
+-- Inner symmetry and transitivity, by path induction. These are the v1
+-- chapter-3 proofs REPLAYED ONE LEVEL IN: same shapes, second equality.
+psym : (A : UF) -> (x : El A) -> (y : El A) ->
+    El (pathF A x y) -> El (pathF A y x) is
+  fn (A : UF) (x : El A) (y : El A) (p : El (pathF A x y)) is
+    pathJ A x (fn (z : El A) (q : El (pathF A x z)) is pathF A z x end)
+      (preflF A x)
+      y p
+  end
+end
+
+ptrans : (A : UF) -> (x : El A) -> (y : El A) -> (z : El A) ->
+    El (pathF A x y) -> El (pathF A y z) -> El (pathF A x z) is
+  fn (A : UF) (x : El A) (y : El A) (z : El A)
+     (p : El (pathF A x y)) (q : El (pathF A y z)) is
+    pathJ A y (fn (w : El A) (r : El (pathF A y w)) is pathF A x w end)
+      p
+      z q
+  end
+end
+
+-- The β-rule in action: symmetry of reflexivity computes BACK to
+-- reflexivity. (The harness gates this normal form.)
+psymComputes : El (pathF natF two two) is psym natF two two (preflF natF two) end
+
+-- The strict layer quantifies over the fibrant layer like over anything
+-- else: an outer theorem ABOUT inner paths, proved with the outer Eq. This
+-- is what "the strict layer reasons about the fibrant layer" means.
+outerAboutInner : (A : UF) -> (x : El A) ->
+    Eq (El (pathF A x x)) (psym A x x (preflF A x)) (preflF A x) is
+  fn (A : UF) (x : El A) is refl end
+end

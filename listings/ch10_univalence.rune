@@ -1,0 +1,61 @@
+-- Chapter 10 — Univalence, postulated; transport, computing.
+-- The construction v1 and v2 correctly refused now has a home that costs
+-- nothing it bought: ua turns an isomorphism into an inner path between
+-- fibrant types, and castU transports along it AS A PROGRAM. What computes
+-- and what is postulated is the chapter's whole point:
+--
+--   castU A B (ureflU A) x      computes to x
+--   castU A B (ua … f …) x      computes to f x      ← the programming idiom
+--   path induction OVER a ua-path                     ← does NOT compute: §F
+--
+-- And the reason the two equalities can share a core: pathU A B is ordinary
+-- DATA in the strict layer — not a Prop — so UIP never applies to it. The
+-- strict Eq can neither identify ua-not with ureflU (they are distinct
+-- neutrals) nor refute it (no such axiom): principled coexistence.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+boolF : UF is fib Bool end
+
+-- not is an involution — the strict, OUTER proof, by Bool induction.
+notNot : (b : Bool) -> Eq Bool (not (not b)) b is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (not (not x)) x end) refl refl b
+  end
+end
+
+-- Univalence, used: the not-isomorphism becomes an inner path Bool = Bool.
+-- This is the inhabitant that UIP forbids globally and the inner layer
+-- houses locally — ua is POSTULATED (a permanently neutral head), exactly
+-- the honesty v3 ships with.
+notPath : pathU boolF boolF is
+  ua boolF boolF not not notNot notNot
+end
+
+-- Transport across an equivalence as a programming idiom: castU along
+-- notPath IS not. These reduce (the harness gates the normal forms).
+flipped : Bool is castU boolF boolF notPath true end
+backAgain : Bool is castU boolF boolF notPath flipped end
+
+-- Along reflexivity, transport is the identity.
+same : Bool is castU boolF boolF (ureflU boolF) true end
+
+-- Composite transports chain like function composition.
+viaBoth : Bool is castU boolF boolF notPath (castU boolF boolF (ureflU boolF) false) end
+
+-- The strict layer can still state — and prove with the outer Eq — facts
+-- ABOUT transport, because transport computes:
+transportIsNot : (b : Bool) -> Eq Bool (castU boolF boolF notPath b) (not b) is
+  fn (b : Bool) is refl end
+end
+
+roundTrip : (b : Bool) -> Eq Bool (castU boolF boolF notPath (castU boolF boolF notPath b)) b is
+  fn (b : Bool) is notNot b end
+end

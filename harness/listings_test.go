@@ -113,6 +113,32 @@ func TestListingsRun(t *testing.T) {
 		normalizesTo(t, s, `squashElim (Squash Nat) (fn (x : Nat) is squash x end) someNat`,
 			"fn (P : U) (k : U) is k zero end")
 	})
+	t.Run("ch09", func(t *testing.T) {
+		s := loadListing(t, "ch09_two_level.rune")
+		// Decoding computes: an inner function is a plain function.
+		normalizesTo(t, s, `four`, "succ (succ (succ (succ zero)))")
+		// The inner J computes on preflF: sym(refl) is refl, one level in.
+		normalizesTo(t, s, `psymComputes`, "preflF (fib Nat) (succ (succ zero))")
+	})
+	t.Run("ch10", func(t *testing.T) {
+		s := loadListing(t, "ch10_univalence.rune")
+		// Transport THROUGH a postulated ua-path computes (the v3 idiom)...
+		normalizesTo(t, s, `flipped`, "false")
+		normalizesTo(t, s, `backAgain`, "true")
+		// ...and along reflexivity it is the identity.
+		normalizesTo(t, s, `same`, "true")
+	})
+}
+
+// TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant
+// layer is "elaborates and checks", not "runs" — transport along a ua-path
+// has no erased meaning yet (§F), so emission must refuse rather than
+// silently compute the wrong function.
+func TestInnerLayerDoesNotDeploy(t *testing.T) {
+	s := loadListing(t, "ch10_univalence.rune")
+	if _, err := s.EmitProgram("flipped"); err == nil {
+		t.Fatal("emitting an inner-layer construction must be refused in v3")
+	}
 }
 
 // TestListingsEmitAndExecute: the data and quotient chapters survive erasure
