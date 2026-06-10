@@ -50,6 +50,36 @@ const (
 	Impl
 )
 
+// Prop is the universe of propositions (Phase 3, the observational equality
+// stratum): proof-irrelevant, with Prop : U. Equality types live here.
+type Prop struct{}
+
+// Eq is the observational equality type former: Eq Ty L R, the proposition
+// that L and R are equal elements of Ty. It computes on the structure of Ty
+// (Eq over a function type unfolds to pointwise equality — funext is a
+// REDUCTION, not an axiom). Lives in Prop.
+type Eq struct {
+	Ty Tm
+	L  Tm
+	R  Tm
+}
+
+// Refl is the reflexivity proof: Refl x : Eq A x x. Proofs are definitionally
+// irrelevant; Refl's payload exists for type inference, not for computation.
+type Refl struct {
+	Tm Tm
+}
+
+// Cast transports a term along a type equality: Cast A B P X : B, given
+// A B : U, P : Eq U A B, X : A. Cast computes on the structure of A and B and
+// never inspects P (proof irrelevance).
+type Cast struct {
+	A Tm
+	B Tm
+	P Tm
+	X Tm
+}
+
 // Meta is an unsolved metavariable, identified within one elaboration run. It is
 // ELABORATION-INTERNAL: a meta must never reach the store or the hash boundary —
 // HashTerm panics on it, and the session asserts elaborated definitions are
@@ -110,6 +140,10 @@ type Scope struct {
 
 func (Var) isTm()  {}
 func (Meta) isTm() {}
+func (Prop) isTm() {}
+func (Eq) isTm()   {}
+func (Refl) isTm() {}
+func (Cast) isTm() {}
 func (Ref) isTm()  {}
 func (Univ) isTm() {}
 func (Pi) isTm()   {}

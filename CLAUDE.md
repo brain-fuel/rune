@@ -87,8 +87,15 @@ first and forces only on mismatch, so the fast path logs nothing.
   (`{x : A}`, `{e}`) and holes (`_`) in the surface; plicity (Icit) joined the
   core and its hash preimage (hashFormatVersion 0x02). Definitions are zonked,
   meta-free, before the store; the certificate layer is unchanged.
-- **Later:** the OTT equality stratum; data, coverage, totality; turn on QTT;
-  universe hierarchy; codegen + a backend.
+- **Phase 3 (done):** the observational equality stratum (Pujet–Tabareau) —
+  proof-irrelevant `Prop`, `Eq` computing on type structure (funext is a
+  REDUCTION: an equality of functions unfolds to the pointwise equality Pi, and
+  `refl f` eta-expands), `cast` computing on its endpoint types and never
+  inspecting its proof (conversion skips cast proofs and equates refls — UIP at
+  the canonical level). equality.Observational implements core.EqStratum, wired
+  into every Machine; full Eq-U decomposition (needs Sigma) is parked.
+- **Later:** data, coverage, totality; turn on QTT; universe hierarchy;
+  codegen + a backend.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
   stratum is **added** (v3 two-level type theory).
 

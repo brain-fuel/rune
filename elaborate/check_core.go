@@ -27,7 +27,7 @@ func (e *Elaborator) CheckCore(c *Ctx, t core.Tm, want core.Val) error {
 	case core.Let:
 		var vty core.Val
 		if tm.Ty != nil {
-			if err := e.CheckCore(c, tm.Ty, core.VU{}); err != nil {
+			if _, err := e.checkTypeCore(c, tm.Ty); err != nil {
 				return err
 			}
 			vty = e.Eval(c, tm.Ty)
@@ -68,17 +68,60 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 		return e.refType(tm.Hash)
 	case core.Univ:
 		return core.VU{}, nil // type : type until the Phase-6 hierarchy
+	case core.Prop:
+		return core.VU{}, nil
 	case core.Meta:
 		return nil, fmt.Errorf("metavariable in core term: the checker judges only zonked, meta-free core")
+	case core.Eq:
+		if _, err := e.checkTypeCore(c, tm.Ty); err != nil {
+			return nil, err
+		}
+		vty := e.Eval(c, tm.Ty)
+		if err := e.CheckCore(c, tm.L, vty); err != nil {
+			return nil, err
+		}
+		if err := e.CheckCore(c, tm.R, vty); err != nil {
+			return nil, err
+		}
+		return core.VProp{}, nil
+	case core.Refl:
+		xty, err := e.InferCore(c, tm.Tm)
+		if err != nil {
+			return nil, err
+		}
+		vx := e.Eval(c, tm.Tm)
+		eqTy := e.M.EvalEq(xty, vx, vx)
+		if _, stillEq := e.M.Force(eqTy).(core.VEq); !stillEq {
+			// Funext computed the equality away: a refl at a function type
+			// must be eta-expanded (elaboration does this; raw core must too).
+			return nil, fmt.Errorf("refl at a function type; eta-expand the proof")
+		}
+		return eqTy, nil
+	case core.Cast:
+		if _, err := e.checkTypeCore(c, tm.A); err != nil {
+			return nil, err
+		}
+		if _, err := e.checkTypeCore(c, tm.B); err != nil {
+			return nil, err
+		}
+		va, vb := e.Eval(c, tm.A), e.Eval(c, tm.B)
+		if err := e.CheckCore(c, tm.P, core.VEq{Ty: core.VU{}, L: va, R: vb}); err != nil {
+			return nil, err
+		}
+		if err := e.CheckCore(c, tm.X, va); err != nil {
+			return nil, err
+		}
+		return vb, nil
 	case core.Pi:
-		if err := e.CheckCore(c, tm.Dom, core.VU{}); err != nil {
+		if _, err := e.checkTypeCore(c, tm.Dom); err != nil {
 			return nil, err
 		}
 		dom := e.Eval(c, tm.Dom)
-		if err := e.CheckCore(c.bind(tm.Cod.Name, dom), tm.Cod.Body, core.VU{}); err != nil {
+		sort, err := e.checkTypeCore(c.bind(tm.Cod.Name, dom), tm.Cod.Body)
+		if err != nil {
 			return nil, err
 		}
-		return core.VU{}, nil
+		return sort, nil
 	case core.Lam:
 		return nil, fmt.Errorf("cannot infer the type of an un-annotated lambda; ascribe it: (fn … : T)")
 	case core.App:
@@ -101,7 +144,7 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 	case core.Let:
 		var vty core.Val
 		if tm.Ty != nil {
-			if err := e.CheckCore(c, tm.Ty, core.VU{}); err != nil {
+			if _, err := e.checkTypeCore(c, tm.Ty); err != nil {
 				return nil, err
 			}
 			vty = e.Eval(c, tm.Ty)
@@ -118,7 +161,7 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 		vval := e.Eval(c, tm.Val)
 		return e.InferCore(c.define(tm.Body.Name, vty, vval), tm.Body.Body)
 	case core.Ann:
-		if err := e.CheckCore(c, tm.Ty, core.VU{}); err != nil {
+		if _, err := e.checkTypeCore(c, tm.Ty); err != nil {
 			return nil, err
 		}
 		want := e.Eval(c, tm.Ty)
@@ -131,12 +174,29 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 	}
 }
 
+// checkTypeCore checks that t is a type, returning its sort (VU or VProp).
+func (e *Elaborator) checkTypeCore(c *Ctx, t core.Tm) (core.Val, error) {
+	got, err := e.InferCore(c, t)
+	if err != nil {
+		return nil, err
+	}
+	switch s := e.M.Force(got).(type) {
+	case core.VU:
+		return core.VU{}, nil
+	case core.VProp:
+		return core.VProp{}, nil
+	default:
+		_ = s
+		return nil, fmt.Errorf("not a type: %s has type %s", e.prettyTm(t), e.pretty(c, got))
+	}
+}
+
 // CheckDef checks one definition: ty must be a type, body must have type ty.
 // This is the judgment a proof-cache certificate records; run it on a fresh
 // Elaborator and read the Machine's Deps afterward for the certificate's U.
 func (e *Elaborator) CheckDef(ty, body core.Tm) error {
 	c := &Ctx{}
-	if err := e.CheckCore(c, ty, core.VU{}); err != nil {
+	if _, err := e.checkTypeCore(c, ty); err != nil {
 		return err
 	}
 	return e.CheckCore(c, body, e.Eval(c, ty))

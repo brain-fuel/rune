@@ -31,11 +31,25 @@ type Machine struct {
 	// only during elaboration; pure core runs (the cached checker judgment, REPL
 	// normalization) operate on zonked, meta-free terms and leave it nil.
 	Metas MetaSolver
+	// EqS, when non-nil, supplies the equality stratum's reduction rules.
+	EqS EqStratum
 }
 
 // MetaSolver resolves a metavariable to its solution value, if solved.
 type MetaSolver interface {
 	Solution(int) (Val, bool)
+}
+
+// EqStratum is the EQUALITY STRATUM's reduction hooks (Phase 3). The conversion
+// checker and evaluator call these when they reach an equality former; the one
+// v1 implementation is equality.Observational (Pujet–Tabareau). Nil means the
+// formers are stuck (pre-Phase-3 behavior).
+type EqStratum interface {
+	// EvalEq computes the value of Eq ty l r, applying the stratum's
+	// type-directed reductions (e.g. funext: Eq over a Pi unfolds pointwise).
+	EvalEq(m *Machine, ty, l, r Val) Val
+	// EvalCast computes cast a b p x, never inspecting p.
+	EvalCast(m *Machine, a, b, p, x Val) Val
 }
 
 // NewMachine returns a Machine over g with an empty dependency log.
@@ -95,6 +109,14 @@ func (m *Machine) Eval(env Env, t Tm) Val {
 		return m.apply(m.Eval(env, tm.Fn), m.Eval(env, tm.Arg), tm.Icit)
 	case Meta:
 		return m.metaVal(tm.ID)
+	case Prop:
+		return VProp{}
+	case Eq:
+		return m.EvalEq(m.Eval(env, tm.Ty), m.Eval(env, tm.L), m.Eval(env, tm.R))
+	case Refl:
+		return VRefl{V: m.Eval(env, tm.Tm)}
+	case Cast:
+		return m.EvalCast(m.Eval(env, tm.A), m.Eval(env, tm.B), m.Eval(env, tm.P), m.Eval(env, tm.X))
 	case Let:
 		// The bound value is in-band (part of the term); the binder is
 		// definitionally transparent, so the body sees the VALUE.
@@ -205,4 +227,20 @@ func (m *Machine) force1(v Val) (Val, bool) {
 		return n.Unfold(), true
 	}
 	return v, false
+}
+
+// EvalEq applies the equality stratum's Eq reduction, or leaves the type stuck.
+func (m *Machine) EvalEq(ty, l, r Val) Val {
+	if m.EqS != nil {
+		return m.EqS.EvalEq(m, ty, l, r)
+	}
+	return VEq{Ty: ty, L: l, R: r}
+}
+
+// EvalCast applies the equality stratum's cast reduction, or leaves it stuck.
+func (m *Machine) EvalCast(a, b, p, x Val) Val {
+	if m.EqS != nil {
+		return m.EqS.EvalCast(m, a, b, p, x)
+	}
+	return VNeu{Spine: NCast{A: a, B: b, P: p, X: x}}
 }

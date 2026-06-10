@@ -9,9 +9,13 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
 - **Thread quantities through binders.** Pi/Lam carry no `quantity.Qty` yet — there
   is no QTT consumer until Phase 5. The semiring interface and the default 0/1/ω
   instance exist; wiring is deferred. (quantity/)
-- **The equality stratum implementation.** `equality.Observational` is a Phase-3
-  stub that panics; the interface is fixed now, the OTT machinery hooks into the
-  Phase-1 NbE that now exists.
+- **Eq-of-types decomposition.** `Eq U (Pi …) (Pi …)` stays stuck rather than
+  unfolding to a telescope of domain/codomain equalities — that unfolding needs
+  Sigma types, which have no other consumer yet. Convertible endpoints are still
+  provable by `refl`. (equality/)
+- **Full definitional proof irrelevance.** Conversion equates refls and skips
+  cast proofs; equating an arbitrary NEUTRAL proof with refl needs type-directed
+  conversion. Parked until a listing needs it. (core/conv.go)
 - **Erasure and a backend.** `codegen` is interface + stub; erasure and a concrete
   `Backend` are Phase 7.
 - **Universe hierarchy.** One universe `U` now (`type : type` stance); a real
@@ -40,9 +44,9 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
 - **Pruning in pattern unification.** A meta solved against a term whose metas
   carry out-of-scope spine variables fails with a scope error instead of pruning
   the offending dependency. Add pruning only when a listing needs it.
-- **Sigma types, pairs, equality formers in the surface.** The v1 design's `Tm`
-  includes `Sig`/`Pair`/`Eq`/`Cast`; Phase 0's surface and core deliberately omit
-  them (no consumer yet). They enter with their phases.
+- **Sigma types and pairs.** The v1 design's `Tm` includes `Sig`/`Pair`; they
+  still have no consumer (their main customer is the parked Eq-of-types
+  decomposition). They enter when a listing needs them.
 - **Persistence of the store.** The content-addressed map is in-memory; on-disk
   persistence has no Phase-0 consumer.
 - **Readable error spans / source positions in core.** Tokens carry offsets; the

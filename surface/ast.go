@@ -28,6 +28,20 @@ type EUniv struct{}
 // (Phase 2). Holes never survive elaboration; the untyped resolver rejects them.
 type EHole struct{}
 
+// EProp is the universe of propositions, Prop (Phase 3).
+type EProp struct{}
+
+// EEq is the equality former head, `Eq`. It is applied like a function and must
+// be saturated with three arguments: Eq T l r.
+type EEq struct{}
+
+// ERefl is the reflexivity proof head, `refl`. Used bare (in checking position)
+// or applied to one argument.
+type ERefl struct{}
+
+// ECast is the cast head, `cast`, saturated with four arguments: cast A B p x.
+type ECast struct{}
+
 // ELam is one parameter of a lambda: fn (Param : Dom) is Body end. The parser
 // desugars a curried fn (x : A) (y : B) is e end into nested ELam. Dom is the binder's
 // domain annotation; resolution scope-checks it and then discards it, since the
@@ -71,6 +85,10 @@ type EAnn struct {
 
 func (EVar) isExp()  {}
 func (EHole) isExp() {}
+func (EProp) isExp() {}
+func (EEq) isExp()   {}
+func (ERefl) isExp() {}
+func (ECast) isExp() {}
 func (EUniv) isExp() {}
 func (ELam) isExp()  {}
 func (EApp) isExp()  {}

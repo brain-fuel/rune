@@ -88,8 +88,15 @@ func (e *Elaborator) ErrUnsolved(what string) error {
 // at depth lvl. Unsolved metas survive zonking; callers reject them separately.
 func (e *Elaborator) Zonk(lvl int, t core.Tm) core.Tm {
 	switch tm := t.(type) {
-	case core.Var, core.Ref, core.Univ:
+	case core.Var, core.Ref, core.Univ, core.Prop:
 		return t
+	case core.Eq:
+		return core.Eq{Ty: e.Zonk(lvl, tm.Ty), L: e.Zonk(lvl, tm.L), R: e.Zonk(lvl, tm.R)}
+	case core.Refl:
+		return core.Refl{Tm: e.Zonk(lvl, tm.Tm)}
+	case core.Cast:
+		return core.Cast{A: e.Zonk(lvl, tm.A), B: e.Zonk(lvl, tm.B),
+			P: e.Zonk(lvl, tm.P), X: e.Zonk(lvl, tm.X)}
 	case core.Meta:
 		if sol, ok := e.metas.Solution(tm.ID); ok {
 			return e.Zonk(lvl, e.M.Quote(lvl, sol))
@@ -156,8 +163,14 @@ func spineEnv(lvl int) core.Env {
 // invariant required at the store/hash boundary.
 func MetaFree(t core.Tm) bool {
 	switch tm := t.(type) {
-	case core.Var, core.Ref, core.Univ:
+	case core.Var, core.Ref, core.Univ, core.Prop:
 		return true
+	case core.Eq:
+		return MetaFree(tm.Ty) && MetaFree(tm.L) && MetaFree(tm.R)
+	case core.Refl:
+		return MetaFree(tm.Tm)
+	case core.Cast:
+		return MetaFree(tm.A) && MetaFree(tm.B) && MetaFree(tm.P) && MetaFree(tm.X)
 	case core.Meta:
 		return false
 	case core.Pi:

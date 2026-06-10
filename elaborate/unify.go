@@ -54,6 +54,25 @@ func (e *Elaborator) Unify(lvl int, a, b core.Val) error {
 		if _, ok := b.(core.VU); ok {
 			return nil
 		}
+	case core.VProp:
+		if _, ok := b.(core.VProp); ok {
+			return nil
+		}
+	case core.VEq:
+		if y, ok := b.(core.VEq); ok {
+			if err := e.Unify(lvl, x.Ty, y.Ty); err != nil {
+				return err
+			}
+			if err := e.Unify(lvl, x.L, y.L); err != nil {
+				return err
+			}
+			return e.Unify(lvl, x.R, y.R)
+		}
+	case core.VRefl:
+		// Proof irrelevance: any two refl proofs are equal.
+		if _, ok := b.(core.VRefl); ok {
+			return nil
+		}
 	case core.VPi:
 		if y, ok := b.(core.VPi); ok {
 			if x.Icit != y.Icit {
@@ -166,6 +185,17 @@ func (e *Elaborator) unifySpine(lvl int, p, q core.Neutral) error {
 		if y, ok := q.(core.NMeta); ok && x.ID == y.ID {
 			return nil
 		}
+	case core.NCast:
+		// Conversion skips the proof (irrelevance).
+		if y, ok := q.(core.NCast); ok {
+			if err := e.Unify(lvl, x.A, y.A); err != nil {
+				return err
+			}
+			if err := e.Unify(lvl, x.B, y.B); err != nil {
+				return err
+			}
+			return e.Unify(lvl, x.X, y.X)
+		}
 	case core.NApp:
 		if y, ok := q.(core.NApp); ok && x.Icit == y.Icit {
 			if err := e.unifySpine(lvl, x.Fn, y.Fn); err != nil {
@@ -234,6 +264,28 @@ func (e *Elaborator) rename(id int, ren renaming, srcLvl int, v core.Val) (core.
 	switch x := v.(type) {
 	case core.VU:
 		return core.Univ{}, nil
+	case core.VProp:
+		return core.Prop{}, nil
+	case core.VEq:
+		ty, err := e.rename(id, ren, srcLvl, x.Ty)
+		if err != nil {
+			return nil, err
+		}
+		l, err := e.rename(id, ren, srcLvl, x.L)
+		if err != nil {
+			return nil, err
+		}
+		r, err := e.rename(id, ren, srcLvl, x.R)
+		if err != nil {
+			return nil, err
+		}
+		return core.Eq{Ty: ty, L: l, R: r}, nil
+	case core.VRefl:
+		tm, err := e.rename(id, ren, srcLvl, x.V)
+		if err != nil {
+			return nil, err
+		}
+		return core.Refl{Tm: tm}, nil
 	case core.VPi:
 		dom, err := e.rename(id, ren, srcLvl, x.Dom)
 		if err != nil {
@@ -274,6 +326,24 @@ func (e *Elaborator) renameSpine(id int, ren renaming, srcLvl int, n core.Neutra
 			return nil, fmt.Errorf("occurs check: ?%d would appear in its own solution", id)
 		}
 		return core.Meta{ID: s.ID}, nil
+	case core.NCast:
+		a, err := e.rename(id, ren, srcLvl, s.A)
+		if err != nil {
+			return nil, err
+		}
+		b, err := e.rename(id, ren, srcLvl, s.B)
+		if err != nil {
+			return nil, err
+		}
+		pr, err := e.rename(id, ren, srcLvl, s.P)
+		if err != nil {
+			return nil, err
+		}
+		x2, err := e.rename(id, ren, srcLvl, s.X)
+		if err != nil {
+			return nil, err
+		}
+		return core.Cast{A: a, B: b, P: pr, X: x2}, nil
 	case core.NApp:
 		fn, err := e.renameSpine(id, ren, srcLvl, s.Fn)
 		if err != nil {

@@ -10,6 +10,7 @@ package session
 import (
 	"goforge.dev/rune/core"
 	"goforge.dev/rune/elaborate"
+	"goforge.dev/rune/equality"
 	"goforge.dev/rune/store"
 	"goforge.dev/rune/surface"
 )
@@ -159,7 +160,9 @@ func (s *Session) ElabExpr(e surface.Exp) (tm, ty core.Tm, err error) {
 
 // NormalizeExpr fully normalizes (βδ) a closed, well-typed core term.
 func (s *Session) NormalizeExpr(t core.Tm) core.Tm {
-	return core.NewMachine(s.st).NormalizeUnfold(t)
+	m := core.NewMachine(s.st)
+	m.EqS = equality.Default()
+	return m.NormalizeUnfold(t)
 }
 
 // Certified reports whether the definition currently bound to name has a valid

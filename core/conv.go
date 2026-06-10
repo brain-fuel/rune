@@ -25,6 +25,20 @@ func (m *Machine) Conv(lvl int, a, b Val) bool {
 		if _, ok := b.(VU); ok {
 			return true
 		}
+	case VProp:
+		if _, ok := b.(VProp); ok {
+			return true
+		}
+	case VEq:
+		if y, ok := b.(VEq); ok {
+			return m.Conv(lvl, x.Ty, y.Ty) && m.Conv(lvl, x.L, y.L) && m.Conv(lvl, x.R, y.R)
+		}
+	case VRefl:
+		// Proof irrelevance at the canonical level: any two refl proofs are
+		// definitionally equal regardless of payload.
+		if _, ok := b.(VRefl); ok {
+			return true
+		}
 	case VPi:
 		if y, ok := b.(VPi); ok {
 			if x.Icit != y.Icit {
@@ -70,6 +84,11 @@ func (m *Machine) convSpine(lvl int, p, q Neutral) bool {
 		// itself. Solving-by-unification is elaborate/'s job, not conversion's.
 		y, ok := q.(NMeta)
 		return ok && x.ID == y.ID
+	case NCast:
+		// Casts compare on endpoints and subject; the PROOF is skipped —
+		// definitional proof irrelevance at the cast site.
+		y, ok := q.(NCast)
+		return ok && m.Conv(lvl, x.A, y.A) && m.Conv(lvl, x.B, y.B) && m.Conv(lvl, x.X, y.X)
 	case NApp:
 		y, ok := q.(NApp)
 		return ok && x.Icit == y.Icit && m.convSpine(lvl, x.Fn, y.Fn) && m.Conv(lvl, x.Arg, y.Arg)

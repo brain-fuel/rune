@@ -234,7 +234,7 @@ func (p *parser) parseApp() (Exp, error) {
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq, tHole:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast:
 		return true
 	default:
 		return false
@@ -250,6 +250,18 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tHole:
 		p.next()
 		return EHole{}, nil
+	case tProp:
+		p.next()
+		return EProp{}, nil
+	case tEq:
+		p.next()
+		return EEq{}, nil
+	case tRefl:
+		p.next()
+		return ERefl{}, nil
+	case tCast:
+		p.next()
+		return ECast{}, nil
 	case tIdent:
 		p.next()
 		return EVar{Name: t.text}, nil

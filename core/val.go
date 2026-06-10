@@ -31,6 +31,22 @@ type VNeu struct {
 // VU is the universe as a value.
 type VU struct{}
 
+// VProp is the universe of propositions as a value (Phase 3).
+type VProp struct{}
+
+// VEq is a STUCK observational equality type: the stratum's EvalEq could not
+// reduce it further (Ty is not a function type, and not enough structure is
+// known). Values of a VEq type are proofs and are definitionally irrelevant.
+type VEq struct {
+	Ty, L, R Val
+}
+
+// VRefl is the reflexivity proof as a value. Its payload is carried for
+// quotation only; conversion never inspects it (proof irrelevance).
+type VRefl struct {
+	V Val
+}
+
 // VPi is a dependent function type value (x : Dom) -> Cod. Cod is a Go closure:
 // the NbE meaning function. Name is a pretty-printing hint for the binder, like
 // Scope.Name — never part of identity, never hashed (quote drops it into a Scope).
@@ -49,10 +65,13 @@ type VLam struct {
 	Body func(Val) Val
 }
 
-func (VNeu) isVal() {}
-func (VU) isVal()   {}
-func (VPi) isVal()  {}
-func (VLam) isVal() {}
+func (VNeu) isVal()  {}
+func (VU) isVal()    {}
+func (VProp) isVal() {}
+func (VEq) isVal()   {}
+func (VRefl) isVal() {}
+func (VPi) isVal()   {}
+func (VLam) isVal()  {}
 
 // Neutral is the un-unfolded spine of a stuck computation: a head (a free variable
 // at a de Bruijn level, or a definition reference) under a stack of eliminators.
@@ -86,7 +105,15 @@ type NMeta struct {
 	ID int
 }
 
+// NCast is a stuck cast: transport along an equality whose endpoint types are
+// not yet concrete enough to reduce. P is carried for quotation only —
+// conversion compares A, B, and X and SKIPS P (proof irrelevance).
+type NCast struct {
+	A, B, P, X Val
+}
+
 func (NVar) isNeutral()  {}
 func (NRef) isNeutral()  {}
 func (NApp) isNeutral()  {}
 func (NMeta) isNeutral() {}
+func (NCast) isNeutral() {}

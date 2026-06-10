@@ -38,8 +38,9 @@ ascription. There is no evaluation, type checking, data, or literals yet.
 - **Comments** are insignificant and are **not** preserved by the pretty-printer (round-trip is
   modulo comments): line comment `-- … <end-of-line>`; block comment `{- … -}`, **nestable**.
 - **Identifier:** `(letter | "_") (letter | digit | "_" | "'")*`. Case-sensitive.
-- **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`. The bare
-  underscore `_` is reserved as the hole; identifiers may still begin with `_` (`_x` is a name).
+- **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, and the
+  equality stratum's `Prop`, `Eq`, `refl`, `cast` (Phase 3). The bare underscore `_` is reserved
+  as the hole; identifiers may still begin with `_` (`_x` is a name).
 - **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
   instead, so an implicit form cannot begin with a literal `-`.
 - **Punctuation/operators:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
@@ -71,6 +72,10 @@ Arg       ::= Atom                        -- explicit argument
 Atom      ::= Ident
            |  "_"                         -- a hole: a metavariable for elaboration (Phase 2)
            |  "U"
+           |  "Prop"                      -- the universe of propositions (Phase 3)
+           |  "Eq" | "refl" | "cast"      -- equality-former heads, applied like functions:
+                                          --   Eq T l r · refl x (or bare refl when checking)
+                                          --   cast A B p x      (Phase 3)
            |  Lam
            |  Seq
            |  "(" Expr ")"                -- parenthesized expression

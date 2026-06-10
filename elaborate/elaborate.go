@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"goforge.dev/rune/core"
+	"goforge.dev/rune/equality"
 	"goforge.dev/rune/surface"
 )
 
@@ -37,6 +38,7 @@ type Elaborator struct {
 func New(g core.Globals, refs map[string]core.Hash, refNames map[core.Hash]string) *Elaborator {
 	e := &Elaborator{M: core.NewMachine(g), Refs: refs, RefNames: refNames}
 	e.M.Metas = &e.metas
+	e.M.EqS = equality.Default()
 	return e
 }
 

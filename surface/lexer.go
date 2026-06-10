@@ -27,6 +27,10 @@ const (
 	tLBrace // {  (implicit binder/argument; '{-' opens a comment instead)
 	tRBrace // }
 	tHole   // _  (a hole: a metavariable for elaboration to solve)
+	tProp   // Prop (the universe of propositions; Phase 3)
+	tEq     // Eq   (the observational equality type former)
+	tRefl   // refl (the reflexivity proof)
+	tCast   // cast (transport along a type equality)
 )
 
 type token struct {
@@ -75,6 +79,14 @@ func (k tokKind) String() string {
 		return "'}'"
 	case tHole:
 		return "'_'"
+	case tProp:
+		return "'Prop'"
+	case tEq:
+		return "'Eq'"
+	case tRefl:
+		return "'refl'"
+	case tCast:
+		return "'cast'"
 	default:
 		return "token"
 	}
@@ -174,6 +186,14 @@ func keyword(word string, pos int) token {
 		return token{tU, word, pos}
 	case "_":
 		return token{tHole, word, pos}
+	case "Prop":
+		return token{tProp, word, pos}
+	case "Eq":
+		return token{tEq, word, pos}
+	case "refl":
+		return token{tRefl, word, pos}
+	case "cast":
+		return token{tCast, word, pos}
 	default:
 		return token{tIdent, word, pos}
 	}

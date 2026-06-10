@@ -11,6 +11,12 @@ func (m *Machine) Quote(lvl int, v Val) Tm {
 	switch x := v.(type) {
 	case VU:
 		return Univ{}
+	case VProp:
+		return Prop{}
+	case VEq:
+		return Eq{Ty: m.Quote(lvl, x.Ty), L: m.Quote(lvl, x.L), R: m.Quote(lvl, x.R)}
+	case VRefl:
+		return Refl{Tm: m.Quote(lvl, x.V)}
 	case VPi:
 		dom := m.Quote(lvl, x.Dom)
 		body := m.Quote(lvl+1, x.Cod(VVar(lvl)))
@@ -33,6 +39,12 @@ func (m *Machine) QuoteUnfold(lvl int, v Val) Tm {
 	switch x := v.(type) {
 	case VU:
 		return Univ{}
+	case VProp:
+		return Prop{}
+	case VEq:
+		return Eq{Ty: m.QuoteUnfold(lvl, x.Ty), L: m.QuoteUnfold(lvl, x.L), R: m.QuoteUnfold(lvl, x.R)}
+	case VRefl:
+		return Refl{Tm: m.QuoteUnfold(lvl, x.V)}
 	case VPi:
 		dom := m.QuoteUnfold(lvl, x.Dom)
 		body := m.QuoteUnfold(lvl+1, x.Cod(VVar(lvl)))
@@ -57,6 +69,9 @@ func (m *Machine) quoteSpine(lvl int, n Neutral, quoteVal func(int, Val) Tm) Tm 
 		return Ref{Hash: s.Hash}
 	case NMeta:
 		return Meta{ID: s.ID}
+	case NCast:
+		return Cast{A: quoteVal(lvl, s.A), B: quoteVal(lvl, s.B),
+			P: quoteVal(lvl, s.P), X: quoteVal(lvl, s.X)}
 	case NApp:
 		return App{Fn: m.quoteSpine(lvl, s.Fn, quoteVal), Arg: quoteVal(lvl, s.Arg), Icit: s.Icit}
 	default:

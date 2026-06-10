@@ -60,6 +60,33 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		sb.WriteString("U")
 	case core.Meta:
 		sb.WriteString("?" + strconv.Itoa(x.ID))
+	case core.Prop:
+		sb.WriteString("Prop")
+	case core.Eq:
+		p.wrap(sb, prec, precApp, func() {
+			sb.WriteString("Eq ")
+			p.print(sb, x.Ty, names, precAtom)
+			sb.WriteByte(' ')
+			p.print(sb, x.L, names, precAtom)
+			sb.WriteByte(' ')
+			p.print(sb, x.R, names, precAtom)
+		})
+	case core.Refl:
+		p.wrap(sb, prec, precApp, func() {
+			sb.WriteString("refl ")
+			p.print(sb, x.Tm, names, precAtom)
+		})
+	case core.Cast:
+		p.wrap(sb, prec, precApp, func() {
+			sb.WriteString("cast ")
+			p.print(sb, x.A, names, precAtom)
+			sb.WriteByte(' ')
+			p.print(sb, x.B, names, precAtom)
+			sb.WriteByte(' ')
+			p.print(sb, x.P, names, precAtom)
+			sb.WriteByte(' ')
+			p.print(sb, x.X, names, precAtom)
+		})
 	case core.App:
 		p.wrap(sb, prec, precApp, func() {
 			p.print(sb, x.Fn, names, precApp)

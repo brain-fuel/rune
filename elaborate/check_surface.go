@@ -31,24 +31,30 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		return nil, nil, fmt.Errorf("unbound identifier %q", s.Name)
 	case surface.EUniv:
 		return core.Univ{}, core.VU{}, nil // type : type until Phase 6
+	case surface.EProp:
+		return core.Prop{}, core.VU{}, nil
+	case surface.EEq, surface.ERefl, surface.ECast:
+		return nil, nil, fmt.Errorf("an equality former needs its arguments (Eq T l r · refl x · cast A B p x)")
 	case surface.EHole:
 		// A hole is a fresh meta; its type is another fresh meta.
 		tyM := e.freshMeta(c, "type of _")
 		tm := e.freshMeta(c, "_")
 		return tm, e.Eval(c, tyM), nil
 	case surface.EPi:
-		dom, err := e.Check(c, s.Dom, core.VU{})
+		dom, _, err := e.checkType(c, s.Dom)
 		if err != nil {
 			return nil, nil, err
 		}
 		vdom := e.Eval(c, dom)
-		cod, err := e.Check(c.bind(s.Param, vdom), s.Cod, core.VU{})
+		cod, codSort, err := e.checkType(c.bind(s.Param, vdom), s.Cod)
 		if err != nil {
 			return nil, nil, err
 		}
-		return core.Pi{Icit: s.Icit, Dom: dom, Cod: core.Scope{Name: s.Param, Body: cod}}, core.VU{}, nil
+		// A function into a proposition is a proposition (Prop is closed
+		// under Pi); otherwise the Pi lives in U.
+		return core.Pi{Icit: s.Icit, Dom: dom, Cod: core.Scope{Name: s.Param, Body: cod}}, codSort, nil
 	case surface.ELam:
-		dom, err := e.Check(c, s.Dom, core.VU{})
+		dom, _, err := e.checkType(c, s.Dom)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -67,6 +73,11 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		}}
 		return core.Lam{Icit: s.Icit, Body: core.Scope{Name: s.Param, Body: body}}, pi, nil
 	case surface.EApp:
+		if head, args := surface.SpineOf(x); len(args) > 0 {
+			if tm, vty, handled, err := e.elabFormer(c, head, args); handled {
+				return tm, vty, err
+			}
+		}
 		fn, fnTy, err := e.Infer(c, s.Fn)
 		if err != nil {
 			return nil, nil, err
@@ -106,7 +117,7 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		tm.Body = core.Scope{Name: s.Name, Body: body}
 		return tm, bodyTy, nil
 	case surface.EAnn:
-		ty, err := e.Check(c, s.Ty, core.VU{})
+		ty, _, err := e.checkType(c, s.Ty)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -176,6 +187,19 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 	switch s := x.(type) {
 	case surface.EHole:
 		return e.freshMeta(c, "_"), nil
+	case surface.ERefl:
+		// Bare refl in checking position: the expected type must be (or reduce
+		// to) an equality with convertible endpoints — including the pointwise
+		// expansion of a function equality, handled by reflProof's recursion
+		// arriving here under binders.
+		eq, ok := fw.(core.VEq)
+		if !ok {
+			return nil, fmt.Errorf("refl checked against %s, which is not an equality type", e.pretty(c, want))
+		}
+		if !e.M.Conv(c.Lvl(), eq.L, eq.R) {
+			return nil, fmt.Errorf("refl does not prove %s: the sides are not definitionally equal", e.pretty(c, fw))
+		}
+		return core.Refl{Tm: e.M.Quote(c.Lvl(), eq.L)}, nil
 	case surface.ELam:
 		pi, ok := fw.(core.VPi)
 		if !ok {
@@ -191,7 +215,7 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 				icitName(s.Icit), icitName(pi.Icit))
 		}
 		// The annotation must agree with the expected domain.
-		dom, err := e.Check(c, s.Dom, core.VU{})
+		dom, _, err := e.checkType(c, s.Dom)
 		if err != nil {
 			return nil, err
 		}
@@ -235,6 +259,149 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 	}
 }
 
+// checkType elaborates e as a TYPE: its type must be a sort (U or Prop). A
+// flexible type defaults to U by unification.
+func (e *Elaborator) checkType(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
+	tm, got, err := e.Infer(c, x)
+	if err != nil {
+		return nil, nil, err
+	}
+	tm2, got2 := e.insertImplicits(c, tm, got)
+	switch e.M.Force(got2).(type) {
+	case core.VU:
+		return tm2, core.VU{}, nil
+	case core.VProp:
+		return tm2, core.VProp{}, nil
+	default:
+		if err := e.Unify(c.Lvl(), got2, core.VU{}); err != nil {
+			return nil, nil, fmt.Errorf("not a type: %s has type %s",
+				e.prettyTm(tm2), e.pretty(c, got2))
+		}
+		return tm2, core.VU{}, nil
+	}
+}
+
+// reflProof builds the proof of Eq ty x x, eta-expanding through function
+// types: funext computes, so an equality at (x : A) -> B IS the pointwise
+// equality function, and its canonical proof is a lambda of refls.
+func (e *Elaborator) reflProof(c *Ctx, ty core.Val, x core.Tm) core.Tm {
+	if pi, ok := e.M.Force(ty).(core.VPi); ok {
+		inner := c.bind(pi.Name, pi.Dom)
+		v := core.VVar(c.Lvl())
+		body := e.reflProof(inner, pi.Cod(v),
+			core.App{Fn: weaken(x), Arg: core.Var{Idx: 0}, Icit: pi.Icit})
+		name := pi.Name
+		if name == "" {
+			name = "x"
+		}
+		return core.Lam{Icit: pi.Icit, Body: core.Scope{Name: name, Body: body}}
+	}
+	return core.Refl{Tm: x}
+}
+
+// weaken shifts a term's free de Bruijn indices up by one (it is used under
+// exactly one new binder). Implemented by quote∘eval would normalize; the
+// simple structural shift keeps the term intact.
+func weaken(t core.Tm) core.Tm { return shift(t, 0, 1) }
+
+func shift(t core.Tm, cutoff, by int) core.Tm {
+	switch tm := t.(type) {
+	case core.Var:
+		if tm.Idx >= cutoff {
+			return core.Var{Idx: tm.Idx + by}
+		}
+		return tm
+	case core.Ref, core.Univ, core.Prop, core.Meta:
+		return t
+	case core.Pi:
+		return core.Pi{Icit: tm.Icit, Dom: shift(tm.Dom, cutoff, by),
+			Cod: core.Scope{Name: tm.Cod.Name, Body: shift(tm.Cod.Body, cutoff+1, by)}}
+	case core.Lam:
+		return core.Lam{Icit: tm.Icit,
+			Body: core.Scope{Name: tm.Body.Name, Body: shift(tm.Body.Body, cutoff+1, by)}}
+	case core.App:
+		return core.App{Fn: shift(tm.Fn, cutoff, by), Arg: shift(tm.Arg, cutoff, by), Icit: tm.Icit}
+	case core.Let:
+		var ty core.Tm
+		if tm.Ty != nil {
+			ty = shift(tm.Ty, cutoff, by)
+		}
+		return core.Let{Ty: ty, Val: shift(tm.Val, cutoff, by),
+			Body: core.Scope{Name: tm.Body.Name, Body: shift(tm.Body.Body, cutoff+1, by)}}
+	case core.Ann:
+		return core.Ann{Term: shift(tm.Term, cutoff, by), Ty: shift(tm.Ty, cutoff, by)}
+	case core.Eq:
+		return core.Eq{Ty: shift(tm.Ty, cutoff, by), L: shift(tm.L, cutoff, by), R: shift(tm.R, cutoff, by)}
+	case core.Refl:
+		return core.Refl{Tm: shift(tm.Tm, cutoff, by)}
+	case core.Cast:
+		return core.Cast{A: shift(tm.A, cutoff, by), B: shift(tm.B, cutoff, by),
+			P: shift(tm.P, cutoff, by), X: shift(tm.X, cutoff, by)}
+	default:
+		panic(fmt.Sprintf("shift: unknown core term %T", t))
+	}
+}
+
+// elabFormer elaborates a saturated equality-former application spine, or
+// reports that the expression is not one (handled == false).
+func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (core.Tm, core.Val, bool, error) {
+	switch head.(type) {
+	case surface.EEq:
+		if len(args) != 3 {
+			return nil, nil, true, fmt.Errorf("Eq takes exactly 3 arguments (Eq T l r), got %d", len(args))
+		}
+		ty, _, err := e.checkType(c, args[0])
+		if err != nil {
+			return nil, nil, true, err
+		}
+		vty := e.Eval(c, ty)
+		l, err := e.Check(c, args[1], vty)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		r, err := e.Check(c, args[2], vty)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return core.Eq{Ty: ty, L: l, R: r}, core.VProp{}, true, nil
+	case surface.ERefl:
+		if len(args) != 1 {
+			return nil, nil, true, fmt.Errorf("refl takes exactly 1 argument here, got %d", len(args))
+		}
+		x, xty, err := e.Infer(c, args[0])
+		if err != nil {
+			return nil, nil, true, err
+		}
+		x, xty = e.insertImplicits(c, x, xty)
+		vx := e.Eval(c, x)
+		proof := e.reflProof(c, xty, x)
+		return proof, e.M.EvalEq(xty, vx, vx), true, nil
+	case surface.ECast:
+		if len(args) != 4 {
+			return nil, nil, true, fmt.Errorf("cast takes exactly 4 arguments (cast A B p x), got %d", len(args))
+		}
+		a, _, err := e.checkType(c, args[0])
+		if err != nil {
+			return nil, nil, true, err
+		}
+		b, _, err := e.checkType(c, args[1])
+		if err != nil {
+			return nil, nil, true, err
+		}
+		va, vb := e.Eval(c, a), e.Eval(c, b)
+		pr, err := e.Check(c, args[2], core.VEq{Ty: core.VU{}, L: va, R: vb})
+		if err != nil {
+			return nil, nil, true, err
+		}
+		x, err := e.Check(c, args[3], va)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return core.Cast{A: a, B: b, P: pr, X: x}, vb, true, nil
+	}
+	return nil, nil, false, nil
+}
+
 // elabLet elaborates the binding part of a let (annotation and value), returning
 // the partially-built core Let (Body unset), the binder's type, and the extended
 // context in which to elaborate the body.
@@ -243,7 +410,7 @@ func (e *Elaborator) elabLet(c *Ctx, s surface.ELet) (core.Let, core.Val, *Ctx, 
 	var vty core.Val
 	var val core.Tm
 	if s.Ty != nil {
-		t, err := e.Check(c, s.Ty, core.VU{})
+		t, _, err := e.checkType(c, s.Ty)
 		if err != nil {
 			return core.Let{}, nil, nil, err
 		}
@@ -272,7 +439,7 @@ func (e *Elaborator) ElabDef(d surface.Def) (ty, body core.Tm, err error) {
 	if d.Ty == nil {
 		return nil, nil, fmt.Errorf("%s: definition has no type", d.Name)
 	}
-	ty, err = e.Check(c, d.Ty, core.VU{})
+	ty, _, err = e.checkType(c, d.Ty)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
 	}

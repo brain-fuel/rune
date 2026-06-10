@@ -41,6 +41,10 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		return core.Univ{}, nil
 	case EHole:
 		return nil, fmt.Errorf("a hole (_) needs the type checker to solve it; name resolution alone cannot")
+	case EProp:
+		return core.Prop{}, nil
+	case EEq, ERefl, ECast:
+		return nil, fmt.Errorf("an under-applied equality former; Eq takes 3 arguments, refl 1, cast 4")
 	case ELam:
 		// The binder's domain annotation is scope-checked in the enclosing context and
 		// then discarded: the Phase-0 core lambda is un-annotated (GRAMMAR.md §6).
@@ -55,6 +59,50 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		}
 		return core.Lam{Icit: x.Icit, Body: core.Scope{Name: x.Param, Body: body}}, nil
 	case EApp:
+		// A saturated equality-former spine resolves to its core node.
+		if head, args := SpineOf(x); len(args) > 0 {
+			switch head.(type) {
+			case EEq:
+				if len(args) != 3 {
+					return nil, fmt.Errorf("Eq takes exactly 3 arguments, got %d", len(args))
+				}
+				ty, err := r.resolve(args[0], ctx)
+				if err != nil {
+					return nil, err
+				}
+				l, err := r.resolve(args[1], ctx)
+				if err != nil {
+					return nil, err
+				}
+				rr, err := r.resolve(args[2], ctx)
+				if err != nil {
+					return nil, err
+				}
+				return core.Eq{Ty: ty, L: l, R: rr}, nil
+			case ERefl:
+				if len(args) != 1 {
+					return nil, fmt.Errorf("refl takes exactly 1 argument, got %d", len(args))
+				}
+				tm, err := r.resolve(args[0], ctx)
+				if err != nil {
+					return nil, err
+				}
+				return core.Refl{Tm: tm}, nil
+			case ECast:
+				if len(args) != 4 {
+					return nil, fmt.Errorf("cast takes exactly 4 arguments, got %d", len(args))
+				}
+				var rs [4]core.Tm
+				for i, a := range args {
+					t, err := r.resolve(a, ctx)
+					if err != nil {
+						return nil, err
+					}
+					rs[i] = t
+				}
+				return core.Cast{A: rs[0], B: rs[1], P: rs[2], X: rs[3]}, nil
+			}
+		}
 		fn, err := r.resolve(x.Fn, ctx)
 		if err != nil {
 			return nil, err
@@ -107,6 +155,20 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 	}
 }
 
+// SpineOf splits an application into its head and argument list (explicit
+// arguments only; an implicit argument in a former spine disqualifies it).
+func SpineOf(e Exp) (Exp, []Exp) {
+	var args []Exp
+	for {
+		app, ok := e.(EApp)
+		if !ok || app.Icit != core.Expl {
+			return e, args
+		}
+		args = append([]Exp{app.Arg}, args...)
+		e = app.Fn
+	}
+}
+
 func push(name string, ctx []string) []string {
 	out := make([]string, 0, len(ctx)+1)
 	out = append(out, name)
@@ -128,6 +190,7 @@ func FreeIdents(e Exp) []string {
 				out = append(out, x.Name)
 			}
 		case EHole:
+		case EProp, EEq, ERefl, ECast:
 		case EUniv:
 		case ELam:
 			if x.Dom != nil {
