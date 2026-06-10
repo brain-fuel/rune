@@ -8,6 +8,42 @@ fight type-theory wars over — the codegen target, the resource semiring, the n
 of equality — each sit behind a clean interface so the right one lives in the right
 layer.
 
+## v3.0.0
+
+v3 puts a **second equality** behind the interface the first one defined —
+two-level type theory, shipped the way v2 shipped quotients: a builtin
+content-addressed group, zero new core syntax, zero hash-format change. The
+strict, proof-irrelevant `Eq` (UIP and all) stays exactly as it was and keeps
+doing the metatheoretic work; alongside it, a **fibrant universe à la
+Tarski** houses the inner layer:
+
+- **`UF`, `El`, `fib`, `piF`** — fibrant types as codes, with decoding that
+  COMPUTES: `El (fib A)` is `A`, `El (piF A B)` is the genuine function
+  type, so inner functions are plain lambdas.
+- **Inner identity, twice.** Point-level `pathF`/`preflF`/`pathJ` — J with
+  its β-rule on refl (the v1 equality chapter replays one level in). And
+  type-level `pathU`/`ureflU`/**`ua`** — univalence, **postulated**: the
+  inhabitant UIP forbids globally now lives locally, as a permanently
+  neutral head the strict layer can quantify over but never collapse.
+  `pathU A B` is data, not Prop — UIP never applies to inner paths, so the
+  two equalities never name the same relation and never contradict.
+- **Transport computes.** `castU` reduces on `ureflU` AND through `ua`:
+  `castU … (ua … not …) b` IS `not b`, provable by bare `refl`. Transport
+  across an equivalence as a programming idiom — literally. What does NOT
+  compute — path induction over a ua-path, the higher coherences — is the
+  labelled §F frontier (cubical inner layer), postulated, not sold.
+- **Check, not run — honestly enforced.** The v3 criterion is that the inner
+  chapters elaborate and CHECK (`listings/ch09`–`ch10`). Erasure has no
+  meaning for ua-paths yet, so `EmitProgram` skips inner-tainted definitions
+  and refuses a tainted main, rather than silently emitting the identity
+  where the checker computed `not`.
+
+The thesis, end to end: names where you read, quantities as a parameter,
+targets as a menu, and equality as a stratum — even the notion everyone said
+you'd have to leave home for. See `ref_docs/rune-v3-implementation.md` for
+why the feared two-layer machinery (fibrancy judgments, layer-tracking
+elaboration, a second cache seam) collapsed into ordinary typing.
+
 ## v2.0.0
 
 v2 extends the equality stratum with **quotients** — and proves the extension
@@ -101,9 +137,12 @@ functions and universes, implicits, observational equality (funext computes,
 sym/trans by transport), data and induction (a proof of `add n zero = n` that
 reduces to `refl` at numerals), quantities, and — as of v2 — quotients (a
 parity quotient, then ℤ with lifted arithmetic and quotient-induction
-theorems) and propositional truncation. The harness loads every chapter,
-checks every definition, normalizes the marked expressions, and runs the data
-and quotient chapters through the JS backend.
+theorems), propositional truncation, and — as of v3 — the two-level chapters:
+the fibrant layer and inner path induction, then postulated univalence with
+computing transport. The harness loads every chapter, checks every
+definition, normalizes the marked expressions, runs the data and quotient
+chapters through the JS backend, and asserts that inner-layer constructions
+refuse to deploy.
 
 See `CLAUDE.md` for the architecture and standing rules, `NON-GOALS.md` for what
 this core deliberately is not, `PARKING-LOT.md` for what was deferred and why, and

@@ -147,7 +147,23 @@ first and forces only on mismatch, so the fast path logs nothing.
   No hash-format bump: no new core constructors exist. Listings ch06–ch08 are
   the gate. See ref_docs/rune-v2-implementation.md for the deltas from
   rune-v2-design.md and why.
-- A second equality stratum is then **added** (v3 two-level type theory).
+- **v3.0.0 (done):** TWO-LEVEL TYPE THEORY — the second equality stratum,
+  shipped as the third builtin group (store/fib.go, eleven members): a
+  Tarski-style fibrant universe (`UF : U1`, `El : UF -> U` decoding, `fib`
+  embedding small outer types, `piF` closure) and TWO inner identities — the
+  point-level `pathF`/`preflF`/`pathJ` (J computes on refl by ι,
+  core.FibInfo/tryFibIota) and the type-level `pathU`/`ureflU`/`ua`/`castU`,
+  where `ua` is POSTULATED univalence (a permanently neutral head) and
+  `castU` computes on BOTH intros (`castU … (ua … f …) x ~> f x` — transport
+  across an equivalence as a programming idiom). Coexistence is structural:
+  `pathU A B : U1` is data, not Prop, so UIP never applies to inner paths —
+  the strict Eq can neither identify `ua not …` with `ureflU …` (distinct
+  neutrals) nor refute it. The v3 release criterion is "the v3 chapters
+  ELABORATE AND CHECK" (listings ch09–ch10) — not "run": EmitProgram skips
+  inner-tainted definitions and refuses a tainted main, because transport
+  along a ua-path has no erased meaning yet. That, and path induction over
+  ua-paths, is the §F frontier — postulated, labelled, not sold
+  (ref_docs/rune-v3-implementation.md).
 
 ## Standing rules
 

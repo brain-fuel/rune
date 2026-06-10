@@ -16,11 +16,13 @@ sequencing form (`seq … end`). The language is otherwise the Phase-0 calculus 
 variables, the universe `U`, dependent function types, lambda, application, inline `let`, and type
 ascription. There is no evaluation, type checking, data, or literals yet.
 
-**v2.0.0 adds no syntax.** The quotient kit (`Quot`, `qin`, `qsound`, `qlift`, `qind`) is a group
-of BUILTIN DEFINITIONS bound ambiently in every session — ordinary identifiers resolving to
-content-hash references, applied like any function. They are deliberately NOT reserved words and
-NOT former heads in this grammar (contrast `Eq`/`refl`/`cast`/`subst`); shadowing them with a
-user definition is possible and merely unwise. See `rune-v2-implementation.md`.
+**v2.0.0 and v3.0.0 add no syntax.** The quotient kit (`Quot`, `qin`, `qsound`, `qlift`, `qind`)
+and the two-level kit (`UF`, `El`, `fib`, `piF`, `pathF`, `preflF`, `pathJ`, `pathU`, `ureflU`,
+`ua`, `castU`) are groups of BUILTIN DEFINITIONS bound ambiently in every session — ordinary
+identifiers resolving to content-hash references, applied like any function. They are
+deliberately NOT reserved words and NOT former heads in this grammar (contrast
+`Eq`/`refl`/`cast`/`subst`); shadowing them with a user definition is possible and merely
+unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
 
 ## 1. Design rules (read first)
 

@@ -123,3 +123,29 @@ or a later-phase feature with no current consumer.
 - **Quantity annotations on the builtin telescopes.** Quot/qin/qlift/qind
   binders are all ω; marking type/proof positions 0 would document erasure in
   the types at the cost of quantity-polymorphism questions with no consumer.
+
+## Parked in v3.0.0 (the two-level layer)
+
+- **§F: computational inner univalence.** The labelled frontier
+  (ref_docs/rune-v3-design.md): a cubical INNER stratum — interval, Kan
+  operations, Glue — isolated behind the fibrant universe, with the outer
+  OTT core untouched. v3 ships `ua` postulated and `castU` computing through
+  it; path induction OVER a ua-path does not compute, and making it compute
+  is research, not a checkbox. Unexplored on a content-addressed substrate;
+  plausibly the technical heart of a thesis.
+- **A fibrant universe hierarchy.** `UF : U1` is the single inner universe;
+  codes for UF itself (paths between universes, univalence one level up)
+  need `UF1` and a lifting story. No chapter uses them.
+- **Sigma codes in UF (`sigmaF`).** With Sigma absent from the outer core,
+  the inner layer has no pair codes either; `Equiv` as a first-class fibrant
+  type (rather than ua's four-component telescope) waits on it.
+- **Inner higher inductive types.** The circle, suspensions, higher
+  truncations — expressible in principle as postulated code groups in UF,
+  shipped only when a chapter teaches one.
+- **Erasure for the inner layer.** Tainted definitions are skipped at
+  emission and a tainted main refuses (§F honesty: castU along ua would
+  erase to the wrong function). A real erased meaning for inner transport —
+  paths as data at runtime — arrives with computational univalence or not
+  at all.
+- **funext for inner paths (`pathF` over `piF`).** The outer Eq computes
+  funext; the inner path type has no such rule yet. Chapter-gated.
