@@ -1,0 +1,62 @@
+-- Chapter 6 — Quotients.
+-- A / R as a first-class type: Quot, qin, qsound, qlift, qind. The respect
+-- obligation is discharged ONCE, at the lift; after that the quotient's
+-- elements are values like any other and the representative is gone.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+isEven : Nat -> Bool is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is not ih end) n
+  end
+end
+
+-- Numbers modulo parity: two naturals are related when their parities agree.
+ParRel : Nat -> Nat -> Prop is
+  fn (m : Nat) (n : Nat) is Eq Bool (isEven m) (isEven n) end
+end
+
+Par : U is Quot Nat ParRel end
+
+-- The two parities, as quotient points.
+even : Par is qin Nat ParRel zero end
+odd : Par is qin Nat ParRel (succ zero) end
+
+-- The path constructor: zero and two are THE SAME element of Par. The
+-- relation holds by computation, so the premise is refl.
+twoIsEven : Eq Par (qin Nat ParRel (succ (succ zero))) even is
+  qsound Nat ParRel (succ (succ zero)) zero refl
+end
+
+-- The eliminator: isEven respects ParRel — the respect premise IS the
+-- relation, so the proof is the identity — and so descends to the quotient.
+parity : Par -> Bool is
+  qlift Nat ParRel Bool isEven
+    (fn (a : Nat) (b : Nat) (r : ParRel a b) is r end)
+end
+
+-- The lift COMPUTES on points: parity (qin n) is isEven n, by the ι-rule.
+parityOfTwo : Bool is parity (qin Nat ParRel (succ (succ zero))) end
+
+-- Induction on the quotient: a Prop-valued property holds of every element
+-- once it holds on representatives. Proof irrelevance pays here: no respect
+-- premise is owed, because any two proofs of P q already agree.
+parRefl : (q : Par) -> Eq Par q q is
+  fn (q : Par) is
+    qind Nat ParRel (fn (z : Par) is Eq Par z z end)
+      (fn (a : Nat) is refl end)
+      q
+  end
+end

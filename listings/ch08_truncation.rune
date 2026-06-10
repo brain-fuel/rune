@@ -1,0 +1,86 @@
+-- Chapter 8 — Truncation: "exists, without choosing".
+-- The other set-level higher inductive everyone wants is propositional
+-- truncation, ‖A‖ — A squashed down to the mere fact of its inhabitation.
+-- Rune needs NO new former for it: Prop is impredicative, so the Church
+-- encoding (P : Prop) -> (A -> P) -> P IS the truncation. The quotient was
+-- the only genuinely new thing v2 had to add; the rest of the set-level
+-- toolkit was already in the walls.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- ‖A‖: every Prop that A's inhabitants can reach is reachable. The witness
+-- is gone — only reachability remains.
+Squash : U -> Prop is
+  fn (A : U) is (P : Prop) -> (A -> P) -> P end
+end
+
+-- The point constructor: squashing a value forgets everything but existence.
+squash : {A : U} -> A -> Squash A is
+  fn {A : U} (x : A) is
+    fn (P : Prop) (k : A -> P) is k x end
+  end
+end
+
+-- The eliminator: a squashed A may be consumed only into a Prop — the
+-- witness can never escape into runtime data. (Compare qind: same shape,
+-- same reason. Truncation is the quotient of A by the total relation.)
+squashElim : {A : U} -> (P : Prop) -> (A -> P) -> Squash A -> P is
+  fn {A : U} (P : Prop) (k : A -> P) (s : Squash A) is s P k end
+end
+
+-- Two different witnesses, one proposition: both definitions inhabit the
+-- SAME Prop, and Prop's proof irrelevance means nothing distinguishes them.
+someNat : Squash Nat is squash zero end
+someNat' : Squash Nat is squash (succ zero) end
+
+-- Truncation is functorial: mere existence maps forward.
+squashMap : {A : U} -> {B : U} -> (A -> B) -> Squash A -> Squash B is
+  fn {A : U} {B : U} (f : A -> B) (s : Squash A) is
+    squashElim (Squash B) (fn (x : A) is squash (f x) end) s
+  end
+end
+
+-- The same impredicativity gives the rest of the propositional toolkit —
+-- conjunction, disjunction, falsity — with their introduction and
+-- elimination rules as plain definitions.
+
+POr : Prop -> Prop -> Prop is
+  fn (P : Prop) (Q : Prop) is (R : Prop) -> (P -> R) -> (Q -> R) -> R end
+end
+
+orInl : {P : Prop} -> {Q : Prop} -> P -> POr P Q is
+  fn {P : Prop} {Q : Prop} (p : P) is
+    fn (R : Prop) (f : P -> R) (g : Q -> R) is f p end
+  end
+end
+
+orInr : {P : Prop} -> {Q : Prop} -> Q -> POr P Q is
+  fn {P : Prop} {Q : Prop} (q : Q) is
+    fn (R : Prop) (f : P -> R) (g : Q -> R) is g q end
+  end
+end
+
+PAnd : Prop -> Prop -> Prop is
+  fn (P : Prop) (Q : Prop) is (R : Prop) -> (P -> Q -> R) -> R end
+end
+
+pandIntro : {P : Prop} -> {Q : Prop} -> P -> Q -> PAnd P Q is
+  fn {P : Prop} {Q : Prop} (p : P) (q : Q) is
+    fn (R : Prop) (k : P -> Q -> R) is k p q end
+  end
+end
+
+pandFst : {P : Prop} -> {Q : Prop} -> PAnd P Q -> P is
+  fn {P : Prop} {Q : Prop} (c : PAnd P Q) is
+    c P (fn (p : P) (q : Q) is p end)
+  end
+end
+
+-- A use of the whole kit: from a mere A or a mere B, a mere (A or B) —
+-- choice never made, witness never seen.
+squashOr : {A : U} -> {B : U} -> POr (Squash A) (Squash B) -> Squash (POr (Squash A) (Squash B)) is
+  fn {A : U} {B : U} (o : POr (Squash A) (Squash B)) is squash o end
+end

@@ -1,0 +1,250 @@
+-- Chapter 7 — The integers, as a quotient.
+-- ℤ is pairs of naturals modulo "equal differences": (a, b) names a − b, and
+-- (a, b) ~ (c, d) iff a + d = c + b. Every setoid chore from the old life —
+-- proving each operation respects ~, at every use site — is paid exactly once
+-- here, inside a qlift; afterwards ℤ is just a type.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- The equality toolkit, with implicit arguments (Chapter 2) doing the
+-- bookkeeping that the proofs below would otherwise drown in.
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> Eq A x y -> Eq B (f x) (f y) is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+addZeroRight : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is cong succ ih end)
+      n
+  end
+end
+
+addSucc : (m : Nat) -> (n : Nat) -> Eq Nat (add m (succ n)) (succ (add m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add k (succ n)) (succ (add k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (add k (succ n)) (succ (add k n))) is cong succ ih end)
+      m
+  end
+end
+
+addComm : (m : Nat) -> (n : Nat) -> Eq Nat (add m n) (add n m) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add k n) (add n k) end)
+      (sym (addZeroRight n))
+      (fn (k : Nat) (ih : Eq Nat (add k n) (add n k)) is
+        trans (cong succ ih) (sym (addSucc n k))
+      end)
+      m
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) -> Eq Nat (add (add a b) c) (add a (add b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add (add k b) c) (add k (add b c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (add (add k b) c) (add k (add b c))) is cong succ ih end)
+      a
+  end
+end
+
+-- x + (y + z) = y + (x + z): rotate the left summand inward.
+swapLeft : (x : Nat) -> (y : Nat) -> (z : Nat) ->
+    Eq Nat (add x (add y z)) (add y (add x z)) is
+  fn (x : Nat) (y : Nat) (z : Nat) is
+    trans (sym (addAssoc x y z))
+      (trans (cong (fn (s : Nat) is add s z end) (addComm x y))
+        (addAssoc y x z))
+  end
+end
+
+-- (w + x) + (y + z) = (w + y) + (x + z): the interchange law, the workhorse
+-- of every respect proof below.
+interchange : (w : Nat) -> (x : Nat) -> (y : Nat) -> (z : Nat) ->
+    Eq Nat (add (add w x) (add y z)) (add (add w y) (add x z)) is
+  fn (w : Nat) (x : Nat) (y : Nat) (z : Nat) is
+    trans (addAssoc w x (add y z))
+      (trans (cong (fn (s : Nat) is add w s end) (swapLeft x y z))
+        (sym (addAssoc w y (add x z))))
+  end
+end
+
+-- Pairs of naturals: (a, b) will name the integer a − b.
+
+data NatPair : U is
+  npair : Nat -> Nat -> NatPair
+end
+
+fst : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is a end) p
+  end
+end
+
+snd : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is b end) p
+  end
+end
+
+-- Equal differences, without subtraction: (a, b) ~ (c, d) iff a + d = c + b.
+ZRel : NatPair -> NatPair -> Prop is
+  fn (p : NatPair) (q : NatPair) is
+    Eq Nat (add (fst p) (snd q)) (add (fst q) (snd p))
+  end
+end
+
+Z : U is Quot NatPair ZRel end
+
+zfrom : Nat -> Z is fn (n : Nat) is qin NatPair ZRel (npair n zero) end end
+zzero : Z is zfrom zero end
+zone : Z is zfrom (succ zero) end
+zminusOne : Z is qin NatPair ZRel (npair zero (succ zero)) end
+
+-- The operations, on representatives.
+psucc : NatPair -> NatPair is
+  fn (p : NatPair) is npair (succ (fst p)) (snd p) end
+end
+pneg : NatPair -> NatPair is
+  fn (p : NatPair) is npair (snd p) (fst p) end
+end
+padd : NatPair -> NatPair -> NatPair is
+  fn (p : NatPair) (q : NatPair) is
+    npair (add (fst p) (fst q)) (add (snd p) (snd q))
+  end
+end
+
+-- Successor descends: the respect proof is one cong, because both sides of
+-- the obligation compute to a succ of the assumed relation.
+zsucc : Z -> Z is
+  qlift NatPair ZRel Z
+    (fn (p : NatPair) is qin NatPair ZRel (psucc p) end)
+    (fn (p : NatPair) (q : NatPair) (r : ZRel p q) is
+      qsound NatPair ZRel (psucc p) (psucc q) (cong succ r)
+    end)
+end
+
+-- Negation descends: flip the pair, flip the equation.
+zneg : Z -> Z is
+  qlift NatPair ZRel Z
+    (fn (p : NatPair) is qin NatPair ZRel (pneg p) end)
+    (fn (p : NatPair) (q : NatPair) (r : ZRel p q) is
+      qsound NatPair ZRel (pneg p) (pneg q)
+        (trans (addComm (snd p) (fst q))
+          (trans (sym r) (addComm (fst p) (snd q))))
+    end)
+end
+
+-- Addition respects ~ in each argument; both proofs are the interchange law
+-- around the assumed relation.
+paddRespL : (p : NatPair) -> (p' : NatPair) -> (q : NatPair) ->
+    ZRel p p' -> ZRel (padd p q) (padd p' q) is
+  fn (p : NatPair) (p' : NatPair) (q : NatPair) (r : ZRel p p') is
+    trans (interchange (fst p) (fst q) (snd p') (snd q))
+      (trans (cong (fn (s : Nat) is add s (add (fst q) (snd q)) end) r)
+        (sym (interchange (fst p') (fst q) (snd p) (snd q))))
+  end
+end
+
+paddRespR : (p : NatPair) -> (q : NatPair) -> (q' : NatPair) ->
+    ZRel q q' -> ZRel (padd p q) (padd p q') is
+  fn (p : NatPair) (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+    trans (interchange (fst p) (fst q) (snd p) (snd q'))
+      (trans (cong (fn (s : Nat) is add (add (fst p) (snd p)) s end) r)
+        (sym (interchange (fst p) (fst q') (snd p) (snd q))))
+  end
+end
+
+-- Addition, by lifting twice. The inner lift fixes the left representative;
+-- the outer lift's respect obligation is an equality of FUNCTIONS Z -> Z —
+-- and funext is a reduction (Chapter 3), so that obligation is literally a
+-- function from z : Z to pointwise proofs, which qind supplies from
+-- representatives. Chapter 3's equality and this chapter's quotients are one
+-- mechanism.
+zaddR : NatPair -> Z -> Z is
+  fn (p : NatPair) is
+    qlift NatPair ZRel Z
+      (fn (q : NatPair) is qin NatPair ZRel (padd p q) end)
+      (fn (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+        qsound NatPair ZRel (padd p q) (padd p q') (paddRespR p q q' r)
+      end)
+  end
+end
+
+zadd : Z -> Z -> Z is
+  qlift NatPair ZRel (Z -> Z) zaddR
+    (fn (p : NatPair) (p' : NatPair) (r : ZRel p p') is
+      fn (z : Z) is
+        qind NatPair ZRel (fn (w : Z) is Eq Z (zaddR p w) (zaddR p' w) end)
+          (fn (q : NatPair) is
+            qsound NatPair ZRel (padd p q) (padd p' q) (paddRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- Theorems, by induction on the quotient.
+
+-- Double negation is the identity. On a representative the goal computes to
+-- relating (fst p, snd p) with p itself, and THAT relation is refl — qsound
+-- carries it home. No respect proof, no representative bookkeeping.
+znegInvol : (z : Z) -> Eq Z (zneg (zneg z)) z is
+  fn (z : Z) is
+    qind NatPair ZRel (fn (w : Z) is Eq Z (zneg (zneg w)) w end)
+      (fn (p : NatPair) is
+        qsound NatPair ZRel (npair (fst p) (snd p)) p refl
+      end)
+      z
+  end
+end
+
+-- Addition on ℤ is commutative. The motive's inner ∀ lands in Prop because
+-- Prop is impredicative, so a nested qind finishes it on representatives.
+zaddComm : (y : Z) -> (z : Z) -> Eq Z (zadd y z) (zadd z y) is
+  fn (y : Z) is
+    qind NatPair ZRel (fn (w : Z) is (z : Z) -> Eq Z (zadd w z) (zadd z w) end)
+      (fn (p : NatPair) is
+        fn (z : Z) is
+          qind NatPair ZRel (fn (w : Z) is Eq Z (zadd (qin NatPair ZRel p) w) (zadd w (qin NatPair ZRel p)) end)
+            (fn (q : NatPair) is
+              qsound NatPair ZRel (padd p q) (padd q p)
+                (trans (cong (fn (s : Nat) is add s (add (snd q) (snd p)) end) (addComm (fst p) (fst q)))
+                  (cong (fn (s : Nat) is add (add (fst q) (fst p)) s end) (addComm (snd q) (snd p))))
+            end)
+            z
+        end
+      end)
+      y
+  end
+end
+
+-- 2 + (−1) = 1, computed through the quotient: lifts reduce on points.
+ztwo : Z is zadd zone zone end
+zresult : Z is zadd ztwo zminusOne end

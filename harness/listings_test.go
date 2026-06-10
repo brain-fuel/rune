@@ -94,36 +94,69 @@ func TestListingsRun(t *testing.T) {
 		s := loadListing(t, "ch05_quantities.rune")
 		normalizesTo(t, s, `eid U`, "U")
 	})
+	t.Run("ch06", func(t *testing.T) {
+		s := loadListing(t, "ch06_quotients.rune")
+		// The quotient ι-rule: a lift computes on points.
+		normalizesTo(t, s, `parityOfTwo`, "true")
+		normalizesTo(t, s, `parity odd`, "false")
+	})
+	t.Run("ch07", func(t *testing.T) {
+		s := loadListing(t, "ch07_integers.rune")
+		// Lifted arithmetic reduces through the quotient on representatives.
+		normalizesTo(t, s, `fst (padd (npair (succ zero) zero) (npair (succ zero) zero))`,
+			"succ (succ zero)")
+	})
+	t.Run("ch08", func(t *testing.T) {
+		s := loadListing(t, "ch08_truncation.rune")
+		// The squash eliminator is plain application: it β-reduces away. (The
+		// printer's lambda annotations are canonically U — GRAMMAR.md §8.)
+		normalizesTo(t, s, `squashElim (Squash Nat) (fn (x : Nat) is squash x end) someNat`,
+			"fn (P : U) (k : U) is k zero end")
+	})
 }
 
-// TestListingsEmitAndExecute: the data chapter survives erasure and runs on
-// the JS backend (the "runs" of the freeze criterion, in the deployed sense).
+// TestListingsEmitAndExecute: the data and quotient chapters survive erasure
+// and run on the JS backend (the "runs" of the freeze criterion, in the
+// deployed sense). For the quotient chapters this is also the shadow rule's
+// promise made visible: qin is the identity at runtime, a lift is a plain
+// call, and every respect proof is gone.
 func TestListingsEmitAndExecute(t *testing.T) {
 	if _, err := exec.LookPath("node"); err != nil {
 		t.Skip("node not in PATH")
 	}
-	s := loadListing(t, "ch04_data.rune")
-	p, err := s.EmitProgram("four")
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		listing, main, want string
+	}{
+		{"ch04_data.rune", "four", "succ (succ (succ (succ zero)))"},
+		{"ch06_quotients.rune", "parityOfTwo", "true"},
+		{"ch07_integers.rune", "zresult", "npair (succ (succ zero)) (succ zero)"},
 	}
-	out, err := codegen.Default().Emit(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	f, err := os.CreateTemp(t.TempDir(), "*.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString(string(out)); err != nil {
-		t.Fatal(err)
-	}
-	f.Close()
-	got, err := exec.Command("node", f.Name()).CombinedOutput()
-	if err != nil {
-		t.Fatalf("node: %v\n%s", err, got)
-	}
-	if strings.TrimSpace(string(got)) != "succ (succ (succ (succ zero)))" {
-		t.Fatalf("emitted chapter printed %q", got)
+	for _, tc := range cases {
+		t.Run(tc.listing, func(t *testing.T) {
+			s := loadListing(t, tc.listing)
+			p, err := s.EmitProgram(tc.main)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out, err := codegen.Default().Emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.CreateTemp(t.TempDir(), "*.js")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.WriteString(string(out)); err != nil {
+				t.Fatal(err)
+			}
+			f.Close()
+			got, err := exec.Command("node", f.Name()).CombinedOutput()
+			if err != nil {
+				t.Fatalf("node: %v\n%s", err, got)
+			}
+			if strings.TrimSpace(string(got)) != tc.want {
+				t.Fatalf("emitted chapter printed %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
