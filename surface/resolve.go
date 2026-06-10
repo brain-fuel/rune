@@ -39,6 +39,8 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		return nil, fmt.Errorf("unbound identifier %q", x.Name)
 	case EUniv:
 		return core.Univ{}, nil
+	case EHole:
+		return nil, fmt.Errorf("a hole (_) needs the type checker to solve it; name resolution alone cannot")
 	case ELam:
 		// The binder's domain annotation is scope-checked in the enclosing context and
 		// then discarded: the Phase-0 core lambda is un-annotated (GRAMMAR.md §6).
@@ -51,7 +53,7 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		if err != nil {
 			return nil, err
 		}
-		return core.Lam{Body: core.Scope{Name: x.Param, Body: body}}, nil
+		return core.Lam{Icit: x.Icit, Body: core.Scope{Name: x.Param, Body: body}}, nil
 	case EApp:
 		fn, err := r.resolve(x.Fn, ctx)
 		if err != nil {
@@ -61,7 +63,7 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		if err != nil {
 			return nil, err
 		}
-		return core.App{Fn: fn, Arg: arg}, nil
+		return core.App{Fn: fn, Arg: arg, Icit: x.Icit}, nil
 	case EPi:
 		dom, err := r.resolve(x.Dom, ctx)
 		if err != nil {
@@ -71,7 +73,7 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		if err != nil {
 			return nil, err
 		}
-		return core.Pi{Dom: dom, Cod: core.Scope{Name: x.Param, Body: cod}}, nil
+		return core.Pi{Icit: x.Icit, Dom: dom, Cod: core.Scope{Name: x.Param, Body: cod}}, nil
 	case ELet:
 		var ty core.Tm
 		if x.Ty != nil {
@@ -125,6 +127,7 @@ func FreeIdents(e Exp) []string {
 				seen[x.Name] = true
 				out = append(out, x.Name)
 			}
+		case EHole:
 		case EUniv:
 		case ELam:
 			if x.Dom != nil {

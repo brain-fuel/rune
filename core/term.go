@@ -37,22 +37,47 @@ type Ref struct {
 // Phase 1+ stance until the Phase 6 hierarchy); there is no level field yet.
 type Univ struct{}
 
-// Pi is the dependent function type (x : Dom) -> Cod. Cod is a Scope: it binds one
-// variable (the argument), reachable as Var{0} inside it.
+// Icit is the plicity of a binder or application: explicit (the default) or
+// implicit (Phase 2; surface syntax {x : A}). Implicit arguments are inserted by
+// elaboration, so the core is always fully applied and plicity is part of a
+// term's identity (it is hashed).
+type Icit byte
+
+const (
+	// Expl marks an explicit binder or argument.
+	Expl Icit = iota
+	// Impl marks an implicit binder or argument.
+	Impl
+)
+
+// Meta is an unsolved metavariable, identified within one elaboration run. It is
+// ELABORATION-INTERNAL: a meta must never reach the store or the hash boundary —
+// HashTerm panics on it, and the session asserts elaborated definitions are
+// meta-free (zonked) before storing.
+type Meta struct {
+	ID int
+}
+
+// Pi is the dependent function type (x : Dom) -> Cod (explicit) or
+// {x : Dom} -> Cod (implicit). Cod is a Scope: it binds one variable (the
+// argument), reachable as Var{0} inside it.
 type Pi struct {
-	Dom Tm
-	Cod Scope
+	Icit Icit
+	Dom  Tm
+	Cod  Scope
 }
 
 // Lam is a lambda abstraction \x -> Body. Body is a Scope binding the parameter.
 type Lam struct {
+	Icit Icit
 	Body Scope
 }
 
-// App is an application Fn Arg.
+// App is an application Fn Arg, at the given plicity.
 type App struct {
-	Fn  Tm
-	Arg Tm
+	Fn   Tm
+	Arg  Tm
+	Icit Icit
 }
 
 // Let is let x = Val in Body, with an optional annotation Ty (nil when absent).
@@ -84,6 +109,7 @@ type Scope struct {
 }
 
 func (Var) isTm()  {}
+func (Meta) isTm() {}
 func (Ref) isTm()  {}
 func (Univ) isTm() {}
 func (Pi) isTm()   {}

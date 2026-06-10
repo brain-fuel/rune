@@ -38,7 +38,10 @@ ascription. There is no evaluation, type checking, data, or literals yet.
 - **Comments** are insignificant and are **not** preserved by the pretty-printer (round-trip is
   modulo comments): line comment `-- … <end-of-line>`; block comment `{- … -}`, **nestable**.
 - **Identifier:** `(letter | "_") (letter | digit | "_" | "'")*`. Case-sensitive.
-- **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`.
+- **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`. The bare
+  underscore `_` is reserved as the hole; identifiers may still begin with `_` (`_x` is a name).
+- **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
+  instead, so an implicit form cannot begin with a literal `-`.
 - **Punctuation/operators:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
   is one token and is never read as `-` `-` `>`, and `--` begins a comment rather than two `-`.
 
@@ -58,20 +61,25 @@ Expr      ::= Let
 Let       ::= "let" Ident [":" Expr] "=" Expr "in" Expr      -- inline; `in` is mandatory
 
 Arrow     ::= Binder "->" Expr            -- dependent:     (x : A) -> B   (right-assoc via Expr)
+           |  IBinder "->" Expr           -- implicit:      {x : A} -> B   (Phase 2)
            |  App ["->" Expr]             -- non-dependent: A -> B,  or just App
 
-App       ::= Atom+                       -- application, left-associative
+App       ::= Atom Arg*                   -- application, left-associative
+Arg       ::= Atom                        -- explicit argument
+           |  "{" Expr "}"                -- implicit argument, given explicitly (Phase 2)
 
 Atom      ::= Ident
+           |  "_"                         -- a hole: a metavariable for elaboration (Phase 2)
            |  "U"
            |  Lam
            |  Seq
            |  "(" Expr ")"                -- parenthesized expression
            |  "(" Expr ":" Expr ")"       -- type ascription
 
-Lam       ::= "fn" Binder+ "is" Expr "end"
+Lam       ::= "fn" (Binder | IBinder)+ "is" Expr "end"
 
 Binder    ::= "(" Ident ":" Expr ")"
+IBinder   ::= "{" Ident ":" Expr "}"      -- implicit binder (Phase 2)
 
 Seq       ::= "seq" SeqBind* Result "end"          -- separators per §5.3
 SeqBind   ::= "let" Ident [":" Expr] "=" Expr       -- NOTE: no `in`

@@ -27,6 +27,15 @@ type Globals interface {
 type Machine struct {
 	G    Globals
 	Deps map[Hash]struct{}
+	// Metas, when non-nil, resolves metavariable solutions (Phase 2). It is set
+	// only during elaboration; pure core runs (the cached checker judgment, REPL
+	// normalization) operate on zonked, meta-free terms and leave it nil.
+	Metas MetaSolver
+}
+
+// MetaSolver resolves a metavariable to its solution value, if solved.
+type MetaSolver interface {
+	Solution(int) (Val, bool)
 }
 
 // NewMachine returns a Machine over g with an empty dependency log.
@@ -74,16 +83,18 @@ func (m *Machine) Eval(env Env, t Tm) Val {
 	case Pi:
 		dom := m.Eval(env, tm.Dom)
 		cod := tm.Cod
-		return VPi{Name: cod.Name, Dom: dom, Cod: func(v Val) Val {
+		return VPi{Name: cod.Name, Icit: tm.Icit, Dom: dom, Cod: func(v Val) Val {
 			return m.Eval(env.Extend(v), cod.Body)
 		}}
 	case Lam:
 		body := tm.Body
-		return VLam{Name: body.Name, Body: func(v Val) Val {
+		return VLam{Name: body.Name, Icit: tm.Icit, Body: func(v Val) Val {
 			return m.Eval(env.Extend(v), body.Body)
 		}}
 	case App:
-		return m.Apply(m.Eval(env, tm.Fn), m.Eval(env, tm.Arg))
+		return m.apply(m.Eval(env, tm.Fn), m.Eval(env, tm.Arg), tm.Icit)
+	case Meta:
+		return m.metaVal(tm.ID)
 	case Let:
 		// The bound value is in-band (part of the term); the binder is
 		// definitionally transparent, so the body sees the VALUE.
@@ -119,20 +130,26 @@ func (m *Machine) logDep(h Hash) {
 	}
 }
 
-// Apply applies fn to arg. A lambda β-reduces; a neutral grows its spine, and its
+// Apply applies fn to an explicit arg (the common external entry point).
+func (m *Machine) Apply(fn, arg Val) Val { return m.apply(fn, arg, Expl) }
+
+// ApplyIcit applies fn to arg at the given plicity.
+func (m *Machine) ApplyIcit(fn, arg Val, icit Icit) Val { return m.apply(fn, arg, icit) }
+
+// apply applies fn to arg. A lambda β-reduces; a neutral grows its spine, and its
 // glued unfolding (if any) is applied lazily so forcing the result forces the head.
-func (m *Machine) Apply(fn, arg Val) Val {
+func (m *Machine) apply(fn, arg Val, icit Icit) Val {
 	switch f := fn.(type) {
 	case VLam:
 		return f.Body(arg)
 	case VNeu:
-		out := VNeu{Spine: NApp{Fn: f.Spine, Arg: arg}}
+		out := VNeu{Spine: NApp{Fn: f.Spine, Arg: arg, Icit: icit}}
 		if f.Unfold != nil {
 			u := f.Unfold
 			var memo Val
 			out.Unfold = func() Val {
 				if memo == nil {
-					memo = m.Apply(u(), arg)
+					memo = m.apply(u(), arg, icit)
 				}
 				return memo
 			}
@@ -143,17 +160,43 @@ func (m *Machine) Apply(fn, arg Val) Val {
 	}
 }
 
+// metaVal builds the value of a metavariable: its solution if solved, otherwise
+// a flexible neutral. The solution is consulted lazily via the glued unfolding,
+// so a meta solved AFTER this value was built still forces correctly.
+func (m *Machine) metaVal(id int) Val {
+	return VNeu{Spine: NMeta{ID: id}, Unfold: func() Val {
+		if m.Metas != nil {
+			if sol, ok := m.Metas.Solution(id); ok {
+				return sol
+			}
+		}
+		return VNeu{Spine: NMeta{ID: id}}
+	}}
+}
+
 // Force unfolds a glued neutral to its delta-reduced value, repeatedly, logging
-// each unfolded definition (forcing the thunk is store.Unfold). Non-neutrals and
-// neutrals with nothing to unfold are returned as-is.
+// each unfolded definition (forcing the thunk is store.Unfold). A flexible
+// neutral whose meta is unsolved is returned as-is (its Unfold yields itself).
+// Non-neutrals and neutrals with nothing to unfold are returned as-is.
 func (m *Machine) Force(v Val) Val {
 	for {
 		n, ok := v.(VNeu)
 		if !ok || n.Unfold == nil {
 			return v
 		}
-		v = n.Unfold()
+		next := n.Unfold()
+		if nn, ok := next.(VNeu); ok && nn.Unfold == nil && sameSpine(nn.Spine, n.Spine) {
+			return v // an unsolved meta forces to itself; stop
+		}
+		v = next
 	}
+}
+
+// sameSpine is a shallow identity check used to detect a no-progress force.
+func sameSpine(a, b Neutral) bool {
+	x, ok1 := a.(NMeta)
+	y, ok2 := b.(NMeta)
+	return ok1 && ok2 && x.ID == y.ID
 }
 
 // force1 unfolds one glued layer if possible, reporting whether it did.

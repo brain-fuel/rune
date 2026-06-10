@@ -82,8 +82,13 @@ first and forces only on mismatch, so the fast path logs nothing.
   `runExpr` upgraded to elaborate+normalize+print. The four Phase-1 harness
   properties (preservation, conversion equivalence + congruence, Frame Lemma) are
   live.
-- **Later:** metavariables/unification/implicits; the OTT equality stratum; data,
-  coverage, totality; turn on QTT; universe hierarchy; codegen + a backend.
+- **Phase 2 (done):** metavariables (contextual, elaboration-scoped), Miller
+  pattern unification (no pruning — parked), implicit Pi/lambda/application
+  (`{x : A}`, `{e}`) and holes (`_`) in the surface; plicity (Icit) joined the
+  core and its hash preimage (hashFormatVersion 0x02). Definitions are zonked,
+  meta-free, before the store; the certificate layer is unchanged.
+- **Later:** the OTT equality stratum; data, coverage, totality; turn on QTT;
+  universe hierarchy; codegen + a backend.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
   stratum is **added** (v3 two-level type theory).
 

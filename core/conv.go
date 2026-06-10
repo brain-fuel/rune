@@ -27,6 +27,9 @@ func (m *Machine) Conv(lvl int, a, b Val) bool {
 		}
 	case VPi:
 		if y, ok := b.(VPi); ok {
+			if x.Icit != y.Icit {
+				return false
+			}
 			v := VVar(lvl)
 			return m.Conv(lvl, x.Dom, y.Dom) && m.Conv(lvl+1, x.Cod(v), y.Cod(v))
 		}
@@ -62,9 +65,14 @@ func (m *Machine) convSpine(lvl int, p, q Neutral) bool {
 	case NRef:
 		y, ok := q.(NRef)
 		return ok && x.Hash == y.Hash
+	case NMeta:
+		// Core conversion treats an unsolved meta as rigid: equal only to
+		// itself. Solving-by-unification is elaborate/'s job, not conversion's.
+		y, ok := q.(NMeta)
+		return ok && x.ID == y.ID
 	case NApp:
 		y, ok := q.(NApp)
-		return ok && m.convSpine(lvl, x.Fn, y.Fn) && m.Conv(lvl, x.Arg, y.Arg)
+		return ok && x.Icit == y.Icit && m.convSpine(lvl, x.Fn, y.Fn) && m.Conv(lvl, x.Arg, y.Arg)
 	default:
 		panic("core.Conv: unknown Neutral constructor")
 	}

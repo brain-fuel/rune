@@ -36,6 +36,7 @@ type VU struct{}
 // Scope.Name — never part of identity, never hashed (quote drops it into a Scope).
 type VPi struct {
 	Name string
+	Icit Icit
 	Dom  Val
 	Cod  func(Val) Val
 }
@@ -44,6 +45,7 @@ type VPi struct {
 // hint only, like VPi.Name.
 type VLam struct {
 	Name string
+	Icit Icit
 	Body func(Val) Val
 }
 
@@ -70,12 +72,21 @@ type NRef struct {
 	Hash Hash
 }
 
-// NApp is a neutral applied to an argument value.
+// NApp is a neutral applied to an argument value at the given plicity.
 type NApp struct {
-	Fn  Neutral
-	Arg Val
+	Fn   Neutral
+	Arg  Val
+	Icit Icit
 }
 
-func (NVar) isNeutral() {}
-func (NRef) isNeutral() {}
-func (NApp) isNeutral() {}
+// NMeta is a stuck metavariable head (Phase 2, elaboration-internal). A neutral
+// headed by an NMeta is FLEXIBLE: solving the meta can wake it. The Machine's
+// Metas solver is consulted when forcing.
+type NMeta struct {
+	ID int
+}
+
+func (NVar) isNeutral()  {}
+func (NRef) isNeutral()  {}
+func (NApp) isNeutral()  {}
+func (NMeta) isNeutral() {}

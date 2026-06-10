@@ -32,10 +32,14 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
   rather than on `e`'s full content would recover reuse across harmless body edits,
   but reintroduces a validation procedure (invalidation logic). Explicitly out of
   scope; the cache asserts only "this exact configuration of bodies checks."
-- **Richer surface beyond the v0.2.0 calculus.** The surface is exactly: variables,
-  lambda (`fn (x : A) is e end`, curried), application, Pi, inline `let`, `seq`, `U`,
-  and parenthesized ascription (see `ref_docs/GRAMMAR.md`). No data types, implicits,
-  or modules beyond a flat list of definitions until a phase needs them.
+- **Richer surface beyond the current calculus.** The surface is: variables, lambda
+  (explicit and implicit binders), application (with `{e}` implicit override), Pi
+  (explicit and implicit), holes (`_`), inline `let`, `seq`, `U`, and parenthesized
+  ascription (see `ref_docs/GRAMMAR.md`). No data types or modules beyond a flat
+  list of definitions until a phase needs them.
+- **Pruning in pattern unification.** A meta solved against a term whose metas
+  carry out-of-scope spine variables fails with a scope error instead of pruning
+  the offending dependency. Add pruning only when a listing needs it.
 - **Sigma types, pairs, equality formers in the surface.** The v1 design's `Tm`
   includes `Sig`/`Pair`/`Eq`/`Cast`; Phase 0's surface and core deliberately omit
   them (no consumer yet). They enter with their phases.

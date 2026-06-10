@@ -58,11 +58,19 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		}
 	case core.Univ:
 		sb.WriteString("U")
+	case core.Meta:
+		sb.WriteString("?" + strconv.Itoa(x.ID))
 	case core.App:
 		p.wrap(sb, prec, precApp, func() {
 			p.print(sb, x.Fn, names, precApp)
 			sb.WriteByte(' ')
-			p.print(sb, x.Arg, names, precAtom)
+			if x.Icit == core.Impl {
+				sb.WriteByte('{')
+				p.print(sb, x.Arg, names, precLow)
+				sb.WriteByte('}')
+			} else {
+				p.print(sb, x.Arg, names, precAtom)
+			}
 		})
 	case core.Lam:
 		// fn (x : U) (y : U) … is BODY end. The core lambda is un-annotated, so the
@@ -78,9 +86,13 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 				break
 			}
 			n := fresh(lam.Body.Name, cur)
-			sb.WriteString(" (")
+			open, close := " (", " : U)"
+			if lam.Icit == core.Impl {
+				open, close = " {", " : U}"
+			}
+			sb.WriteString(open)
 			sb.WriteString(n)
-			sb.WriteString(" : U)")
+			sb.WriteString(close)
 			cur = prepend(n, cur)
 			body = lam.Body.Body
 		}
@@ -88,7 +100,18 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		p.print(sb, body, cur, precLow)
 		sb.WriteString(" end")
 	case core.Pi:
-		if occursVar(x.Cod.Body, 0) {
+		if x.Icit == core.Impl {
+			// An implicit Pi always shows its binder: {x : A} -> B.
+			p.wrap(sb, prec, precArrow, func() {
+				n := fresh(x.Cod.Name, names)
+				sb.WriteByte('{')
+				sb.WriteString(n)
+				sb.WriteString(" : ")
+				p.print(sb, x.Dom, names, precLow)
+				sb.WriteString("} -> ")
+				p.print(sb, x.Cod.Body, prepend(n, names), precArrow)
+			})
+		} else if occursVar(x.Cod.Body, 0) {
 			p.wrap(sb, prec, precArrow, func() {
 				n := fresh(x.Cod.Name, names)
 				sb.WriteByte('(')

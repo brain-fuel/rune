@@ -30,11 +30,14 @@ type Elaborator struct {
 	M        *core.Machine
 	Refs     map[string]core.Hash
 	RefNames map[core.Hash]string
+	metas    metaState // Phase 2: this run's metavariables
 }
 
 // New returns an Elaborator over globals g with the given name maps.
 func New(g core.Globals, refs map[string]core.Hash, refNames map[core.Hash]string) *Elaborator {
-	return &Elaborator{M: core.NewMachine(g), Refs: refs, RefNames: refNames}
+	e := &Elaborator{M: core.NewMachine(g), Refs: refs, RefNames: refNames}
+	e.M.Metas = &e.metas
+	return e
 }
 
 // Ctx is the typing context: parallel innermost-first lists of binder names,
@@ -45,6 +48,7 @@ type Ctx struct {
 	names []string
 	types []core.Val
 	env   core.Env
+	bound []bool // true for lambda/Pi binders, false for let definitions
 }
 
 // Lvl is the number of binders in scope — the next fresh de Bruijn level.
@@ -52,15 +56,15 @@ func (c *Ctx) Lvl() int { return len(c.env) }
 
 // bind extends the context with a fresh variable of type ty (lambda/Pi binders).
 func (c *Ctx) bind(name string, ty core.Val) *Ctx {
-	return c.push(name, ty, core.VVar(c.Lvl()))
+	return c.push(name, ty, core.VVar(c.Lvl()), true)
 }
 
 // define extends the context with a binder bound to a known value (let binders).
 func (c *Ctx) define(name string, ty, val core.Val) *Ctx {
-	return c.push(name, ty, val)
+	return c.push(name, ty, val, false)
 }
 
-func (c *Ctx) push(name string, ty, val core.Val) *Ctx {
+func (c *Ctx) push(name string, ty, val core.Val, isBound bool) *Ctx {
 	names := make([]string, 0, len(c.names)+1)
 	names = append(names, name)
 	names = append(names, c.names...)
@@ -70,7 +74,10 @@ func (c *Ctx) push(name string, ty, val core.Val) *Ctx {
 	env := make(core.Env, 0, len(c.env)+1)
 	env = append(env, val)
 	env = append(env, c.env...)
-	return &Ctx{names: names, types: types, env: env}
+	bound := make([]bool, 0, len(c.bound)+1)
+	bound = append(bound, isBound)
+	bound = append(bound, c.bound...)
+	return &Ctx{names: names, types: types, env: env, bound: bound}
 }
 
 // lookup finds a bound name, returning its de Bruijn index and type.
@@ -89,6 +96,11 @@ func (e *Elaborator) Eval(c *Ctx, t core.Tm) core.Val { return e.M.Eval(c.env, t
 // pretty renders a type value for an error message.
 func (e *Elaborator) pretty(c *Ctx, v core.Val) string {
 	return surface.PrettyWith(e.M.Quote(c.Lvl(), v), e.RefNames)
+}
+
+// prettyTm renders a core term for an error message.
+func (e *Elaborator) prettyTm(t core.Tm) string {
+	return surface.PrettyWith(t, e.RefNames)
 }
 
 // refType returns the evaluated public type of the definition at h. Reading a

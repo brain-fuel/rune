@@ -24,6 +24,9 @@ const (
 	tLet
 	tIn
 	tU
+	tLBrace // {  (implicit binder/argument; '{-' opens a comment instead)
+	tRBrace // }
+	tHole   // _  (a hole: a metavariable for elaboration to solve)
 )
 
 type token struct {
@@ -66,6 +69,12 @@ func (k tokKind) String() string {
 		return "'in'"
 	case tU:
 		return "'U'"
+	case tLBrace:
+		return "'{'"
+	case tRBrace:
+		return "'}'"
+	case tHole:
+		return "'_'"
 	default:
 		return "token"
 	}
@@ -107,6 +116,12 @@ func lex(src string) ([]token, error) {
 				return nil, err
 			}
 			i = end
+		case r == '{':
+			toks = append(toks, token{tLBrace, "{", i})
+			i++
+		case r == '}':
+			toks = append(toks, token{tRBrace, "}", i})
+			i++
 		case r == '(':
 			toks = append(toks, token{tLParen, "(", i})
 			i++
@@ -157,6 +172,8 @@ func keyword(word string, pos int) token {
 		return token{tIn, word, pos}
 	case "U":
 		return token{tU, word, pos}
+	case "_":
+		return token{tHole, word, pos}
 	default:
 		return token{tIdent, word, pos}
 	}

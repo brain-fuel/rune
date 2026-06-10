@@ -7,6 +7,8 @@
 // definition references (content hashes). There is no type elaboration in Phase 0.
 package surface
 
+import "goforge.dev/rune/core"
+
 // Exp is a named surface expression. Like core.Tm it is a sealed interface matched
 // by type switch; the marker keeps the constructor set closed.
 type Exp interface {
@@ -22,26 +24,33 @@ type EVar struct {
 // EUniv is the universe U.
 type EUniv struct{}
 
+// EHole is `_`: a hole for elaboration to solve with a fresh metavariable
+// (Phase 2). Holes never survive elaboration; the untyped resolver rejects them.
+type EHole struct{}
+
 // ELam is one parameter of a lambda: fn (Param : Dom) is Body end. The parser
 // desugars a curried fn (x : A) (y : B) is e end into nested ELam. Dom is the binder's
 // domain annotation; resolution scope-checks it and then discards it, since the
 // Phase-0 core lambda is un-annotated (see GRAMMAR.md §6). Dom is never nil.
 type ELam struct {
 	Param string
+	Icit  core.Icit // Impl when written fn {x : A}
 	Dom   Exp
 	Body  Exp
 }
 
 // EApp is application Fn Arg, left-associative.
 type EApp struct {
-	Fn  Exp
-	Arg Exp
+	Fn   Exp
+	Arg  Exp
+	Icit core.Icit // Impl when written f {e}
 }
 
 // EPi is a dependent function type (Param : Dom) -> Cod. A non-dependent arrow
 // A -> B parses to EPi with Param "_".
 type EPi struct {
 	Param string
+	Icit  core.Icit // Impl when written {x : A} -> B
 	Dom   Exp
 	Cod   Exp
 }
@@ -61,6 +70,7 @@ type EAnn struct {
 }
 
 func (EVar) isExp()  {}
+func (EHole) isExp() {}
 func (EUniv) isExp() {}
 func (ELam) isExp()  {}
 func (EApp) isExp()  {}

@@ -28,8 +28,9 @@ func (h Hash) Short() string { return hex.EncodeToString(h[:])[:12] }
 // hashFormatVersion is the preimage tag that prefixes every term digest. Bumping it
 // changes every content hash, which is the intended migration lever if the core's
 // serialization or hash algorithm changes. NEVER reuse a tag across incompatible
-// encodings. 0x01: BLAKE3 (0x00 was sha256).
-const hashFormatVersion byte = 0x01
+// encodings. 0x02: plicity (Icit) joined the Pi/Lam/App preimage (Phase 2).
+// 0x01 was BLAKE3 without plicity; 0x00 was sha256.
+const hashFormatVersion byte = 0x02
 
 // Constructor tags. Each core constructor gets a distinct, stable byte so that
 // differently-shaped terms cannot collide by accident. Append-only: never renumber.
@@ -71,14 +72,14 @@ func writeTerm(h hash.Hash, t Tm) {
 	case Univ:
 		h.Write([]byte{tagUniv})
 	case Pi:
-		h.Write([]byte{tagPi})
+		h.Write([]byte{tagPi, byte(tm.Icit)})
 		writeTerm(h, tm.Dom)
 		writeScope(h, tm.Cod)
 	case Lam:
-		h.Write([]byte{tagLam})
+		h.Write([]byte{tagLam, byte(tm.Icit)})
 		writeScope(h, tm.Body)
 	case App:
-		h.Write([]byte{tagApp})
+		h.Write([]byte{tagApp, byte(tm.Icit)})
 		writeTerm(h, tm.Fn)
 		writeTerm(h, tm.Arg)
 	case Let:
@@ -90,6 +91,10 @@ func writeTerm(h hash.Hash, t Tm) {
 		h.Write([]byte{tagAnn})
 		writeTerm(h, tm.Term)
 		writeTerm(h, tm.Ty)
+	case Meta:
+		// A metavariable has no content identity. Reaching one here means a
+		// definition was stored before being zonked — a checker bug, not data.
+		panic("core.HashTerm: metavariable in hashable core (unzonked term)")
 	default:
 		panic("core.HashTerm: unknown Tm constructor")
 	}

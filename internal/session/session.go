@@ -8,8 +8,6 @@
 package session
 
 import (
-	"fmt"
-
 	"goforge.dev/rune/core"
 	"goforge.dev/rune/elaborate"
 	"goforge.dev/rune/store"
@@ -68,35 +66,34 @@ func (s *Session) ResolveExpr(e surface.Exp) (core.Tm, error) {
 // hit. Otherwise the definition is elaborated and checked, and a certificate is
 // recorded with the exact unfolded-dependency set the machine logged.
 func (s *Session) AddDef(d surface.Def) (Def, error) {
-	r := s.resolver()
-	var ty core.Tm
+	// Fast path: untyped resolution. On plain programs (no holes, no implicit
+	// insertion) it emits the same core elaboration would, so its content hash
+	// can hit the certificate table and skip the check entirely. A certificate
+	// speaks about CORE CONTENT, so a hit is sound no matter which surface
+	// produced the content. If resolution fails (a hole) or the hash misses,
+	// the typed elaborator is the authority.
+	var ty, body core.Tm
 	if d.Ty != nil {
-		t, err := r.ResolveExp(d.Ty)
-		if err != nil {
-			return Def{}, fmt.Errorf("%s: %w", d.Name, err)
+		r := s.resolver()
+		rty, errTy := r.ResolveExp(d.Ty)
+		rbody, errBody := r.ResolveExp(d.Body)
+		if errTy == nil && errBody == nil {
+			h := store.HashDef(rty, rbody)
+			if s.st.Certified(h) {
+				ty, body = rty, rbody
+			}
 		}
-		ty = t
 	}
-	body, err := r.ResolveExp(d.Body)
-	if err != nil {
-		return Def{}, fmt.Errorf("%s: %w", d.Name, err)
-	}
-	h := store.HashDef(ty, body)
-	if !s.st.Certified(h) {
+	if body == nil {
 		el := elaborate.New(s.st, s.refs, s.refNames)
 		ety, ebody, err := el.ElabDef(d)
 		if err != nil {
 			return Def{}, err
 		}
-		// Elaboration is annotation-guided but emits exactly resolution's core
-		// (Phase 1 has no metavariables), so the hash is unchanged. Guard it.
-		if eh := store.HashDef(ety, ebody); eh != h {
-			return Def{}, fmt.Errorf("%s: internal: elaborated core hash %s differs from resolved %s",
-				d.Name, eh.Short(), h.Short())
-		}
-		s.st.Certify(h, el.M.DepList())
+		ty, body = ety, ebody
+		s.st.Certify(store.HashDef(ty, body), el.M.DepList())
 	}
-	h = s.st.Add(d.Name, ty, body)
+	h := s.st.Add(d.Name, ty, body)
 	rd := Def{Name: d.Name, Ty: ty, Body: body, Hash: h}
 	if _, exists := s.byName[d.Name]; !exists {
 		s.order = append(s.order, d.Name)
@@ -144,14 +141,20 @@ func (s *Session) elaborator() *elaborate.Elaborator {
 }
 
 // ElabExpr elaborates a surface expression against the session environment,
-// returning the core term and its inferred type (quoted back to core).
+// returning the zonked core term and its inferred type (quoted back to core).
+// Unsolved metavariables (underconstrained holes/implicits) are an error.
 func (s *Session) ElabExpr(e surface.Exp) (tm, ty core.Tm, err error) {
 	el := s.elaborator()
 	t, vty, err := el.Infer(&elaborate.Ctx{}, e)
 	if err != nil {
 		return nil, nil, err
 	}
-	return t, el.M.Quote(0, vty), nil
+	t = el.Zonk(0, t)
+	tyTm := el.Zonk(0, el.M.Quote(0, vty))
+	if err := el.ErrUnsolved("expression"); err != nil {
+		return nil, nil, err
+	}
+	return t, tyTm, nil
 }
 
 // NormalizeExpr fully normalizes (βδ) a closed, well-typed core term.

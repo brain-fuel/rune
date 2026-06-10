@@ -18,6 +18,10 @@ func (e *Elaborator) CheckCore(c *Ctx, t core.Tm, want core.Val) error {
 		if !ok {
 			return fmt.Errorf("lambda has non-function type %s", e.pretty(c, want))
 		}
+		if pi.Icit != tm.Icit {
+			return fmt.Errorf("%s lambda checked against an %s function type",
+				icitName(tm.Icit), icitName(pi.Icit))
+		}
 		v := core.VVar(c.Lvl())
 		return e.CheckCore(c.bind(tm.Body.Name, pi.Dom), tm.Body.Body, pi.Cod(v))
 	case core.Let:
@@ -64,6 +68,8 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 		return e.refType(tm.Hash)
 	case core.Univ:
 		return core.VU{}, nil // type : type until the Phase-6 hierarchy
+	case core.Meta:
+		return nil, fmt.Errorf("metavariable in core term: the checker judges only zonked, meta-free core")
 	case core.Pi:
 		if err := e.CheckCore(c, tm.Dom, core.VU{}); err != nil {
 			return nil, err
@@ -83,6 +89,10 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 		pi, ok := e.M.Force(fnTy).(core.VPi)
 		if !ok {
 			return nil, fmt.Errorf("applying a non-function of type %s", e.pretty(c, fnTy))
+		}
+		if pi.Icit != tm.Icit {
+			return nil, fmt.Errorf("%s application to a function expecting an %s argument",
+				icitName(tm.Icit), icitName(pi.Icit))
 		}
 		if err := e.CheckCore(c, tm.Arg, pi.Dom); err != nil {
 			return nil, err

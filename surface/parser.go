@@ -3,6 +3,8 @@ package surface
 import (
 	"errors"
 	"fmt"
+
+	"goforge.dev/rune/core"
 )
 
 // ErrIncomplete marks a parse that ran out of input mid-form (an unterminated is/seq
@@ -170,6 +172,21 @@ func (p *parser) parseLet() (Exp, error) {
 // Bare `e : T` ascription does not exist at top level — ascription is only the
 // parenthesized atom `(e : T)` (§5.1).
 func (p *parser) parseArrow() (Exp, error) {
+	if p.peek().kind == tLBrace {
+		// {x : A} -> B : an implicit dependent function type.
+		param, _, dom, err := p.parseBinder()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tArrow); err != nil {
+			return nil, err
+		}
+		cod, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		return EPi{Param: param, Icit: core.Impl, Dom: dom, Cod: cod}, nil
+	}
 	lhs, err := p.parseApp()
 	if err != nil {
 		return nil, err
@@ -190,19 +207,34 @@ func (p *parser) parseApp() (Exp, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.atomStarts() {
+	for {
+		if p.peek().kind == tLBrace {
+			// f {e}: an explicitly-supplied implicit argument.
+			p.next()
+			arg, err := p.parseExpr()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := p.expect(tRBrace); err != nil {
+				return nil, err
+			}
+			fn = EApp{Fn: fn, Arg: arg, Icit: core.Impl}
+			continue
+		}
+		if !p.atomStarts() {
+			return fn, nil
+		}
 		arg, err := p.parseAtom()
 		if err != nil {
 			return nil, err
 		}
 		fn = EApp{Fn: fn, Arg: arg}
 	}
-	return fn, nil
 }
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole:
 		return true
 	default:
 		return false
@@ -215,6 +247,9 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tU:
 		p.next()
 		return EUniv{}, nil
+	case tHole:
+		p.next()
+		return EHole{}, nil
 	case tIdent:
 		p.next()
 		return EVar{Name: t.text}, nil
@@ -237,18 +272,19 @@ func (p *parser) parseLam() (Exp, error) {
 	p.next() // 'fn'
 	type binder struct {
 		name string
+		icit core.Icit
 		dom  Exp
 	}
 	var bs []binder
-	for p.peek().kind == tLParen {
-		name, dom, err := p.parseBinder()
+	for p.peek().kind == tLParen || p.peek().kind == tLBrace {
+		name, icit, dom, err := p.parseBinder()
 		if err != nil {
 			return nil, err
 		}
-		bs = append(bs, binder{name, dom})
+		bs = append(bs, binder{name, icit, dom})
 	}
 	if len(bs) == 0 {
-		return nil, fmt.Errorf("expected a (name : type) binder after 'fn' at offset %d", p.peek().pos)
+		return nil, fmt.Errorf("expected a (name : type) or {name : type} binder after 'fn' at offset %d", p.peek().pos)
 	}
 	if _, err := p.expect(tIs); err != nil {
 		return nil, err
@@ -261,32 +297,39 @@ func (p *parser) parseLam() (Exp, error) {
 		return nil, err
 	}
 	for i := len(bs) - 1; i >= 0; i-- {
-		body = ELam{Param: bs[i].name, Dom: bs[i].dom, Body: body}
+		body = ELam{Param: bs[i].name, Icit: bs[i].icit, Dom: bs[i].dom, Body: body}
 	}
 	return body, nil
 }
 
-// parseBinder parses a lambda binder `"(" Ident ":" Expr ")"`. Unlike the head of an
-// Arrow/App, a binder position is unambiguous: a `(` here is always `(name : type)`.
-func (p *parser) parseBinder() (string, Exp, error) {
-	if _, err := p.expect(tLParen); err != nil {
-		return "", nil, err
+// parseBinder parses a lambda binder `"(" Ident ":" Expr ")"` (explicit) or
+// `"{" Ident ":" Expr "}"` (implicit). Unlike the head of an Arrow/App, a binder
+// position is unambiguous: the bracket always opens `name : type`.
+func (p *parser) parseBinder() (string, core.Icit, Exp, error) {
+	icit := core.Expl
+	closeKind := tRParen
+	if p.peek().kind == tLBrace {
+		p.next()
+		icit = core.Impl
+		closeKind = tRBrace
+	} else if _, err := p.expect(tLParen); err != nil {
+		return "", icit, nil, err
 	}
 	id, err := p.expect(tIdent)
 	if err != nil {
-		return "", nil, err
+		return "", icit, nil, err
 	}
 	if _, err := p.expect(tColon); err != nil {
-		return "", nil, err
+		return "", icit, nil, err
 	}
 	dom, err := p.parseExpr()
 	if err != nil {
-		return "", nil, err
+		return "", icit, nil, err
 	}
-	if _, err := p.expect(tRParen); err != nil {
-		return "", nil, err
+	if _, err := p.expect(closeKind); err != nil {
+		return "", icit, nil, err
 	}
-	return id.text, dom, nil
+	return id.text, icit, dom, nil
 }
 
 // parseParen disambiguates the three things a '(' can open at the head of an
