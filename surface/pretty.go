@@ -345,6 +345,16 @@ func occursVar(t core.Tm, depth int) bool {
 			occursVar(x.Val, depth) || occursVar(x.Body.Body, depth+1)
 	case core.Ann:
 		return occursVar(x.Term, depth) || occursVar(x.Ty, depth)
+	case core.Eq:
+		return occursVar(x.Ty, depth) || occursVar(x.L, depth) || occursVar(x.R, depth)
+	case core.Refl:
+		return occursVar(x.Tm, depth)
+	case core.Cast:
+		return occursVar(x.A, depth) || occursVar(x.B, depth) ||
+			occursVar(x.P, depth) || occursVar(x.X, depth)
+	case core.Subst:
+		return occursVar(x.A, depth) || occursVar(x.X, depth) || occursVar(x.Y, depth) ||
+			occursVar(x.Prf, depth) || occursVar(x.P, depth) || occursVar(x.Px, depth)
 	default:
 		return false
 	}
