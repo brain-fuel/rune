@@ -35,6 +35,9 @@ type Machine struct {
 	EqS EqStratum
 	// Data, when non-nil, supplies datatype roles for ι-reduction.
 	Data DataInfo
+	// Quot, when non-nil, supplies quotient-builtin roles for the quotient
+	// ι-rules (v2): qlift/qind compute when their scrutinee is qin-headed.
+	Quot QuotInfo
 }
 
 // MetaSolver resolves a metavariable to its solution value, if solved.
@@ -68,6 +71,34 @@ type ElimSig struct {
 type DataInfo interface {
 	CtorOf(Hash) (data Hash, idx int, ok bool)
 	ElimOf(Hash) (ElimSig, bool)
+}
+
+// QuotRole classifies a stored hash's role in the quotient builtin group (v2).
+// The quotient formers are BUILTIN DEFINITIONS, not new core syntax: permanently
+// neutral heads (like datatype constructors) whose eliminators compute by the
+// quotient ι-rules below. See store/quot.go for the group and its types.
+type QuotRole byte
+
+const (
+	// QRoleNone: not a quotient builtin.
+	QRoleNone QuotRole = iota
+	// QRoleQuot is the type former Quot : (A : U) -> (A -> A -> Prop) -> U.
+	QRoleQuot
+	// QRoleIn is the point constructor qin : … -> A -> Quot A R.
+	QRoleIn
+	// QRoleSound is the path introduction qsound : … R a b -> Eq (Quot A R) (qin … a) (qin … b).
+	QRoleSound
+	// QRoleLift is the non-dependent eliminator qlift : … (f : A -> B) -> (resp : …) -> Quot A R -> B.
+	QRoleLift
+	// QRoleInd is the Prop-motive induction principle qind : … -> (q : Quot A R) -> P q.
+	QRoleInd
+)
+
+// QuotInfo gives the evaluator the quotient-builtin roles of stored hashes (v2).
+// store.Store implements it. Nil means no quotient builtins (the ι-rules never
+// fire).
+type QuotInfo interface {
+	QuotRoleOf(Hash) QuotRole
 }
 
 // EqStratum is the EQUALITY STRATUM's reduction hooks (Phase 3). The conversion
@@ -220,6 +251,9 @@ func (m *Machine) apply(fn, arg Val, icit Icit) Val {
 		if red, ok := m.tryIota(out.Spine); ok {
 			return red
 		}
+		if red, ok := m.tryQuotIota(out.Spine); ok {
+			return red
+		}
 		return out
 	default:
 		panic("core.Apply: applying a non-function (ill-typed core reached eval)")
@@ -307,6 +341,57 @@ func spineParts(n Neutral) (head Neutral, args []Val) {
 		args = append([]Val{app.Arg}, args...)
 		n = app.Fn
 	}
+}
+
+// tryQuotIota fires the quotient computation rules (v2) on a saturated spine:
+//
+//	qlift A R B f resp (qin A' R' a)  ~>  f a
+//	qind  A R P h      (qin A' R' a)  ~>  h a
+//
+// exactly parallel to tryIota: the scrutinee (the last argument) is forced —
+// logged, as always — and the rule fires when it is a saturated qin. The
+// respect premise (resp) and the path constructor (qsound) have no computation
+// rule: qsound is a proof, definitionally irrelevant, and resp is consumed
+// only by the typing judgment. qin and qsound applied to anything are
+// permanently neutral (canonical), like datatype constructors.
+func (m *Machine) tryQuotIota(spine Neutral) (Val, bool) {
+	if m.Quot == nil {
+		return nil, false
+	}
+	head, args := spineParts(spine)
+	ref, ok := head.(NRef)
+	if !ok {
+		return nil, false
+	}
+	var fnIdx int
+	switch m.Quot.QuotRoleOf(ref.Hash) {
+	case QRoleLift:
+		// qlift A R B f resp q — six arguments, f at index 3.
+		if len(args) != 6 {
+			return nil, false
+		}
+		fnIdx = 3
+	case QRoleInd:
+		// qind A R P h q — five arguments, h at index 3.
+		if len(args) != 5 {
+			return nil, false
+		}
+		fnIdx = 3
+	default:
+		return nil, false
+	}
+	scrut := m.Force(args[len(args)-1])
+	sneu, ok := scrut.(VNeu)
+	if !ok {
+		return nil, false
+	}
+	chead, cargs := spineParts(sneu.Spine)
+	cref, ok := chead.(NRef)
+	if !ok || m.Quot.QuotRoleOf(cref.Hash) != QRoleIn || len(cargs) != 3 {
+		return nil, false
+	}
+	// qin A R a: the carried point is the last argument.
+	return m.Apply(args[fnIdx], cargs[2]), true
 }
 
 // tryIota fires the eliminator computation rule on a saturated spine

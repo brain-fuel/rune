@@ -47,6 +47,8 @@ type Store struct {
 	dataByHash map[core.Hash]dataEntry
 	ctorRole   map[core.Hash]ctorRole
 	elimRole   map[core.Hash]core.Hash
+	// The quotient builtin group (quot.go), once registered.
+	quot *quotEntry
 }
 
 // New returns an empty store.
