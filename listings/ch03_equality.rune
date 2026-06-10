@@ -1,0 +1,33 @@
+-- Chapter 3 — Observational equality.
+-- Eq computes on type structure: function extensionality is a REDUCTION,
+-- not an axiom. Proofs are irrelevant; UIP holds.
+
+idU : U -> U is fn (x : U) is x end end
+idU' : U -> U is fn (x : U) is let y = x in y end end
+
+-- An equality of functions IS the pointwise equality function type, so its
+-- proof is a lambda of refls. Nothing is postulated.
+funext : Eq (U -> U) idU idU' is
+  fn (x : U) is refl end
+end
+
+-- Symmetry and transitivity, by Leibniz transport.
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- Transport between equal types, computing through cast.
+transport : (A : U1) -> (B : U1) -> Eq U1 A B -> A -> B is
+  fn (A : U1) (B : U1) (p : Eq U1 A B) (x : A) is cast A B p x end
+end
+
+-- UIP at the canonical level: any two refls agree.
+uip : Eq (Eq U1 U U) (refl U) (refl U) is refl end

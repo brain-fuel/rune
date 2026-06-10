@@ -130,6 +130,8 @@ first and forces only on mismatch, so the fast path logs nothing.
   `rune emit FILE [NAME]` prints the shadow; `rune run FILE NAME` executes it
   under node. The shadow rule holds: codegen reads bodies through the store
   and mutates only its own output.
+- **Phase 8 / v1.0.0 (done):** the listings corpus (`listings/`, gated by
+  `harness/listings_test.go`) — every chapter elaborates, checks, and runs.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
   stratum is **added** (v3 two-level type theory).
 

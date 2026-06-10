@@ -1,0 +1,56 @@
+-- Chapter 4 — Data and induction.
+-- Eliminators are the only recursion principle: coverage and totality are
+-- by construction, so every proof below means something.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data List : U -> U is
+  nil : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+double : Nat -> Nat is fn (n : Nat) is add n n end end
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+length : (A : U) -> List A -> Nat is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (x : List A) is Nat end)
+      zero
+      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- A real induction: add n zero = n. The base case is refl; the step
+-- transports along the induction hypothesis.
+addZeroRight : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+        subst Nat (add k zero) k ih
+          (fn (z : Nat) is Eq Nat (succ (add k zero)) (succ z) end)
+          refl
+      end)
+      n
+  end
+end
+
+four : Nat is double (succ (succ zero)) end

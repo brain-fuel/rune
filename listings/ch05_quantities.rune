@@ -1,0 +1,19 @@
+-- Chapter 5 — Quantities.
+-- 0 marks the erased fragment (types, indices); 1 marks linear data.
+-- The checker counts; codegen reads the 0-fragment as the erasure boundary.
+
+-- A linear identity: the argument is consumed exactly once.
+lid : (1 x : U) -> U is fn (1 x : U) is x end end
+
+-- The type argument of the erased identity never exists at runtime.
+eid : {0 A : U} -> A -> A is fn {0 A : U} (x : A) is x end end
+
+-- Erased binders may appear freely in types and proofs.
+reflAt : (0 A : U) -> (x : A) -> Eq A x x is
+  fn (0 A : U) (x : A) is refl x end
+end
+
+-- Linear data flowing through a linear-typed function stays linear.
+pipe : (1 f : (1 z : U) -> U) -> (1 x : U) -> U is
+  fn (1 f : (1 z : U) -> U) (1 x : U) is f x end
+end

@@ -1,0 +1,21 @@
+-- Chapter 1 — Functions and universes.
+-- The polymorphic identity, composition, and the predicative hierarchy.
+
+id : (A : U) -> A -> A is
+  fn (A : U) (x : A) is x end
+end
+
+const : (A : U) -> (B : U) -> A -> B -> A is
+  fn (A : U) (B : U) (x : A) (y : B) is x end
+end
+
+comp : (A : U) -> (B : U) -> (C : U) -> (B -> C) -> (A -> B) -> A -> C is
+  fn (A : U) (B : U) (C : U) (g : B -> C) (f : A -> B) (x : A) is g (f x) end
+end
+
+-- U is not a member of itself: id cannot take U. One level up, it can.
+id1 : (A : U1) -> A -> A is
+  fn (A : U1) (x : A) is x end
+end
+
+idU : U -> U is id1 U end

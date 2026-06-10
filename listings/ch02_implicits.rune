@@ -1,0 +1,17 @@
+-- Chapter 2 — Implicit arguments and holes.
+-- The elaborator inserts what the reader would not write.
+
+id : {A : U1} -> A -> A is
+  fn {A : U1} (x : A) is x end
+end
+
+-- The type argument is solved from the explicit one.
+idU : U -> U is id end
+
+-- An explicit override, and a hole the checker fills.
+viaOverride : U -> U is id {U} end
+viaHole : U -> _ is fn (x : U) is x end end
+
+compose : {A : U} -> {B : U} -> {C : U} -> (B -> C) -> (A -> B) -> A -> C is
+  fn {A : U} {B : U} {C : U} (g : B -> C) (f : A -> B) (x : A) is g (f x) end
+end
