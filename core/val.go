@@ -31,15 +31,19 @@ type VNeu struct {
 // VU is the universe as a value.
 type VU struct{}
 
-// VPi is a dependent function type value (x : Dom) -> Cod. Cod is a Go closure: the
-// Phase-1 NbE meaning function. Unused at Phase 0.
+// VPi is a dependent function type value (x : Dom) -> Cod. Cod is a Go closure:
+// the NbE meaning function. Name is a pretty-printing hint for the binder, like
+// Scope.Name — never part of identity, never hashed (quote drops it into a Scope).
 type VPi struct {
-	Dom Val
-	Cod func(Val) Val
+	Name string
+	Dom  Val
+	Cod  func(Val) Val
 }
 
-// VLam is a lambda value, carrying its meaning as a Go closure.
+// VLam is a lambda value, carrying its meaning as a Go closure. Name is a display
+// hint only, like VPi.Name.
 type VLam struct {
+	Name string
 	Body func(Val) Val
 }
 

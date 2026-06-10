@@ -34,16 +34,20 @@ func TestREPLSession(t *testing.T) {
 	got := out.String()
 
 	wants := []string{
-		"defined id",                       // multi-line definition accumulated
-		"id U",                             // reference printed by name, not #hash
-		`unbound identifier "nope"`,        // resolution error, loop continues
-		`unknown command ":bogus"`,         // unknown command, loop continues
-		"(λ. (λ. #0))",                     // :core de Bruijn view
-		"type checking arrives in Phase 1", // :type stub
-		"id : (A : U) -> A -> A",           // :list
-		"let y = U in y",                   // seq desugars and prints as let
-		"session cleared",                  // :reset
-		"(no definitions)",                 // :list after reset
+		"defined id",                   // multi-line definition accumulated
+		"U : U",                        // bare U checks and normalizes
+		"fn (x : U) is x end : U -> U", // id U β-reduces, with its inferred type
+		`unbound identifier "nope"`,    // elaboration error, loop continues
+		`unknown command ":bogus"`,     // unknown command, loop continues
+		"(λ. (λ. #0))",                 // :core de Bruijn view
+		"(A : U) -> A -> A",            // :type id prints the stored type
+		"id : (A : U) -> A -> A",       // :list
+		"session cleared",              // :reset
+		"(no definitions)",             // :list after reset
+	}
+	// seq let y = U; y end normalizes the let away: the value line is plain U.
+	if !strings.Contains(got, "U : U") {
+		t.Errorf("seq/let did not normalize to U\n--- full output ---\n%s", got)
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {

@@ -38,14 +38,27 @@ func NewDef(ty, body core.Tm) Def {
 type Store struct {
 	defs  map[core.Hash]Def
 	names map[string]core.Hash
+	// The proof cache (cert.go): append-only certificates keyed by
+	// hash(defHash, ‖U‖), plus an index by definition hash for lookup.
+	certs      map[core.Hash]Cert
+	certsByDef map[core.Hash][]core.Hash
 }
 
 // New returns an empty store.
 func New() *Store {
 	return &Store{
-		defs:  map[core.Hash]Def{},
-		names: map[string]core.Hash{},
+		defs:       map[core.Hash]Def{},
+		names:      map[string]core.Hash{},
+		certs:      map[core.Hash]Cert{},
+		certsByDef: map[core.Hash][]core.Hash{},
 	}
+}
+
+// HashDef computes the content hash a definition (ty, body) would be stored
+// under, without storing it. Identity is syntax (core.HashTerm); never modulo
+// conversion.
+func HashDef(ty, body core.Tm) core.Hash {
+	return hashContent(content{Type: ty, Body: body})
 }
 
 // Add stores a single definition under its content hash, binds name to that hash,

@@ -1,0 +1,85 @@
+package store
+
+import (
+	"sort"
+
+	"goforge.dev/rune/core"
+)
+
+// The certificate table: the proof cache of ref_docs/rune-proof-cache-semantics.md.
+//
+// A certificate is a derivation of the hypothetical judgment Δ ⊢ (h ✓): "the
+// definition at content-hash h is well-typed under the definitional assumptions
+// Δ" — where Δ (here Deps) is exactly the set of definitions whose BODIES the
+// check unfolded, as logged by the conversion machinery through the Unfold
+// gateway. Both h and Δ name immutable objects, so a certificate's truth value is
+// fixed forever; the table is append-only and there is NO invalidation logic.
+
+// Cert is one certificate: the dependency set U the judgment was closed over.
+// Only well-typedness certificates are stored (a failed check is not a reusable
+// fact about immutable content — it is simply not cached).
+type Cert struct {
+	Deps []core.Hash // canonical: sorted
+}
+
+// certKey is hash(h, ‖U‖) with ‖U‖ the sort-then-hash canonicalization of the
+// dependency set (semantics doc §4–5).
+func certKey(h core.Hash, deps []core.Hash) core.Hash {
+	hs := newHasher()
+	hs.Write([]byte{defFormatVersion, 'c'})
+	hs.Write(h[:])
+	for _, d := range deps {
+		hs.Write(d[:])
+	}
+	var out core.Hash
+	copy(out[:], hs.Sum(nil))
+	return out
+}
+
+// canonDeps returns deps sorted (the canonical order for hashing and storage).
+func canonDeps(deps []core.Hash) []core.Hash {
+	out := make([]core.Hash, len(deps))
+	copy(out, deps)
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		for k := range a {
+			if a[k] != b[k] {
+				return a[k] < b[k]
+			}
+		}
+		return false
+	})
+	return out
+}
+
+// Certify records that the definition at h checked under the unfolded-dependency
+// set deps. Append-only: re-certifying is a no-op.
+func (s *Store) Certify(h core.Hash, deps []core.Hash) {
+	cd := canonDeps(deps)
+	k := certKey(h, cd)
+	if _, ok := s.certs[k]; ok {
+		return
+	}
+	s.certs[k] = Cert{Deps: cd}
+	s.certsByDef[h] = append(s.certsByDef[h], k)
+}
+
+// Certified reports whether a stored certificate for h applies in this store:
+// one whose every recorded dependency hash still resolves here. By immutability
+// that side-condition is a set of lookups, not a validation procedure.
+func (s *Store) Certified(h core.Hash) bool {
+	for _, k := range s.certsByDef[h] {
+		c := s.certs[k]
+		ok := true
+		for _, d := range c.Deps {
+			if _, present := s.defs[d]; !present {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return true
+		}
+	}
+	return false
+}

@@ -10,23 +10,20 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
   is no QTT consumer until Phase 5. The semiring interface and the default 0/1/ω
   instance exist; wiring is deferred. (quantity/)
 - **The equality stratum implementation.** `equality.Observational` is a Phase-3
-  stub that panics; the interface is fixed now, the OTT machinery comes with the
-  Phase-1 NbE it hooks into.
-- **eval / quote / conversion.** `core.Val` is shape-only; NbE is Phase 1.
+  stub that panics; the interface is fixed now, the OTT machinery hooks into the
+  Phase-1 NbE that now exists.
 - **Erasure and a backend.** `codegen` is interface + stub; erasure and a concrete
   `Backend` are Phase 7.
 - **Universe hierarchy.** One universe `U` now (`type : type` stance); a real
   hierarchy is Phase 6 — a one-time cache nuke, deliberately late.
-- **Proof cache + dependency log.** `store.Unfold` is the choke point; the
-  write-only `DepSet`, the conversion monad, and the certificate table arrive with
-  Phase-1 conversion. The Frame Lemma is already stated as a skipped property.
 
 ## Tempted in Phase 0, not built
 
 - **Recursive-definition resolution.** `store.HashSCC` and positional `Placeholder`
   lay down SCC-as-unit hashing, but the resolver wires only the acyclic case; the
-  CLI rejects recursive groups. Cyclic resolution (placeholder rewriting in the
-  resolver) is Phase 1. Rationale: no recursive listing to exercise it yet.
+  CLI rejects recursive groups. Cyclic resolution lands WITH Phase-4 totality —
+  unchecked recursion would let conversion diverge. Rationale: no recursive
+  listing to exercise it yet, and no totality checker to make it safe.
 - **Multiset / incremental dependency-set hashing.** The proof cache will
   canonicalize the dependency set by sort-then-hash; a commutative incremental
   combiner is a tempting optimization with cancellation/collision hazards. Parked

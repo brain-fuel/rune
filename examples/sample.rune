@@ -8,7 +8,7 @@ const : (A : U) -> (B : U) -> A -> B -> A is
   fn (A : U) (B : U) (x : A) (y : B) is x end
 end
 
-idU : U is
+idU : U -> U is
   id U
 end
 

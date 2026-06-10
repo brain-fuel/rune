@@ -1,8 +1,7 @@
-// Package repl is the rune REPL: a read -> resolve -> show loop over the existing
-// pipeline. It does NOT evaluate or type-check anything; "evaluation" here is exactly
-// name resolution followed by pretty-printing the round-tripped core, and the REPL
-// says nothing false about that. Type checking and normalization arrive in Phase 1 at
-// the single dispatch point marked in runExpr.
+// Package repl is the rune REPL: a read -> elaborate -> check -> normalize ->
+// show loop over the shared session pipeline. Definitions are type checked on
+// entry (and their certificates cached); a bare expression is elaborated, its
+// type inferred, and its βδ-normal form printed alongside that type.
 package repl
 
 import (
@@ -32,7 +31,7 @@ func Run(in io.Reader, out io.Writer) error {
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	s := session.New()
 
-	fmt.Fprintln(out, "rune repl — name resolution only; type checking and evaluation arrive in Phase 1.")
+	fmt.Fprintln(out, "rune repl — expressions are type checked and normalized; definitions are checked and cached.")
 	fmt.Fprintln(out, "type :help for commands, :quit to exit.")
 
 	for {
@@ -114,17 +113,16 @@ func runForm(s *session.Session, src string, out io.Writer) error {
 
 // runExpr is the SINGLE dispatch point for "what to do with a complete expression".
 //
-// Phase-1 insertion point: today the default action is resolve + pretty-print the
-// round-tripped core. When type checking and normalization land, this is where they
-// are inserted — typecheck the resolved core, normalize it, then print — by extending
-// this one function. Do not scatter that logic elsewhere, and do not stub a fake eval
-// before it exists.
+// Phase 1: elaborate (bidirectional, annotation-guided), then normalize (full βδ
+// via NbE), then print `normal-form : type`.
 func runExpr(s *session.Session, e surface.Exp, out io.Writer) error {
-	c, err := s.ResolveExpr(e)
+	tm, ty, err := s.ElabExpr(e)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, surface.PrettyWith(c, s.RefNames()))
+	nf := s.NormalizeExpr(tm)
+	fmt.Fprintf(out, "%s : %s\n",
+		surface.PrettyWith(nf, s.RefNames()), surface.PrettyWith(ty, s.RefNames()))
 	return nil
 }
 
@@ -177,8 +175,7 @@ func runCommand(s *session.Session, line string, out io.Writer) error {
 	case ":hash":
 		return showHash(s, arg, out)
 	case ":type", ":t":
-		fmt.Fprintln(out, "type checking arrives in Phase 1")
-		return nil
+		return showType(s, arg, out)
 	default:
 		return fmt.Errorf("unknown command %q (try :help)", cmd)
 	}
@@ -256,4 +253,21 @@ func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "  :reset          clear the session")
 	fmt.Fprintln(out, "  :help           (:h) show this help")
 	fmt.Fprintln(out, "  :quit           (:q) exit (Ctrl-D also exits)")
+}
+
+// showType elaborates an expression and prints only its inferred type.
+func showType(s *session.Session, arg string, out io.Writer) error {
+	if strings.TrimSpace(arg) == "" {
+		return fmt.Errorf("expected an expression")
+	}
+	e, err := surface.ParseExpr(arg)
+	if err != nil {
+		return err
+	}
+	_, ty, err := s.ElabExpr(e)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out, surface.PrettyWith(ty, s.RefNames()))
+	return nil
 }

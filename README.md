@@ -11,11 +11,31 @@ The end goal is **provably correct infrastructure code**. The v1 release criteri
 that every code listing in the book *Specify & Verify* elaborates, checks, and runs
 against this core — and the core contains nothing the book does not use.
 
-## Current phase: 0 (the walking skeleton); surface at v0.2.0
+## Current phase: 1 (the MLTT core) — type checking, NbE, the proof cache
 
-Phase 0 locks the foundational shapes and ships a runnable, tested skeleton. It does
-**not** implement type checking, normalization, conversion, or type-directed
-elaboration — those are Phase 1. What exists now:
+Phase 1 turns the skeleton into a working dependently typed checker. On top of the
+Phase-0 foundations there is now:
+
+- **Glued NbE**: eval and quote over `core.Val`, with neutrals carrying both an
+  un-unfolded spine and a lazy unfolding. Forcing the unfolding IS `store.Unfold`,
+  and logs the definition into the run's write-only dependency set.
+- **Conversion** (βδη) with the smalltt-style fast path: spines compare
+  syntactically first; bodies are forced only on mismatch, so the fast path logs
+  nothing and the log records exactly what the judgment consulted.
+- **Bidirectional type checking** (`elaborate/`): a surface elaborator that uses
+  the grammar's binder annotations (so bare lambdas infer), and the core checker —
+  the deterministic judgment the proof cache certifies. Both emit exactly the core
+  that name resolution emits, so every Phase-0 content hash is unchanged.
+- **The proof cache**: an append-only certificate table keyed
+  `(defHash, ‖U‖)` per `ref_docs/rune-proof-cache-semantics.md`. Every definition
+  is checked on entry; reloading identical content is a cache hit; editing mints
+  new hashes that miss — there is no invalidation logic anywhere.
+- **The REPL upgraded**: expressions elaborate, check, and print
+  `βδ-normal-form : type`; `:type` works.
+- The four Phase-1 harness properties are live: type preservation, conversion as
+  an equivalence and a congruence, and the cache-soundness Frame Lemma.
+
+What Phase 0 shipped:
 
 - A surface language (authoritative spec: [`ref_docs/GRAMMAR.md`](ref_docs/GRAMMAR.md)):
   variables, curried `fn (x : A) is e end` lambdas, application, dependent function
@@ -54,10 +74,12 @@ go build -o rune ./cmd/rune                    # or build from source
 
 `rune fmt` round-trips a file (modulo comments, bound-variable names, and `fn` binder
 annotations); `rune hash` prints, per definition, the Merkle hash of its elaborated core.
+Both now TYPE CHECK every definition first — an ill-typed file is rejected with the
+mismatch, not silently hashed.
 
 ### `rune repl`
 
-An honest front-end over the existing pipeline: it **resolves and pretty-prints**, and
+Expressions are elaborated, type checked, and printed as `normal form : type`; and
 does not evaluate or type-check (those are Phase 1). Enter an expression to see its
 round-tripped core, or a `name : T is e end` definition to add it to the session.
 Multi-line forms continue at a `...>` prompt until they parse.

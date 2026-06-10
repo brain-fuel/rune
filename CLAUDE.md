@@ -20,8 +20,12 @@ definition refs. There is no type elaboration in Phase 0.
 
 ```
 surface/          lexer, parser, named AST, pretty-printer, name resolution  (names live here)
-core/             locally-nameless Tm; glued Val domain (shape only); structural Merkle hash
-store/            sealed bodies, the Unfold gateway, content-addressed map, SCC hashing
+elaborate/        bidirectional checking: the surface elaborator (Phase-2 meta
+                  insertion site) and the core checker (the cached judgment)
+core/             locally-nameless Tm; glued Val domain; NbE eval/quote; conversion
+                  with unfolding-tracking (the Machine and its dependency log)
+store/            sealed bodies, the Unfold gateway, content-addressed map, SCC
+                  hashing, and the proof cache (append-only certificate table)
 equality/         the EQUALITY stratum interface (+ Phase-3 stub)
 quantity/         the QUANTITY stratum interface (+ default 0/1/ω semiring)
 codegen/          the CODEGEN stratum interface (Backend; erased IR -> target source)
@@ -55,12 +59,13 @@ the right one lives in the right layer. v1 ships one implementation of each.
   the erasure boundary. QTT is wired into binders in Phase 5, not before.
 - **codegen/** — `Backend`: erased IR → target source. One plugin per target.
 
-### Glued values (shape only in Phase 0)
+### Glued values
 
 `core.Val` is a glued NbE domain: a neutral carries both its un-unfolded spine and a
-lazy unfolding (a thunk). Forcing that thunk is the **same operation** as
-`store.Unfold`, and is where the Phase-1 proof-cache dependency log hooks. eval/quote
-are not implemented in Phase 0.
+lazy unfolding (a thunk). Forcing that thunk IS `store.Unfold`, and logs the unfolded
+definition's hash into the Machine's write-only dependency set — the proof-cache
+instrumentation rides on the laziness built for speed. Conversion compares spines
+first and forces only on mismatch, so the fast path logs nothing.
 
 ## Phase map
 
@@ -70,9 +75,13 @@ are not implemented in Phase 0.
 - **v0.2.0 (done):** surface conforms to `ref_docs/GRAMMAR.md` (`fn … is … end`,
   `seq … end`); `rune repl` front-end over the existing pipeline. Still no eval,
   quote, conversion, or type checking — the core is unchanged.
-- **Phase 1:** the MLTT core with glued NbE (eval, quote, conversion). The REPL's
-  single dispatch point (`internal/repl`, `runExpr`) is the marked insertion site:
-  the default expression action upgrades from resolve+print to typecheck+normalize+print.
+- **Phase 1 (done):** the MLTT core with glued NbE — eval, quote (folded and
+  δ-unfolding), conversion with the dependency log; the bidirectional core checker
+  and surface elaborator (`elaborate/`); the append-only certificate table keyed
+  `(defHash, ‖U‖)`; every definition type checked and cached on entry; the REPL's
+  `runExpr` upgraded to elaborate+normalize+print. The four Phase-1 harness
+  properties (preservation, conversion equivalence + congruence, Frame Lemma) are
+  live.
 - **Later:** metavariables/unification/implicits; the OTT equality stratum; data,
   coverage, totality; turn on QTT; universe hierarchy; codegen + a backend.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
