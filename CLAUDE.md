@@ -132,8 +132,22 @@ first and forces only on mismatch, so the fast path logs nothing.
   and mutates only its own output.
 - **Phase 8 / v1.0.0 (done):** the listings corpus (`listings/`, gated by
   `harness/listings_test.go`) — every chapter elaborates, checks, and runs.
-- The equality stratum is then **extended** (v2 quotients) and a second equality
-  stratum is **added** (v3 two-level type theory).
+- **v2.0.0 (done):** QUOTIENTS — the equality stratum extended without new core
+  syntax. `Quot`, `qin`, `qsound`, `qlift`, `qind` are a BUILTIN GROUP of
+  bodiless, content-addressed definitions (store/quot.go, registered ambiently
+  by every session), exactly the data-declaration pattern: hashes derive from a
+  placeholder-rewritten group digest, the heads are permanently neutral, and
+  qlift/qind compute by quotient ι-rules in the evaluator
+  (`qlift … (qin … a) ~> f a`, `qind … (qin … a) ~> h a` — core.QuotInfo, wired
+  like core.DataInfo). Eq stays STUCK at quotient types; identification is
+  introduced by `qsound` (Lean-style, UIP-safe; effectiveness parked). Prop's
+  impredicativity already contains propositional truncation (listings ch08), so
+  no Trunc former ships. Codegen: a quotient compiles to its carrier — qin is
+  the identity, qlift applies, the proofs are units (codegen/js.go quotRuntime).
+  No hash-format bump: no new core constructors exist. Listings ch06–ch08 are
+  the gate. See ref_docs/rune-v2-implementation.md for the deltas from
+  rune-v2-design.md and why.
+- A second equality stratum is then **added** (v3 two-level type theory).
 
 ## Standing rules
 

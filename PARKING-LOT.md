@@ -96,3 +96,30 @@ or a later-phase feature with no current consumer.
   (`type checking arrives in Phase 1`); the default expression action is resolve +
   pretty-print, and the single dispatch point in `internal/repl` is marked as the
   Phase-1 insertion site. No fake eval before NbE exists.
+
+## Parked in v2.0.0 (quotients)
+
+- **Quotient effectiveness.** `Eq (Quot A R) (qin a) (qin b) -> R a b` is not
+  provable: Eq stays STUCK at quotient types and identification is introduced
+  by `qsound` (the Lean-style presentation). Making Eq COMPUTE to `R a b` at
+  point-constructors (the full observational presentation) requires R to be an
+  equivalence relation — premises on the former, or an equivalence-closure
+  reduction — with no listing demanding it. Parked, not lost: it is an
+  EvalEq/EvalCast extension behind the existing stratum interface.
+- **Universe-polymorphic Quot.** The builtin telescope fixes the carrier at
+  `U` (level 0), exactly as data formers do. Lifts to higher-level carriers
+  arrive with universe polymorphism, if a listing needs them.
+- **Dependent quotient elimination into U.** `qind` targets Prop (respect is
+  free by irrelevance); `qlift` targets a non-dependent `B : U`. The full
+  dependent eliminator into U owes a transported-respect premise whose
+  statement needs heavier Eq machinery than any current chapter uses.
+- **A truncation FORMER.** `‖A‖` is the Church encoding in impredicative Prop
+  (listings ch08); a primitive `Trunc` with a definitional squash adds nothing
+  a listing uses. If a chapter ever needs `Eq (Squash A) x y` to compute,
+  revisit.
+- **Quotient-inductive(-inductive) types and a user-facing HIT schema.**
+  Named in the v2 design as the standing temptation; chapter-gated, and no
+  chapter teaches them.
+- **Quantity annotations on the builtin telescopes.** Quot/qin/qlift/qind
+  binders are all ω; marking type/proof positions 0 would document erasure in
+  the types at the cost of quantity-polymorphism questions with no consumer.
