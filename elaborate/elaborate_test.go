@@ -43,10 +43,12 @@ end
 func TestWellTypedPrograms(t *testing.T) {
 	cases := []string{
 		prelude,
-		// Polymorphic application of id to a type and to itself.
+		// Polymorphic application at higher level: id1 lives one universe up,
+		// so it can take U (and id's own type) as the type argument.
 		prelude + `
-idU : U -> U is id U end
-idid : (A : U) -> A -> A is id ((A : U) -> A -> A) id end
+id1 : (A : U1) -> A -> A is fn (A : U1) (x : A) is x end end
+idU : U -> U is id1 U end
+idid : (A : U) -> A -> A is id1 ((A : U) -> A -> A) id end
 `,
 		// Dependent composition.
 		prelude + `
@@ -54,9 +56,9 @@ comp : (A : U) -> (B : U) -> (C : U) -> (B -> C) -> (A -> B) -> A -> C is
   fn (A : U) (B : U) (C : U) (g : B -> C) (f : A -> B) (x : A) is g (f x) end
 end
 `,
-		// Church numerals at a fixed type.
+		// Church numerals; the encoding quantifies over U, so it lives in U1.
 		`
-Nat : U is (A : U) -> (A -> A) -> A -> A end
+Nat : U1 is (A : U) -> (A -> A) -> A -> A end
 zero : (A : U) -> (A -> A) -> A -> A is
   fn (A : U) (s : A -> A) (z : A) is z end
 end
@@ -69,7 +71,7 @@ two : Nat is succ (succ zero) end
 `,
 		// A definition whose TYPE mentions another definition (δ in types).
 		`
-T : U is U -> U end
+T : U1 is U -> U end
 f : T is fn (x : U) is x end end
 `,
 		// let with and without annotation, and seq.
@@ -77,7 +79,7 @@ f : T is fn (x : U) is x end end
 g : U -> U is
   fn (x : U) is
     seq
-      let y : U = id U x
+      let y : U = x
       y
     end
   end

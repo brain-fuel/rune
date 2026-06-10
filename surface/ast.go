@@ -21,8 +21,10 @@ type EVar struct {
 	Name string
 }
 
-// EUniv is the universe U.
-type EUniv struct{}
+// EUniv is a universe: `U` is U_0, `U1`…`U9` the higher levels (Phase 6).
+type EUniv struct {
+	Lvl int
+}
 
 // EHole is `_`: a hole for elaboration to solve with a fresh metavariable
 // (Phase 2). Holes never survive elaboration; the untyped resolver rejects them.

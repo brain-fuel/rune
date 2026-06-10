@@ -20,9 +20,12 @@ import (
 func elabClosed(t *rapid.T, e surface.Exp, ty Ty) (core.Tm, core.Val, *elaborate.Elaborator) {
 	st := store.New()
 	el := elaborate.New(st, nil, nil)
-	tyTm, err := el.Check(&elaborate.Ctx{}, TyExp(ty), core.VU{})
+	tyTm, sort, err := el.Infer(&elaborate.Ctx{}, TyExp(ty))
 	if err != nil {
 		t.Fatalf("generated type does not check: %v", err)
+	}
+	if _, ok := el.M.Force(sort).(core.VU); !ok {
+		t.Fatalf("generated type's sort is not a universe")
 	}
 	want := el.M.Eval(nil, tyTm)
 	tm, err := el.Check(&elaborate.Ctx{}, e, want)
@@ -140,12 +143,13 @@ func TestProofCacheFrameLemma(t *testing.T) {
 		return defs
 	}
 
-	// Checking d : A with body U forces A's body (conversion must see through
-	// the Ref to U), so U_d = {A}. "unrelated" sits in the store, never touched.
+	// Checking d : A (a lambda against the alias A = U -> U) forces A's body —
+	// conversion must see through the Ref to the Pi — so U_d = {A}.
+	// "unrelated" sits in the store, never touched.
 	base := parse(`
-A : U is U end
-unrelated : U is U -> U end
-d : A is U end
+A : U1 is U -> U end
+unrelated : U1 is U end
+d : A is fn (x : U) is x end end
 `)
 
 	check := func(extra []surface.Def) (deps []core.Hash, defHash core.Hash, aHash core.Hash) {
@@ -186,7 +190,7 @@ d : A is U end
 	depsS, hS, aS := check(nil)
 	// S′ differs from S by extra definitions whose bodies d never consults.
 	depsS2, hS2, _ := check(parse(`
-extra1 : U is U -> U -> U end
+extra1 : U1 is U -> U -> U end
 extra2 : U -> U is fn (x : U) is x end end
 `))
 

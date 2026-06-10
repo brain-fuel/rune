@@ -33,9 +33,13 @@ type Ref struct {
 	Hash Hash
 }
 
-// Univ is the single universe U. Phase 0 has one universe (type : type is the
-// Phase 1+ stance until the Phase 6 hierarchy); there is no level field yet.
-type Univ struct{}
+// Univ is a universe U_Lvl in the predicative hierarchy (Phase 6):
+// U_i : U_{i+1}, with cumulativity U_i <: U_j for i ≤ j supplied by Sub. The
+// surface writes `U` for U_0 and `U1`, `U2`, … for higher levels. The
+// type-in-type stance is gone.
+type Univ struct {
+	Lvl int
+}
 
 // Qty is a binder's usage annotation, drawn from the 0/1/ω semiring the
 // quantity stratum supplies (Phase 5). The zero value is QMany (ω,

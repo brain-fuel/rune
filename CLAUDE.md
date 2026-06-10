@@ -116,7 +116,12 @@ first and forces only on mismatch, so the fast path logs nothing.
   expected quantity; explicit annotations must match. Let binders are ω;
   metavariable spines are not usage-counted (recorded in PARKING-LOT.md).
   The 0-fragment is the erasure boundary Phase 7 reads.
-- **Later:** universe hierarchy; codegen + a backend.
+- **Phase 6 (done):** the predicative universe hierarchy — `U` is U_0, `U1`…
+  surface higher levels; U_i : U_{i+1}, Pi lands at the max of its parts'
+  levels (Prop stays impredicative: any Pi into Prop is a Prop), cumulativity
+  U_i <: U_j via Sub. Type-in-type is gone; levels are part of identity and
+  the hash preimage (0x04). The one-time cache nuke the design priced in.
+- **Later:** codegen + a backend.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
   stratum is **added** (v3 two-level type theory).
 

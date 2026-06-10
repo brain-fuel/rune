@@ -22,8 +22,8 @@ func (m *Machine) Conv(lvl int, a, b Val) bool {
 
 	switch x := a.(type) {
 	case VU:
-		if _, ok := b.(VU); ok {
-			return true
+		if y, ok := b.(VU); ok {
+			return x.Lvl == y.Lvl
 		}
 	case VProp:
 		if _, ok := b.(VProp); ok {
@@ -115,6 +115,11 @@ func (m *Machine) Sub(lvl int, a, b Val) bool {
 	if _, ok := af.(VProp); ok {
 		if _, ok2 := bf.(VU); ok2 {
 			return true
+		}
+	}
+	if ua, ok := af.(VU); ok {
+		if ub, ok2 := bf.(VU); ok2 && ua.Lvl <= ub.Lvl {
+			return true // cumulativity
 		}
 	}
 	pa, ok1 := af.(VPi)

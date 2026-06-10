@@ -98,7 +98,7 @@ func TestElabExprAndNormalize(t *testing.T) {
 	if _, err := s.LoadSource(idSrc); err != nil {
 		t.Fatal(err)
 	}
-	e, err := surface.ParseExpr(`id ((A : U) -> A -> A) id U`)
+	e, err := surface.ParseExpr(`(fn (A : U1) (x : A) is x end) (U -> U) (fn (z : U) is z end)`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestElabExprAndNormalize(t *testing.T) {
 	var _ core.Tm = ty
 	nf := s.NormalizeExpr(tm)
 	got := surface.PrettyWith(nf, s.RefNames())
-	if got != "fn (x : U) is x end" {
+	if got != "fn (z : U) is z end" {
 		t.Fatalf("normal form = %q", got)
 	}
 }

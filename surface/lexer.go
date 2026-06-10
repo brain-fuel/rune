@@ -202,6 +202,8 @@ func keyword(word string, pos int) token {
 		return token{tIn, word, pos}
 	case "U":
 		return token{tU, word, pos}
+	case "U1", "U2", "U3", "U4", "U5", "U6", "U7", "U8", "U9":
+		return token{tU, word, pos}
 	case "_":
 		return token{tHole, word, pos}
 	case "data":

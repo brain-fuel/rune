@@ -175,7 +175,7 @@ func TestDataErrors(t *testing.T) {
 		// Constructor returning the wrong type.
 		{`data D : U is mk : U end`, "must return"},
 		// Constructor not repeating the parameter telescope.
-		{`data P : U -> U is mk : P U end`, "parameter"},
+		{`data P : (A : U) -> U is mk : (A : U) -> P (A -> A) end`, "parameter"},
 		// Former type not ending in U.
 		{`data W : U -> Prop is mk : W U end`, "must end in U"},
 	}

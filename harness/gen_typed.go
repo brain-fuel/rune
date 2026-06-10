@@ -29,11 +29,14 @@ type TyArrow struct{ Dom, Cod Ty }
 func (TyU) isTy()     {}
 func (TyArrow) isTy() {}
 
-// TyExp renders a generator type as a surface expression.
+// TyExp renders a generator type as a surface expression. TyU is U1: with the
+// predicative hierarchy, the only closed inhabitants of a base universe are
+// type EXPRESSIONS, which live one level up — so generated "values" of TyU are
+// U_0-level types (U itself, arrows over U), classified by U1.
 func TyExp(ty Ty) surface.Exp {
 	switch t := ty.(type) {
 	case TyU:
-		return surface.EUniv{}
+		return surface.EUniv{Lvl: 1}
 	case TyArrow:
 		return surface.EPi{Param: "_", Dom: TyExp(t.Dom), Cod: TyExp(t.Cod)}
 	default:
@@ -96,8 +99,8 @@ func genTyped(t *rapid.T, scope []typedScope, want Ty, fuel int) surface.Exp {
 		switch rapid.IntRange(0, 3).Draw(t, "u-form") {
 		case 0:
 			return surface.EUniv{}
-		case 1: // any simple type is a term of type U
-			return TyExp(genTy(t, 2))
+		case 1: // an arrow over U_0 is a term of type U1
+			return surface.EPi{Param: "_", Dom: surface.EUniv{}, Cod: surface.EUniv{}}
 		case 2: // β-redex of type U: (fn (x : A) is body end : A -> U) arg
 			a := genTy(t, 1)
 			n := freshName(scope)

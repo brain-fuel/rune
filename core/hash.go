@@ -28,9 +28,9 @@ func (h Hash) Short() string { return hex.EncodeToString(h[:])[:12] }
 // hashFormatVersion is the preimage tag that prefixes every term digest. Bumping it
 // changes every content hash, which is the intended migration lever if the core's
 // serialization or hash algorithm changes. NEVER reuse a tag across incompatible
-// encodings. 0x03: quantity (Qty) joined the Pi/Lam preimage (Phase 5).
-// 0x02 added plicity; 0x01 was BLAKE3 without plicity; 0x00 was sha256.
-const hashFormatVersion byte = 0x03
+// encodings. 0x04: universe levels joined the Univ preimage (Phase 6).
+// 0x03 added quantity; 0x02 plicity; 0x01 BLAKE3; 0x00 sha256.
+const hashFormatVersion byte = 0x04
 
 // Constructor tags. Each core constructor gets a distinct, stable byte so that
 // differently-shaped terms cannot collide by accident. Append-only: never renumber.
@@ -76,6 +76,7 @@ func writeTerm(h hash.Hash, t Tm) {
 		h.Write(tm.Hash[:])
 	case Univ:
 		h.Write([]byte{tagUniv})
+		writeInt(h, tm.Lvl)
 	case Pi:
 		h.Write([]byte{tagPi, byte(tm.Icit), byte(tm.Qty)})
 		writeTerm(h, tm.Dom)

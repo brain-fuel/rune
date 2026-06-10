@@ -322,7 +322,11 @@ func (p *parser) parseAtom() (Exp, error) {
 	switch t.kind {
 	case tU:
 		p.next()
-		return EUniv{}, nil
+		lvl := 0
+		if len(t.text) > 1 {
+			lvl = int(t.text[1] - '0')
+		}
+		return EUniv{Lvl: lvl}, nil
 	case tHole:
 		p.next()
 		return EHole{}, nil

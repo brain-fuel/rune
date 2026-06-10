@@ -1,6 +1,11 @@
--- the polymorphic identity function
+-- the polymorphic identity function (over small types)
 id : (A : U) -> A -> A is
   fn (A : U) (x : A) is x end
+end
+
+-- the identity one universe up: it can take U itself as the type argument
+id1 : (A : U1) -> A -> A is
+  fn (A : U1) (x : A) is x end
 end
 
 -- the constant function
@@ -9,22 +14,23 @@ const : (A : U) -> (B : U) -> A -> B -> A is
 end
 
 idU : U -> U is
-  id U
+  id1 U
 end
 
 apply : (A : U) -> (B : U) -> (A -> B) -> A -> B is
   fn (A : U) (B : U) (f : A -> B) (x : A) is f x end
 end
 
-prod : U -> U -> U is
+-- quantifying over U lifts the result a level: prod lands in U1
+prod : U -> U -> U1 is
   fn (A : U) (B : U) is (P : U) -> (A -> B -> P) -> P end
 end
 
 -- explicit sequencing desugars to nested let ... in
-example : U is
+example : U1 is
   seq
     let a = U
-    let b : U = a
+    let b : U1 = a
     b
   end
 end

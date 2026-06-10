@@ -28,8 +28,10 @@ type VNeu struct {
 	Unfold func() Val
 }
 
-// VU is the universe as a value.
-type VU struct{}
+// VU is a universe as a value, at its level.
+type VU struct {
+	Lvl int
+}
 
 // VProp is the universe of propositions as a value (Phase 3).
 type VProp struct{}

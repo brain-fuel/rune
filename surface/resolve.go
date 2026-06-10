@@ -38,7 +38,7 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		}
 		return nil, fmt.Errorf("unbound identifier %q", x.Name)
 	case EUniv:
-		return core.Univ{}, nil
+		return core.Univ{Lvl: x.Lvl}, nil
 	case EHole:
 		return nil, fmt.Errorf("a hole (_) needs the type checker to solve it; name resolution alone cannot")
 	case EProp:

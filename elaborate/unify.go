@@ -51,8 +51,11 @@ func (e *Elaborator) Unify(lvl int, a, b core.Val) error {
 
 	switch x := a.(type) {
 	case core.VU:
-		if _, ok := b.(core.VU); ok {
-			return nil
+		if y, ok := b.(core.VU); ok {
+			if x.Lvl == y.Lvl {
+				return nil
+			}
+			return fmt.Errorf("universe level mismatch: U%d vs U%d", x.Lvl, y.Lvl)
 		}
 	case core.VProp:
 		if _, ok := b.(core.VProp); ok {
@@ -275,7 +278,7 @@ func (e *Elaborator) rename(id int, ren renaming, srcLvl int, v core.Val) (core.
 	v = e.forceFlex(v)
 	switch x := v.(type) {
 	case core.VU:
-		return core.Univ{}, nil
+		return core.Univ{Lvl: x.Lvl}, nil
 	case core.VProp:
 		return core.Prop{}, nil
 	case core.VEq:

@@ -10,7 +10,7 @@ package core
 func (m *Machine) Quote(lvl int, v Val) Tm {
 	switch x := v.(type) {
 	case VU:
-		return Univ{}
+		return Univ{Lvl: x.Lvl}
 	case VProp:
 		return Prop{}
 	case VEq:
@@ -38,7 +38,7 @@ func (m *Machine) QuoteUnfold(lvl int, v Val) Tm {
 	v = m.Force(v)
 	switch x := v.(type) {
 	case VU:
-		return Univ{}
+		return Univ{Lvl: x.Lvl}
 	case VProp:
 		return Prop{}
 	case VEq:

@@ -9,8 +9,8 @@ import (
 )
 
 const implicitPrelude = `
-id : {A : U} -> A -> A is
-  fn {A : U} (x : A) is x end
+id : {A : U1} -> A -> A is
+  fn {A : U1} (x : A) is x end
 end
 `
 
@@ -18,17 +18,17 @@ func TestImplicitInsertion(t *testing.T) {
 	cases := []string{
 		// The implicit type argument is inserted and solved from the explicit one.
 		implicitPrelude + `idU : U -> U is id end
-two : U is id U end`,
+two : U1 is id U end`,
 		// Explicit override of an implicit argument.
 		implicitPrelude + `viaOverride : U -> U is id {U} end`,
 		// const with two implicits, both inferred.
 		implicitPrelude + `
-const : {A : U} -> {B : U} -> A -> B -> A is
-  fn {A : U} {B : U} (x : A) (y : B) is x end
+const : {A : U1} -> {B : U1} -> A -> B -> A is
+  fn {A : U1} {B : U1} (x : A) (y : B) is x end
 end
-k : U is const U (U -> U) end`,
+k : U1 is const U (U -> U) end`,
 		// Implicit lambda inserted when checking a plain term against {A} -> ...
-		implicitPrelude + `idAgain : {A : U} -> A -> A is fn (x : _) is x end end`,
+		implicitPrelude + `idAgain : {A : U1} -> A -> A is fn (x : _) is x end end`,
 		// Holes solved by unification with the expected type.
 		implicitPrelude + `viaHole : U -> U is (id : _ -> _) end`,
 		// Composition with implicits, applied.
@@ -90,15 +90,15 @@ func TestImplicitElabAndNormalize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := surface.PrettyWith(ty, s.RefNames()); got != "U" {
-		t.Fatalf("type = %q, want U", got)
+	if got := surface.PrettyWith(ty, s.RefNames()); got != "U1" {
+		t.Fatalf("type = %q, want U1", got)
 	}
 	if got := surface.PrettyWith(s.NormalizeExpr(tm), s.RefNames()); got != "U" {
 		t.Fatalf("normal form = %q, want U", got)
 	}
-	// The elaborated term shows the inserted implicit: id {U} U.
-	if got := surface.PrettyWith(tm, s.RefNames()); got != "id {U} U" {
-		t.Fatalf("elaborated = %q, want id {U} U", got)
+	// The elaborated term shows the inserted implicit: id {U1} U.
+	if got := surface.PrettyWith(tm, s.RefNames()); got != "id {U1} U" {
+		t.Fatalf("elaborated = %q, want id {U1} U", got)
 	}
 }
 

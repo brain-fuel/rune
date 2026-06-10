@@ -15,8 +15,9 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
   conversion. Parked until a listing needs it. (core/conv.go)
 - **Erasure and a backend.** `codegen` is interface + stub; erasure and a concrete
   `Backend` are Phase 7.
-- **Universe hierarchy.** One universe `U` now (`type : type` stance); a real
-  hierarchy is Phase 6 — a one-time cache nuke, deliberately late.
+- **Universe polymorphism / level variables.** Levels are concrete (U, U1…U9);
+  level-polymorphic definitions (and large eliminations — eliminator motives
+  target U_0/Prop) arrive only if a listing needs them.
 
 ## Parked in Phase 4
 

@@ -31,9 +31,9 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		}
 		return nil, nil, fmt.Errorf("unbound identifier %q", s.Name)
 	case surface.EUniv:
-		return core.Univ{}, core.VU{}, nil // type : type until Phase 6
+		return core.Univ{Lvl: s.Lvl}, core.VU{Lvl: s.Lvl + 1}, nil // U_i : U_{i+1}
 	case surface.EProp:
-		return core.Prop{}, core.VU{}, nil
+		return core.Prop{}, core.VU{}, nil // Prop : U_0
 	case surface.EEq, surface.ERefl, surface.ECast, surface.ESubst:
 		return nil, nil, fmt.Errorf("an equality former needs its arguments (Eq T l r · refl x · cast A B p x · subst A x y p P px)")
 	case surface.EHole:
@@ -44,7 +44,7 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 	case surface.EPi:
 		m0 := e.pushZero()
 		defer e.popMult(m0)
-		dom, _, err := e.checkType(c, s.Dom)
+		dom, domSort, err := e.checkType(c, s.Dom)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -57,9 +57,8 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		if err := e.checkBinderUse(inner, core.QMany, s.Param); err != nil {
 			return nil, nil, err
 		}
-		// A function into a proposition is a proposition (Prop is closed
-		// under Pi); otherwise the Pi lives in U.
-		return core.Pi{Icit: s.Icit, Qty: s.Qty, Dom: dom, Cod: core.Scope{Name: s.Param, Body: cod}}, codSort, nil
+		return core.Pi{Icit: s.Icit, Qty: s.Qty, Dom: dom, Cod: core.Scope{Name: s.Param, Body: cod}},
+			piSort(domSort, codSort), nil
 	case surface.ELam:
 		m0 := e.pushZero()
 		dom, _, err := e.checkType(c, s.Dom)
@@ -305,9 +304,9 @@ func (e *Elaborator) checkType(c *Ctx, x surface.Exp) (core.Tm, core.Val, error)
 		return nil, nil, err
 	}
 	tm2, got2 := e.insertImplicits(c, tm, got)
-	switch e.M.Force(got2).(type) {
+	switch sort := e.M.Force(got2).(type) {
 	case core.VU:
-		return tm2, core.VU{}, nil
+		return tm2, sort, nil
 	case core.VProp:
 		return tm2, core.VProp{}, nil
 	default:
@@ -464,17 +463,21 @@ func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (c
 		if len(args) != 4 {
 			return nil, nil, true, fmt.Errorf("cast takes exactly 4 arguments (cast A B p x), got %d", len(args))
 		}
-		a, _, err := e.checkType(c, args[0])
+		a, sa, err := e.checkType(c, args[0])
 		if err != nil {
 			return nil, nil, true, err
 		}
-		b, _, err := e.checkType(c, args[1])
+		b, sb, err := e.checkType(c, args[1])
 		if err != nil {
 			return nil, nil, true, err
+		}
+		if !e.M.Conv(c.Lvl(), sa, sb) {
+			return nil, nil, true, fmt.Errorf("cast endpoints live in different sorts: %s vs %s",
+				e.pretty(c, sa), e.pretty(c, sb))
 		}
 		va, vb := e.Eval(c, a), e.Eval(c, b)
 		mp := e.pushZero()
-		pr, err := e.Check(c, args[2], core.VEq{Ty: core.VU{}, L: va, R: vb})
+		pr, err := e.Check(c, args[2], core.VEq{Ty: sa, L: va, R: vb})
 		e.popMult(mp)
 		if err != nil {
 			return nil, nil, true, err
@@ -541,4 +544,24 @@ func (e *Elaborator) ElabDef(d surface.Def) (ty, body core.Tm, err error) {
 		return nil, nil, fmt.Errorf("%s: internal: metavariable survived zonking", d.Name)
 	}
 	return ty, body, nil
+}
+
+// piSort is the sort of a Pi from its domain's and codomain's sorts: a
+// function into a proposition is a proposition (Prop is impredicative);
+// otherwise the Pi lives at the max of the levels (predicative U hierarchy).
+func piSort(dom, cod core.Val) core.Val {
+	if _, ok := cod.(core.VProp); ok {
+		return core.VProp{}
+	}
+	ld, lc := 0, 0
+	if u, ok := dom.(core.VU); ok {
+		ld = u.Lvl
+	}
+	if u, ok := cod.(core.VU); ok {
+		lc = u.Lvl
+	}
+	if lc > ld {
+		return core.VU{Lvl: lc}
+	}
+	return core.VU{Lvl: ld}
 }

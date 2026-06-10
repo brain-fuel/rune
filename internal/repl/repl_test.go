@@ -14,7 +14,7 @@ func TestREPLSession(t *testing.T) {
 		"id : (A : U) -> A -> A is",
 		"  fn (A : U) (x : A) is x end",
 		"end",
-		"id U",
+		"(fn (A : U1) (x : A) is x end) U",
 		"nope",
 		":bogus",
 		":core fn (A : U) (x : A) is x end",
@@ -35,8 +35,8 @@ func TestREPLSession(t *testing.T) {
 
 	wants := []string{
 		"defined id",                   // multi-line definition accumulated
-		"U : U",                        // bare U checks and normalizes
-		"fn (x : U) is x end : U -> U", // id U β-reduces, with its inferred type
+		"U : U1",                       // bare U checks; U_0 : U_1
+		"fn (x : U) is x end : U -> U", // the level-polymorphic identity at U β-reduces
 		`unbound identifier "nope"`,    // elaboration error, loop continues
 		`unknown command ":bogus"`,     // unknown command, loop continues
 		"(λ. (λ. #0))",                 // :core de Bruijn view
@@ -45,8 +45,8 @@ func TestREPLSession(t *testing.T) {
 		"session cleared",              // :reset
 		"(no definitions)",             // :list after reset
 	}
-	// seq let y = U; y end normalizes the let away: the value line is plain U.
-	if !strings.Contains(got, "U : U") {
+	// seq let y = U; y end normalizes the let away: the value line is U : U1.
+	if !strings.Contains(got, "U : U1") {
 		t.Errorf("seq/let did not normalize to U\n--- full output ---\n%s", got)
 	}
 	for _, w := range wants {

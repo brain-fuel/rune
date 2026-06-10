@@ -125,7 +125,7 @@ func (m *Machine) Eval(env Env, t Tm) Val {
 	case Ref:
 		return m.refVal(tm.Hash)
 	case Univ:
-		return VU{}
+		return VU{Lvl: tm.Lvl}
 	case Pi:
 		dom := m.Eval(env, tm.Dom)
 		cod := tm.Cod

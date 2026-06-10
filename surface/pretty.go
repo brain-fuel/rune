@@ -58,6 +58,9 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		}
 	case core.Univ:
 		sb.WriteString("U")
+		if x.Lvl > 0 {
+			sb.WriteString(strconv.Itoa(x.Lvl))
+		}
 	case core.Meta:
 		sb.WriteString("?" + strconv.Itoa(x.ID))
 	case core.Prop:
@@ -224,6 +227,9 @@ func debugCore(sb *strings.Builder, t core.Tm) {
 		sb.WriteString(x.Hash.Short())
 	case core.Univ:
 		sb.WriteString("U")
+		if x.Lvl > 0 {
+			sb.WriteString(strconv.Itoa(x.Lvl))
+		}
 	case core.App:
 		sb.WriteByte('(')
 		debugCore(sb, x.Fn)

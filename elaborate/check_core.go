@@ -67,9 +67,9 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 	case core.Ref:
 		return e.refType(tm.Hash)
 	case core.Univ:
-		return core.VU{}, nil // type : type until the Phase-6 hierarchy
+		return core.VU{Lvl: tm.Lvl + 1}, nil // U_i : U_{i+1}
 	case core.Prop:
-		return core.VU{}, nil
+		return core.VU{}, nil // Prop : U_0
 	case core.Meta:
 		return nil, fmt.Errorf("metavariable in core term: the checker judges only zonked, meta-free core")
 	case core.Eq:
@@ -105,7 +105,11 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 			return nil, err
 		}
 		va, vb := e.Eval(c, tm.A), e.Eval(c, tm.B)
-		if err := e.CheckCore(c, tm.P, core.VEq{Ty: core.VU{}, L: va, R: vb}); err != nil {
+		saCast, err := e.checkTypeCore(c, tm.A)
+		if err != nil {
+			return nil, err
+		}
+		if err := e.CheckCore(c, tm.P, core.VEq{Ty: saCast, L: va, R: vb}); err != nil {
 			return nil, err
 		}
 		if err := e.CheckCore(c, tm.X, va); err != nil {
@@ -137,15 +141,16 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 		}
 		return e.M.Apply(vp, vy), nil
 	case core.Pi:
-		if _, err := e.checkTypeCore(c, tm.Dom); err != nil {
-			return nil, err
-		}
-		dom := e.Eval(c, tm.Dom)
-		sort, err := e.checkTypeCore(c.bind(tm.Cod.Name, dom), tm.Cod.Body)
+		domSort, err := e.checkTypeCore(c, tm.Dom)
 		if err != nil {
 			return nil, err
 		}
-		return sort, nil
+		dom := e.Eval(c, tm.Dom)
+		codSort, err := e.checkTypeCore(c.bind(tm.Cod.Name, dom), tm.Cod.Body)
+		if err != nil {
+			return nil, err
+		}
+		return piSort(domSort, codSort), nil
 	case core.Lam:
 		return nil, fmt.Errorf("cannot infer the type of an un-annotated lambda; ascribe it: (fn … : T)")
 	case core.App:

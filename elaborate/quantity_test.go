@@ -40,7 +40,7 @@ func TestQuantityRejected(t *testing.T) {
 		// Linear variable duplicated.
 		{`bad : (1 x : U) -> U is fn (1 x : U) is (fn (a : U) (b : U) is a end) x x end end`, "exactly once"},
 		// Linear variable dropped.
-		{`bad : (1 x : U) -> U is fn (1 x : U) is U end end`, "exactly once"},
+		{`bad : (1 x : U) -> U1 is fn (1 x : U) is U end end`, "exactly once"},
 		// Erased variable used computationally.
 		{`bad : (0 x : U) -> U is fn (0 x : U) is x end end`, "erased"},
 		// Lambda annotation conflicting with the Pi's quantity.
