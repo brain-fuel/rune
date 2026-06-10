@@ -106,10 +106,10 @@ func (e *Elaborator) Zonk(lvl int, t core.Tm) core.Tm {
 		}
 		return t
 	case core.Pi:
-		return core.Pi{Icit: tm.Icit, Dom: e.Zonk(lvl, tm.Dom),
+		return core.Pi{Icit: tm.Icit, Qty: tm.Qty, Dom: e.Zonk(lvl, tm.Dom),
 			Cod: core.Scope{Name: tm.Cod.Name, Body: e.Zonk(lvl+1, tm.Cod.Body)}}
 	case core.Lam:
-		return core.Lam{Icit: tm.Icit,
+		return core.Lam{Icit: tm.Icit, Qty: tm.Qty,
 			Body: core.Scope{Name: tm.Body.Name, Body: e.Zonk(lvl+1, tm.Body.Body)}}
 	case core.App:
 		// A meta-headed application whose head is solved is evaluated away as a

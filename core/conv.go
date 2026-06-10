@@ -41,7 +41,7 @@ func (m *Machine) Conv(lvl int, a, b Val) bool {
 		}
 	case VPi:
 		if y, ok := b.(VPi); ok {
-			if x.Icit != y.Icit {
+			if x.Icit != y.Icit || x.Qty != y.Qty {
 				return false
 			}
 			v := VVar(lvl)
@@ -119,7 +119,7 @@ func (m *Machine) Sub(lvl int, a, b Val) bool {
 	}
 	pa, ok1 := af.(VPi)
 	pb, ok2 := bf.(VPi)
-	if ok1 && ok2 && pa.Icit == pb.Icit && m.Conv(lvl, pa.Dom, pb.Dom) {
+	if ok1 && ok2 && pa.Icit == pb.Icit && pa.Qty == pb.Qty && m.Conv(lvl, pa.Dom, pb.Dom) {
 		v := VVar(lvl)
 		return m.Sub(lvl+1, pa.Cod(v), pb.Cod(v))
 	}

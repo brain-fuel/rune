@@ -34,6 +34,7 @@ const (
 	tRefl   // refl (the reflexivity proof)
 	tCast   // cast (transport along a type equality)
 	tSubst  // subst (Leibniz transport along an equality; Phase 4)
+	tQty    // 0 or 1: a usage annotation on a binder (Phase 5)
 )
 
 type token struct {
@@ -96,6 +97,8 @@ func (k tokKind) String() string {
 		return "'cast'"
 	case tSubst:
 		return "'subst'"
+	case tQty:
+		return "quantity"
 	default:
 		return "token"
 	}
@@ -164,6 +167,9 @@ func lex(src string) ([]token, error) {
 		case r == '-' && i+1 < len(rs) && rs[i+1] == '>':
 			toks = append(toks, token{tArrow, "->", i})
 			i += 2
+		case r == '0' || r == '1':
+			toks = append(toks, token{tQty, string(r), i})
+			i++
 		case isIdentStart(r):
 			start := i
 			for i < len(rs) && isIdentCont(rs[i]) {

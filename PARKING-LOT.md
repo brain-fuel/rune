@@ -6,9 +6,6 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
 
 ## Deferred by phase plan (well-understood swaps)
 
-- **Thread quantities through binders.** Pi/Lam carry no `quantity.Qty` yet — there
-  is no QTT consumer until Phase 5. The semiring interface and the default 0/1/ω
-  instance exist; wiring is deferred. (quantity/)
 - **Eq-of-types decomposition.** `Eq U (Pi …) (Pi …)` stays stuck rather than
   unfolding to a telescope of domain/codomain equalities — that unfolding needs
   Sigma types, which have no other consumer yet. Convertible endpoints are still
@@ -32,6 +29,17 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
   checker arrives only if a listing cannot be written eliminator-style.
 - **The empty type.** Declarations require at least one constructor; absurdity
   arrives when a listing needs `Empty`/`absurd`.
+
+## Parked in Phase 5
+
+- **Linearity through let.** Let binders are unrestricted; threading the
+  bound value's usage by the binder's count is bookkeeping with no listing.
+- **Usage counting of metavariable spines.** Contextual metas apply to bound
+  variables without recording uses; QTT×unification interaction is parked
+  until a listing exercises it.
+- **Sub-usaging (1 ≤ ω).** Quantities compare exactly; admitting a linear
+  function where an unrestricted one is expected is a one-line lattice change
+  behind quantity.Semiring when wanted.
 
 ## Tempted in Phase 0, not built
 

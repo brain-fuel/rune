@@ -78,6 +78,9 @@ func (e *Elaborator) Unify(lvl int, a, b core.Val) error {
 			if x.Icit != y.Icit {
 				return fmt.Errorf("plicity mismatch: %s vs %s", icitName(x.Icit), icitName(y.Icit))
 			}
+			if x.Qty != y.Qty {
+				return fmt.Errorf("quantity mismatch: %s vs %s", qtyName(x.Qty), qtyName(y.Qty))
+			}
 			if err := e.Unify(lvl, x.Dom, y.Dom); err != nil {
 				return err
 			}
@@ -305,14 +308,14 @@ func (e *Elaborator) rename(id int, ren renaming, srcLvl int, v core.Val) (core.
 		if err != nil {
 			return nil, err
 		}
-		return core.Pi{Icit: x.Icit, Dom: dom, Cod: core.Scope{Name: x.Name, Body: cod}}, nil
+		return core.Pi{Icit: x.Icit, Qty: x.Qty, Dom: dom, Cod: core.Scope{Name: x.Name, Body: cod}}, nil
 	case core.VLam:
 		ren2 := ren.lift(srcLvl)
 		body, err := e.rename(id, ren2, srcLvl+1, x.Body(core.VVar(srcLvl)))
 		if err != nil {
 			return nil, err
 		}
-		return core.Lam{Icit: x.Icit, Body: core.Scope{Name: x.Name, Body: body}}, nil
+		return core.Lam{Icit: x.Icit, Qty: x.Qty, Body: core.Scope{Name: x.Name, Body: body}}, nil
 	case core.VNeu:
 		return e.renameSpine(id, ren, srcLvl, x.Spine)
 	default:

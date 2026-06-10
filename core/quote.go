@@ -20,10 +20,10 @@ func (m *Machine) Quote(lvl int, v Val) Tm {
 	case VPi:
 		dom := m.Quote(lvl, x.Dom)
 		body := m.Quote(lvl+1, x.Cod(VVar(lvl)))
-		return Pi{Icit: x.Icit, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
+		return Pi{Icit: x.Icit, Qty: x.Qty, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
 	case VLam:
 		body := m.Quote(lvl+1, x.Body(VVar(lvl)))
-		return Lam{Icit: x.Icit, Body: Scope{Name: x.Name, Body: body}}
+		return Lam{Icit: x.Icit, Qty: x.Qty, Body: Scope{Name: x.Name, Body: body}}
 	case VNeu:
 		return m.quoteSpine(lvl, x.Spine, m.Quote)
 	default:
@@ -48,10 +48,10 @@ func (m *Machine) QuoteUnfold(lvl int, v Val) Tm {
 	case VPi:
 		dom := m.QuoteUnfold(lvl, x.Dom)
 		body := m.QuoteUnfold(lvl+1, x.Cod(VVar(lvl)))
-		return Pi{Icit: x.Icit, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
+		return Pi{Icit: x.Icit, Qty: x.Qty, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
 	case VLam:
 		body := m.QuoteUnfold(lvl+1, x.Body(VVar(lvl)))
-		return Lam{Icit: x.Icit, Body: Scope{Name: x.Name, Body: body}}
+		return Lam{Icit: x.Icit, Qty: x.Qty, Body: Scope{Name: x.Name, Body: body}}
 	case VNeu:
 		return m.quoteSpine(lvl, x.Spine, m.QuoteUnfold)
 	default:

@@ -143,10 +143,10 @@ func replaceRef(t core.Tm, from, to core.Hash) core.Tm {
 		}
 		return t
 	case core.Pi:
-		return core.Pi{Icit: x.Icit, Dom: replaceRef(x.Dom, from, to),
+		return core.Pi{Icit: x.Icit, Qty: x.Qty, Dom: replaceRef(x.Dom, from, to),
 			Cod: core.Scope{Name: x.Cod.Name, Body: replaceRef(x.Cod.Body, from, to)}}
 	case core.Lam:
-		return core.Lam{Icit: x.Icit,
+		return core.Lam{Icit: x.Icit, Qty: x.Qty,
 			Body: core.Scope{Name: x.Body.Name, Body: replaceRef(x.Body.Body, from, to)}}
 	case core.App:
 		return core.App{Fn: replaceRef(x.Fn, from, to), Arg: replaceRef(x.Arg, from, to), Icit: x.Icit}

@@ -105,7 +105,18 @@ first and forces only on mismatch, so the fast path logs nothing.
   needed. `subst` (Leibniz transport) joins the equality stratum so induction
   proofs over `Eq` go through; `Prop <: U` cumulativity admits Prop-valued
   motives. Declaration groups are content-addressed as a unit.
-- **Later:** turn on QTT; universe hierarchy; codegen + a backend.
+- **Phase 5 (done):** QTT is ON — binders carry a quantity from the 0/1/ω
+  semiring (`(0 x : A)`, `(1 x : A)`; unannotated is ω; the annotation domain
+  core.Qty lives in core and is hashed — format 0x03 — while the RULES live in
+  quantity.Semiring). The elaborator does usage accounting: occurrences are
+  recorded scaled by the current multiplicity (0 inside types and proofs),
+  argument positions multiply by the Pi's quantity, and each binder exit
+  compares usage against mult·declared. Quantities are part of a Pi's
+  identity (conversion and unification check them). Lambda binders adopt the
+  expected quantity; explicit annotations must match. Let binders are ω;
+  metavariable spines are not usage-counted (recorded in PARKING-LOT.md).
+  The 0-fragment is the erasure boundary Phase 7 reads.
+- **Later:** universe hierarchy; codegen + a backend.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
   stratum is **added** (v3 two-level type theory).
 

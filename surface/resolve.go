@@ -57,7 +57,7 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		if err != nil {
 			return nil, err
 		}
-		return core.Lam{Icit: x.Icit, Body: core.Scope{Name: x.Param, Body: body}}, nil
+		return core.Lam{Icit: x.Icit, Qty: x.Qty, Body: core.Scope{Name: x.Param, Body: body}}, nil
 	case EApp:
 		// A saturated equality-former spine resolves to its core node.
 		if head, args := SpineOf(x); len(args) > 0 {
@@ -134,7 +134,7 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		if err != nil {
 			return nil, err
 		}
-		return core.Pi{Icit: x.Icit, Dom: dom, Cod: core.Scope{Name: x.Param, Body: cod}}, nil
+		return core.Pi{Icit: x.Icit, Qty: x.Qty, Dom: dom, Cod: core.Scope{Name: x.Param, Body: cod}}, nil
 	case ELet:
 		var ty core.Tm
 		if x.Ty != nil {

@@ -250,7 +250,7 @@ func (p *parser) parseLet() (Exp, error) {
 func (p *parser) parseArrow() (Exp, error) {
 	if p.peek().kind == tLBrace {
 		// {x : A} -> B : an implicit dependent function type.
-		param, _, dom, err := p.parseBinder()
+		param, _, qty, dom, err := p.parseBinder()
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +261,7 @@ func (p *parser) parseArrow() (Exp, error) {
 		if err != nil {
 			return nil, err
 		}
-		return EPi{Param: param, Icit: core.Impl, Dom: dom, Cod: cod}, nil
+		return EPi{Param: param, Icit: core.Impl, Qty: qty, Dom: dom, Cod: cod}, nil
 	}
 	lhs, err := p.parseApp()
 	if err != nil {
@@ -364,15 +364,16 @@ func (p *parser) parseLam() (Exp, error) {
 	type binder struct {
 		name string
 		icit core.Icit
+		qty  core.Qty
 		dom  Exp
 	}
 	var bs []binder
 	for p.peek().kind == tLParen || p.peek().kind == tLBrace {
-		name, icit, dom, err := p.parseBinder()
+		name, icit, qty, dom, err := p.parseBinder()
 		if err != nil {
 			return nil, err
 		}
-		bs = append(bs, binder{name, icit, dom})
+		bs = append(bs, binder{name, icit, qty, dom})
 	}
 	if len(bs) == 0 {
 		return nil, fmt.Errorf("expected a (name : type) or {name : type} binder after 'fn' at offset %d", p.peek().pos)
@@ -388,7 +389,7 @@ func (p *parser) parseLam() (Exp, error) {
 		return nil, err
 	}
 	for i := len(bs) - 1; i >= 0; i-- {
-		body = ELam{Param: bs[i].name, Icit: bs[i].icit, Dom: bs[i].dom, Body: body}
+		body = ELam{Param: bs[i].name, Icit: bs[i].icit, Qty: bs[i].qty, Dom: bs[i].dom, Body: body}
 	}
 	return body, nil
 }
@@ -396,31 +397,43 @@ func (p *parser) parseLam() (Exp, error) {
 // parseBinder parses a lambda binder `"(" Ident ":" Expr ")"` (explicit) or
 // `"{" Ident ":" Expr "}"` (implicit). Unlike the head of an Arrow/App, a binder
 // position is unambiguous: the bracket always opens `name : type`.
-func (p *parser) parseBinder() (string, core.Icit, Exp, error) {
+func (p *parser) parseBinder() (string, core.Icit, core.Qty, Exp, error) {
 	icit := core.Expl
+	qty := core.QMany
 	closeKind := tRParen
 	if p.peek().kind == tLBrace {
 		p.next()
 		icit = core.Impl
 		closeKind = tRBrace
 	} else if _, err := p.expect(tLParen); err != nil {
-		return "", icit, nil, err
+		return "", icit, qty, nil, err
+	}
+	if p.peek().kind == tQty {
+		qty = qtyOf(p.next().text)
 	}
 	id, err := p.expect(tIdent)
 	if err != nil {
-		return "", icit, nil, err
+		return "", icit, qty, nil, err
 	}
 	if _, err := p.expect(tColon); err != nil {
-		return "", icit, nil, err
+		return "", icit, qty, nil, err
 	}
 	dom, err := p.parseExpr()
 	if err != nil {
-		return "", icit, nil, err
+		return "", icit, qty, nil, err
 	}
 	if _, err := p.expect(closeKind); err != nil {
-		return "", icit, nil, err
+		return "", icit, qty, nil, err
 	}
-	return id.text, icit, dom, nil
+	return id.text, icit, qty, dom, nil
+}
+
+// qtyOf maps a quantity token to its core annotation.
+func qtyOf(text string) core.Qty {
+	if text == "0" {
+		return core.QZero
+	}
+	return core.QOne
 }
 
 // parseParen disambiguates the three things a '(' can open at the head of an
@@ -428,6 +441,27 @@ func (p *parser) parseBinder() (string, core.Icit, Exp, error) {
 // `(x : A) ->`, a parenthesized ascription `(e : T)`, and plain grouping `(e)`.
 func (p *parser) parseParen() (Exp, error) {
 	p.next() // '('
+	if p.peek().kind == tQty && p.peekAt(1).kind == tIdent && p.peekAt(2).kind == tColon {
+		// (0 x : A) -> B / (1 x : A) -> B: a quantity-annotated dependent Pi.
+		qty := qtyOf(p.next().text)
+		param := p.next().text
+		p.next() // ':'
+		dom, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tRParen); err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tArrow); err != nil {
+			return nil, err
+		}
+		cod, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		return EPi{Param: param, Qty: qty, Dom: dom, Cod: cod}, nil
+	}
 	if p.peek().kind == tIdent && p.peekAt(1).kind == tColon {
 		param := p.next().text
 		p.next() // ':'

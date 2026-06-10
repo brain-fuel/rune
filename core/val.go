@@ -53,6 +53,7 @@ type VRefl struct {
 type VPi struct {
 	Name string
 	Icit Icit
+	Qty  Qty
 	Dom  Val
 	Cod  func(Val) Val
 }
@@ -62,6 +63,7 @@ type VPi struct {
 type VLam struct {
 	Name string
 	Icit Icit
+	Qty  Qty
 	Body func(Val) Val
 }
 

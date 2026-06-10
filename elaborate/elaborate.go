@@ -21,6 +21,7 @@ import (
 
 	"goforge.dev/rune/core"
 	"goforge.dev/rune/equality"
+	"goforge.dev/rune/quantity"
 	"goforge.dev/rune/surface"
 )
 
@@ -32,6 +33,15 @@ type Elaborator struct {
 	Refs     map[string]core.Hash
 	RefNames map[core.Hash]string
 	metas    metaState // Phase 2: this run's metavariables
+
+	// Phase 5 usage accounting (the quantity stratum's checker): the current
+	// multiplicity (QZero inside types and proofs, QOne otherwise), and the
+	// per-binder usage observed so far, keyed by de Bruijn level. Variable
+	// occurrences are recorded scaled by mult; at each binder exit the usage
+	// is compared against mult·declared.
+	sr   quantity.Semiring
+	mult core.Qty
+	uses map[int]core.Qty
 }
 
 // New returns an Elaborator over globals g with the given name maps.
@@ -39,6 +49,9 @@ func New(g core.Globals, refs map[string]core.Hash, refNames map[core.Hash]strin
 	e := &Elaborator{M: core.NewMachine(g), Refs: refs, RefNames: refNames}
 	e.M.Metas = &e.metas
 	e.M.EqS = equality.Default()
+	e.sr = quantity.Default()
+	e.mult = core.QOne
+	e.uses = map[int]core.Qty{}
 	return e
 }
 
@@ -115,4 +128,62 @@ func (e *Elaborator) refType(h core.Hash) (core.Val, error) {
 		return nil, fmt.Errorf("definition %s has no stored type", name)
 	}
 	return e.M.Eval(nil, ty), nil
+}
+
+// pushZero enters an erased position (a type or a proof): occurrences inside
+// cost nothing. Returns the multiplicity to restore.
+func (e *Elaborator) pushZero() core.Qty {
+	m := e.mult
+	e.mult = core.QZero
+	return m
+}
+
+// pushMul enters an argument position consumed at quantity q.
+func (e *Elaborator) pushMul(q core.Qty) core.Qty {
+	m := e.mult
+	e.mult = e.sr.Mul(m, q)
+	return m
+}
+
+// popMult restores the multiplicity saved by pushZero/pushMul.
+func (e *Elaborator) popMult(m core.Qty) { e.mult = m }
+
+// useVar records one occurrence of the variable at index idx in c. (An absent
+// map entry means unused — QZero — NOT the Qty zero value, which is ω.)
+func (e *Elaborator) useVar(c *Ctx, idx int) {
+	lvl := c.Lvl() - 1 - idx
+	prev, ok := e.uses[lvl]
+	if !ok {
+		prev = core.QZero
+	}
+	e.uses[lvl] = e.sr.Add(prev, e.mult)
+}
+
+// checkBinderUse compares a binder's observed usage against its declared
+// quantity (scaled by the current multiplicity) as the binder goes out of
+// scope. inner is the context INCLUDING the binder.
+func (e *Elaborator) checkBinderUse(inner *Ctx, declared core.Qty, name string) error {
+	lvl := inner.Lvl() - 1
+	used, ok := e.uses[lvl]
+	if !ok {
+		used = core.QZero
+	}
+	delete(e.uses, lvl)
+	want := e.sr.Mul(e.mult, declared)
+	if !e.sr.Compatible(want, used) {
+		return fmt.Errorf("binder %s declared with quantity %s is used %s",
+			name, qtyName(declared), qtyName(used))
+	}
+	return nil
+}
+
+func qtyName(q core.Qty) string {
+	switch q {
+	case core.QZero:
+		return "0 (erased)"
+	case core.QOne:
+		return "1 (exactly once)"
+	default:
+		return "ω (unrestricted)"
+	}
 }

@@ -37,6 +37,22 @@ type Ref struct {
 // Phase 1+ stance until the Phase 6 hierarchy); there is no level field yet.
 type Univ struct{}
 
+// Qty is a binder's usage annotation, drawn from the 0/1/ω semiring the
+// quantity stratum supplies (Phase 5). The zero value is QMany (ω,
+// unrestricted) so unannotated binders cost nothing. The 0-fragment is the
+// erasure boundary codegen reads. Quantities are part of a Pi type's identity
+// and are hashed.
+type Qty byte
+
+const (
+	// QMany is ω: unrestricted use (the default).
+	QMany Qty = iota
+	// QZero marks an erased binder: usable in types, absent at runtime.
+	QZero
+	// QOne marks a linear binder: used exactly once.
+	QOne
+)
+
 // Icit is the plicity of a binder or application: explicit (the default) or
 // implicit (Phase 2; surface syntax {x : A}). Implicit arguments are inserted by
 // elaboration, so the core is always fully applied and plicity is part of a
@@ -106,6 +122,7 @@ type Meta struct {
 // argument), reachable as Var{0} inside it.
 type Pi struct {
 	Icit Icit
+	Qty  Qty
 	Dom  Tm
 	Cod  Scope
 }
@@ -113,6 +130,7 @@ type Pi struct {
 // Lam is a lambda abstraction \x -> Body. Body is a Scope binding the parameter.
 type Lam struct {
 	Icit Icit
+	Qty  Qty
 	Body Scope
 }
 

@@ -129,12 +129,12 @@ func (m *Machine) Eval(env Env, t Tm) Val {
 	case Pi:
 		dom := m.Eval(env, tm.Dom)
 		cod := tm.Cod
-		return VPi{Name: cod.Name, Icit: tm.Icit, Dom: dom, Cod: func(v Val) Val {
+		return VPi{Name: cod.Name, Icit: tm.Icit, Qty: tm.Qty, Dom: dom, Cod: func(v Val) Val {
 			return m.Eval(env.Extend(v), cod.Body)
 		}}
 	case Lam:
 		body := tm.Body
-		return VLam{Name: body.Name, Icit: tm.Icit, Body: func(v Val) Val {
+		return VLam{Name: body.Name, Icit: tm.Icit, Qty: tm.Qty, Body: func(v Val) Val {
 			return m.Eval(env.Extend(v), body.Body)
 		}}
 	case App:

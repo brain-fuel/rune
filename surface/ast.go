@@ -53,6 +53,7 @@ type ESubst struct{}
 type ELam struct {
 	Param string
 	Icit  core.Icit // Impl when written fn {x : A}
+	Qty   core.Qty  // 0 or 1 when annotated (fn (0 x : A) …); ω otherwise
 	Dom   Exp
 	Body  Exp
 }
@@ -69,6 +70,7 @@ type EApp struct {
 type EPi struct {
 	Param string
 	Icit  core.Icit // Impl when written {x : A} -> B
+	Qty   core.Qty  // 0 or 1 when annotated ((0 x : A) -> B); ω otherwise
 	Dom   Exp
 	Cod   Exp
 }

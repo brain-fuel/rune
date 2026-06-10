@@ -1,58 +1,52 @@
 package quantity
 
-// The default usage semiring: the 0/1/ω lattice (Atkey's QTT resource semiring).
-// Zero means erased, One means linear, Omega (ω) means unrestricted. This is the one
-// instance v1 ships behind the Semiring interface.
+import "goforge.dev/rune/core"
 
-type zeroOneOmega int
-
-const (
-	zero zeroOneOmega = iota
-	one
-	omega
-)
-
-func (zeroOneOmega) isQty() {}
-
-// Zero, One, and Omega are the three usages of the default semiring.
-var (
-	Zero  Qty = zero
-	One   Qty = one
-	Omega Qty = omega
-)
-
-// ZeroOneOmega is the default usage semiring instance. Add is the lattice join with
-// the rule that two distinct nonzero usages saturate to ω; Mul is annihilated by 0
-// and saturates to ω when both operands are nonzero and not both 1.
+// ZeroOneOmega is the default usage semiring: Atkey's 0/1/ω lattice. Zero
+// means erased, One linear, Omega unrestricted. Addition saturates: two
+// nonzero usages make ω. Multiplication is annihilated by 0 and saturates to
+// ω unless an operand is 1.
 type ZeroOneOmega struct{}
 
-// Default returns the 0/1/ω semiring, Rune v1's sole quantity-stratum implementation.
+// Default returns the 0/1/ω semiring, Rune v1's sole quantity-stratum
+// implementation.
 func Default() Semiring { return ZeroOneOmega{} }
 
-func (ZeroOneOmega) Zero() Qty { return Zero }
-func (ZeroOneOmega) One() Qty  { return One }
+func (ZeroOneOmega) Zero() core.Qty { return core.QZero }
+func (ZeroOneOmega) One() core.Qty  { return core.QOne }
 
-func (ZeroOneOmega) Add(a, b Qty) Qty {
-	x, y := a.(zeroOneOmega), b.(zeroOneOmega)
-	if x == zero {
-		return y
+func (ZeroOneOmega) Add(a, b core.Qty) core.Qty {
+	if a == core.QZero {
+		return b
 	}
-	if y == zero {
-		return x
+	if b == core.QZero {
+		return a
 	}
-	return omega
+	return core.QMany
 }
 
-func (ZeroOneOmega) Mul(a, b Qty) Qty {
-	x, y := a.(zeroOneOmega), b.(zeroOneOmega)
-	if x == zero || y == zero {
-		return zero
+func (ZeroOneOmega) Mul(a, b core.Qty) core.Qty {
+	if a == core.QZero || b == core.QZero {
+		return core.QZero
 	}
-	if x == one {
-		return y
+	if a == core.QOne {
+		return b
 	}
-	if y == one {
-		return x
+	if b == core.QOne {
+		return a
 	}
-	return omega
+	return core.QMany
+}
+
+func (ZeroOneOmega) Compatible(declared, used core.Qty) bool {
+	switch declared {
+	case core.QMany:
+		return true
+	case core.QZero:
+		return used == core.QZero
+	case core.QOne:
+		return used == core.QOne
+	default:
+		return false
+	}
 }

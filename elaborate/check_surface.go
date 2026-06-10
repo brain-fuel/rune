@@ -19,6 +19,7 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 	switch s := x.(type) {
 	case surface.EVar:
 		if i, ty, ok := c.lookup(s.Name); ok {
+			e.useVar(c, i)
 			return core.Var{Idx: i}, ty, nil
 		}
 		if h, ok := e.Refs[s.Name]; ok {
@@ -41,20 +42,28 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		tm := e.freshMeta(c, "_")
 		return tm, e.Eval(c, tyM), nil
 	case surface.EPi:
+		m0 := e.pushZero()
+		defer e.popMult(m0)
 		dom, _, err := e.checkType(c, s.Dom)
 		if err != nil {
 			return nil, nil, err
 		}
 		vdom := e.Eval(c, dom)
-		cod, codSort, err := e.checkType(c.bind(s.Param, vdom), s.Cod)
+		inner := c.bind(s.Param, vdom)
+		cod, codSort, err := e.checkType(inner, s.Cod)
 		if err != nil {
+			return nil, nil, err
+		}
+		if err := e.checkBinderUse(inner, core.QMany, s.Param); err != nil {
 			return nil, nil, err
 		}
 		// A function into a proposition is a proposition (Prop is closed
 		// under Pi); otherwise the Pi lives in U.
-		return core.Pi{Icit: s.Icit, Dom: dom, Cod: core.Scope{Name: s.Param, Body: cod}}, codSort, nil
+		return core.Pi{Icit: s.Icit, Qty: s.Qty, Dom: dom, Cod: core.Scope{Name: s.Param, Body: cod}}, codSort, nil
 	case surface.ELam:
+		m0 := e.pushZero()
 		dom, _, err := e.checkType(c, s.Dom)
+		e.popMult(m0)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -64,14 +73,17 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		if err := e.checkBinderUse(inner, s.Qty, s.Param); err != nil {
+			return nil, nil, err
+		}
 		// Close the inferred codomain over the binder by quoting one level up,
 		// then re-evaluating it under the argument the Pi closure receives.
 		codTm := e.M.Quote(inner.Lvl(), bodyTy)
 		env := c.env
-		pi := core.VPi{Name: s.Param, Icit: s.Icit, Dom: vdom, Cod: func(v core.Val) core.Val {
+		pi := core.VPi{Name: s.Param, Icit: s.Icit, Qty: s.Qty, Dom: vdom, Cod: func(v core.Val) core.Val {
 			return e.M.Eval(env.Extend(v), codTm)
 		}}
-		return core.Lam{Icit: s.Icit, Body: core.Scope{Name: s.Param, Body: body}}, pi, nil
+		return core.Lam{Icit: s.Icit, Qty: s.Qty, Body: core.Scope{Name: s.Param, Body: body}}, pi, nil
 	case surface.EApp:
 		if head, args := surface.SpineOf(x); len(args) > 0 {
 			if tm, vty, handled, err := e.elabFormer(c, head, args); handled {
@@ -100,7 +112,9 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 			return nil, nil, fmt.Errorf("%s application to a function expecting an %s argument",
 				icitName(s.Icit), icitName(pi.Icit))
 		}
+		ma := e.pushMul(pi.Qty)
 		arg, err := e.Check(c, s.Arg, pi.Dom)
+		e.popMult(ma)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -114,6 +128,7 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		delete(e.uses, inner.Lvl()-1) // let binders are ω; clear the level
 		tm.Body = core.Scope{Name: s.Name, Body: body}
 		return tm, bodyTy, nil
 	case surface.EAnn:
@@ -176,11 +191,14 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 			if err != nil {
 				return nil, err
 			}
+			if err := e.checkBinderUse(inner, pi.Qty, pi.Name); err != nil {
+				return nil, err
+			}
 			name := pi.Name
 			if name == "" {
 				name = "x"
 			}
-			return core.Lam{Icit: core.Impl, Body: core.Scope{Name: name, Body: body}}, nil
+			return core.Lam{Icit: core.Impl, Qty: pi.Qty, Body: core.Scope{Name: name, Body: body}}, nil
 		}
 	}
 
@@ -214,8 +232,19 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 			return nil, fmt.Errorf("%s lambda checked against an %s function type",
 				icitName(s.Icit), icitName(pi.Icit))
 		}
+		// An unannotated binder adopts the expected quantity; an explicit 0/1
+		// must match it.
+		qty := s.Qty
+		if qty == core.QMany {
+			qty = pi.Qty
+		} else if qty != pi.Qty {
+			return nil, fmt.Errorf("binder %s annotated quantity %s, but the function type expects %s",
+				s.Param, qtyName(s.Qty), qtyName(pi.Qty))
+		}
 		// The annotation must agree with the expected domain.
+		m0 := e.pushZero()
 		dom, _, err := e.checkType(c, s.Dom)
+		e.popMult(m0)
 		if err != nil {
 			return nil, err
 		}
@@ -229,7 +258,10 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 		if err != nil {
 			return nil, err
 		}
-		return core.Lam{Icit: s.Icit, Body: core.Scope{Name: s.Param, Body: body}}, nil
+		if err := e.checkBinderUse(inner, qty, s.Param); err != nil {
+			return nil, err
+		}
+		return core.Lam{Icit: s.Icit, Qty: qty, Body: core.Scope{Name: s.Param, Body: body}}, nil
 	case surface.ELet:
 		tm, _, inner, err := e.elabLet(c, s)
 		if err != nil {
@@ -239,6 +271,7 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 		if err != nil {
 			return nil, err
 		}
+		delete(e.uses, inner.Lvl()-1) // let binders are ω; clear the level
 		tm.Body = core.Scope{Name: s.Name, Body: body}
 		return tm, nil
 	default:
@@ -265,6 +298,8 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 // checkType elaborates e as a TYPE: its type must be a sort (U or Prop). A
 // flexible type defaults to U by unification.
 func (e *Elaborator) checkType(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
+	m0 := e.pushZero()
+	defer e.popMult(m0)
 	tm, got, err := e.Infer(c, x)
 	if err != nil {
 		return nil, nil, err
@@ -317,10 +352,10 @@ func shift(t core.Tm, cutoff, by int) core.Tm {
 	case core.Ref, core.Univ, core.Prop, core.Meta:
 		return t
 	case core.Pi:
-		return core.Pi{Icit: tm.Icit, Dom: shift(tm.Dom, cutoff, by),
+		return core.Pi{Icit: tm.Icit, Qty: tm.Qty, Dom: shift(tm.Dom, cutoff, by),
 			Cod: core.Scope{Name: tm.Cod.Name, Body: shift(tm.Cod.Body, cutoff+1, by)}}
 	case core.Lam:
-		return core.Lam{Icit: tm.Icit,
+		return core.Lam{Icit: tm.Icit, Qty: tm.Qty,
 			Body: core.Scope{Name: tm.Body.Name, Body: shift(tm.Body.Body, cutoff+1, by)}}
 	case core.App:
 		return core.App{Fn: shift(tm.Fn, cutoff, by), Arg: shift(tm.Arg, cutoff, by), Icit: tm.Icit}
@@ -357,6 +392,8 @@ func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (c
 		if len(args) != 3 {
 			return nil, nil, true, fmt.Errorf("Eq takes exactly 3 arguments (Eq T l r), got %d", len(args))
 		}
+		m0 := e.pushZero()
+		defer e.popMult(m0)
 		ty, _, err := e.checkType(c, args[0])
 		if err != nil {
 			return nil, nil, true, err
@@ -375,6 +412,8 @@ func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (c
 		if len(args) != 1 {
 			return nil, nil, true, fmt.Errorf("refl takes exactly 1 argument here, got %d", len(args))
 		}
+		m0 := e.pushZero()
+		defer e.popMult(m0)
 		x, xty, err := e.Infer(c, args[0])
 		if err != nil {
 			return nil, nil, true, err
@@ -392,21 +431,26 @@ func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (c
 			return nil, nil, true, err
 		}
 		va := e.Eval(c, a)
+		mz := e.pushZero()
 		xx, err := e.Check(c, args[1], va)
 		if err != nil {
+			e.popMult(mz)
 			return nil, nil, true, err
 		}
 		yy, err := e.Check(c, args[2], va)
 		if err != nil {
+			e.popMult(mz)
 			return nil, nil, true, err
 		}
 		vx, vy := e.Eval(c, xx), e.Eval(c, yy)
 		pr, err := e.Check(c, args[3], e.M.EvalEq(va, vx, vy))
 		if err != nil {
+			e.popMult(mz)
 			return nil, nil, true, err
 		}
 		motiveTy := core.VPi{Name: "z", Dom: va, Cod: func(core.Val) core.Val { return core.VU{} }}
 		pm, err := e.Check(c, args[4], motiveTy)
+		e.popMult(mz)
 		if err != nil {
 			return nil, nil, true, err
 		}
@@ -429,7 +473,9 @@ func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (c
 			return nil, nil, true, err
 		}
 		va, vb := e.Eval(c, a), e.Eval(c, b)
+		mp := e.pushZero()
 		pr, err := e.Check(c, args[2], core.VEq{Ty: core.VU{}, L: va, R: vb})
+		e.popMult(mp)
 		if err != nil {
 			return nil, nil, true, err
 		}

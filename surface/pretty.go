@@ -128,6 +128,7 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 				open, close = " {", " : U}"
 			}
 			sb.WriteString(open)
+			sb.WriteString(qtyPrefix(lam.Qty))
 			sb.WriteString(n)
 			sb.WriteString(close)
 			cur = prepend(n, cur)
@@ -142,16 +143,18 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 			p.wrap(sb, prec, precArrow, func() {
 				n := fresh(x.Cod.Name, names)
 				sb.WriteByte('{')
+				sb.WriteString(qtyPrefix(x.Qty))
 				sb.WriteString(n)
 				sb.WriteString(" : ")
 				p.print(sb, x.Dom, names, precLow)
 				sb.WriteString("} -> ")
 				p.print(sb, x.Cod.Body, prepend(n, names), precArrow)
 			})
-		} else if occursVar(x.Cod.Body, 0) {
+		} else if occursVar(x.Cod.Body, 0) || x.Qty != core.QMany {
 			p.wrap(sb, prec, precArrow, func() {
 				n := fresh(x.Cod.Name, names)
 				sb.WriteByte('(')
+				sb.WriteString(qtyPrefix(x.Qty))
 				sb.WriteString(n)
 				sb.WriteString(" : ")
 				p.print(sb, x.Dom, names, precLow)
@@ -338,5 +341,17 @@ func occursVar(t core.Tm, depth int) bool {
 		return occursVar(x.Term, depth) || occursVar(x.Ty, depth)
 	default:
 		return false
+	}
+}
+
+// qtyPrefix renders a binder's quantity annotation ("0 ", "1 ", or nothing).
+func qtyPrefix(q core.Qty) string {
+	switch q {
+	case core.QZero:
+		return "0 "
+	case core.QOne:
+		return "1 "
+	default:
+		return ""
 	}
 }

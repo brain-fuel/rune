@@ -88,8 +88,9 @@ Atom      ::= Ident
 
 Lam       ::= "fn" (Binder | IBinder)+ "is" Expr "end"
 
-Binder    ::= "(" Ident ":" Expr ")"
-IBinder   ::= "{" Ident ":" Expr "}"      -- implicit binder (Phase 2)
+Binder    ::= "(" [Qty] Ident ":" Expr ")"
+IBinder   ::= "{" [Qty] Ident ":" Expr "}"   -- implicit binder (Phase 2)
+Qty       ::= "0" | "1"                      -- usage annotation (Phase 5); default ω
 
 Seq       ::= "seq" SeqBind* Result "end"          -- separators per §5.3
 SeqBind   ::= "let" Ident [":" Expr] "=" Expr       -- NOTE: no `in`
