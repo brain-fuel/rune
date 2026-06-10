@@ -20,6 +20,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	b.WriteString("'use strict';\n")
 	b.WriteString("const $unit = null;\n")
 
+	if usesQuot(p) {
+		b.WriteString(quotRuntime)
+	}
 	for _, d := range p.Datas {
 		for _, c := range d.Ctors {
 			emitCtor(&b, c)
@@ -169,6 +172,43 @@ var jsReserved = map[string]bool{
 	"super": true, "switch": true, "this": true, "throw": true, "true": true,
 	"try": true, "typeof": true, "var": true, "void": true, "while": true,
 	"with": true, "yield": true, "let": true, "static": true,
+}
+
+// quotRuntime is the erased quotient builtin group (v2): a quotient compiles
+// to its carrier, so qin is the identity on its point, qlift applies the
+// lifted function directly, and the proof-valued members (qsound, qind) are
+// unit-producers. Type and proof arguments arrive as units (no arity surgery).
+const quotRuntime = `const qin = A => R => a => a;
+const qsound = A => R => a => b => r => $unit;
+const qlift = A => R => B => f => resp => q => f(q);
+const qind = A => R => P => h => q => $unit;
+`
+
+// usesQuot reports whether any emitted definition references a quotient
+// builtin by name, so the runtime is included only when needed.
+func usesQuot(p Program) bool {
+	names := map[string]bool{"qin": true, "qsound": true, "qlift": true, "qind": true}
+	var walk func(Ir) bool
+	walk = func(t Ir) bool {
+		switch x := t.(type) {
+		case IGlobal:
+			return names[x.Name]
+		case ILam:
+			return walk(x.Body)
+		case IApp:
+			return walk(x.Fn) || walk(x.Arg)
+		case ILet:
+			return walk(x.Val) || walk(x.Body)
+		default:
+			return false
+		}
+	}
+	for _, d := range p.Defs {
+		if walk(d.Body) {
+			return true
+		}
+	}
+	return false
 }
 
 // showRuntime renders constructor values back in surface style for the

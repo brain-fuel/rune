@@ -55,6 +55,7 @@ func (e *Elaborator) ElabData(d surface.DataDef) (store.DataDecl, error) {
 	inner := New(g, refs, e.RefNames)
 	inner.M.EqS = e.M.EqS
 	inner.M.Data = e.M.Data
+	inner.M.Quot = e.M.Quot
 
 	decl := store.DataDecl{Name: d.Name, Ty: ty, NumParams: k}
 	for _, ctor := range d.Ctors {

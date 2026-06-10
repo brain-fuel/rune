@@ -43,13 +43,21 @@ func New() *Session {
 	return s
 }
 
-// Reset clears every definition from the session.
+// Reset clears every definition from the session, then re-registers the
+// quotient builtin group (v2): Quot, qin, qsound, qlift, qind are part of the
+// ambient environment of every session, exactly as content-addressed as user
+// definitions, but not part of the user's definition order.
 func (s *Session) Reset() {
 	s.st = store.New()
 	s.refs = map[string]core.Hash{}
 	s.refNames = map[core.Hash]string{}
 	s.order = nil
 	s.byName = map[string]Def{}
+	hs := s.st.AddQuot()
+	for i, n := range store.QuotNames() {
+		s.refs[n] = hs[i]
+		s.refNames[hs[i]] = n
+	}
 }
 
 func (s *Session) resolver() *surface.Resolver { return &surface.Resolver{Refs: s.refs} }
@@ -153,6 +161,7 @@ func (s *Session) RefNames() map[core.Hash]string { return s.refNames }
 func (s *Session) elaborator() *elaborate.Elaborator {
 	el := elaborate.New(s.st, s.refs, s.refNames)
 	el.M.Data = s.st
+	el.M.Quot = s.st
 	return el
 }
 
@@ -178,6 +187,7 @@ func (s *Session) NormalizeExpr(t core.Tm) core.Tm {
 	m := core.NewMachine(s.st)
 	m.EqS = equality.Default()
 	m.Data = s.st
+	m.Quot = s.st
 	return m.NormalizeUnfold(t)
 }
 
@@ -239,11 +249,15 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		p.Main = main
 	}
 	// Datatype formers denote types: at runtime they erase to the unit token.
+	// So does the quotient former Quot (a quotient compiles to its carrier).
 	typeRefs := map[core.Hash]bool{}
 	for _, name := range s.order {
 		if _, _, _, ok := s.st.DataDeclOf(s.refs[name]); ok {
 			typeRefs[s.refs[name]] = true
 		}
+	}
+	if hs, ok := s.st.QuotHashes(); ok {
+		typeRefs[hs[0]] = true
 	}
 	for _, name := range s.order {
 		h := s.refs[name]
