@@ -10,7 +10,12 @@
 package main
 
 import (
+	"io"
+	"os/exec"
+	"strings"
+
 	"fmt"
+	"goforge.dev/rune/codegen"
 	"os"
 
 	"goforge.dev/rune/internal/repl"
@@ -42,6 +47,27 @@ func main() {
 			err = runFmt(string(src))
 		} else {
 			err = runHash(string(src))
+		}
+		if err != nil {
+			fatal(err)
+		}
+	case "emit", "run":
+		if len(os.Args) < 3 {
+			usage()
+			os.Exit(2)
+		}
+		src, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			fatal(err)
+		}
+		main := ""
+		if len(os.Args) > 3 {
+			main = os.Args[3]
+		}
+		if os.Args[1] == "emit" {
+			err = runEmit(string(src), main, os.Stdout)
+		} else {
+			err = runNode(string(src), main)
 		}
 		if err != nil {
 			fatal(err)
@@ -85,4 +111,48 @@ func usage() {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "rune:", err)
 	os.Exit(1)
+}
+
+// runEmit type checks a file and writes its erased JavaScript shadow to w.
+func runEmit(src, main string, w io.Writer) error {
+	s := session.New()
+	if _, err := s.LoadSource(src); err != nil {
+		return err
+	}
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		return err
+	}
+	out, err := codegen.Default().Emit(p)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, string(out))
+	return err
+}
+
+// runNode emits the program to a temporary file and executes it with node.
+func runNode(src, main string) error {
+	if main == "" {
+		return fmt.Errorf("rune run needs a definition to evaluate: rune run FILE NAME")
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		return fmt.Errorf("the js backend needs node in PATH to run (use `rune emit` to inspect the output)")
+	}
+	var buf strings.Builder
+	if err := runEmit(src, main, &buf); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp("", "rune-*.js")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := io.WriteString(f, buf.String()); err != nil {
+		return err
+	}
+	f.Close()
+	cmd := exec.Command("node", f.Name())
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }

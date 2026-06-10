@@ -8,6 +8,9 @@
 package session
 
 import (
+	"fmt"
+
+	"goforge.dev/rune/codegen"
 	"goforge.dev/rune/core"
 	"goforge.dev/rune/elaborate"
 	"goforge.dev/rune/equality"
@@ -222,4 +225,55 @@ func (s *Session) Certified(name string) bool {
 func (s *Session) Lookup(name string) (core.Hash, bool) {
 	h, ok := s.refs[name]
 	return h, ok
+}
+
+// EmitProgram lowers the whole session to the erased IR program, in
+// definition order. main, when non-empty, must name a session definition; the
+// emitted program prints its value.
+func (s *Session) EmitProgram(main string) (codegen.Program, error) {
+	var p codegen.Program
+	if main != "" {
+		if _, ok := s.refs[main]; !ok {
+			return p, fmt.Errorf("no definition named %q", main)
+		}
+		p.Main = main
+	}
+	// Datatype formers denote types: at runtime they erase to the unit token.
+	typeRefs := map[core.Hash]bool{}
+	for _, name := range s.order {
+		if _, _, _, ok := s.st.DataDeclOf(s.refs[name]); ok {
+			typeRefs[s.refs[name]] = true
+		}
+	}
+	for _, name := range s.order {
+		h := s.refs[name]
+		// Datatype groups are emitted once, at the former; constructor and
+		// eliminator name entries are covered by it.
+		if decl, ctors, _, ok := s.st.DataDeclOf(h); ok {
+			ds := codegen.DataSpec{ElimName: decl.Name + "Elim", NumParams: decl.NumParams}
+			for i, cn := range decl.CtorNames {
+				_ = ctors
+				ds.Ctors = append(ds.Ctors, codegen.CtorSpec{
+					Name:  cn,
+					Tag:   i,
+					Arity: decl.NumParams + decl.Sigs[i].Arity,
+				})
+				ds.Rec = append(ds.Rec, decl.Sigs[i].Rec)
+			}
+			p.Datas = append(p.Datas, ds)
+			continue
+		}
+		if _, _, isCtor := s.st.CtorOf(h); isCtor {
+			continue
+		}
+		if _, isElim := s.st.ElimOf(h); isElim {
+			continue
+		}
+		body, ok := s.st.Unfold(h)
+		if !ok {
+			return p, fmt.Errorf("definition %q has no body to emit", name)
+		}
+		p.Defs = append(p.Defs, codegen.DefSpec{Name: name, Body: codegen.Erase(body, s.refNames, typeRefs)})
+	}
+	return p, nil
 }

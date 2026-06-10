@@ -121,7 +121,15 @@ first and forces only on mismatch, so the fast path logs nothing.
   levels (Prop stays impredicative: any Pi into Prop is a Prop), cumulativity
   U_i <: U_j via Sub. Type-in-type is gone; levels are part of identity and
   the hash preimage (0x04). The one-time cache nuke the design priced in.
-- **Later:** codegen + a backend.
+- **Phase 7 (done):** codegen — Erase lowers checked, meta-free core to the
+  erased IR (untyped lambda calculus + globals + the unit token; types,
+  proofs, casts, and transports become their computational payload or unit;
+  no arity surgery — erased positions receive units), and the JS backend
+  emits self-contained, dependency-free JavaScript: curried arrows, tagged
+  constructor records, switch-dispatch eliminators with recursive IHs.
+  `rune emit FILE [NAME]` prints the shadow; `rune run FILE NAME` executes it
+  under node. The shadow rule holds: codegen reads bodies through the store
+  and mutates only its own output.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
   stratum is **added** (v3 two-level type theory).
 

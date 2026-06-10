@@ -13,8 +13,11 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
 - **Full definitional proof irrelevance.** Conversion equates refls and skips
   cast proofs; equating an arbitrary NEUTRAL proof with refl needs type-directed
   conversion. Parked until a listing needs it. (core/conv.go)
-- **Erasure and a backend.** `codegen` is interface + stub; erasure and a concrete
-  `Backend` are Phase 7.
+- **A second backend (Scheme/Go).** The Backend interface is exercised by one
+  target (JS); a second lands when a deployment needs it.
+- **Erased-argument elision.** Erasure keeps positions (units at call sites)
+  instead of arity surgery; dropping 0-quantity arguments entirely is an
+  optimization on the shadow with no current consumer.
 - **Universe polymorphism / level variables.** Levels are concrete (U, U1…U9);
   level-polymorphic definitions (and large eliminations — eliminator motives
   target U_0/Prop) arrive only if a listing needs them.
