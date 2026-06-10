@@ -42,6 +42,11 @@ type Store struct {
 	// hash(defHash, ‖U‖), plus an index by definition hash for lookup.
 	certs      map[core.Hash]Cert
 	certsByDef map[core.Hash][]core.Hash
+	// Datatype roles (data.go): declaration groups and per-hash roles the
+	// evaluator's ι-reduction consults through core.DataInfo.
+	dataByHash map[core.Hash]dataEntry
+	ctorRole   map[core.Hash]ctorRole
+	elimRole   map[core.Hash]core.Hash
 }
 
 // New returns an empty store.
@@ -51,6 +56,9 @@ func New() *Store {
 		names:      map[string]core.Hash{},
 		certs:      map[core.Hash]Cert{},
 		certsByDef: map[core.Hash][]core.Hash{},
+		dataByHash: map[core.Hash]dataEntry{},
+		ctorRole:   map[core.Hash]ctorRole{},
+		elimRole:   map[core.Hash]core.Hash{},
 	}
 }
 
@@ -101,7 +109,9 @@ func (s *Store) TypeOf(h core.Hash) (core.Tm, bool) {
 // retrofit.
 func (s *Store) Unfold(h core.Hash) (core.Tm, bool) {
 	d, ok := s.defs[h]
-	if !ok {
+	if !ok || d.body == nil {
+		// Unknown, or a bodiless definition (a datatype former, constructor,
+		// or eliminator): there is nothing to unfold — permanently neutral.
 		return nil, false
 	}
 	return d.body, true

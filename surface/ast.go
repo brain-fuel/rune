@@ -42,6 +42,10 @@ type ERefl struct{}
 // ECast is the cast head, `cast`, saturated with four arguments: cast A B p x.
 type ECast struct{}
 
+// ESubst is the transport head, `subst`, saturated with six arguments:
+// subst A x y p P px — from p : Eq A x y and px : P x, conclude P y.
+type ESubst struct{}
+
 // ELam is one parameter of a lambda: fn (Param : Dom) is Body end. The parser
 // desugars a curried fn (x : A) (y : B) is e end into nested ELam. Dom is the binder's
 // domain annotation; resolution scope-checks it and then discards it, since the
@@ -103,3 +107,28 @@ type Def struct {
 	Ty   Exp
 	Body Exp
 }
+
+// Ctor is one constructor of a datatype declaration: Name : Ty.
+type Ctor struct {
+	Name string
+	Ty   Exp
+}
+
+// DataDef is a datatype declaration (Phase 4):
+//
+//	data Name : Ty is C1 : T1 | C2 : T2 | … end
+type DataDef struct {
+	Name  string
+	Ty    Exp
+	Ctors []Ctor
+}
+
+// Item is one top-level program item: a *Def or a *DataDef.
+type Item interface {
+	isItem()
+}
+
+func (Def) isItem()     {}
+func (DataDef) isItem() {}
+
+func (ESubst) isExp() {}

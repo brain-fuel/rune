@@ -80,6 +80,19 @@ type Cast struct {
 	X Tm
 }
 
+// Subst is Leibniz transport along an equality (Phase 4's induction
+// workhorse): Subst A X Y Prf P Px : P Y, given X Y : A, Prf : Eq A X Y,
+// P : A -> s, Px : P X. It computes to Px when X ≡ Y (in particular at refl)
+// and never inspects Prf.
+type Subst struct {
+	A   Tm
+	X   Tm
+	Y   Tm
+	Prf Tm
+	P   Tm
+	Px  Tm
+}
+
 // Meta is an unsolved metavariable, identified within one elaboration run. It is
 // ELABORATION-INTERNAL: a meta must never reach the store or the hash boundary —
 // HashTerm panics on it, and the session asserts elaborated definitions are
@@ -138,16 +151,17 @@ type Scope struct {
 	Body Tm
 }
 
-func (Var) isTm()  {}
-func (Meta) isTm() {}
-func (Prop) isTm() {}
-func (Eq) isTm()   {}
-func (Refl) isTm() {}
-func (Cast) isTm() {}
-func (Ref) isTm()  {}
-func (Univ) isTm() {}
-func (Pi) isTm()   {}
-func (Lam) isTm()  {}
-func (App) isTm()  {}
-func (Let) isTm()  {}
-func (Ann) isTm()  {}
+func (Var) isTm()   {}
+func (Meta) isTm()  {}
+func (Prop) isTm()  {}
+func (Eq) isTm()    {}
+func (Refl) isTm()  {}
+func (Cast) isTm()  {}
+func (Subst) isTm() {}
+func (Ref) isTm()   {}
+func (Univ) isTm()  {}
+func (Pi) isTm()    {}
+func (Lam) isTm()   {}
+func (App) isTm()   {}
+func (Let) isTm()   {}
+func (Ann) isTm()   {}

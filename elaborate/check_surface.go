@@ -33,8 +33,8 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		return core.Univ{}, core.VU{}, nil // type : type until Phase 6
 	case surface.EProp:
 		return core.Prop{}, core.VU{}, nil
-	case surface.EEq, surface.ERefl, surface.ECast:
-		return nil, nil, fmt.Errorf("an equality former needs its arguments (Eq T l r · refl x · cast A B p x)")
+	case surface.EEq, surface.ERefl, surface.ECast, surface.ESubst:
+		return nil, nil, fmt.Errorf("an equality former needs its arguments (Eq T l r · refl x · cast A B p x · subst A x y p P px)")
 	case surface.EHole:
 		// A hole is a fresh meta; its type is another fresh meta.
 		tyM := e.freshMeta(c, "type of _")
@@ -252,6 +252,9 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 			tm, got = e.insertImplicits(c, tm, got)
 		}
 		if err := e.Unify(c.Lvl(), got, want); err != nil {
+			if e.M.Sub(c.Lvl(), got, want) {
+				return tm, nil // cumulativity: Prop <: U
+			}
 			return nil, fmt.Errorf("type mismatch: expected %s, got %s (%v)",
 				e.pretty(c, want), e.pretty(c, got), err)
 		}
@@ -337,6 +340,10 @@ func shift(t core.Tm, cutoff, by int) core.Tm {
 	case core.Cast:
 		return core.Cast{A: shift(tm.A, cutoff, by), B: shift(tm.B, cutoff, by),
 			P: shift(tm.P, cutoff, by), X: shift(tm.X, cutoff, by)}
+	case core.Subst:
+		return core.Subst{A: shift(tm.A, cutoff, by), X: shift(tm.X, cutoff, by),
+			Y: shift(tm.Y, cutoff, by), Prf: shift(tm.Prf, cutoff, by),
+			P: shift(tm.P, cutoff, by), Px: shift(tm.Px, cutoff, by)}
 	default:
 		panic(fmt.Sprintf("shift: unknown core term %T", t))
 	}
@@ -376,6 +383,39 @@ func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (c
 		vx := e.Eval(c, x)
 		proof := e.reflProof(c, xty, x)
 		return proof, e.M.EvalEq(xty, vx, vx), true, nil
+	case surface.ESubst:
+		if len(args) != 6 {
+			return nil, nil, true, fmt.Errorf("subst takes exactly 6 arguments (subst A x y p P px), got %d", len(args))
+		}
+		a, _, err := e.checkType(c, args[0])
+		if err != nil {
+			return nil, nil, true, err
+		}
+		va := e.Eval(c, a)
+		xx, err := e.Check(c, args[1], va)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		yy, err := e.Check(c, args[2], va)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		vx, vy := e.Eval(c, xx), e.Eval(c, yy)
+		pr, err := e.Check(c, args[3], e.M.EvalEq(va, vx, vy))
+		if err != nil {
+			return nil, nil, true, err
+		}
+		motiveTy := core.VPi{Name: "z", Dom: va, Cod: func(core.Val) core.Val { return core.VU{} }}
+		pm, err := e.Check(c, args[4], motiveTy)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		vp := e.Eval(c, pm)
+		px, err := e.Check(c, args[5], e.M.Apply(vp, vx))
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return core.Subst{A: a, X: xx, Y: yy, Prf: pr, P: pm, Px: px}, e.M.Apply(vp, vy), true, nil
 	case surface.ECast:
 		if len(args) != 4 {
 			return nil, nil, true, fmt.Errorf("cast takes exactly 4 arguments (cast A B p x), got %d", len(args))

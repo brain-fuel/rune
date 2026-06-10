@@ -94,8 +94,18 @@ first and forces only on mismatch, so the fast path logs nothing.
   inspecting its proof (conversion skips cast proofs and equates refls — UIP at
   the canonical level). equality.Observational implements core.EqStratum, wired
   into every Machine; full Eq-U decomposition (needs Sigma) is parked.
-- **Later:** data, coverage, totality; turn on QTT; universe hierarchy;
-  codegen + a backend.
+- **Phase 4 (done):** datatypes by ELIMINATORS — `data D : (params) -> U is C : … end`
+  declares a former, constructors, and a generated eliminator (`DElim`), all
+  bodiless (permanently neutral heads; the eliminator computes by the ι-rule in
+  the evaluator, firing when the scrutinee forces to a saturated constructor,
+  with induction hypotheses for recursive arguments). Strict positivity is
+  checked at declaration; uniform parameters only (indexed families parked);
+  coverage is by construction and TOTALITY IS BY CONSTRUCTION — the eliminator
+  is the only recursion principle, so no termination checker exists or is
+  needed. `subst` (Leibniz transport) joins the equality stratum so induction
+  proofs over `Eq` go through; `Prop <: U` cumulativity admits Prop-valued
+  motives. Declaration groups are content-addressed as a unit.
+- **Later:** turn on QTT; universe hierarchy; codegen + a backend.
 - The equality stratum is then **extended** (v2 quotients) and a second equality
   stratum is **added** (v3 two-level type theory).
 

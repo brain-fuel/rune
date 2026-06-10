@@ -38,9 +38,10 @@ ascription. There is no evaluation, type checking, data, or literals yet.
 - **Comments** are insignificant and are **not** preserved by the pretty-printer (round-trip is
   modulo comments): line comment `-- … <end-of-line>`; block comment `{- … -}`, **nestable**.
 - **Identifier:** `(letter | "_") (letter | digit | "_" | "'")*`. Case-sensitive.
-- **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, and the
-  equality stratum's `Prop`, `Eq`, `refl`, `cast` (Phase 3). The bare underscore `_` is reserved
-  as the hole; identifiers may still begin with `_` (`_x` is a name).
+- **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
+  equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), and `data` (Phase 4).
+  The bare underscore `_` is reserved as the hole; identifiers may still begin with `_`
+  (`_x` is a name). `|` separates constructors inside a `data` block.
 - **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
   instead, so an implicit form cannot begin with a literal `-`.
 - **Punctuation/operators:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
@@ -52,9 +53,12 @@ Notation: `X*` zero+ , `X+` one+ , `[X]` optional, `|` alternation, `"…"` term
 generative skeleton; §5 gives the deterministic parse for the `(`-forms and for `seq`.
 
 ```
-Program   ::= Definition*
+Program   ::= (Definition | DataDecl)*
 
 Definition ::= Ident ":" Expr "is" Expr "end"
+
+DataDecl  ::= "data" Ident ":" Expr "is" ["|"] Ctor ("|" Ctor)* "end"   -- Phase 4
+Ctor      ::= Ident ":" Expr
 
 Expr      ::= Let
            |  Arrow
@@ -76,6 +80,7 @@ Atom      ::= Ident
            |  "Eq" | "refl" | "cast"      -- equality-former heads, applied like functions:
                                           --   Eq T l r · refl x (or bare refl when checking)
                                           --   cast A B p x      (Phase 3)
+           |  "subst"                     -- Leibniz transport: subst A x y p P px (Phase 4)
            |  Lam
            |  Seq
            |  "(" Expr ")"                -- parenthesized expression

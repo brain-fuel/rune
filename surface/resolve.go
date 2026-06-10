@@ -43,8 +43,8 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		return nil, fmt.Errorf("a hole (_) needs the type checker to solve it; name resolution alone cannot")
 	case EProp:
 		return core.Prop{}, nil
-	case EEq, ERefl, ECast:
-		return nil, fmt.Errorf("an under-applied equality former; Eq takes 3 arguments, refl 1, cast 4")
+	case EEq, ERefl, ECast, ESubst:
+		return nil, fmt.Errorf("an under-applied equality former; Eq takes 3 arguments, refl 1, cast 4, subst 6")
 	case ELam:
 		// The binder's domain annotation is scope-checked in the enclosing context and
 		// then discarded: the Phase-0 core lambda is un-annotated (GRAMMAR.md §6).
@@ -101,6 +101,19 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 					rs[i] = t
 				}
 				return core.Cast{A: rs[0], B: rs[1], P: rs[2], X: rs[3]}, nil
+			case ESubst:
+				if len(args) != 6 {
+					return nil, fmt.Errorf("subst takes exactly 6 arguments, got %d", len(args))
+				}
+				var rs [6]core.Tm
+				for i, a := range args {
+					t, err := r.resolve(a, ctx)
+					if err != nil {
+						return nil, err
+					}
+					rs[i] = t
+				}
+				return core.Subst{A: rs[0], X: rs[1], Y: rs[2], Prf: rs[3], P: rs[4], Px: rs[5]}, nil
 			}
 		}
 		fn, err := r.resolve(x.Fn, ctx)
@@ -190,7 +203,7 @@ func FreeIdents(e Exp) []string {
 				out = append(out, x.Name)
 			}
 		case EHole:
-		case EProp, EEq, ERefl, ECast:
+		case EProp, EEq, ERefl, ECast, ESubst:
 		case EUniv:
 		case ELam:
 			if x.Dom != nil {

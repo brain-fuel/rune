@@ -33,11 +33,41 @@ type Machine struct {
 	Metas MetaSolver
 	// EqS, when non-nil, supplies the equality stratum's reduction rules.
 	EqS EqStratum
+	// Data, when non-nil, supplies datatype roles for ι-reduction.
+	Data DataInfo
 }
 
 // MetaSolver resolves a metavariable to its solution value, if solved.
 type MetaSolver interface {
 	Solution(int) (Val, bool)
+}
+
+// CtorSig describes one constructor's arguments: its arity (after the data
+// type's parameters) and which of those arguments are recursive occurrences of
+// the datatype (the positions that get induction hypotheses).
+type CtorSig struct {
+	Arity int
+	Rec   []bool
+}
+
+// ElimSig describes an eliminator: the datatype it eliminates, the number of
+// datatype parameters, and the constructor signatures in declaration order.
+// The eliminator's argument layout is
+//
+//	elim p1..pk motive case1..casen scrutinee
+//
+// and the ι-rule fires when the scrutinee forces to a saturated constructor.
+type ElimSig struct {
+	Data      Hash
+	NumParams int
+	Ctors     []CtorSig
+}
+
+// DataInfo gives the evaluator the datatype roles of stored hashes (Phase 4).
+// store.Store implements it. Nil means no datatypes (ι never fires).
+type DataInfo interface {
+	CtorOf(Hash) (data Hash, idx int, ok bool)
+	ElimOf(Hash) (ElimSig, bool)
 }
 
 // EqStratum is the EQUALITY STRATUM's reduction hooks (Phase 3). The conversion
@@ -50,6 +80,8 @@ type EqStratum interface {
 	EvalEq(m *Machine, ty, l, r Val) Val
 	// EvalCast computes cast a b p x, never inspecting p.
 	EvalCast(m *Machine, a, b, p, x Val) Val
+	// EvalSubst computes subst a x y prf P px, never inspecting prf.
+	EvalSubst(m *Machine, a, x, y, prf, pmot, px Val) Val
 }
 
 // NewMachine returns a Machine over g with an empty dependency log.
@@ -117,6 +149,9 @@ func (m *Machine) Eval(env Env, t Tm) Val {
 		return VRefl{V: m.Eval(env, tm.Tm)}
 	case Cast:
 		return m.EvalCast(m.Eval(env, tm.A), m.Eval(env, tm.B), m.Eval(env, tm.P), m.Eval(env, tm.X))
+	case Subst:
+		return m.EvalSubst(m.Eval(env, tm.A), m.Eval(env, tm.X), m.Eval(env, tm.Y),
+			m.Eval(env, tm.Prf), m.Eval(env, tm.P), m.Eval(env, tm.Px))
 	case Let:
 		// The bound value is in-band (part of the term); the binder is
 		// definitionally transparent, so the body sees the VALUE.
@@ -135,11 +170,15 @@ func (m *Machine) refVal(h Hash) Val {
 	var memo Val
 	return VNeu{Spine: NRef{Hash: h}, Unfold: func() Val {
 		if memo == nil {
-			m.logDep(h)
 			body, ok := m.G.Unfold(h)
 			if !ok {
-				panic("core: unfolding unknown definition " + h.Short())
+				// Bodiless (a datatype former, constructor, or eliminator) or
+				// unknown: permanently rigid. No body was read, so no
+				// dependency is logged.
+				memo = VNeu{Spine: NRef{Hash: h}}
+				return memo
 			}
+			m.logDep(h)
 			memo = m.Eval(nil, body)
 		}
 		return memo
@@ -175,6 +214,11 @@ func (m *Machine) apply(fn, arg Val, icit Icit) Val {
 				}
 				return memo
 			}
+		}
+		// ι: a saturated eliminator applied to a constructor-headed scrutinee
+		// computes. This is as much a computation rule as β; it fires eagerly.
+		if red, ok := m.tryIota(out.Spine); ok {
+			return red
 		}
 		return out
 	default:
@@ -243,4 +287,90 @@ func (m *Machine) EvalCast(a, b, p, x Val) Val {
 		return m.EqS.EvalCast(m, a, b, p, x)
 	}
 	return VNeu{Spine: NCast{A: a, B: b, P: p, X: x}}
+}
+
+// EvalSubst applies the equality stratum's transport, or leaves it stuck.
+func (m *Machine) EvalSubst(a, x, y, prf, pmot, px Val) Val {
+	if m.EqS != nil {
+		return m.EqS.EvalSubst(m, a, x, y, prf, pmot, px)
+	}
+	return VNeu{Spine: NSubst{A: a, X: x, Y: y, Prf: prf, P: pmot, Px: px}}
+}
+
+// spineParts flattens a neutral spine into its head and argument values.
+func spineParts(n Neutral) (head Neutral, args []Val) {
+	for {
+		app, ok := n.(NApp)
+		if !ok {
+			return n, args
+		}
+		args = append([]Val{app.Arg}, args...)
+		n = app.Fn
+	}
+}
+
+// tryIota fires the eliminator computation rule on a saturated spine
+//
+//	elim p1..pk motive case1..casen scrutinee
+//
+// when the scrutinee forces to a saturated constructor C_i of the same
+// datatype: the result is case_i applied to the constructor's arguments and
+// then to one induction hypothesis (a recursive elimination) per recursive
+// argument. Forcing the scrutinee may unfold definitions — logged, as always.
+func (m *Machine) tryIota(spine Neutral) (Val, bool) {
+	if m.Data == nil {
+		return nil, false
+	}
+	head, args := spineParts(spine)
+	ref, ok := head.(NRef)
+	if !ok {
+		return nil, false
+	}
+	sig, ok := m.Data.ElimOf(ref.Hash)
+	if !ok {
+		return nil, false
+	}
+	want := sig.NumParams + 1 + len(sig.Ctors) + 1
+	if len(args) != want {
+		return nil, false
+	}
+	scrut := m.Force(args[len(args)-1])
+	sneu, ok := scrut.(VNeu)
+	if !ok {
+		return nil, false
+	}
+	chead, cargs := spineParts(sneu.Spine)
+	cref, ok := chead.(NRef)
+	if !ok {
+		return nil, false
+	}
+	cdata, idx, ok := m.Data.CtorOf(cref.Hash)
+	if !ok || cdata != sig.Data || idx >= len(sig.Ctors) {
+		return nil, false
+	}
+	cs := sig.Ctors[idx]
+	if len(cargs) != sig.NumParams+cs.Arity {
+		return nil, false // under-applied constructor: stuck
+	}
+	ctorArgs := cargs[sig.NumParams:]
+
+	// case_i applied to the constructor arguments...
+	result := args[sig.NumParams+1+idx]
+	for _, a := range ctorArgs {
+		result = m.Apply(result, a)
+	}
+	// ...then to the induction hypotheses for recursive arguments.
+	elimPrefix := args[:len(args)-1] // params, motive, cases
+	for i, rec := range cs.Rec {
+		if !rec {
+			continue
+		}
+		var ih Val = m.refVal(ref.Hash)
+		for _, a := range elimPrefix {
+			ih = m.Apply(ih, a)
+		}
+		ih = m.Apply(ih, ctorArgs[i])
+		result = m.Apply(result, ih)
+	}
+	return result, true
 }

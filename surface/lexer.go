@@ -27,10 +27,13 @@ const (
 	tLBrace // {  (implicit binder/argument; '{-' opens a comment instead)
 	tRBrace // }
 	tHole   // _  (a hole: a metavariable for elaboration to solve)
+	tData   // data (a datatype declaration; Phase 4)
+	tBar    // |  (constructor separator)
 	tProp   // Prop (the universe of propositions; Phase 3)
 	tEq     // Eq   (the observational equality type former)
 	tRefl   // refl (the reflexivity proof)
 	tCast   // cast (transport along a type equality)
+	tSubst  // subst (Leibniz transport along an equality; Phase 4)
 )
 
 type token struct {
@@ -79,6 +82,10 @@ func (k tokKind) String() string {
 		return "'}'"
 	case tHole:
 		return "'_'"
+	case tData:
+		return "'data'"
+	case tBar:
+		return "'|'"
 	case tProp:
 		return "'Prop'"
 	case tEq:
@@ -87,6 +94,8 @@ func (k tokKind) String() string {
 		return "'refl'"
 	case tCast:
 		return "'cast'"
+	case tSubst:
+		return "'subst'"
 	default:
 		return "token"
 	}
@@ -149,6 +158,9 @@ func lex(src string) ([]token, error) {
 		case r == ';':
 			toks = append(toks, token{tSemi, ";", i})
 			i++
+		case r == '|':
+			toks = append(toks, token{tBar, "|", i})
+			i++
 		case r == '-' && i+1 < len(rs) && rs[i+1] == '>':
 			toks = append(toks, token{tArrow, "->", i})
 			i += 2
@@ -186,6 +198,8 @@ func keyword(word string, pos int) token {
 		return token{tU, word, pos}
 	case "_":
 		return token{tHole, word, pos}
+	case "data":
+		return token{tData, word, pos}
 	case "Prop":
 		return token{tProp, word, pos}
 	case "Eq":
@@ -194,6 +208,8 @@ func keyword(word string, pos int) token {
 		return token{tRefl, word, pos}
 	case "cast":
 		return token{tCast, word, pos}
+	case "subst":
+		return token{tSubst, word, pos}
 	default:
 		return token{tIdent, word, pos}
 	}

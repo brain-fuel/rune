@@ -112,8 +112,15 @@ type NCast struct {
 	A, B, P, X Val
 }
 
-func (NVar) isNeutral()  {}
-func (NRef) isNeutral()  {}
-func (NApp) isNeutral()  {}
-func (NMeta) isNeutral() {}
-func (NCast) isNeutral() {}
+// NSubst is a stuck Leibniz transport: its equality's endpoints are not yet
+// convertible. Prf is carried for quotation only; conversion skips it.
+type NSubst struct {
+	A, X, Y, Prf, P, Px Val
+}
+
+func (NVar) isNeutral()   {}
+func (NSubst) isNeutral() {}
+func (NRef) isNeutral()   {}
+func (NApp) isNeutral()   {}
+func (NMeta) isNeutral()  {}
+func (NCast) isNeutral()  {}

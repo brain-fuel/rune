@@ -72,6 +72,9 @@ func (m *Machine) quoteSpine(lvl int, n Neutral, quoteVal func(int, Val) Tm) Tm 
 	case NCast:
 		return Cast{A: quoteVal(lvl, s.A), B: quoteVal(lvl, s.B),
 			P: quoteVal(lvl, s.P), X: quoteVal(lvl, s.X)}
+	case NSubst:
+		return Subst{A: quoteVal(lvl, s.A), X: quoteVal(lvl, s.X), Y: quoteVal(lvl, s.Y),
+			Prf: quoteVal(lvl, s.Prf), P: quoteVal(lvl, s.P), Px: quoteVal(lvl, s.Px)}
 	case NApp:
 		return App{Fn: m.quoteSpine(lvl, s.Fn, quoteVal), Arg: quoteVal(lvl, s.Arg), Icit: s.Icit}
 	default:

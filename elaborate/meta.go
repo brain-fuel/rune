@@ -97,6 +97,9 @@ func (e *Elaborator) Zonk(lvl int, t core.Tm) core.Tm {
 	case core.Cast:
 		return core.Cast{A: e.Zonk(lvl, tm.A), B: e.Zonk(lvl, tm.B),
 			P: e.Zonk(lvl, tm.P), X: e.Zonk(lvl, tm.X)}
+	case core.Subst:
+		return core.Subst{A: e.Zonk(lvl, tm.A), X: e.Zonk(lvl, tm.X), Y: e.Zonk(lvl, tm.Y),
+			Prf: e.Zonk(lvl, tm.Prf), P: e.Zonk(lvl, tm.P), Px: e.Zonk(lvl, tm.Px)}
 	case core.Meta:
 		if sol, ok := e.metas.Solution(tm.ID); ok {
 			return e.Zonk(lvl, e.M.Quote(lvl, sol))
@@ -171,6 +174,9 @@ func MetaFree(t core.Tm) bool {
 		return MetaFree(tm.Tm)
 	case core.Cast:
 		return MetaFree(tm.A) && MetaFree(tm.B) && MetaFree(tm.P) && MetaFree(tm.X)
+	case core.Subst:
+		return MetaFree(tm.A) && MetaFree(tm.X) && MetaFree(tm.Y) &&
+			MetaFree(tm.Prf) && MetaFree(tm.P) && MetaFree(tm.Px)
 	case core.Meta:
 		return false
 	case core.Pi:

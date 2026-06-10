@@ -86,7 +86,7 @@ func (s *Session) AddDef(d surface.Def) (Def, error) {
 		}
 	}
 	if body == nil {
-		el := elaborate.New(s.st, s.refs, s.refNames)
+		el := s.elaborator()
 		ety, ebody, err := el.ElabDef(d)
 		if err != nil {
 			return Def{}, err
@@ -105,20 +105,30 @@ func (s *Session) AddDef(d surface.Def) (Def, error) {
 	return rd, nil
 }
 
-// LoadSource parses a file of definitions and adds each in order, returning the names
-// added. On the first error the names added so far are returned alongside it.
+// LoadSource parses a file of top-level items (definitions and datatype
+// declarations) and adds each in order, returning the names added. On the
+// first error the names added so far are returned alongside it.
 func (s *Session) LoadSource(src string) ([]string, error) {
-	defs, err := surface.ParseFile(src)
+	items, err := surface.ParseProgram(src)
 	if err != nil {
 		return nil, err
 	}
 	var added []string
-	for _, d := range defs {
-		rd, err := s.AddDef(d)
-		if err != nil {
-			return added, err
+	for _, it := range items {
+		switch d := it.(type) {
+		case surface.Def:
+			rd, err := s.AddDef(d)
+			if err != nil {
+				return added, err
+			}
+			added = append(added, rd.Name)
+		case surface.DataDef:
+			names, err := s.AddData(d)
+			if err != nil {
+				return added, err
+			}
+			added = append(added, names...)
 		}
-		added = append(added, rd.Name)
 	}
 	return added, nil
 }
@@ -138,7 +148,9 @@ func (s *Session) RefNames() map[core.Hash]string { return s.refNames }
 
 // elaborator returns a fresh per-run Elaborator over the session store.
 func (s *Session) elaborator() *elaborate.Elaborator {
-	return elaborate.New(s.st, s.refs, s.refNames)
+	el := elaborate.New(s.st, s.refs, s.refNames)
+	el.M.Data = s.st
+	return el
 }
 
 // ElabExpr elaborates a surface expression against the session environment,
@@ -158,11 +170,45 @@ func (s *Session) ElabExpr(e surface.Exp) (tm, ty core.Tm, err error) {
 	return t, tyTm, nil
 }
 
-// NormalizeExpr fully normalizes (βδ) a closed, well-typed core term.
+// NormalizeExpr fully normalizes (βδι) a closed, well-typed core term.
 func (s *Session) NormalizeExpr(t core.Tm) core.Tm {
 	m := core.NewMachine(s.st)
 	m.EqS = equality.Default()
+	m.Data = s.st
 	return m.NormalizeUnfold(t)
+}
+
+// AddData elaborates and stores a datatype declaration, binding the former,
+// the constructors, and the eliminator (Name + "Elim").
+func (s *Session) AddData(d surface.DataDef) ([]string, error) {
+	el := s.elaborator()
+	decl, err := el.ElabData(d)
+	if err != nil {
+		return nil, err
+	}
+	dh, ctors, eh := s.st.AddData(decl)
+	names := []string{decl.Name}
+	s.bindName(decl.Name, dh)
+	for i, ch := range ctors {
+		s.bindName(decl.CtorNames[i], ch)
+		names = append(names, decl.CtorNames[i])
+	}
+	elimName := decl.Name + "Elim"
+	s.bindName(elimName, eh)
+	names = append(names, elimName)
+	return names, nil
+}
+
+// bindName binds a session name to a stored hash (definition order preserved).
+func (s *Session) bindName(name string, h core.Hash) {
+	ty, _ := s.st.TypeOf(h)
+	rd := Def{Name: name, Ty: ty, Hash: h}
+	if _, exists := s.byName[name]; !exists {
+		s.order = append(s.order, name)
+	}
+	s.refs[name] = h
+	s.refNames[h] = name
+	s.byName[name] = rd
 }
 
 // Certified reports whether the definition currently bound to name has a valid
@@ -170,4 +216,10 @@ func (s *Session) NormalizeExpr(t core.Tm) core.Tm {
 func (s *Session) Certified(name string) bool {
 	h, ok := s.refs[name]
 	return ok && s.st.Certified(h)
+}
+
+// Lookup returns the hash bound to a session name.
+func (s *Session) Lookup(name string) (core.Hash, bool) {
+	h, ok := s.refs[name]
+	return h, ok
 }

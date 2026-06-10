@@ -21,6 +21,18 @@ until a current listing (eventually a *Specify & Verify* listing) needs it.
 - **Universe hierarchy.** One universe `U` now (`type : type` stance); a real
   hierarchy is Phase 6 — a one-time cache nuke, deliberately late.
 
+## Parked in Phase 4
+
+- **Indexed families (Vec, Fin).** Datatypes take uniform parameters only;
+  indices need unification-based coverage machinery with no current listing.
+- **Pattern-matching sugar.** Listings use eliminators directly; compiling
+  match to eliminators is ergonomics with no consumer yet.
+- **General recursive definitions + termination checking.** The eliminator is
+  the only recursion principle, which makes totality structural. A termination
+  checker arrives only if a listing cannot be written eliminator-style.
+- **The empty type.** Declarations require at least one constructor; absurdity
+  arrives when a listing needs `Empty`/`absurd`.
+
 ## Tempted in Phase 0, not built
 
 - **Recursive-definition resolution.** `store.HashSCC` and positional `Placeholder`

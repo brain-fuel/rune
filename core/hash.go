@@ -47,6 +47,7 @@ const (
 	tagEq
 	tagRefl
 	tagCast
+	tagSubst
 )
 
 // HashTerm computes the structural Merkle hash of a core term.
@@ -111,6 +112,14 @@ func writeTerm(h hash.Hash, t Tm) {
 		writeTerm(h, tm.B)
 		writeTerm(h, tm.P)
 		writeTerm(h, tm.X)
+	case Subst:
+		h.Write([]byte{tagSubst})
+		writeTerm(h, tm.A)
+		writeTerm(h, tm.X)
+		writeTerm(h, tm.Y)
+		writeTerm(h, tm.Prf)
+		writeTerm(h, tm.P)
+		writeTerm(h, tm.Px)
 	case Meta:
 		// A metavariable has no content identity. Reaching one here means a
 		// definition was stored before being zonked — a checker bug, not data.

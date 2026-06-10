@@ -48,7 +48,7 @@ func (e *Elaborator) CheckCore(c *Ctx, t core.Tm, want core.Val) error {
 		if err != nil {
 			return err
 		}
-		if !e.M.Conv(c.Lvl(), got, want) {
+		if !e.M.Conv(c.Lvl(), got, want) && !e.M.Sub(c.Lvl(), got, want) {
 			return fmt.Errorf("type mismatch: expected %s, got %s",
 				e.pretty(c, want), e.pretty(c, got))
 		}
@@ -112,6 +112,30 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 			return nil, err
 		}
 		return vb, nil
+	case core.Subst:
+		if _, err := e.checkTypeCore(c, tm.A); err != nil {
+			return nil, err
+		}
+		va := e.Eval(c, tm.A)
+		if err := e.CheckCore(c, tm.X, va); err != nil {
+			return nil, err
+		}
+		if err := e.CheckCore(c, tm.Y, va); err != nil {
+			return nil, err
+		}
+		vx, vy := e.Eval(c, tm.X), e.Eval(c, tm.Y)
+		if err := e.CheckCore(c, tm.Prf, e.M.EvalEq(va, vx, vy)); err != nil {
+			return nil, err
+		}
+		motiveTy := core.VPi{Name: "z", Dom: va, Cod: func(core.Val) core.Val { return core.VU{} }}
+		if err := e.CheckCore(c, tm.P, motiveTy); err != nil {
+			return nil, err
+		}
+		vp := e.Eval(c, tm.P)
+		if err := e.CheckCore(c, tm.Px, e.M.Apply(vp, vx)); err != nil {
+			return nil, err
+		}
+		return e.M.Apply(vp, vy), nil
 	case core.Pi:
 		if _, err := e.checkTypeCore(c, tm.Dom); err != nil {
 			return nil, err

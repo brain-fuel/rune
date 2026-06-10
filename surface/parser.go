@@ -80,6 +80,82 @@ func ParseExpr(src string) (Exp, error) {
 // ParseFile parses a flat list of top-level definitions (GRAMMAR.md §3). Each
 // definition self-delimits with its own `end`, so no layout rule is needed;
 // newlines between definitions are insignificant.
+// ParseProgram parses a file of top-level items: definitions and datatype
+// declarations, in order.
+func ParseProgram(src string) ([]Item, error) {
+	toks, err := lex(src)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{toks: appendEOF(toks)}
+	var items []Item
+	for p.peek().kind != tEOF {
+		if p.peek().kind == tData {
+			d, err := p.parseData()
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, d)
+			continue
+		}
+		d, err := p.parseDef()
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, d)
+	}
+	return items, nil
+}
+
+// parseData parses `data Ident ":" Expr "is" Ctor ("|" Ctor)* "end"` with
+// Ctor ::= Ident ":" Expr. A leading "|" before the first constructor is
+// permitted.
+func (p *parser) parseData() (DataDef, error) {
+	p.next() // 'data'
+	id, err := p.expect(tIdent)
+	if err != nil {
+		return DataDef{}, err
+	}
+	if _, err := p.expect(tColon); err != nil {
+		return DataDef{}, err
+	}
+	ty, err := p.parseExpr()
+	if err != nil {
+		return DataDef{}, err
+	}
+	if _, err := p.expect(tIs); err != nil {
+		return DataDef{}, err
+	}
+	d := DataDef{Name: id.text, Ty: ty}
+	if p.peek().kind == tBar {
+		p.next()
+	}
+	for {
+		cid, err := p.expect(tIdent)
+		if err != nil {
+			return DataDef{}, err
+		}
+		if _, err := p.expect(tColon); err != nil {
+			return DataDef{}, err
+		}
+		cty, err := p.parseExpr()
+		if err != nil {
+			return DataDef{}, err
+		}
+		d.Ctors = append(d.Ctors, Ctor{Name: cid.text, Ty: cty})
+		switch p.peek().kind {
+		case tBar:
+			p.next()
+		case tEnd:
+			p.next()
+			return d, nil
+		default:
+			return DataDef{}, fmt.Errorf("expected '|' or 'end' in data declaration, found %s at offset %d",
+				p.peek().kind, p.peek().pos)
+		}
+	}
+}
+
 func ParseFile(src string) ([]Def, error) {
 	toks, err := lex(src)
 	if err != nil {
@@ -234,7 +310,7 @@ func (p *parser) parseApp() (Exp, error) {
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst:
 		return true
 	default:
 		return false
@@ -262,6 +338,9 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tCast:
 		p.next()
 		return ECast{}, nil
+	case tSubst:
+		p.next()
+		return ESubst{}, nil
 	case tIdent:
 		p.next()
 		return EVar{Name: t.text}, nil

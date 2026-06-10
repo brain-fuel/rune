@@ -185,6 +185,15 @@ func (e *Elaborator) unifySpine(lvl int, p, q core.Neutral) error {
 		if y, ok := q.(core.NMeta); ok && x.ID == y.ID {
 			return nil
 		}
+	case core.NSubst:
+		if y, ok := q.(core.NSubst); ok {
+			for _, pair := range [][2]core.Val{{x.A, y.A}, {x.X, y.X}, {x.Y, y.Y}, {x.P, y.P}, {x.Px, y.Px}} {
+				if err := e.Unify(lvl, pair[0], pair[1]); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
 	case core.NCast:
 		// Conversion skips the proof (irrelevance).
 		if y, ok := q.(core.NCast); ok {
@@ -326,6 +335,17 @@ func (e *Elaborator) renameSpine(id int, ren renaming, srcLvl int, n core.Neutra
 			return nil, fmt.Errorf("occurs check: ?%d would appear in its own solution", id)
 		}
 		return core.Meta{ID: s.ID}, nil
+	case core.NSubst:
+		parts := []core.Val{s.A, s.X, s.Y, s.Prf, s.P, s.Px}
+		out := make([]core.Tm, 6)
+		for i, v2 := range parts {
+			t2, err := e.rename(id, ren, srcLvl, v2)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = t2
+		}
+		return core.Subst{A: out[0], X: out[1], Y: out[2], Prf: out[3], P: out[4], Px: out[5]}, nil
 	case core.NCast:
 		a, err := e.rename(id, ren, srcLvl, s.A)
 		if err != nil {

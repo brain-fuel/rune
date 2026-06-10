@@ -71,3 +71,13 @@ func (o Observational) EvalCast(m *core.Machine, a, b, p, x core.Val) core.Val {
 	// only reach here on open terms; the checker rejects them when closed).
 	return core.VNeu{Spine: core.NCast{A: a, B: b, P: p, X: x}}
 }
+
+// EvalSubst computes Leibniz transport: when the equality's endpoints are
+// definitionally equal the transport is the identity on its subject; otherwise
+// it is stuck. The proof is never inspected.
+func (Observational) EvalSubst(m *core.Machine, a, x, y, prf, pmot, px core.Val) core.Val {
+	if m.Conv(0, x, y) {
+		return px
+	}
+	return core.VNeu{Spine: core.NSubst{A: a, X: x, Y: y, Prf: prf, P: pmot, Px: px}}
+}

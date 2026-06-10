@@ -90,17 +90,26 @@ func readLine(sc *bufio.Scanner) (string, bool) {
 // file), anything else is an expression. ErrIncomplete propagates so the caller can
 // prompt for continuation.
 func runForm(s *session.Session, src string, out io.Writer) error {
-	if looksLikeDef(src) {
-		defs, err := surface.ParseFile(src)
+	if looksLikeDef(src) || looksLikeData(src) {
+		items, err := surface.ParseProgram(src)
 		if err != nil {
 			return err
 		}
-		for _, d := range defs {
-			rd, err := s.AddDef(d)
-			if err != nil {
-				return err
+		for _, it := range items {
+			switch d := it.(type) {
+			case surface.Def:
+				rd, err := s.AddDef(d)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "defined %s\n", rd.Name)
+			case surface.DataDef:
+				names, err := s.AddData(d)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(out, "declared %s\n", strings.Join(names, " "))
 			}
-			fmt.Fprintf(out, "defined %s\n", rd.Name)
 		}
 		return nil
 	}
@@ -124,6 +133,12 @@ func runExpr(s *session.Session, e surface.Exp, out io.Writer) error {
 	fmt.Fprintf(out, "%s : %s\n",
 		surface.PrettyWith(nf, s.RefNames()), surface.PrettyWith(ty, s.RefNames()))
 	return nil
+}
+
+// looksLikeData reports whether src begins with the `data` keyword.
+func looksLikeData(src string) bool {
+	t := strings.TrimSpace(src)
+	return t == "data" || strings.HasPrefix(t, "data ") || strings.HasPrefix(t, "data\t")
 }
 
 // looksLikeDef reports whether src has the shape `Ident :` — an identifier head

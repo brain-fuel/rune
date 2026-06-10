@@ -89,10 +89,39 @@ func (m *Machine) convSpine(lvl int, p, q Neutral) bool {
 		// definitional proof irrelevance at the cast site.
 		y, ok := q.(NCast)
 		return ok && m.Conv(lvl, x.A, y.A) && m.Conv(lvl, x.B, y.B) && m.Conv(lvl, x.X, y.X)
+	case NSubst:
+		// Likewise: everything but the proof.
+		y, ok := q.(NSubst)
+		return ok && m.Conv(lvl, x.A, y.A) && m.Conv(lvl, x.X, y.X) &&
+			m.Conv(lvl, x.Y, y.Y) && m.Conv(lvl, x.P, y.P) && m.Conv(lvl, x.Px, y.Px)
 	case NApp:
 		y, ok := q.(NApp)
 		return ok && x.Icit == y.Icit && m.convSpine(lvl, x.Fn, y.Fn) && m.Conv(lvl, x.Arg, y.Arg)
 	default:
 		panic("core.Conv: unknown Neutral constructor")
 	}
+}
+
+// Sub reports a <: b — definitional conversion extended with cumulativity:
+// Prop <: U, and function types are covariant in their codomain (domains stay
+// invariant, which is sound and keeps the relation decidable without
+// antisymmetry games). Used where a Prop-valued thing is supplied at a
+// U-valued expectation (e.g. Prop-valued eliminator motives).
+func (m *Machine) Sub(lvl int, a, b Val) bool {
+	if m.Conv(lvl, a, b) {
+		return true
+	}
+	af, bf := m.Force(a), m.Force(b)
+	if _, ok := af.(VProp); ok {
+		if _, ok2 := bf.(VU); ok2 {
+			return true
+		}
+	}
+	pa, ok1 := af.(VPi)
+	pb, ok2 := bf.(VPi)
+	if ok1 && ok2 && pa.Icit == pb.Icit && m.Conv(lvl, pa.Dom, pb.Dom) {
+		v := VVar(lvl)
+		return m.Sub(lvl+1, pa.Cod(v), pb.Cod(v))
+	}
+	return false
 }

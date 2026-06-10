@@ -76,6 +76,16 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 			sb.WriteString("refl ")
 			p.print(sb, x.Tm, names, precAtom)
 		})
+	case core.Subst:
+		p.wrap(sb, prec, precApp, func() {
+			sb.WriteString("subst ")
+			for i, sub := range []core.Tm{x.A, x.X, x.Y, x.Prf, x.P, x.Px} {
+				if i > 0 {
+					sb.WriteByte(' ')
+				}
+				p.print(sb, sub, names, precAtom)
+			}
+		})
 	case core.Cast:
 		p.wrap(sb, prec, precApp, func() {
 			sb.WriteString("cast ")
