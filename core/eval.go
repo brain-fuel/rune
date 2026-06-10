@@ -38,6 +38,10 @@ type Machine struct {
 	// Quot, when non-nil, supplies quotient-builtin roles for the quotient
 	// ι-rules (v2): qlift/qind compute when their scrutinee is qin-headed.
 	Quot QuotInfo
+	// Fib, when non-nil, supplies fibrant-builtin roles for the two-level
+	// ι-rules (v3): El decodes, pathJ computes on preflF, castU computes on
+	// ureflU and through ua.
+	Fib FibInfo
 }
 
 // MetaSolver resolves a metavariable to its solution value, if solved.
@@ -99,6 +103,45 @@ const (
 // fire).
 type QuotInfo interface {
 	QuotRoleOf(Hash) QuotRole
+}
+
+// FibRole classifies a stored hash's role in the fibrant builtin group (v3):
+// the two-level layer's members, builtin definitions like the quotient kit.
+// See store/fib.go for the group, its types, and the computation/postulate
+// line.
+type FibRole byte
+
+const (
+	// FRoleNone: not a fibrant builtin.
+	FRoleNone FibRole = iota
+	// FRoleUF is the fibrant universe UF : U1.
+	FRoleUF
+	// FRoleEl decodes a fibrant code to its outer type: El : UF -> U.
+	FRoleEl
+	// FRoleFib embeds a small outer type as fibrant: fib : U -> UF.
+	FRoleFib
+	// FRolePiF closes UF under Pi.
+	FRolePiF
+	// FRolePathF is the inner identity type former.
+	FRolePathF
+	// FRolePrefl is the inner reflexivity preflF.
+	FRolePrefl
+	// FRoleJ is inner path induction pathJ (computes on preflF).
+	FRoleJ
+	// FRolePathU is the type of inner paths between fibrant types.
+	FRolePathU
+	// FRoleUrefl is ureflU : (A : UF) -> pathU A A.
+	FRoleUrefl
+	// FRoleUa is POSTULATED univalence (an iso yields a pathU).
+	FRoleUa
+	// FRoleCastU is transport along a pathU (computes on ureflU and ua).
+	FRoleCastU
+)
+
+// FibInfo gives the evaluator the fibrant-builtin roles of stored hashes (v3).
+// store.Store implements it. Nil means no fibrant builtins.
+type FibInfo interface {
+	FibRoleOf(Hash) FibRole
 }
 
 // EqStratum is the EQUALITY STRATUM's reduction hooks (Phase 3). The conversion
@@ -254,6 +297,9 @@ func (m *Machine) apply(fn, arg Val, icit Icit) Val {
 		if red, ok := m.tryQuotIota(out.Spine); ok {
 			return red
 		}
+		if red, ok := m.tryFibIota(out.Spine); ok {
+			return red
+		}
 		return out
 	default:
 		panic("core.Apply: applying a non-function (ill-typed core reached eval)")
@@ -392,6 +438,106 @@ func (m *Machine) tryQuotIota(spine Neutral) (Val, bool) {
 	}
 	// qin A R a: the carried point is the last argument.
 	return m.Apply(args[fnIdx], cargs[2]), true
+}
+
+// tryFibIota fires the two-level computation rules (v3) on a saturated spine.
+// What computes — and, as deliberately, what does not:
+//
+//	El (fib A)            ~>  A                                   (decoding)
+//	El (piF A B)          ~>  (x : El A) -> El (B x)              (decoding)
+//	pathJ A x P d y (preflF _ _)   ~>  d                          (J on refl)
+//	castU A B (ureflU _) x         ~>  x                          (transport on refl)
+//	castU A B (ua _ _ f _ _ _) x   ~>  f x                        (transport THROUGH ua)
+//
+// pathJ on a ua-path stays stuck: that is the postulated half of v3's
+// univalence, the §F frontier. El (pathF …) stays neutral: the inner path
+// type is abstract. Scrutinees are forced — logged, as always — so the
+// proof-cache seam is the same one ι-reduction has always used.
+func (m *Machine) tryFibIota(spine Neutral) (Val, bool) {
+	if m.Fib == nil {
+		return nil, false
+	}
+	head, args := spineParts(spine)
+	ref, ok := head.(NRef)
+	if !ok {
+		return nil, false
+	}
+	switch m.Fib.FibRoleOf(ref.Hash) {
+	case FRoleEl:
+		if len(args) != 1 {
+			return nil, false
+		}
+		code := m.Force(args[0])
+		cneu, ok := code.(VNeu)
+		if !ok {
+			return nil, false
+		}
+		chead, cargs := spineParts(cneu.Spine)
+		cref, ok := chead.(NRef)
+		if !ok {
+			return nil, false
+		}
+		switch m.Fib.FibRoleOf(cref.Hash) {
+		case FRoleFib:
+			if len(cargs) == 1 {
+				return cargs[0], true
+			}
+		case FRolePiF:
+			if len(cargs) == 2 {
+				dom := m.Apply(m.refVal(ref.Hash), cargs[0])
+				fam := cargs[1]
+				elRef := ref.Hash
+				return VPi{Name: "x", Dom: dom, Cod: func(x Val) Val {
+					return m.Apply(m.refVal(elRef), m.Apply(fam, x))
+				}}, true
+			}
+		}
+		return nil, false
+	case FRoleJ:
+		// pathJ A x P d y p — six arguments, d at index 3.
+		if len(args) != 6 {
+			return nil, false
+		}
+		if fibHeadIs(m, args[5], FRolePrefl, 2) {
+			return args[3], true
+		}
+		return nil, false
+	case FRoleCastU:
+		// castU A B p x — four arguments.
+		if len(args) != 4 {
+			return nil, false
+		}
+		if fibHeadIs(m, args[2], FRoleUrefl, 1) {
+			return args[3], true
+		}
+		p := m.Force(args[2])
+		if pneu, ok := p.(VNeu); ok {
+			phead, pargs := spineParts(pneu.Spine)
+			if pref, ok := phead.(NRef); ok &&
+				m.Fib.FibRoleOf(pref.Hash) == FRoleUa && len(pargs) == 6 {
+				return m.Apply(pargs[2], args[3]), true
+			}
+		}
+		return nil, false
+	default:
+		return nil, false
+	}
+}
+
+// fibHeadIs reports whether v forces to a saturated spine headed by a fibrant
+// builtin with the given role and arity.
+func fibHeadIs(m *Machine, v Val, role FibRole, arity int) bool {
+	f := m.Force(v)
+	n, ok := f.(VNeu)
+	if !ok {
+		return false
+	}
+	head, args := spineParts(n.Spine)
+	ref, ok := head.(NRef)
+	if !ok {
+		return false
+	}
+	return m.Fib.FibRoleOf(ref.Hash) == role && len(args) == arity
 }
 
 // tryIota fires the eliminator computation rule on a saturated spine

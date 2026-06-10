@@ -49,6 +49,8 @@ type Store struct {
 	elimRole   map[core.Hash]core.Hash
 	// The quotient builtin group (quot.go), once registered.
 	quot *quotEntry
+	// The fibrant builtin group (fib.go), once registered.
+	fib *fibEntry
 }
 
 // New returns an empty store.
