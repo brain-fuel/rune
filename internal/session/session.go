@@ -58,6 +58,11 @@ func (s *Session) Reset() {
 		s.refs[n] = hs[i]
 		s.refNames[hs[i]] = n
 	}
+	fhs := s.st.AddFib()
+	for i, n := range store.FibNames() {
+		s.refs[n] = fhs[i]
+		s.refNames[fhs[i]] = n
+	}
 }
 
 func (s *Session) resolver() *surface.Resolver { return &surface.Resolver{Refs: s.refs} }
@@ -162,6 +167,7 @@ func (s *Session) elaborator() *elaborate.Elaborator {
 	el := elaborate.New(s.st, s.refs, s.refNames)
 	el.M.Data = s.st
 	el.M.Quot = s.st
+	el.M.Fib = s.st
 	return el
 }
 
@@ -188,6 +194,7 @@ func (s *Session) NormalizeExpr(t core.Tm) core.Tm {
 	m.EqS = equality.Default()
 	m.Data = s.st
 	m.Quot = s.st
+	m.Fib = s.st
 	return m.NormalizeUnfold(t)
 }
 
@@ -259,6 +266,16 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 	if hs, ok := s.st.QuotHashes(); ok {
 		typeRefs[hs[0]] = true
 	}
+	// The fibrant layer's TYPE formers erase like any type: UF, El, fib, piF,
+	// pathF, pathU. Its VALUE members must not deploy at all (below): v3's
+	// criterion for the inner layer is "elaborates and checks", not "runs" —
+	// computational inner univalence is the §F frontier.
+	if fhs, ok := s.st.FibHashes(); ok {
+		for _, i := range []int{0, 1, 2, 3, 4, 7} {
+			typeRefs[fhs[i]] = true
+		}
+	}
+	tainted := map[string]string{}
 	for _, name := range s.order {
 		h := s.refs[name]
 		// Datatype groups are emitted once, at the former; constructor and
@@ -287,7 +304,55 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		if !ok {
 			return p, fmt.Errorf("definition %q has no body to emit", name)
 		}
-		p.Defs = append(p.Defs, codegen.DefSpec{Name: name, Body: codegen.Erase(body, s.refNames, typeRefs)})
+		ir := codegen.Erase(body, s.refNames, typeRefs)
+		// Inner-layer taint: a definition whose erased body references a
+		// fibrant VALUE member (or another tainted definition) checks but
+		// does not deploy in v3 — transport along a ua-path has no erased
+		// meaning yet, and emitting it would silently compute the wrong
+		// function. Tainted definitions are skipped; only a tainted MAIN is
+		// an error (see ref_docs/rune-v3-design.md §F).
+		if bad := innerTaint(ir, tainted); bad != "" {
+			tainted[name] = bad
+			if name == main {
+				return p, fmt.Errorf(
+					"definition %q uses the inner layer (%s): inner constructions check but do not deploy in v3 (see ref_docs/rune-v3-design.md §F)",
+					name, bad)
+			}
+			continue
+		}
+		p.Defs = append(p.Defs, codegen.DefSpec{Name: name, Body: ir})
 	}
 	return p, nil
+}
+
+// innerTaint reports the inner-layer name (a fibrant value member, or a
+// previously-tainted definition) an erased body references, or "".
+func innerTaint(t codegen.Ir, tainted map[string]string) string {
+	inner := map[string]bool{"preflF": true, "pathJ": true, "ureflU": true, "ua": true, "castU": true}
+	var walk func(codegen.Ir) string
+	walk = func(t codegen.Ir) string {
+		switch x := t.(type) {
+		case codegen.IGlobal:
+			if inner[x.Name] {
+				return x.Name
+			}
+			if via, ok := tainted[x.Name]; ok {
+				return x.Name + " (via " + via + ")"
+			}
+		case codegen.ILam:
+			return walk(x.Body)
+		case codegen.IApp:
+			if n := walk(x.Fn); n != "" {
+				return n
+			}
+			return walk(x.Arg)
+		case codegen.ILet:
+			if n := walk(x.Val); n != "" {
+				return n
+			}
+			return walk(x.Body)
+		}
+		return ""
+	}
+	return walk(t)
 }
