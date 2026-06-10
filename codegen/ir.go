@@ -111,7 +111,13 @@ func Erase(t core.Tm, names map[core.Hash]string, typeRefs map[core.Hash]bool) I
 	case core.Lam:
 		return ILam{Name: tm.Body.Name, Body: Erase(tm.Body.Body, names, typeRefs)}
 	case core.App:
-		return IApp{Fn: Erase(tm.Fn, names, typeRefs), Arg: Erase(tm.Arg, names, typeRefs)}
+		fn := Erase(tm.Fn, names, typeRefs)
+		if _, isUnit := fn.(IUnit); isUnit {
+			// A unit head is an erased type former (List, Quot, …): the whole
+			// application denotes a type and erases with it.
+			return IUnit{}
+		}
+		return IApp{Fn: fn, Arg: Erase(tm.Arg, names, typeRefs)}
 	case core.Let:
 		return ILet{Name: tm.Body.Name, Val: Erase(tm.Val, names, typeRefs),
 			Body: Erase(tm.Body.Body, names, typeRefs)}
