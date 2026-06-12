@@ -122,7 +122,8 @@ go install goforge.dev/rune/v3/cmd/rune@latest
 go test ./...        # the whole gate, including the listings corpus
 rune fmt  FILE       # parse -> elaborate -> check -> pretty-print
 rune hash FILE       # per definition: the Merkle hash of its checked core
-rune repl            # type check + normalize, definitions cached
+rune repl            # type check + normalize, definitions cached; Nat
+                     # arithmetic preloaded (--no-prelude for a bare session)
 rune emit FILE NAME  # the erased JavaScript shadow, to stdout
 rune run  FILE NAME  # emit and execute under node
 ```

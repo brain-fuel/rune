@@ -49,11 +49,19 @@ You should see:
 
 ```
 rune repl — expressions are type checked and normalized; definitions are checked and cached.
+prelude: Nat arithmetic loaded (+ - * / %, gcd; numerals print as digits). `rune repl --no-prelude` for a bare session.
 type :help for commands, :quit to exit.
 rune>
 ```
 
-Type `:quit` (or press Ctrl-D) to exit. For Lesson 9 you'll also want
+Type `:quit` (or press Ctrl-D) to exit.
+
+> **For this course, start the REPL with `rune repl --no-prelude`.** The
+> default prompt preloads natural-number arithmetic so the REPL works as a
+> calculator out of the box — but this course builds every one of those
+> definitions with you, starting from nothing, and the transcripts assume a
+> bare session. (Lesson 6 is where you build `Nat` yourself; by Lesson 10 you
+> will have rebuilt the entire prelude and proved theorems about it.) For Lesson 9 you'll also want
 [node](https://nodejs.org) on your PATH.
 
 > **Note:** if `rune repl` prints `usage: rune (fmt|hash) <file>` you have an

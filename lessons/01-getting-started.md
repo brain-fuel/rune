@@ -5,10 +5,11 @@ in Rune, and write your first definition.
 
 ## 1.1 The conversation
 
-Start the REPL:
+Start the REPL (bare, as explained in the [course README](README.md) — this
+course builds everything from nothing):
 
 ```sh
-rune repl
+rune repl --no-prelude
 ```
 
 Everything you type is either an **expression** (Rune evaluates it and tells

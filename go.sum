@@ -1,5 +1,6 @@
 github.com/klauspost/cpuid/v2 v2.2.7 h1:ZWSB3igEs+d0qvnxR/ZBzXVmxkgt8DdzP6m9pfuVLDM=
 github.com/klauspost/cpuid/v2 v2.2.7/go.mod h1:Lcz8mBdAVJIBVzewtcLocK12l3Y+JytZYpaMropDUws=
+github.com/spf13/pflag v1.0.10/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=
 goforge.dev/blake3sum v1.0.0 h1:YW2RsdpuHm9yvLu3dbFgFLfyZplezXQY46Y4gGP2Dew=
 goforge.dev/blake3sum v1.0.0/go.mod h1:06NLaoOjyif2aGczLlEpil2eZN3TbcWUBDSi8ugL/UQ=
 golang.org/x/sys v0.5.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=

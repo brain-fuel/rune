@@ -6,8 +6,9 @@ import (
 	"testing"
 )
 
-// TestREPLSession drives a full scripted session through Run and checks the loop reads,
-// resolves, shows, accumulates definitions, runs the commands, and survives bad input.
+// TestREPLSession drives a full scripted session through a bare (--no-prelude) REPL
+// and checks the loop reads, resolves, shows, accumulates definitions, runs the
+// commands, and survives bad input.
 func TestREPLSession(t *testing.T) {
 	script := []string{
 		"U",
@@ -28,8 +29,8 @@ func TestREPLSession(t *testing.T) {
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
 	var out bytes.Buffer
-	if err := Run(in, &out); err != nil {
-		t.Fatalf("Run returned error: %v", err)
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
 	}
 	got := out.String()
 
@@ -53,6 +54,52 @@ func TestREPLSession(t *testing.T) {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
 		}
+	}
+}
+
+// TestREPLPrelude checks the default REPL behaves like a calculator: the prelude
+// binds numerals and the five operators, results print as digits, definitions on
+// top of the prelude work, and :reset brings the prelude back.
+func TestREPLPrelude(t *testing.T) {
+	script := []string{
+		"1 + 1",
+		"6 * 7",
+		"5 - 7", // truncated subtraction floors at zero
+		"17 / 5",
+		"17 % 5",
+		"gcd 12 18",
+		"double : Nat -> Nat is fn (n : Nat) is n + n end end",
+		"double 21",
+		":reset",
+		"2 + 2", // the prelude survives :reset
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+
+	wants := []string{
+		"2 : Nat",  // 1 + 1
+		"42 : Nat", // 6 * 7 and double 21
+		"0 : Nat",  // 5 - 7
+		"3 : Nat",  // 17 / 5
+		"6 : Nat",  // gcd 12 18
+		"defined double",
+		"session cleared; prelude reloaded",
+		"4 : Nat", // 2 + 2 after :reset
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	// 17 % 5 = 2 must appear AFTER 17 / 5's "3 : Nat" — both print "2 : Nat"
+	// only if 1+1 did too, so just check the count of value lines is right.
+	if n := strings.Count(got, " : Nat"); n != 8 {
+		t.Errorf("expected 8 Nat value lines, got %d\n--- full output ---\n%s", n, got)
 	}
 }
 

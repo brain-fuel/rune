@@ -24,14 +24,32 @@ const (
 
 var errQuit = errors.New("quit")
 
-// Run drives the REPL until EOF or :quit. It never returns an error for bad user
-// input — only for an I/O failure on the input stream.
+// Config selects REPL startup behavior.
+type Config struct {
+	// NoPrelude starts a bare session: no Nat, no numerals, no operators —
+	// exactly the book's discipline of owning every definition on screen.
+	NoPrelude bool
+}
+
+// Run drives the REPL with the default configuration (prelude loaded).
 func Run(in io.Reader, out io.Writer) error {
+	return RunWith(in, out, Config{})
+}
+
+// RunWith drives the REPL until EOF or :quit. It never returns an error for bad
+// user input — only for an I/O failure on the input stream or a broken prelude.
+func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	s := session.New()
 
 	fmt.Fprintln(out, "rune repl — expressions are type checked and normalized; definitions are checked and cached.")
+	if !cfg.NoPrelude {
+		if err := loadPrelude(s); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "prelude: Nat arithmetic loaded (+ - * / %, gcd; numerals print as digits). `rune repl --no-prelude` for a bare session.")
+	}
 	fmt.Fprintln(out, "type :help for commands, :quit to exit.")
 
 	for {
@@ -46,7 +64,7 @@ func Run(in io.Reader, out io.Writer) error {
 			continue
 		}
 		if strings.HasPrefix(trimmed, ":") {
-			if err := runCommand(s, trimmed, out); err != nil {
+			if err := runCommand(s, cfg, trimmed, out); err != nil {
 				if errors.Is(err, errQuit) {
 					return nil
 				}
@@ -163,7 +181,7 @@ func isIdentByte(b byte) bool {
 		(b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
-func runCommand(s *session.Session, line string, out io.Writer) error {
+func runCommand(s *session.Session, cfg Config, line string, out io.Writer) error {
 	cmd := line
 	arg := ""
 	if i := strings.IndexAny(line, " \t"); i >= 0 {
@@ -180,6 +198,13 @@ func runCommand(s *session.Session, line string, out io.Writer) error {
 		return nil
 	case ":reset":
 		s.Reset()
+		if !cfg.NoPrelude {
+			if err := loadPrelude(s); err != nil {
+				return err
+			}
+			fmt.Fprintln(out, "session cleared; prelude reloaded")
+			return nil
+		}
 		fmt.Fprintln(out, "session cleared")
 		return nil
 	case ":load":
@@ -264,7 +289,7 @@ func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "  :type <expr>    (:t) type checking arrives in Phase 1")
 	fmt.Fprintln(out, "  :list           list session definitions")
 	fmt.Fprintln(out, "  :load <path>    load definitions from a file")
-	fmt.Fprintln(out, "  :reset          clear the session")
+	fmt.Fprintln(out, "  :reset          clear the session (reloads the prelude unless --no-prelude)")
 	fmt.Fprintln(out, "  :help           (:h) show this help")
 	fmt.Fprintln(out, "  :quit           (:q) exit (Ctrl-D also exits)")
 }

@@ -29,7 +29,16 @@ func main() {
 	}
 	switch os.Args[1] {
 	case "repl":
-		if err := repl.Run(os.Stdin, os.Stdout); err != nil {
+		cfg := repl.Config{}
+		for _, a := range os.Args[2:] {
+			if a == "--no-prelude" {
+				cfg.NoPrelude = true
+				continue
+			}
+			usage()
+			os.Exit(2)
+		}
+		if err := repl.RunWith(os.Stdin, os.Stdout, cfg); err != nil {
 			fatal(err)
 		}
 		return
@@ -101,7 +110,7 @@ func runHash(src string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: rune (fmt|hash) <file> | rune repl")
+	fmt.Fprintln(os.Stderr, "usage: rune (fmt|hash) <file> | rune repl [--no-prelude]")
 }
 
 func fatal(err error) {
