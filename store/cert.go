@@ -3,7 +3,7 @@ package store
 import (
 	"sort"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // The certificate table: the proof cache of ref_docs/rune-proof-cache-semantics.md.

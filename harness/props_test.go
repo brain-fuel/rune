@@ -5,8 +5,8 @@ import (
 
 	"pgregory.net/rapid"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/surface"
 )
 
 // resolveClosed resolves a closed surface expression to core, failing the test on any

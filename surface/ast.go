@@ -7,7 +7,7 @@
 // definition references (content hashes). There is no type elaboration in Phase 0.
 package surface
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // Exp is a named surface expression. Like core.Tm it is a sealed interface matched
 // by type switch; the marker keeps the constructor set closed.

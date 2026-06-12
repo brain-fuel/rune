@@ -1,6 +1,6 @@
 package store
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // The fibrant builtin group (v3): two-level type theory as a second equality
 // stratum, shipped the way v2 shipped quotients — a GROUP of bodiless,

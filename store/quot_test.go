@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // The quotient builtin group: five bodiless members, content-addressed as a

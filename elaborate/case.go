@@ -3,9 +3,9 @@ package elaborate
 import (
 	"fmt"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/store"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/store"
+	"goforge.dev/rune/v3/surface"
 )
 
 // Case elaboration (ergonomics rung 4). `case s of | C a* [with ih*] -> e | … end`

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"goforge.dev/rune/codegen"
-	"goforge.dev/rune/internal/session"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/codegen"
+	"goforge.dev/rune/v3/internal/session"
+	"goforge.dev/rune/v3/surface"
 )
 
 // The v1.0.0 freeze criterion (ref_docs/rune-v1-design.md): every listing in

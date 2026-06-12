@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/surface"
 )
 
 // The quotient pipeline end to end: the builtins are ambient, the ι-rules

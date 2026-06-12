@@ -8,7 +8,7 @@ package harness
 import (
 	"pgregory.net/rapid"
 
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/surface"
 )
 
 // namePool is a deliberately small alphabet so that generated terms frequently

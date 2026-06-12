@@ -1,7 +1,7 @@
 package store
 
 import (
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // Datatype declarations (Phase 4). A `data` declaration introduces a GROUP of

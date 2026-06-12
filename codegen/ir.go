@@ -1,6 +1,6 @@
 package codegen
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // The erased intermediate representation: an untyped lambda calculus with
 // globals, constructors, and eliminators. Types, proofs, and 0-quantity

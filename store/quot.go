@@ -1,6 +1,6 @@
 package store
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // The quotient builtin group (v2). Quotients extend the equality stratum the
 // way datatypes extended the core in Phase 4: as a GROUP of bodiless,

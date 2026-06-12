@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"goforge.dev/rune/internal/session"
+	"goforge.dev/rune/v3/internal/session"
 )
 
 func TestQuantityAccepted(t *testing.T) {

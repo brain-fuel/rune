@@ -6,8 +6,8 @@ import (
 
 	"pgregory.net/rapid"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/surface"
 )
 
 // closedText draws a closed expression and returns its canonical printed form — a

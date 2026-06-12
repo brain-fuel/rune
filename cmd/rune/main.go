@@ -15,11 +15,11 @@ import (
 	"strings"
 
 	"fmt"
-	"goforge.dev/rune/codegen"
+	"goforge.dev/rune/v3/codegen"
 	"os"
 
-	"goforge.dev/rune/internal/repl"
-	"goforge.dev/rune/internal/session"
+	"goforge.dev/rune/v3/internal/repl"
+	"goforge.dev/rune/v3/internal/session"
 )
 
 func main() {

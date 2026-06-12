@@ -10,7 +10,7 @@
 // reads.
 package quantity
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // Semiring abstracts the usage arithmetic: an additive monoid (Zero, Add) for
 // combining usages of distinct occurrences, and a multiplicative monoid (One,

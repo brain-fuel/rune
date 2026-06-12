@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // Metavariables (Phase 2). Metas are ELABORATION-SCOPED: created fresh per

@@ -1,6 +1,6 @@
 # Rune — Working Discipline
 
-`goforge.dev/rune` — the kernel of a small, content-addressed, dependently typed
+`goforge.dev/rune/v3` — the kernel of a small, content-addressed, dependently typed
 language. The end goal is provably correct infrastructure code; the v1 release
 criterion is that every listing in the book *Specify & Verify* elaborates, checks,
 and runs against this core, and the core contains nothing the book does not use.

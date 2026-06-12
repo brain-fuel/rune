@@ -1,6 +1,6 @@
 # Rune
 
-`goforge.dev/rune` — the kernel of a small, **content-addressed, dependently typed**
+`goforge.dev/rune/v3` — the kernel of a small, **content-addressed, dependently typed**
 language. A finished proof is a value, and its identity is the hash of its content,
 so verification becomes a cache that never recomputes. Dependent types are a
 build-time discipline; what deploys is the erasure — the shadow. The parts people
@@ -117,7 +117,7 @@ pretty-printer is the way back. Hashing is structural over elaborated core —
 ## Build, test, run
 
 ```sh
-go install goforge.dev/rune/cmd/rune@latest
+go install goforge.dev/rune/v3/cmd/rune@latest
 
 go test ./...        # the whole gate, including the listings corpus
 rune fmt  FILE       # parse -> elaborate -> check -> pretty-print

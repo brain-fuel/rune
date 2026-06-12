@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // Add stores a body reachable only through Unfold, and TypeOf exposes the public type.

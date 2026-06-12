@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"goforge.dev/rune/codegen"
-	"goforge.dev/rune/internal/session"
+	"goforge.dev/rune/v3/codegen"
+	"goforge.dev/rune/v3/internal/session"
 )
 
 // emitJS loads source and emits the program with the given main.

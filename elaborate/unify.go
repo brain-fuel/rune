@@ -3,7 +3,7 @@ package elaborate
 import (
 	"fmt"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // Pattern unification (Phase 2, Miller fragment). Unify is conversion's

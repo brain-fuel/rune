@@ -11,7 +11,7 @@
 // surface/nameless split are all deliberately ORTHOGONAL to this package.
 package equality
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // Stratum is the equality stratum: core.EqStratum plus identification.
 type Stratum interface {

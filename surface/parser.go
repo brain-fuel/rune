@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // ErrIncomplete marks a parse that ran out of input mid-form (an unterminated is/seq

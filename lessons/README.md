@@ -36,7 +36,7 @@ JavaScript you can run with node.
 You need Go installed. Then:
 
 ```sh
-go install goforge.dev/rune/cmd/rune@latest
+go install goforge.dev/rune/v3/cmd/rune@latest
 ```
 
 Check it works:

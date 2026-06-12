@@ -1,4 +1,4 @@
-module goforge.dev/rune
+module goforge.dev/rune/v3
 
 go 1.24
 

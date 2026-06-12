@@ -1,6 +1,6 @@
 package equality
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // Observational is the v1 equality stratum (Pujet–Tabareau, *Observational
 // Equality: Now For Good*): proof-irrelevant Prop, an Eq that computes on the

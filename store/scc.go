@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 
 	"goforge.dev/blake3sum/components/blake3"
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // newHasher returns the streaming BLAKE3 hasher backing every definition digest,

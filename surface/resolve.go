@@ -3,7 +3,7 @@ package surface
 import (
 	"fmt"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // Resolver carries the only context name resolution needs in Phase 0: a map from

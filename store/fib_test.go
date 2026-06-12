@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // The fibrant builtin group (v3): eleven bodiless members, content-addressed

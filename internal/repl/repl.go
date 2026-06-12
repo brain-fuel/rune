@@ -12,9 +12,9 @@ import (
 	"os"
 	"strings"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/internal/session"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/internal/session"
+	"goforge.dev/rune/v3/surface"
 )
 
 const (

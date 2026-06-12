@@ -1,6 +1,6 @@
 package quantity
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // ZeroOneOmega is the default usage semiring: Atkey's 0/1/ω lattice. Zero
 // means erased, One linear, Omega unrestricted. Addition saturates: two

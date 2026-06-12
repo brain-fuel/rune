@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/surface"
 )
 
 // resolveSrc parses and resolves a closed expression to core, failing on error.

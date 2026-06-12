@@ -19,10 +19,10 @@ package elaborate
 import (
 	"fmt"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/equality"
-	"goforge.dev/rune/quantity"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/equality"
+	"goforge.dev/rune/v3/quantity"
+	"goforge.dev/rune/v3/surface"
 )
 
 // Elaborator holds one elaboration/checking run: the NbE machine (with its

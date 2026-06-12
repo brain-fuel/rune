@@ -3,7 +3,7 @@ package elaborate
 import (
 	"fmt"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // CheckCore checks core term t against type want (a value). This is the cached

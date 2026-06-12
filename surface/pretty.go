@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"goforge.dev/rune/core"
+	"goforge.dev/rune/v3/core"
 )
 
 // Precedence levels for the pretty-printer. Higher binds tighter. They mirror

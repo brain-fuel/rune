@@ -4,11 +4,11 @@ import (
 	"strings"
 	"testing"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/elaborate"
-	"goforge.dev/rune/internal/session"
-	"goforge.dev/rune/store"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/elaborate"
+	"goforge.dev/rune/v3/internal/session"
+	"goforge.dev/rune/v3/store"
+	"goforge.dev/rune/v3/surface"
 )
 
 // loadOK loads source into a fresh session, failing the test on any error.

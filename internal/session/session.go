@@ -10,12 +10,12 @@ package session
 import (
 	"fmt"
 
-	"goforge.dev/rune/codegen"
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/elaborate"
-	"goforge.dev/rune/equality"
-	"goforge.dev/rune/store"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/codegen"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/elaborate"
+	"goforge.dev/rune/v3/equality"
+	"goforge.dev/rune/v3/store"
+	"goforge.dev/rune/v3/surface"
 )
 
 // Def is one definition after name resolution: its core type, body, and content hash.

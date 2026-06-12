@@ -3,8 +3,8 @@ package elaborate
 import (
 	"fmt"
 
-	"goforge.dev/rune/core"
-	"goforge.dev/rune/surface"
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/surface"
 )
 
 // The surface elaborator: bidirectional Infer/Check from named surface Exp to

@@ -13,7 +13,7 @@
 // unfolding is the SAME operation; they coincide on purpose.
 package store
 
-import "goforge.dev/rune/core"
+import "goforge.dev/rune/v3/core"
 
 // Def is a stored definition. Type is public; body is sealed. The pair (Type, body)
 // is the definition's content, and its content hash summarizes both.
