@@ -127,12 +127,27 @@ type DataDef struct {
 	Ctors []Ctor
 }
 
-// Item is one top-level program item: a *Def or a *DataDef.
+// BuiltinNat is a builtin-binding declaration (ergonomics rung 2):
+//
+//	builtin nat Nat zero succ
+//
+// It registers which data type numeric literals mean: from its position to the
+// end of the file, a numeral n parses as the n-fold application of Succ to
+// Zero. The declaration is surface state only — it desugars every literal at
+// parse time and leaves no trace of its own in the core or the store.
+type BuiltinNat struct {
+	TyName string
+	Zero   string
+	Succ   string
+}
+
+// Item is one top-level program item: a Def, a DataDef, or a BuiltinNat.
 type Item interface {
 	isItem()
 }
 
-func (Def) isItem()     {}
-func (DataDef) isItem() {}
+func (Def) isItem()        {}
+func (DataDef) isItem()    {}
+func (BuiltinNat) isItem() {}
 
 func (ESubst) isExp() {}

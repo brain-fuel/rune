@@ -55,6 +55,48 @@ func PrettyWith(t core.Tm, refNames map[core.Hash]string) string {
 
 type printer struct {
 	refNames map[core.Hash]string
+	// natZero/natSucc are the constructor hashes of a registered `builtin nat`
+	// binding; when set (foldNat), saturated succ-chains over zero print as
+	// numerals (GRAMMAR §8). Digits re-parse to the same core under the same
+	// binding, so the round-trip contract is preserved.
+	natZero, natSucc core.Hash
+	foldNat          bool
+}
+
+// PrettyNat is PrettyWith with a registered `builtin nat` binding: saturated
+// applications succ (… (succ zero)) print as numerals.
+func PrettyNat(t core.Tm, refNames map[core.Hash]string, zero, succ core.Hash) string {
+	p := &printer{refNames: refNames, natZero: zero, natSucc: succ, foldNat: true}
+	var sb strings.Builder
+	p.print(&sb, t, nil, precLow)
+	return sb.String()
+}
+
+// numeralOf recognizes a saturated succ-chain terminating in zero and returns
+// its value. Chains over a non-zero tail (succ n) are not numerals.
+func (p *printer) numeralOf(t core.Tm) (int, bool) {
+	if !p.foldNat {
+		return 0, false
+	}
+	n := 0
+	for {
+		switch x := t.(type) {
+		case core.Ref:
+			if x.Hash == p.natZero {
+				return n, true
+			}
+			return 0, false
+		case core.App:
+			ref, ok := x.Fn.(core.Ref)
+			if !ok || x.Icit != core.Expl || ref.Hash != p.natSucc {
+				return 0, false
+			}
+			n++
+			t = x.Arg
+		default:
+			return 0, false
+		}
+	}
 }
 
 // print writes t at the given surrounding precedence. names is the in-scope binder
@@ -68,6 +110,10 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 			sb.WriteString("?" + strconv.Itoa(x.Idx))
 		}
 	case core.Ref:
+		if v, ok := p.numeralOf(x); ok {
+			sb.WriteString(strconv.Itoa(v))
+			return
+		}
 		if n, ok := p.refNames[x.Hash]; ok {
 			if opPrec(n) >= 0 {
 				// An operator outside its infix position prints first-class: (+).
@@ -123,6 +169,11 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 			p.print(sb, x.X, names, precAtom)
 		})
 	case core.App:
+		// A saturated succ-chain over zero prints as a numeral (an atom).
+		if v, ok := p.numeralOf(x); ok {
+			sb.WriteString(strconv.Itoa(v))
+			return
+		}
 		// A saturated binary application of an operator-named definition prints
 		// infix at its table level; left operand at the level (left-associative),
 		// right operand one tighter. Re-parsing reads it back to the same core.

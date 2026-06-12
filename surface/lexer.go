@@ -34,8 +34,9 @@ const (
 	tRefl   // refl (the reflexivity proof)
 	tCast   // cast (transport along a type equality)
 	tSubst  // subst (Leibniz transport along an equality; Phase 4)
-	tQty    // 0 or 1: a usage annotation on a binder (Phase 5)
-	tOp     // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
+	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
+	tOp      // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
+	tBuiltin // builtin (a builtin-binding declaration: builtin nat Nat zero succ)
 )
 
 type token struct {
@@ -98,10 +99,12 @@ func (k tokKind) String() string {
 		return "'cast'"
 	case tSubst:
 		return "'subst'"
-	case tQty:
-		return "quantity"
+	case tNum:
+		return "numeral"
 	case tOp:
 		return "operator"
+	case tBuiltin:
+		return "'builtin'"
 	default:
 		return "token"
 	}
@@ -175,9 +178,12 @@ func lex(src string) ([]token, error) {
 			// cases above have declined it.
 			toks = append(toks, token{tOp, string(r), i})
 			i++
-		case r == '0' || r == '1':
-			toks = append(toks, token{tQty, string(r), i})
-			i++
+		case unicode.IsDigit(r):
+			start := i
+			for i < len(rs) && unicode.IsDigit(rs[i]) {
+				i++
+			}
+			toks = append(toks, token{tNum, string(rs[start:i]), start})
 		case isIdentStart(r):
 			start := i
 			for i < len(rs) && isIdentCont(rs[i]) {
@@ -216,6 +222,8 @@ func keyword(word string, pos int) token {
 		return token{tHole, word, pos}
 	case "data":
 		return token{tData, word, pos}
+	case "builtin":
+		return token{tBuiltin, word, pos}
 	case "Prop":
 		return token{tProp, word, pos}
 	case "Eq":

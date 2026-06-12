@@ -3,6 +3,7 @@ package surface
 import (
 	"errors"
 	"fmt"
+	"strconv"
 
 	"goforge.dev/rune/core"
 )
@@ -19,7 +20,16 @@ type parser struct {
 	// let/seq type annotation, where '=' belongs to the binding (GRAMMAR §5.4). It
 	// is inherited through arrows and operators and reset inside bracketed groups.
 	noEq bool
+	// natZero/natSucc are the constructor names a `builtin nat` declaration
+	// registered; numerals expand against them at parse time (GRAMMAR §5.5).
+	// Empty means no binding: a numeral is then a parse error.
+	natZero, natSucc string
 }
+
+// numMax caps numeral expansion: a literal is nothing but its unary succ-chain
+// (a compressed core numeral is parked), so an absurd literal must fail loudly
+// rather than materialize a million-node term.
+const numMax = 1 << 16
 
 // skipNL advances past tNewline tokens. Newlines are insignificant everywhere the
 // ordinary peek/next path runs; only seq item collection reads tokens raw (§2, §5.3).
@@ -102,6 +112,14 @@ func ParseProgram(src string) ([]Item, error) {
 			items = append(items, d)
 			continue
 		}
+		if p.peek().kind == tBuiltin {
+			b, err := p.parseBuiltin()
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, b)
+			continue
+		}
 		d, err := p.parseDef()
 		if err != nil {
 			return nil, err
@@ -109,6 +127,49 @@ func ParseProgram(src string) ([]Item, error) {
 		items = append(items, d)
 	}
 	return items, nil
+}
+
+// parseBuiltin parses `builtin nat Ident Ident Ident` (GRAMMAR §3) and registers
+// the binding with the parser, so numerals in the rest of the file expand
+// against it (§5.5).
+func (p *parser) parseBuiltin() (BuiltinNat, error) {
+	p.next() // 'builtin'
+	kind, err := p.expect(tIdent)
+	if err != nil {
+		return BuiltinNat{}, err
+	}
+	if kind.text != "nat" {
+		return BuiltinNat{}, fmt.Errorf("unknown builtin kind %q at offset %d (only \"nat\" exists)", kind.text, kind.pos)
+	}
+	var names [3]string
+	for i := range names {
+		id, err := p.expect(tIdent)
+		if err != nil {
+			return BuiltinNat{}, err
+		}
+		names[i] = id.text
+	}
+	b := BuiltinNat{TyName: names[0], Zero: names[1], Succ: names[2]}
+	p.natZero, p.natSucc = b.Zero, b.Succ
+	return b, nil
+}
+
+// ParseExprNat is ParseExpr with a registered `builtin nat` binding, so numerals
+// in the expression expand. The REPL uses it once a session has the binding.
+func ParseExprNat(src, zero, succ string) (Exp, error) {
+	toks, err := lex(src)
+	if err != nil {
+		return nil, err
+	}
+	p := &parser{toks: toks, natZero: zero, natSucc: succ}
+	e, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().kind != tEOF {
+		return nil, fmt.Errorf("unexpected %s at offset %d", p.peek().kind, p.peek().pos)
+	}
+	return e, nil
 }
 
 // parseData parses `data Ident ":" Expr "is" Ctor ("|" Ctor)* "end"` with
@@ -390,7 +451,7 @@ func (p *parser) parseApp() (Exp, error) {
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum:
 		return true
 	default:
 		return false
@@ -428,6 +489,9 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tIdent:
 		p.next()
 		return EVar{Name: t.text}, nil
+	case tNum:
+		p.next()
+		return p.expandNum(t)
 	case tFn:
 		return p.parseLam()
 	case tSeq:
@@ -496,7 +560,7 @@ func (p *parser) parseBinder() (string, core.Icit, core.Qty, Exp, error) {
 	saved := p.noEq
 	p.noEq = false
 	defer func() { p.noEq = saved }()
-	if p.peek().kind == tQty {
+	if isQtyTok(p.peek()) {
 		qty = qtyOf(p.next().text)
 	}
 	id, err := p.expect(tIdent)
@@ -524,6 +588,32 @@ func qtyOf(text string) core.Qty {
 	return core.QOne
 }
 
+// expandNum desugars a numeral against the registered `builtin nat` binding:
+// n becomes the n-fold application of Succ to Zero (GRAMMAR §5.5, §6). The
+// expansion is pure parser sugar — downstream the constructors are ordinary
+// names resolving to ordinary content-hash references.
+func (p *parser) expandNum(t token) (Exp, error) {
+	if p.natZero == "" {
+		return nil, fmt.Errorf("numeral %s at offset %d has no meaning: no `builtin nat` declared", t.text, t.pos)
+	}
+	n, err := strconv.Atoi(t.text)
+	if err != nil || n > numMax {
+		return nil, fmt.Errorf("numeral %s at offset %d is too large to expand (unary literals cap at %d)", t.text, t.pos, numMax)
+	}
+	e := Exp(EVar{Name: p.natZero})
+	for range n {
+		e = EApp{Fn: EVar{Name: p.natSucc}, Arg: e}
+	}
+	return e, nil
+}
+
+// isQtyTok reports whether a token is a usage annotation in binder position:
+// the numerals "0" and "1" (GRAMMAR §2 — position disambiguates them from
+// numeric literals).
+func isQtyTok(t token) bool {
+	return t.kind == tNum && (t.text == "0" || t.text == "1")
+}
+
 // parseParen disambiguates the three things a '(' can open at the head of an
 // Arrow/App, with one token of lookahead past the ')' (§5.1): a dependent-Pi binder
 // `(x : A) ->`, a parenthesized ascription `(e : T)`, and plain grouping `(e)`.
@@ -539,7 +629,7 @@ func (p *parser) parseParen() (Exp, error) {
 	saved := p.noEq
 	p.noEq = false
 	defer func() { p.noEq = saved }()
-	if p.peek().kind == tQty && p.peekAt(1).kind == tIdent && p.peekAt(2).kind == tColon {
+	if isQtyTok(p.peek()) && p.peekAt(1).kind == tIdent && p.peekAt(2).kind == tColon {
 		// (0 x : A) -> B / (1 x : A) -> B: a quantity-annotated dependent Pi.
 		qty := qtyOf(p.next().text)
 		param := p.next().text

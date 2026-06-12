@@ -34,6 +34,9 @@ type Session struct {
 	refNames map[core.Hash]string
 	order    []string
 	byName   map[string]Def
+	// nat is the `builtin nat` binding of the loaded source, if any: it lets
+	// REPL expressions use numerals and the printer fold succ-chains back.
+	nat *surface.BuiltinNat
 }
 
 // New returns an empty session.
@@ -144,9 +147,56 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 				return added, err
 			}
 			added = append(added, names...)
+		case surface.BuiltinNat:
+			if err := s.AddBuiltinNat(d); err != nil {
+				return added, err
+			}
 		}
 	}
 	return added, nil
+}
+
+// AddBuiltinNat validates and registers a `builtin nat` declaration: the three
+// names must be bound, and zero/succ must be constructors of the named type's
+// data group. The declaration is session state only — nothing enters the store.
+func (s *Session) AddBuiltinNat(b surface.BuiltinNat) error {
+	tyH, ok := s.refs[b.TyName]
+	if !ok {
+		return fmt.Errorf("builtin nat: unknown type %q", b.TyName)
+	}
+	if _, _, _, isData := s.st.DataDeclOf(tyH); !isData {
+		return fmt.Errorf("builtin nat: %q is not a data type", b.TyName)
+	}
+	for _, n := range []string{b.Zero, b.Succ} {
+		h, ok := s.refs[n]
+		if !ok {
+			return fmt.Errorf("builtin nat: unknown constructor %q", n)
+		}
+		dh, _, isCtor := s.st.CtorOf(h)
+		if !isCtor || dh != tyH {
+			return fmt.Errorf("builtin nat: %q is not a constructor of %q", n, b.TyName)
+		}
+	}
+	s.nat = &b
+	return nil
+}
+
+// ParseSrcExpr parses a single expression against the session: when a `builtin
+// nat` binding is registered, numerals in the expression expand against it.
+func (s *Session) ParseSrcExpr(src string) (surface.Exp, error) {
+	if s.nat != nil {
+		return surface.ParseExprNat(src, s.nat.Zero, s.nat.Succ)
+	}
+	return surface.ParseExpr(src)
+}
+
+// Pretty renders a core term with the session's reference names; under a
+// `builtin nat` binding, saturated succ-chains fold back to numerals.
+func (s *Session) Pretty(t core.Tm) string {
+	if s.nat != nil {
+		return surface.PrettyNat(t, s.refNames, s.refs[s.nat.Zero], s.refs[s.nat.Succ])
+	}
+	return surface.PrettyWith(t, s.refNames)
 }
 
 // Defs returns the session definitions in definition order.

@@ -20,7 +20,6 @@ import (
 
 	"goforge.dev/rune/internal/repl"
 	"goforge.dev/rune/internal/session"
-	"goforge.dev/rune/surface"
 )
 
 func main() {
@@ -83,12 +82,9 @@ func runFmt(src string) error {
 	if _, err := s.LoadSource(src); err != nil {
 		return err
 	}
-	names := s.RefNames()
 	for _, d := range s.Defs() {
 		fmt.Printf("%s : %s is\n  %s\nend\n",
-			d.Name,
-			surface.PrettyWith(d.Ty, names),
-			surface.PrettyWith(d.Body, names))
+			d.Name, s.Pretty(d.Ty), s.Pretty(d.Body))
 	}
 	return nil
 }

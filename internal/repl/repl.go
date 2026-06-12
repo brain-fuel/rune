@@ -113,7 +113,7 @@ func runForm(s *session.Session, src string, out io.Writer) error {
 		}
 		return nil
 	}
-	e, err := surface.ParseExpr(src)
+	e, err := s.ParseSrcExpr(src)
 	if err != nil {
 		return err
 	}
@@ -130,8 +130,7 @@ func runExpr(s *session.Session, e surface.Exp, out io.Writer) error {
 		return err
 	}
 	nf := s.NormalizeExpr(tm)
-	fmt.Fprintf(out, "%s : %s\n",
-		surface.PrettyWith(nf, s.RefNames()), surface.PrettyWith(ty, s.RefNames()))
+	fmt.Fprintf(out, "%s : %s\n", s.Pretty(nf), s.Pretty(ty))
 	return nil
 }
 
@@ -200,7 +199,7 @@ func resolveArg(s *session.Session, arg string) (core.Tm, error) {
 	if strings.TrimSpace(arg) == "" {
 		return nil, fmt.Errorf("expected an expression")
 	}
-	e, err := surface.ParseExpr(arg)
+	e, err := s.ParseSrcExpr(arg)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +274,7 @@ func showType(s *session.Session, arg string, out io.Writer) error {
 	if strings.TrimSpace(arg) == "" {
 		return fmt.Errorf("expected an expression")
 	}
-	e, err := surface.ParseExpr(arg)
+	e, err := s.ParseSrcExpr(arg)
 	if err != nil {
 		return err
 	}
@@ -283,6 +282,6 @@ func showType(s *session.Session, arg string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, surface.PrettyWith(ty, s.RefNames()))
+	fmt.Fprintln(out, s.Pretty(ty))
 	return nil
 }

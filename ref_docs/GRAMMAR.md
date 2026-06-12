@@ -46,10 +46,13 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
 - **Comments** are insignificant and are **not** preserved by the pretty-printer (round-trip is
   modulo comments): line comment `-- … <end-of-line>`; block comment `{- … -}`, **nestable**.
 - **Identifier:** `(letter | "_") (letter | digit | "_" | "'")*`. Case-sensitive.
+- **Numeral:** `digit+`, one token. In binder-quantity position (`(0 x : A)`, `{1 x : A}`) the
+  numerals `0` and `1` are usage annotations — position disambiguates, never the lexer. In
+  expression position a numeral is a literal of the `builtin nat`-bound type (§5.5).
 - **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
-  equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), and `data` (Phase 4).
-  The bare underscore `_` is reserved as the hole; identifiers may still begin with `_`
-  (`_x` is a name). `|` separates constructors inside a `data` block.
+  equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4), and
+  `builtin` (ergonomics rung 2). The bare underscore `_` is reserved as the hole; identifiers
+  may still begin with `_` (`_x` is a name). `|` separates constructors inside a `data` block.
 - **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
   instead, so an implicit form cannot begin with a literal `-`.
 - **Punctuation:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
@@ -67,10 +70,12 @@ Notation: `X*` zero+ , `X+` one+ , `[X]` optional, `|` alternation, `"…"` term
 generative skeleton; §5 gives the deterministic parse for the `(`-forms and for `seq`.
 
 ```
-Program   ::= (Definition | DataDecl)*
+Program   ::= (Definition | DataDecl | BuiltinDecl)*
 
 Definition ::= DefName ":" Expr "is" Expr "end"
 DefName   ::= Ident | Op
+
+BuiltinDecl ::= "builtin" "nat" Ident Ident Ident   -- type, zero, succ (§5.5)
 
 DataDecl  ::= "data" Ident ":" Expr "is" ["|"] Ctor ("|" Ctor)* "end"   -- Phase 4
 Ctor      ::= Ident ":" Expr
@@ -98,6 +103,7 @@ Arg       ::= Atom                        -- explicit argument
            |  "{" Expr "}"                -- implicit argument, given explicitly (Phase 2)
 
 Atom      ::= Ident
+           |  Num                         -- a numeral; requires a builtin nat in scope (§5.5)
            |  "(" Op ")"                  -- an operator, prefix/first-class: (+) x y
            |  "_"                         -- a hole: a metavariable for elaboration (Phase 2)
            |  "U"
@@ -205,6 +211,26 @@ separators:
 - One token of lookahead still suffices everywhere: an operator token after a complete operand
   is the only infix trigger, and `( Op )` is recognized by the token after the `(`.
 
+### 5.5 Numerals and `builtin nat`
+
+```
+builtin nat Nat zero succ
+```
+
+registers which data type numerals mean: the type, its zero, and its successor, by name. From
+the declaration to the end of the file (and in REPL expressions once a loaded file declared it),
+a numeral `n` in expression position parses as the n-fold application of the successor to the
+zero — pure parser sugar; downstream the constructors are ordinary names resolving to ordinary
+content-hash references, and the declaration itself leaves no trace in the core or the store.
+
+- **No binding in scope → a numeral is a parse error** ("no `builtin nat` declared").
+- The session validates the declaration: the type must be a `data` type and the two names must
+  be its constructors.
+- A literal is nothing but its unary succ-chain, so numerals **cap at 65536**; a compressed core
+  numeral is parked until a listing embeds a constant that big.
+- `0` and `1` in binder-quantity position are usage annotations, not literals (§2); position
+  decides, so `(0 x : Nat)` annotates while `f 0` applies `f` to the literal.
+
 ## 6. Desugaring to core
 
 Surface is sugar over the core; resolution lowers as follows.
@@ -225,6 +251,8 @@ Surface is sugar over the core; resolution lowers as follows.
 - **Inline let** and **application** ⟶ their existing core nodes directly.
 - **Infix operators.** `x + y` ⟶ the application `(+) x y`; nothing downstream of the parser
   knows operators exist. `l = r` ⟶ `Eq _ l r` (the hole becomes a metavariable in elaboration).
+- **Numerals.** Under `builtin nat Nat zero succ`, the literal `3` ⟶ `succ (succ (succ zero))`
+  (§5.5), at parse time.
 
 ## 7. Examples
 
@@ -296,6 +324,11 @@ operator name prints as `x + y`, parenthesized per the §3 precedence table; uns
 non-operator applications print prefix (`(+) x`). Both forms re-parse to the same core, so the
 round-trip property extends unchanged.
 
+The printer also folds numerals when a `builtin nat` binding is registered: a saturated
+succ-chain terminating in the bound zero prints as digits (`succ (succ zero)` prints `2`), which
+re-parse to the same core under the same binding. A chain over a variable tail (`succ n`) is not
+a numeral and prints as application.
+
 Canonical layout: definitions break across lines; short `fn … is … end` and `let … in …` may stay
 on one line. The `seq` keyword is accepted on input (one item per line, or `;`-separated) but is
 not produced on output.
@@ -314,7 +347,7 @@ would be convenient — add nothing with no current consumer.
 - Data type and record declarations — Phase 4.
 - Modules, imports, visibility — later; v0.2.0 is a flat list of definitions that may reference one
   another (mutual recursion is handled at the store/SCC level, not the surface).
-- Literals (numbers, strings, characters) and holes (`_` as a term) — later.
+- String and character literals — later. (Numeric literals arrived with `builtin nat`, §5.5.)
 
 ## 10. Input contexts
 

@@ -262,3 +262,50 @@ func TestInfixPrinting(t *testing.T) {
 		}
 	}
 }
+
+// TestNumerals pins §5.5: literals expand against the registered builtin nat at
+// parse time; without a binding they are a parse error; quantities still parse.
+func TestNumerals(t *testing.T) {
+	prog := `data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+two : Nat is 2 end
+zeroLit : Nat is 0 end
+qty : (0 A : U) -> (1 x : A) -> A is fn {- placeholder -} (0 A : U) (1 x : A) is x end end`
+	items, err := surface.ParseProgram(prog)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var two surface.Exp
+	var sawBuiltin bool
+	for _, it := range items {
+		switch d := it.(type) {
+		case surface.BuiltinNat:
+			sawBuiltin = true
+			if d.TyName != "Nat" || d.Zero != "zero" || d.Succ != "succ" {
+				t.Fatalf("builtin parsed as %+v", d)
+			}
+		case surface.Def:
+			if d.Name == "two" {
+				two = d.Body
+			}
+		}
+	}
+	if !sawBuiltin {
+		t.Fatal("builtin nat item missing")
+	}
+	want := surface.EApp{Fn: surface.EVar{Name: "succ"},
+		Arg: surface.EApp{Fn: surface.EVar{Name: "succ"}, Arg: surface.EVar{Name: "zero"}}}
+	if !reflect.DeepEqual(two, surface.Exp(want)) {
+		t.Errorf("2 expanded to %#v, want %#v", two, want)
+	}
+
+	if _, err := surface.ParseExpr("2"); err == nil || !strings.Contains(err.Error(), "no `builtin nat`") {
+		t.Errorf("bare numeral without binding: want parse error, got %v", err)
+	}
+	if _, err := surface.ParseExprNat("succ 41", "zero", "succ"); err != nil {
+		t.Errorf("ParseExprNat: %v", err)
+	}
+	if _, err := surface.ParseExprNat("99999999999", "zero", "succ"); err == nil {
+		t.Errorf("oversized numeral should fail")
+	}
+}
