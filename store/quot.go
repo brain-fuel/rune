@@ -158,9 +158,9 @@ func quotTypes() [5]core.Tm {
 		pi("b", v(4),
 			pi("r", app(v(4), v(1), v(0)), // R a b; R at idx 4 under a,b
 				core.Eq{
-					Ty: v(4),                 // B under a,b,r
-					L:  app(v(3), v(2)),      // f a
-					R:  app(v(3), v(1)),      // f b
+					Ty: v(4),            // B under a,b,r
+					L:  app(v(3), v(2)), // f a
+					R:  app(v(3), v(1)), // f b
 				})))
 	qliftTy := pi("A", core.Univ{},
 		pi("R", rel(0),
