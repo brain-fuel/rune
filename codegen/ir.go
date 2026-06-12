@@ -79,11 +79,22 @@ type DefSpec struct {
 	Body Ir
 }
 
+// NatSpec marks a datatype as the `builtin nat` binding (ergonomics rung 6):
+// the backend may then compile it to native machine integers — zero/succ/the
+// eliminator become arithmetic and a loop — instead of unary records. The
+// core stays Peano and provable; only the shadow gets fast.
+type NatSpec struct {
+	Zero, Succ, ElimName string
+}
+
 // Program is a whole erased program in definition order (acyclic, so the
 // order is also the emission order).
 type Program struct {
 	Datas []DataSpec
 	Defs  []DefSpec
+	// Nat, when non-nil, names the builtin-nat data group for fast-path
+	// compilation.
+	Nat *NatSpec
 	// Main, when non-empty, names the definition whose value the emitted
 	// program prints on run.
 	Main string

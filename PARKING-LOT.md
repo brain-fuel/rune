@@ -149,3 +149,20 @@ or a later-phase feature with no current consumer.
   at all.
 - **funext for inner paths (`pathF` over `piF`).** The outer Eq computes
   funext; the inner path type has no such rule yet. Chapter-gated.
+
+## Parked in the ergonomics ladder (2026-06)
+
+- **Compressed core numerals.** A literal expands to its unary succ-chain at
+  parse time (GRAMMAR §5.5), capped at 4096. Literals beyond that need a core
+  numeral representation (and a hash-format bump); no listing embeds one yet.
+- **Deep-application evaluation is superlinear.** Machine.Eval on an n-deep
+  constructor chain copies neutral spines per node (core.spineParts), making a
+  4000-deep literal cost ~6s to check. Fix is spine sharing in the Machine;
+  exposed by literals, not caused by them. Profile: Eval 70%, mallocgc 41%.
+- **Recognizing arithmetic shapes in codegen.** The builtin-nat shadow (rung 6)
+  compiles zero/succ/NatElim to BigInt and a loop, so user-defined + is O(m)
+  per call, not O(1). Mapping canonical add/mul definitions to native BigInt
+  +/* would need shape recognition or a `builtin natadd +` extension; wait for
+  a listing (gcd on large inputs) to demand it.
+- **Printer folding for `case`.** case/calc are input-only sugar; folding
+  recognizable eliminator applications back into case on output is cosmetic.

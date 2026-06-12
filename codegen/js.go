@@ -24,6 +24,10 @@ func (JS) Emit(p Program) (TargetSource, error) {
 		b.WriteString(quotRuntime)
 	}
 	for _, d := range p.Datas {
+		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
+			emitNat(&b, *p.Nat)
+			continue
+		}
 		for _, c := range d.Ctors {
 			emitCtor(&b, c)
 		}
@@ -52,6 +56,20 @@ func emitCtor(b *strings.Builder, c CtorSpec) {
 		args[i] = fmt.Sprintf("a%d", i)
 	}
 	fmt.Fprintf(b, "({tag: %d, name: %q, args: [%s]});\n", c.Tag, c.Name, strings.Join(args, ", "))
+}
+
+// emitNat writes the builtin-nat group as BigInt arithmetic (rung 6): zero is
+// 0n, succ adds one, and the eliminator is a loop — acc starts at the zero
+// case and folds the succ case k times, exactly the iota-rule unrolled. The
+// motive is erased and ignored.
+func emitNat(b *strings.Builder, n NatSpec) {
+	fmt.Fprintf(b, "const %s = 0n;\n", jsName(n.Zero))
+	fmt.Fprintf(b, "const %s = x => x + 1n;\n", jsName(n.Succ))
+	fmt.Fprintf(b, "const %s = m => c0 => c1 => x => {\n", jsName(n.ElimName))
+	b.WriteString("  let acc = c0;\n")
+	b.WriteString("  for (let k = 0n; k < x; k++) acc = c1(k)(acc);\n")
+	b.WriteString("  return acc;\n")
+	b.WriteString("};\n")
 }
 
 // emitElim writes the eliminator: params, motive, one case per constructor,
@@ -230,6 +248,7 @@ func usesQuot(p Program) bool {
 const showRuntime = `function $show(v) {
   if (v === null) return "()";
   if (typeof v === "function") return "<function>";
+  if (typeof v === "bigint") return v.toString();
   if (v && typeof v === "object" && "tag" in v) {
     let s = v.name;
     for (const a of v.args) {

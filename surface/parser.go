@@ -27,9 +27,10 @@ type parser struct {
 }
 
 // numMax caps numeral expansion: a literal is nothing but its unary succ-chain
-// (a compressed core numeral is parked), so an absurd literal must fail loudly
-// rather than materialize a million-node term.
-const numMax = 1 << 16
+// (a compressed core numeral is parked), and evaluating an n-deep chain is
+// currently superlinear in the Machine (spine copying — see PARKING-LOT), so
+// an over-sized literal must fail loudly rather than stall the checker.
+const numMax = 1 << 12
 
 // skipNL advances past tNewline tokens. Newlines are insignificant everywhere the
 // ordinary peek/next path runs; only seq item collection reads tokens raw (§2, §5.3).

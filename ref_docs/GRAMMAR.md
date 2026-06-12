@@ -236,8 +236,9 @@ content-hash references, and the declaration itself leaves no trace in the core 
 - **No binding in scope → a numeral is a parse error** ("no `builtin nat` declared").
 - The session validates the declaration: the type must be a `data` type and the two names must
   be its constructors.
-- A literal is nothing but its unary succ-chain, so numerals **cap at 65536**; a compressed core
-  numeral is parked until a listing embeds a constant that big.
+- A literal is nothing but its unary succ-chain, so numerals **cap at 4096**; a compressed core
+  numeral (and the Machine's superlinear deep-chain evaluation, see PARKING-LOT) is parked until
+  a listing embeds a constant that big.
 - `0` and `1` in binder-quantity position are usage annotations, not literals (§2); position
   decides, so `(0 x : Nat)` annotates while `f 0` applies `f` to the literal.
 

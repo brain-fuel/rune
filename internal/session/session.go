@@ -305,6 +305,10 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		}
 		p.Main = main
 	}
+	// A registered `builtin nat` group compiles to machine integers (rung 6).
+	if s.nat != nil {
+		p.Nat = &codegen.NatSpec{Zero: s.nat.Zero, Succ: s.nat.Succ, ElimName: s.nat.TyName + "Elim"}
+	}
 	// Datatype formers denote types: at runtime they erase to the unit token.
 	// So does the quotient former Quot (a quotient compiles to its carrier).
 	typeRefs := map[core.Hash]bool{}
