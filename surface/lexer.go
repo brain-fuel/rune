@@ -37,6 +37,9 @@ const (
 	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
 	tOp      // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
 	tBuiltin // builtin (a builtin-binding declaration: builtin nat Nat zero succ)
+	tCase    // case (a case expression; GRAMMAR §5.6)
+	tOf      // of   (separates the scrutinee from the clauses)
+	tWith    // with (binds the induction hypotheses in a clause)
 )
 
 type token struct {
@@ -105,6 +108,12 @@ func (k tokKind) String() string {
 		return "operator"
 	case tBuiltin:
 		return "'builtin'"
+	case tCase:
+		return "'case'"
+	case tOf:
+		return "'of'"
+	case tWith:
+		return "'with'"
 	default:
 		return "token"
 	}
@@ -224,6 +233,12 @@ func keyword(word string, pos int) token {
 		return token{tData, word, pos}
 	case "builtin":
 		return token{tBuiltin, word, pos}
+	case "case":
+		return token{tCase, word, pos}
+	case "of":
+		return token{tOf, word, pos}
+	case "with":
+		return token{tWith, word, pos}
 	case "Prop":
 		return token{tProp, word, pos}
 	case "Eq":

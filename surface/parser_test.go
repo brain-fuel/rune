@@ -309,3 +309,36 @@ qty : (0 A : U) -> (1 x : A) -> A is fn {- placeholder -} (0 A : U) (1 x : A) is
 		t.Errorf("oversized numeral should fail")
 	}
 }
+
+// TestCaseParsing pins §5.6: leading-pipe clauses, flat patterns, optional
+// `with`, '_' binders, and nesting inside seq blocks.
+func TestCaseParsing(t *testing.T) {
+	e, err := surface.ParseExpr("case m of | zero -> n | succ k with ih -> succ ih end")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	cs, ok := e.(surface.ECase)
+	if !ok {
+		t.Fatalf("got %#v, want ECase", e)
+	}
+	if !reflect.DeepEqual(cs.Scrut, surface.Exp(surface.EVar{Name: "m"})) || len(cs.Clauses) != 2 {
+		t.Fatalf("unexpected case shape %#v", cs)
+	}
+	c1 := cs.Clauses[1]
+	if c1.Ctor != "succ" || !reflect.DeepEqual(c1.Binders, []string{"k"}) || !reflect.DeepEqual(c1.IHs, []string{"ih"}) {
+		t.Fatalf("unexpected succ clause %#v", c1)
+	}
+
+	if _, err := surface.ParseExpr("case p of | npair _ b -> b end"); err != nil {
+		t.Errorf("'_' pattern binder: %v", err)
+	}
+	if _, err := surface.ParseExpr("seq let x = case m of | zero -> n end; x end"); err != nil {
+		t.Errorf("case inside seq: %v", err)
+	}
+	if _, err := surface.ParseExpr("case m of | zero -> n"); !errors.Is(err, surface.ErrIncomplete) {
+		t.Errorf("unterminated case: want ErrIncomplete, got %v", err)
+	}
+	if _, err := surface.ParseExpr("case m of | succ k with -> k end"); err == nil {
+		t.Errorf("empty 'with' should be a parse error")
+	}
+}

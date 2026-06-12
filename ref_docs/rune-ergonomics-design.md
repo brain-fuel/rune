@@ -151,9 +151,10 @@ elaborates to data type `D` with constructors `c₁ … cₙ`:
   recursive *call* spelling (Agda/Haskell equations) is a later, compatible
   layer that desugars to this one.
 
-**Printer**: eliminator applications whose motive/branch shapes match the
-desugaring image print back as `case`; anything else prints as the raw
-eliminator. Round-trip is preserved in both directions.
+**Printer**: `case` is input-only sugar (like `seq` and `=`); the printer
+emits the eliminator application. Folding recognizable eliminator
+applications back into `case` is a later cosmetic step — the desugaring
+image is detectable, but nothing gates on it.
 
 ## Rung 5 — `calc` blocks
 

@@ -91,6 +91,30 @@ type EAnn struct {
 	Ty   Exp
 }
 
+// CaseClause is one clause of a case expression:
+//
+//	| ctor b1 b2 with ih1 -> body
+//
+// Binders match the constructor's argument positions in order; IHs names the
+// induction hypotheses the eliminator provides for the recursive arguments
+// (in argument order), and may be shorter than the recursive-argument count —
+// missing ones are bound fresh and unused.
+type CaseClause struct {
+	Ctor    string
+	Binders []string
+	IHs     []string
+	Body    Exp
+}
+
+// ECase is `case Scrut of (| Clause)+ end` (GRAMMAR §5.6): sugar for one
+// saturated application of the scrutinee type's eliminator. It elaborates in
+// checking position only — the expected type supplies the motive — and leaves
+// no trace in the core.
+type ECase struct {
+	Scrut   Exp
+	Clauses []CaseClause
+}
+
 func (EVar) isExp()  {}
 func (EHole) isExp() {}
 func (EProp) isExp() {}
@@ -151,3 +175,4 @@ func (DataDef) isItem()    {}
 func (BuiltinNat) isItem() {}
 
 func (ESubst) isExp() {}
+func (ECase) isExp()  {}

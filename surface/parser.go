@@ -451,7 +451,7 @@ func (p *parser) parseApp() (Exp, error) {
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tCase:
 		return true
 	default:
 		return false
@@ -494,6 +494,8 @@ func (p *parser) parseAtom() (Exp, error) {
 		return p.expandNum(t)
 	case tFn:
 		return p.parseLam()
+	case tCase:
+		return p.parseCase()
 	case tSeq:
 		return p.parseSeq()
 	case tLParen:
@@ -695,6 +697,69 @@ func (p *parser) parseParen() (Exp, error) {
 	return inner, nil
 }
 
+// parseCase parses `"case" Expr "of" ("|" Pattern ["with" Ident+] "->" Expr)+ "end"`
+// (GRAMMAR §5.6). Patterns are flat: a constructor name followed by variable
+// binders ('_' allowed). The block self-delimits, so it is an atom; like any
+// bracketed group it resets the let-annotation '=' carve-out (§5.4).
+func (p *parser) parseCase() (Exp, error) {
+	p.next() // 'case'
+	saved := p.noEq
+	p.noEq = false
+	defer func() { p.noEq = saved }()
+
+	scrut, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tOf); err != nil {
+		return nil, err
+	}
+	e := ECase{Scrut: scrut}
+	for {
+		if _, err := p.expect(tBar); err != nil {
+			return nil, err
+		}
+		id, err := p.expect(tIdent)
+		if err != nil {
+			return nil, err
+		}
+		cl := CaseClause{Ctor: id.text}
+		for p.peek().kind == tIdent || p.peek().kind == tHole {
+			cl.Binders = append(cl.Binders, p.next().text)
+		}
+		if p.peek().kind == tWith {
+			p.next()
+			for p.peek().kind == tIdent || p.peek().kind == tHole {
+				cl.IHs = append(cl.IHs, p.next().text)
+			}
+			if len(cl.IHs) == 0 {
+				return nil, fmt.Errorf("'with' needs at least one induction-hypothesis name at offset %d", p.peek().pos)
+			}
+		}
+		if _, err := p.expect(tArrow); err != nil {
+			return nil, err
+		}
+		body, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		cl.Body = body
+		e.Clauses = append(e.Clauses, cl)
+		switch p.peek().kind {
+		case tBar:
+			continue
+		case tEnd:
+			p.next()
+			return e, nil
+		case tEOF:
+			return nil, fmt.Errorf("%w: unterminated case (missing 'end')", ErrIncomplete)
+		default:
+			return nil, fmt.Errorf("expected '|' or 'end' in case, found %s at offset %d",
+				p.peek().kind, p.peek().pos)
+		}
+	}
+}
+
 // parseSeq parses `"seq" … "end"` and desugars it to nested let (§5.3, §6). The body
 // is collected raw — newlines and ';' are significant separators here — up to the
 // `end` that matches this `seq`, tracking the nesting of inner fn/seq blocks.
@@ -707,7 +772,7 @@ func (p *parser) parseSeq() (Exp, error) {
 			return nil, fmt.Errorf("%w: unterminated seq (missing 'end')", ErrIncomplete)
 		}
 		switch p.toks[i].kind {
-		case tFn, tSeq:
+		case tFn, tSeq, tCase:
 			depth++
 		case tEnd:
 			if depth == 0 {
@@ -735,7 +800,7 @@ func desugarSeq(toks []token) (Exp, error) {
 	}
 	for _, t := range toks {
 		switch t.kind {
-		case tFn, tSeq:
+		case tFn, tSeq, tCase:
 			depth++
 			cur = append(cur, t)
 		case tEnd:

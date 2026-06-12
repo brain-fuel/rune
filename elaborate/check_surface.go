@@ -36,6 +36,8 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		return core.Prop{}, core.VU{}, nil // Prop : U_0
 	case surface.EEq, surface.ERefl, surface.ECast, surface.ESubst:
 		return nil, nil, fmt.Errorf("an equality former needs its arguments (Eq T l r · refl x · cast A B p x · subst A x y p P px)")
+	case surface.ECase:
+		return nil, nil, fmt.Errorf("a case expression needs an expected type for its motive; ascribe it: (case … end : T)")
 	case surface.EHole:
 		// A hole is a fresh meta; its type is another fresh meta.
 		tyM := e.freshMeta(c, "type of _")
@@ -204,6 +206,8 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 	switch s := x.(type) {
 	case surface.EHole:
 		return e.freshMeta(c, "_"), nil
+	case surface.ECase:
+		return e.elabCase(c, s, fw)
 	case surface.ERefl:
 		// Bare refl in checking position: the expected type must be (or reduce
 		// to) an equality with convertible endpoints — including the pointwise

@@ -50,9 +50,10 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   numerals `0` and `1` are usage annotations — position disambiguates, never the lexer. In
   expression position a numeral is a literal of the `builtin nat`-bound type (§5.5).
 - **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
-  equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4), and
-  `builtin` (ergonomics rung 2). The bare underscore `_` is reserved as the hole; identifiers
-  may still begin with `_` (`_x` is a name). `|` separates constructors inside a `data` block.
+  equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4),
+  `builtin` (ergonomics rung 2), and `case`, `of`, `with` (rung 4). The bare underscore `_` is
+  reserved as the hole; identifiers may still begin with `_` (`_x` is a name). `|` separates
+  constructors inside a `data` block and leads each clause of a `case`.
 - **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
   instead, so an implicit form cannot begin with a literal `-`.
 - **Punctuation:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
@@ -105,6 +106,7 @@ Arg       ::= Atom                        -- explicit argument
 Atom      ::= Ident
            |  Num                         -- a numeral; requires a builtin nat in scope (§5.5)
            |  "(" Op ")"                  -- an operator, prefix/first-class: (+) x y
+           |  Case                        -- case expression (§5.6)
            |  "_"                         -- a hole: a metavariable for elaboration (Phase 2)
            |  "U"
            |  "Prop"                      -- the universe of propositions (Phase 3)
@@ -126,6 +128,11 @@ Qty       ::= "0" | "1"                      -- usage annotation (Phase 5); defa
 Seq       ::= "seq" SeqBind* Result "end"          -- separators per §5.3
 SeqBind   ::= "let" Ident [":" Expr] "=" Expr       -- NOTE: no `in`
 Result    ::= Expr
+
+Case      ::= "case" Expr "of" ("|" Clause)+ "end"
+Clause    ::= Pattern ["with" PatName+] "->" Expr
+Pattern   ::= Ident PatName*               -- constructor, then binders; flat (no nesting)
+PatName   ::= Ident | "_"
 ```
 
 Precedence, loosest to tightest: `let … in` and `->` (arrow is **right-associative**), then
@@ -231,6 +238,35 @@ content-hash references, and the declaration itself leaves no trace in the core 
 - `0` and `1` in binder-quantity position are usage annotations, not literals (§2); position
   decides, so `(0 x : Nat)` annotates while `f 0` applies `f` to the literal.
 
+### 5.6 `case … of … end`
+
+```
+case m of
+| zero -> n
+| succ k with ih -> succ ih
+end
+```
+
+Sugar for one saturated application of the scrutinee type's **eliminator** — elaboration-time
+desugaring, since the motive comes from typing:
+
+- The scrutinee's inferred type must be a `data` type, fully applied to its parameters; the
+  clause set must be **exactly** its constructors, each once, any order. Coverage stays by
+  construction; a missing, duplicate, or alien clause is an error naming the constructor.
+- A clause binds the constructor's arguments in order (`_` for unused), and `with` names the
+  induction hypotheses the eliminator provides for the recursive arguments, in argument order.
+  `with` may name fewer than there are (the rest bind fresh and unused); `with` on a
+  constructor with no recursive argument is an error. **The IH is a binding, not a recursive
+  call — totality remains by construction, and no termination checker exists or is needed.**
+- A `case` elaborates in **checking position only**: the expected type is the motive,
+  generalized over the scrutinee when the scrutinee is a bound variable (the dependent case),
+  constant otherwise. In inferring position, ascribe it: `(case … end : T)`.
+- The output is a plain application of `DElim`: the core, the hash, the proof cache, and
+  codegen never learn `case` exists.
+- Parsing: every clause leads with `|`, so clause boundaries never depend on layout; a clause
+  body extends until the next `|` or the closing `end`. The block self-delimits (an atom) and
+  resets the §5.4 annotation carve-out like any bracketed group.
+
 ## 6. Desugaring to core
 
 Surface is sugar over the core; resolution lowers as follows.
@@ -253,6 +289,8 @@ Surface is sugar over the core; resolution lowers as follows.
   knows operators exist. `l = r` ⟶ `Eq _ l r` (the hole becomes a metavariable in elaboration).
 - **Numerals.** Under `builtin nat Nat zero succ`, the literal `3` ⟶ `succ (succ (succ zero))`
   (§5.5), at parse time.
+- **Case.** `case s of | C₁ a* [with ih*] -> e₁ | … end` ⟶ `DElim params* motive branch* s`
+  (§5.6), at elaboration time; each branch is the clause body under its argument and IH binders.
 
 ## 7. Examples
 
@@ -318,6 +356,9 @@ modulo each, exactly as it is modulo comments and bound-variable names:
 - **`=`.** The core `Eq` node stores its type explicitly; `l = r` elaborates that type from a
   hole. Printing `x = y` would drop the solved type, so the printer always emits the saturated
   prefix form `Eq A x y`. `=` is input sugar only, exactly like `seq`.
+- **`case`.** Desugars to an eliminator application at elaboration (§5.6) and leaves no trace
+  in the core; the printer emits the eliminator application. Input sugar only. (Folding
+  recognizable eliminator applications back into `case` is a later cosmetic step.)
 
 The printer DOES emit infix operators: an application `Ref⁺ x y` whose definition hash maps to an
 operator name prints as `x + y`, parenthesized per the §3 precedence table; unsaturated or
@@ -341,8 +382,9 @@ would be convenient — add nothing with no current consumer.
 - Inline arrow lambda (`fn x => body`) — ergonomics, parked.
 - Unannotated lambda parameters (`fn x is …`) — parked; v0.2.0 params are `(name : Type)`.
 - Multi-binder Pi telescopes (`(x : A) (y : B) -> C`) — parked; chain with `->`.
-- Multi-clause definitions, pattern matching — `case … of` arrives with the ergonomics ladder
-  (`rune-ergonomics-design.md` rung 4); equation-style clauses stay parked.
+- Equation-style multi-clause definitions — a later layer that desugars to `case` (§5.6).
+- Nested patterns, literal patterns, default/catch-all clauses — `case` patterns are flat and
+  the clause set is exactly the constructor set; parked until a listing starves.
 - User-defined operators / fixity declarations — the §3 table is closed; parked.
 - Data type and record declarations — Phase 4.
 - Modules, imports, visibility — later; v0.2.0 is a flat list of definitions that may reference one

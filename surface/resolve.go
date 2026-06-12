@@ -45,6 +45,8 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		return core.Prop{}, nil
 	case EEq, ERefl, ECast, ESubst:
 		return nil, fmt.Errorf("an under-applied equality former; Eq takes 3 arguments, refl 1, cast 4, subst 6")
+	case ECase:
+		return nil, fmt.Errorf("a case expression needs the type checker (its motive comes from the expected type); name resolution alone cannot lower it")
 	case ELam:
 		// The binder's domain annotation is scope-checked in the enclosing context and
 		// then discarded: the Phase-0 core lambda is un-annotated (GRAMMAR.md §6).
@@ -225,6 +227,21 @@ func FreeIdents(e Exp) []string {
 		case EAnn:
 			walk(x.Term, bound)
 			walk(x.Ty, bound)
+		case ECase:
+			walk(x.Scrut, bound)
+			for _, cl := range x.Clauses {
+				// The constructor name is a free reference (it drives the
+				// dependency graph); the binders and IHs scope over the body.
+				walk(EVar{Name: cl.Ctor}, bound)
+				b := bound
+				for _, n := range cl.Binders {
+					b = with(b, n)
+				}
+				for _, n := range cl.IHs {
+					b = with(b, n)
+				}
+				walk(cl.Body, b)
+			}
 		}
 	}
 	walk(e, map[string]bool{})
