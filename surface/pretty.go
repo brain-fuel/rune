@@ -7,13 +7,30 @@ import (
 	"goforge.dev/rune/core"
 )
 
-// Precedence levels for the pretty-printer. Higher binds tighter.
+// Precedence levels for the pretty-printer. Higher binds tighter. They mirror
+// GRAMMAR §3: arrow, then the additive and multiplicative operator levels, then
+// application. (The '=' sugar is input-only and has no printing level; core Eq
+// prints prefix, at application precedence.)
 const (
 	precLow   = 0 // lambda, let, and the bodies of arrows
 	precArrow = 1 // dependent and non-dependent function types
-	precApp   = 2 // application
-	precAtom  = 3 // variables, U, references, parenthesized forms
+	precAdd   = 2 // infix + -
+	precMul   = 3 // infix * / %
+	precApp   = 4 // application
+	precAtom  = 5 // variables, U, references, parenthesized forms
 )
+
+// opPrec returns the printing precedence of an infix operator name, or -1 when
+// the name is not in the closed operator table of GRAMMAR §3.
+func opPrec(name string) int {
+	switch name {
+	case "+", "-":
+		return precAdd
+	case "*", "/", "%":
+		return precMul
+	}
+	return -1
+}
 
 // Pretty turns a core term back into named surface syntax. This is the inverse
 // direction of the three-representation split: the core is locally nameless, and
@@ -52,7 +69,12 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		}
 	case core.Ref:
 		if n, ok := p.refNames[x.Hash]; ok {
-			sb.WriteString(n)
+			if opPrec(n) >= 0 {
+				// An operator outside its infix position prints first-class: (+).
+				sb.WriteString("(" + n + ")")
+			} else {
+				sb.WriteString(n)
+			}
 		} else {
 			sb.WriteString("#" + x.Hash.Short())
 		}
@@ -101,6 +123,17 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 			p.print(sb, x.X, names, precAtom)
 		})
 	case core.App:
+		// A saturated binary application of an operator-named definition prints
+		// infix at its table level; left operand at the level (left-associative),
+		// right operand one tighter. Re-parsing reads it back to the same core.
+		if name, l, r, lvl, ok := p.infixApp(x); ok {
+			p.wrap(sb, prec, lvl, func() {
+				p.print(sb, l, names, lvl)
+				sb.WriteString(" " + name + " ")
+				p.print(sb, r, names, lvl+1)
+			})
+			return
+		}
 		p.wrap(sb, prec, precApp, func() {
 			p.print(sb, x.Fn, names, precApp)
 			sb.WriteByte(' ')
@@ -266,6 +299,31 @@ func debugCore(sb *strings.Builder, t core.Tm) {
 	default:
 		sb.WriteString("?")
 	}
+}
+
+// infixApp recognizes `Ref⁺ l r` — a saturated, explicit, binary application of
+// a definition whose display name is an infix operator — and returns the pieces
+// for infix printing.
+func (p *printer) infixApp(a core.App) (name string, l, r core.Tm, lvl int, ok bool) {
+	if a.Icit != core.Expl {
+		return
+	}
+	inner, isApp := a.Fn.(core.App)
+	if !isApp || inner.Icit != core.Expl {
+		return
+	}
+	ref, isRef := inner.Fn.(core.Ref)
+	if !isRef {
+		return
+	}
+	n, named := p.refNames[ref.Hash]
+	if !named {
+		return
+	}
+	if lv := opPrec(n); lv >= 0 {
+		return n, inner.Arg, a.Arg, lv, true
+	}
+	return
 }
 
 func (p *printer) wrap(sb *strings.Builder, outer, self int, body func()) {

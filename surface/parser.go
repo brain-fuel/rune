@@ -15,6 +15,10 @@ var ErrIncomplete = errors.New("incomplete input")
 type parser struct {
 	toks []token
 	pos  int
+	// noEq suppresses the infix '=' (equality-proposition sugar) at the spine of a
+	// let/seq type annotation, where '=' belongs to the binding (GRAMMAR §5.4). It
+	// is inherited through arrows and operators and reset inside bracketed groups.
+	noEq bool
 }
 
 // skipNL advances past tNewline tokens. Newlines are insignificant everywhere the
@@ -173,13 +177,17 @@ func ParseFile(src string) ([]Def, error) {
 	return defs, nil
 }
 
-// parseDef parses `Ident ":" Expr "is" Expr "end"`. The type annotation is mandatory
-// in v0.2.0.
+// parseDef parses `DefName ":" Expr "is" Expr "end"`. The type annotation is
+// mandatory in v0.2.0. A definition name is an identifier or an operator (§3).
 func (p *parser) parseDef() (Def, error) {
-	id, err := p.expect(tIdent)
-	if err != nil {
-		return Def{}, err
+	id := p.peek()
+	if id.kind != tIdent && id.kind != tOp {
+		if id.kind == tEOF {
+			return Def{}, fmt.Errorf("%w: expected a definition name", ErrIncomplete)
+		}
+		return Def{}, fmt.Errorf("expected a definition name (identifier or operator), found %s at offset %d", id.kind, id.pos)
 	}
+	p.next()
 	if _, err := p.expect(tColon); err != nil {
 		return Def{}, err
 	}
@@ -218,7 +226,11 @@ func (p *parser) parseLet() (Exp, error) {
 	let := ELet{Name: id.text}
 	if p.peek().kind == tColon {
 		p.next()
+		// The annotation's spine-level '=' belongs to the binding (§5.4).
+		saved := p.noEq
+		p.noEq = true
 		ty, err := p.parseExpr()
+		p.noEq = saved
 		if err != nil {
 			return nil, err
 		}
@@ -263,7 +275,7 @@ func (p *parser) parseArrow() (Exp, error) {
 		}
 		return EPi{Param: param, Icit: core.Impl, Qty: qty, Dom: dom, Cod: cod}, nil
 	}
-	lhs, err := p.parseApp()
+	lhs, err := p.parseEq()
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +290,70 @@ func (p *parser) parseArrow() (Exp, error) {
 	return lhs, nil
 }
 
+// parseEq parses `Add ["=" Add]` — the equality-proposition sugar, `l = r` ~~>
+// `Eq _ l r` with a hole for elaboration to solve (§5.4). Non-associative.
+// Suppressed (p.noEq) at the spine of a let/seq type annotation, where '='
+// belongs to the binding.
+func (p *parser) parseEq() (Exp, error) {
+	lhs, err := p.parseAdd()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().kind != tEquals || p.noEq {
+		return lhs, nil
+	}
+	p.next()
+	rhs, err := p.parseAdd()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().kind == tEquals {
+		return nil, fmt.Errorf("an equality cannot be chained; parenthesize one side (offset %d)", p.peek().pos)
+	}
+	return EApp{Fn: EApp{Fn: EApp{Fn: EEq{}, Arg: EHole{}}, Arg: lhs}, Arg: rhs}, nil
+}
+
+// parseAdd parses `Mul (("+"|"-") Mul)*`, left-associative. An infix operator is
+// sugar for applying the like-named definition: `x + y` is `(+) x y` (§5.4).
+func (p *parser) parseAdd() (Exp, error) {
+	lhs, err := p.parseMul()
+	if err != nil {
+		return nil, err
+	}
+	for p.peek().kind == tOp && addLevel(p.peek().text) {
+		op := p.next().text
+		rhs, err := p.parseMul()
+		if err != nil {
+			return nil, err
+		}
+		lhs = EApp{Fn: EApp{Fn: EVar{Name: op}, Arg: lhs}, Arg: rhs}
+	}
+	return lhs, nil
+}
+
+// parseMul parses `App (("*"|"/"|"%") App)*`, left-associative.
+func (p *parser) parseMul() (Exp, error) {
+	lhs, err := p.parseApp()
+	if err != nil {
+		return nil, err
+	}
+	for p.peek().kind == tOp && !addLevel(p.peek().text) {
+		op := p.next().text
+		rhs, err := p.parseApp()
+		if err != nil {
+			return nil, err
+		}
+		lhs = EApp{Fn: EApp{Fn: EVar{Name: op}, Arg: lhs}, Arg: rhs}
+	}
+	return lhs, nil
+}
+
+// addLevel reports whether an operator sits at the loose additive level; the
+// closed operator table of GRAMMAR §3 has exactly two levels.
+func addLevel(op string) bool {
+	return op == "+" || op == "-"
+}
+
 func (p *parser) parseApp() (Exp, error) {
 	fn, err := p.parseAtom()
 	if err != nil {
@@ -285,9 +361,13 @@ func (p *parser) parseApp() (Exp, error) {
 	}
 	for {
 		if p.peek().kind == tLBrace {
-			// f {e}: an explicitly-supplied implicit argument.
+			// f {e}: an explicitly-supplied implicit argument. The braces reset
+			// the let-annotation '=' carve-out (§5.4).
 			p.next()
+			saved := p.noEq
+			p.noEq = false
 			arg, err := p.parseExpr()
+			p.noEq = saved
 			if err != nil {
 				return nil, err
 			}
@@ -412,6 +492,10 @@ func (p *parser) parseBinder() (string, core.Icit, core.Qty, Exp, error) {
 	} else if _, err := p.expect(tLParen); err != nil {
 		return "", icit, qty, nil, err
 	}
+	// A bracketed group resets the let-annotation '=' carve-out (§5.4).
+	saved := p.noEq
+	p.noEq = false
+	defer func() { p.noEq = saved }()
 	if p.peek().kind == tQty {
 		qty = qtyOf(p.next().text)
 	}
@@ -445,6 +529,16 @@ func qtyOf(text string) core.Qty {
 // `(x : A) ->`, a parenthesized ascription `(e : T)`, and plain grouping `(e)`.
 func (p *parser) parseParen() (Exp, error) {
 	p.next() // '('
+	if p.peek().kind == tOp && p.peekAt(1).kind == tRParen {
+		// "(" Op ")": an operator used prefix/first-class, e.g. (+) x y.
+		op := p.next().text
+		p.next() // ')'
+		return EVar{Name: op}, nil
+	}
+	// A bracketed group resets the let-annotation '=' carve-out (§5.4).
+	saved := p.noEq
+	p.noEq = false
+	defer func() { p.noEq = saved }()
 	if p.peek().kind == tQty && p.peekAt(1).kind == tIdent && p.peekAt(2).kind == tColon {
 		// (0 x : A) -> B / (1 x : A) -> B: a quantity-annotated dependent Pi.
 		qty := qtyOf(p.next().text)
@@ -460,6 +554,8 @@ func (p *parser) parseParen() (Exp, error) {
 		if _, err := p.expect(tArrow); err != nil {
 			return nil, err
 		}
+		// The codomain is outside the brackets: it inherits the carve-out (§5.4).
+		p.noEq = saved
 		cod, err := p.parseExpr()
 		if err != nil {
 			return nil, err
@@ -478,6 +574,8 @@ func (p *parser) parseParen() (Exp, error) {
 		}
 		if p.peek().kind == tArrow {
 			p.next()
+			// The codomain is outside the brackets: it inherits the carve-out (§5.4).
+			p.noEq = saved
 			cod, err := p.parseExpr()
 			if err != nil {
 				return nil, err
@@ -618,7 +716,10 @@ func parseSeqBind(toks []token) (ELet, error) {
 	let := ELet{Name: id.text}
 	if sub.peek().kind == tColon {
 		sub.next()
+		// The annotation's spine-level '=' belongs to the binding (§5.4).
+		sub.noEq = true
 		ty, err := sub.parseExpr()
+		sub.noEq = false
 		if err != nil {
 			return ELet{}, err
 		}

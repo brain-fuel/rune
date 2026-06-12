@@ -129,9 +129,23 @@ func prepend(n string, env []string) []string {
 	return append(out, env...)
 }
 
-// jsName sanitizes a rune identifier into a JS one. Rune identifiers are
-// already close (letters, digits, _, '); primes become $.
+// jsOpNames maps the operator definition names of GRAMMAR §3 (symbolic
+// identifiers, invalid in JS) to mangled JS identifiers.
+var jsOpNames = map[string]string{
+	"+": "$add",
+	"-": "$sub",
+	"*": "$mul",
+	"/": "$div",
+	"%": "$mod",
+}
+
+// jsName sanitizes a rune identifier into a JS one. Alphabetic rune identifiers
+// are already close (letters, digits, _, '); primes become $. Operator names
+// mangle through jsOpNames.
 func jsName(n string) string {
+	if m, ok := jsOpNames[n]; ok {
+		return m
+	}
 	n = strings.ReplaceAll(n, "'", "$")
 	if n == "" {
 		n = "$x"

@@ -52,8 +52,14 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   (`_x` is a name). `|` separates constructors inside a `data` block.
 - **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
   instead, so an implicit form cannot begin with a literal `-`.
-- **Punctuation/operators:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
+- **Punctuation:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
   is one token and is never read as `-` `-` `>`, and `--` begins a comment rather than two `-`.
+- **Operators** (ergonomics, 2026-06): `+` `-` `*` `/` `%` are **symbolic identifiers** — they
+  name top-level definitions exactly as alphabetic identifiers do, and additionally parse infix
+  (§3, §5.4). The set is **closed**; no other token lexes as an operator and there are no user
+  fixity declarations. `=` is punctuation that *also* parses infix as the equality-proposition
+  sugar (§5.4); it is not an identifier and cannot be defined. A bare `-` is the operator;
+  `--` and `->` still take the longest match.
 
 ## 3. Grammar (EBNF)
 
@@ -63,7 +69,8 @@ generative skeleton; §5 gives the deterministic parse for the `(`-forms and for
 ```
 Program   ::= (Definition | DataDecl)*
 
-Definition ::= Ident ":" Expr "is" Expr "end"
+Definition ::= DefName ":" Expr "is" Expr "end"
+DefName   ::= Ident | Op
 
 DataDecl  ::= "data" Ident ":" Expr "is" ["|"] Ctor ("|" Ctor)* "end"   -- Phase 4
 Ctor      ::= Ident ":" Expr
@@ -71,17 +78,27 @@ Ctor      ::= Ident ":" Expr
 Expr      ::= Let
            |  Arrow
 
-Let       ::= "let" Ident [":" Expr] "=" Expr "in" Expr      -- inline; `in` is mandatory
+Let       ::= "let" Ident [":" AnnExpr] "=" Expr "in" Expr   -- inline; `in` is mandatory
+AnnExpr   ::=                             -- an Expr in which "=" never begins an equality
+                                          -- proposition at the spine (§5.4); parenthesize one
 
 Arrow     ::= Binder "->" Expr            -- dependent:     (x : A) -> B   (right-assoc via Expr)
            |  IBinder "->" Expr           -- implicit:      {x : A} -> B   (Phase 2)
-           |  App ["->" Expr]             -- non-dependent: A -> B,  or just App
+           |  EqE ["->" Expr]             -- non-dependent: A -> B,  or just EqE
+
+EqE       ::= Add ["=" Add]               -- equality proposition; NON-associative (§5.4)
+Add       ::= Mul (AddOp Mul)*            -- left-associative
+Mul       ::= App (MulOp App)*            -- left-associative
+AddOp     ::= "+" | "-"
+MulOp     ::= "*" | "/" | "%"
+Op        ::= AddOp | MulOp
 
 App       ::= Atom Arg*                   -- application, left-associative
 Arg       ::= Atom                        -- explicit argument
            |  "{" Expr "}"                -- implicit argument, given explicitly (Phase 2)
 
 Atom      ::= Ident
+           |  "(" Op ")"                  -- an operator, prefix/first-class: (+) x y
            |  "_"                         -- a hole: a metavariable for elaboration (Phase 2)
            |  "U"
            |  "Prop"                      -- the universe of propositions (Phase 3)
@@ -106,8 +123,10 @@ Result    ::= Expr
 ```
 
 Precedence, loosest to tightest: `let … in` and `->` (arrow is **right-associative**), then
-application (**left-associative**), then atoms. `fn`, `seq`, and parenthesized forms are fully
-delimited, so they are atoms and need no surrounding parentheses.
+`=` (**non-associative**), then `+` `-` (**left**), then `*` `/` `%` (**left**), then
+application (**left-associative**), then atoms. So `a = b -> c = d` is an implication between
+equations, and `a + b * c = c * b + a` parses as mathematics reads it. `fn`, `seq`, and
+parenthesized forms are fully delimited, so they are atoms and need no surrounding parentheses.
 
 ## 4. The core forms, unchanged in meaning
 
@@ -167,6 +186,25 @@ separators:
 - A `seq` with no result (`seq end`, or a `seq` ending in a binding) is an error: a `seq` must
   produce a value.
 
+### 5.4 Operators and `=`
+
+- **Operators are names.** `x + y` parses to the application `(+) x y` — `EVar "+"` applied
+  left-then-right — and resolution treats `+` like any free identifier: it must resolve to a
+  top-level definition (else "unresolved name: +"). Operators cannot be binder names (`fn` and
+  `let` binders are alphabetic `Ident`s only); the parenthesized atom `(+)` is the prefix form.
+- **`=` is the equality-proposition sugar:** `l = r` parses to `Eq _ l r` — the `Eq` former with
+  a hole for elaboration to solve. It is non-associative: `x = y = z` is a parse error
+  ("an equality cannot be chained; parenthesize"). `=` is INPUT sugar only (§8).
+- **The `let`-annotation carve-out.** Inside the optional `[":" AnnExpr]` of an inline `let` or a
+  `SeqBind`, a spine-level `=` always ends the annotation and begins the binding's value — it
+  never begins an equality proposition. The carve-out is inherited through arrows and operator
+  expressions within the annotation, and is **reset inside any bracketed group** (`(…)`, `{…}`),
+  so an equality type in a binding annotation is written parenthesized:
+  `let p : (x = y) = prf in …`. Definitions, binders, and `data` need no carve-out — their type
+  positions self-delimit (`is`, `)`, `}`, `|`, `end`).
+- One token of lookahead still suffices everywhere: an operator token after a complete operand
+  is the only infix trigger, and `( Op )` is recognized by the token after the `(`.
+
 ## 6. Desugaring to core
 
 Surface is sugar over the core; resolution lowers as follows.
@@ -185,6 +223,8 @@ Surface is sugar over the core; resolution lowers as follows.
   its annotation. `seq R end` ⟶ `R`.
 - **Ascription.** `(e : T)` ⟶ the core annotation node, as in Phase 0.
 - **Inline let** and **application** ⟶ their existing core nodes directly.
+- **Infix operators.** `x + y` ⟶ the application `(+) x y`; nothing downstream of the parser
+  knows operators exist. `l = r` ⟶ `Eq _ l r` (the hole becomes a metavariable in elaboration).
 
 ## 7. Examples
 
@@ -247,6 +287,14 @@ modulo each, exactly as it is modulo comments and bound-variable names:
 - **`seq`.** `seq` desugars to nested `let … in …` (§6) and leaves no trace in the core, so the
   printer's canonical sequencing form is inline nested `let … in …`; it never re-emits `seq`.
   `seq` is input sugar only.
+- **`=`.** The core `Eq` node stores its type explicitly; `l = r` elaborates that type from a
+  hole. Printing `x = y` would drop the solved type, so the printer always emits the saturated
+  prefix form `Eq A x y`. `=` is input sugar only, exactly like `seq`.
+
+The printer DOES emit infix operators: an application `Ref⁺ x y` whose definition hash maps to an
+operator name prints as `x + y`, parenthesized per the §3 precedence table; unsaturated or
+non-operator applications print prefix (`(+) x`). Both forms re-parse to the same core, so the
+round-trip property extends unchanged.
 
 Canonical layout: definitions break across lines; short `fn … is … end` and `let … in …` may stay
 on one line. The `seq` keyword is accepted on input (one item per line, or `;`-separated) but is
@@ -260,7 +308,9 @@ would be convenient — add nothing with no current consumer.
 - Inline arrow lambda (`fn x => body`) — ergonomics, parked.
 - Unannotated lambda parameters (`fn x is …`) — parked; v0.2.0 params are `(name : Type)`.
 - Multi-binder Pi telescopes (`(x : A) (y : B) -> C`) — parked; chain with `->`.
-- Operators / infix notation, multi-clause definitions, pattern matching — later phases.
+- Multi-clause definitions, pattern matching — `case … of` arrives with the ergonomics ladder
+  (`rune-ergonomics-design.md` rung 4); equation-style clauses stay parked.
+- User-defined operators / fixity declarations — the §3 table is closed; parked.
 - Data type and record declarations — Phase 4.
 - Modules, imports, visibility — later; v0.2.0 is a flat list of definitions that may reference one
   another (mutual recursion is handled at the store/SCC level, not the surface).
