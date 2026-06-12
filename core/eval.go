@@ -590,17 +590,34 @@ func (m *Machine) tryIota(spine Neutral) (Val, bool) {
 	for _, a := range ctorArgs {
 		result = m.Apply(result, a)
 	}
-	// ...then to the induction hypotheses for recursive arguments.
+	// ...then to the induction hypotheses for recursive arguments. Each IH is
+	// a GLUED NEUTRAL: its spine is the un-reduced recursive elimination, and
+	// forcing it runs that elimination (the Apply chain re-enters ι). A case
+	// that ignores its IH therefore never computes it — building IHs eagerly
+	// made nested eliminations exponential, since the unused IH of one level
+	// recursively constructed the unused IHs of every level below it.
 	elimPrefix := args[:len(args)-1] // params, motive, cases
 	for i, rec := range cs.Rec {
 		if !rec {
 			continue
 		}
-		var ih Val = m.refVal(ref.Hash)
+		spine := Neutral(NRef{Hash: ref.Hash})
 		for _, a := range elimPrefix {
-			ih = m.Apply(ih, a)
+			spine = NApp{Fn: spine, Arg: a, Icit: Expl}
 		}
-		ih = m.Apply(ih, ctorArgs[i])
+		spine = NApp{Fn: spine, Arg: ctorArgs[i], Icit: Expl}
+		recArg := ctorArgs[i]
+		var memo Val
+		ih := VNeu{Spine: spine, Unfold: func() Val {
+			if memo == nil {
+				v := Val(m.refVal(ref.Hash))
+				for _, a := range elimPrefix {
+					v = m.Apply(v, a)
+				}
+				memo = m.Apply(v, recArg)
+			}
+			return memo
+		}}
 		result = m.Apply(result, ih)
 	}
 	return result, true

@@ -36,7 +36,7 @@ func loadListing(t *testing.T, name string) *session.Session {
 // to want.
 func normalizesTo(t *testing.T, s *session.Session, expr, want string) {
 	t.Helper()
-	e, err := surface.ParseExpr(expr)
+	e, err := s.ParseSrcExpr(expr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,6 +128,14 @@ func TestListingsRun(t *testing.T) {
 		// ...and along reflexivity it is the identity.
 		normalizesTo(t, s, `same`, "true")
 	})
+	t.Run("ch11", func(t *testing.T) {
+		s := loadListing(t, "ch11_arithmetic.rune")
+		// The whole ergonomics ladder computing at once: literals, infix,
+		// case, fuel-style Euclid — conversion does arithmetic.
+		normalizesTo(t, s, `17 / 5`, "succ (succ (succ zero))")
+		normalizesTo(t, s, `gcd 12 18`,
+			"succ (succ (succ (succ (succ (succ zero)))))")
+	})
 }
 
 // TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant
@@ -156,6 +164,9 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		{"ch04_data.rune", "four", "succ (succ (succ (succ zero)))"},
 		{"ch06_quotients.rune", "parityOfTwo", "true"},
 		{"ch07_integers.rune", "zresult", "npair (succ (succ zero)) (succ zero)"},
+		// ch11 runs on the BigInt shadow: gcd 252 105 in milliseconds, with
+		// case-shaped eliminations emitted as constant-time dispatch.
+		{"ch11_arithmetic.rune", "answer", "21"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {

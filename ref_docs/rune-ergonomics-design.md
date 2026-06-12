@@ -185,19 +185,30 @@ compiles that data group specially:
 - `NatElim` compiles to a loop (accumulator from the zero branch, succ branch
   applied k times) instead of recursive switch dispatch;
 - everything else is untouched — constructors of other types, quotients,
-  eliminators all compile as today.
+  eliminators all compile as today;
+- a saturated nat-elim whose successor case provably ignores its induction
+  hypothesis (a plain `case` on a number) emits a constant-time dispatch
+  (`$natD`) instead of the fold — the strict fold evaluates the branch body
+  at every step, which is exponential when the body recurses. The Machine
+  got the mirror fix: tryIota builds IHs as glued neutrals, forced only on
+  use.
 
 This is the "mutate the shadow" rule working as designed: the core stays
-Peano and provable; the erased output gets machine arithmetic. Gate: `gcd` on
-8-digit inputs terminates in milliseconds under `rune run`.
+Peano and provable; the erased output gets machine arithmetic. Gate:
+`gcd 252 105` under `rune run` in milliseconds (8-digit inputs wait on
+compressed literals — see PARKING-LOT).
 
 ## Rung 7 — `ch11_arithmetic.rune`, the gate listing
 
-Naturals with the full kit: `mul`, `pow` by `case`; **course-of-values
-recursion derived from `NatElim`** as a library (`cvRec`), then `div`, `mod`,
-`gcd` on top of it; specs proved in `calc` (`mod` correctness,
-`gcd` divides both arguments, `(div m n) * n + mod m n = m`). No new core:
-course-of-values is a definable gadget, which is the point of the chapter.
+Naturals with the full kit: `+`/`*` by `case`; the addition laws proved by
+induction with `calc` ladders (`addComm` is the showcase); then `monus`,
+`leb`, and **fuel-style** `div`/`mod`/`gcd` — the eliminator stays the only
+recursion principle, and a non-structural algorithm threads an explicit
+structural budget. Specs land as computational certificates the checker
+proves by running (`17 / 5 = 3`, `(17/5)*5 + 17%5 = 17`, `gcd 12 18 = 6`,
+all by `refl`). The general division-algorithm and gcd-divides theorems
+belong to the course-of-values chapter, which needs an order on Nat first —
+deferred with the book, not parked silently.
 
 ---
 

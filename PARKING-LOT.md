@@ -166,3 +166,7 @@ or a later-phase feature with no current consumer.
   a listing (gcd on large inputs) to demand it.
 - **Printer folding for `case`.** case/calc are input-only sugar; folding
   recognizable eliminator applications back into case on output is cosmetic.
+- **Lazy IHs for record (non-nat) eliminators in the shadow.** emitElim still
+  computes recursive eliminations eagerly in the switch; a case-with-unused-IH
+  on a recursive RECORD type pays the same exponential the nat path used to.
+  The nat path got $natD dispatch; generalize when a listing hits it.

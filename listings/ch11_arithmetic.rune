@@ -1,0 +1,214 @@
+-- Chapter 11 — Arithmetic that reads like arithmetic.
+-- The ergonomics ladder, end to end: numeric literals (builtin nat), infix
+-- operators, case over the eliminator, and calc ladders — all sugar over the
+-- same unchanged core. Division, modulus, and gcd are written FUEL-style:
+-- the eliminator is still the only recursion principle, so a non-structural
+-- algorithm threads an explicit structural budget. Totality stays by
+-- construction; nothing here needed a termination checker.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> ih + n
+    end
+  end
+end
+
+-- The equality toolkit, now one line each.
+
+sym : {A : U} -> {x : A} -> {y : A} -> x = y -> y = x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is z = x end) (refl x)
+  end
+end
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> x = y -> f x = f y is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is f x = f z end) (refl (f x))
+  end
+end
+
+-- The addition laws, by induction (case) and equation ladders (calc).
+
+addZeroRight : (n : Nat) -> n + 0 = n is
+  fn (n : Nat) is
+    case n of
+    | zero -> refl 0
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addSucc : (m : Nat) -> (n : Nat) -> m + succ n = succ (m + n) is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> refl (succ n)
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addComm : (m : Nat) -> (n : Nat) -> m + n = n + m is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is
+        calc 0 + n
+          = n     by refl n
+          = n + 0 by sym (addZeroRight n)
+        end
+      end
+    | succ k with ih -> fn (n : Nat) is
+        calc succ k + n
+          = succ (k + n) by refl (succ (k + n))
+          = succ (n + k) by cong succ (ih n)
+          = n + succ k   by sym (addSucc n k)
+        end
+      end
+    end
+  end
+end
+
+-- Truncated subtraction and comparison: the building blocks of Euclid.
+
+pred : Nat -> Nat is
+  fn (n : Nat) is
+    case n of
+    | zero -> 0
+    | succ k -> k
+    end
+  end
+end
+
+-- monus m n is m - n, stopping at zero: iterate pred n times.
+monus : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case n of
+    | zero -> m
+    | succ k with ih -> pred ih
+    end
+  end
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+-- leb m n decides m <= n; recursion on m produces the comparison FUNCTION,
+-- so the induction hypothesis is "compare against k" awaiting its argument.
+leb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is true end
+    | succ k with ih -> fn (n : Nat) is
+        case n of
+        | zero -> false
+        | succ j -> ih j
+        end
+      end
+    end
+  end
+end
+
+-- Division and modulus by repeated subtraction, with the dividend as fuel:
+-- each step removes at least one from the dividend, so the budget suffices
+-- exactly. The fuel-zero clause can only be reached with a = 0.
+
+divF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is 0 end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> 0
+        | succ k ->
+            case leb b a of
+            | true -> succ (ih (monus a b) b)
+            | false -> 0
+            end
+        end
+      end
+    end
+  end
+end
+
+modF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is a end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> a
+        | succ k ->
+            case leb b a of
+            | true -> ih (monus a b) b
+            | false -> a
+            end
+        end
+      end
+    end
+  end
+end
+
+/ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is divF m m n end
+end
+
+% : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is modF m m n end
+end
+
+-- Euclid. The second argument strictly decreases (a % b < b), so its
+-- successor is budget enough.
+gcdF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is a end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> a
+        | succ k -> ih b (a % b)
+        end
+      end
+    end
+  end
+end
+
+gcd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is gcdF (succ b) a b end
+end
+
+-- Computational certificates: the checker COMPUTES these — each refl is a
+-- machine-checked arithmetic fact, conversion doing the work a test suite
+-- would. (The general division-algorithm and gcd-divides theorems belong to
+-- the course-of-values chapter; the fuel style proves its results by running.)
+
+seventeenDivFive : 17 / 5 = 3 is refl 3 end
+seventeenModFive : 17 % 5 = 2 is refl 2 end
+divModRoundTrip : (17 / 5) * 5 + 17 % 5 = 17 is refl 17 end
+gcdTwelveEighteen : gcd 12 18 = 6 is refl 6 end
+gcdOfPrimes : gcd 35 64 = 1 is refl 1 end
+
+-- And one law per operator through the ladder, for the running gate.
+mulOneLeft : (n : Nat) -> 1 * n = n is
+  fn (n : Nat) is refl n end
+end
+
+answer : Nat is gcd 252 105 end
