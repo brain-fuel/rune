@@ -24,16 +24,16 @@ const (
 	tLet
 	tIn
 	tU
-	tLBrace // {  (implicit binder/argument; '{-' opens a comment instead)
-	tRBrace // }
-	tHole   // _  (a hole: a metavariable for elaboration to solve)
-	tData   // data (a datatype declaration; Phase 4)
-	tBar    // |  (constructor separator)
-	tProp   // Prop (the universe of propositions; Phase 3)
-	tEq     // Eq   (the observational equality type former)
-	tRefl   // refl (the reflexivity proof)
-	tCast   // cast (transport along a type equality)
-	tSubst  // subst (Leibniz transport along an equality; Phase 4)
+	tLBrace  // {  (implicit binder/argument; '{-' opens a comment instead)
+	tRBrace  // }
+	tHole    // _  (a hole: a metavariable for elaboration to solve)
+	tData    // data (a datatype declaration; Phase 4)
+	tBar     // |  (constructor separator)
+	tProp    // Prop (the universe of propositions; Phase 3)
+	tEq      // Eq   (the observational equality type former)
+	tRefl    // refl (the reflexivity proof)
+	tCast    // cast (transport along a type equality)
+	tSubst   // subst (Leibniz transport along an equality; Phase 4)
 	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
 	tOp      // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
 	tBuiltin // builtin (a builtin-binding declaration: builtin nat Nat zero succ)
