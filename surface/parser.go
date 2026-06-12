@@ -451,7 +451,7 @@ func (p *parser) parseApp() (Exp, error) {
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tCase:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tCase, tCalc:
 		return true
 	default:
 		return false
@@ -496,6 +496,8 @@ func (p *parser) parseAtom() (Exp, error) {
 		return p.parseLam()
 	case tCase:
 		return p.parseCase()
+	case tCalc:
+		return p.parseCalc()
 	case tSeq:
 		return p.parseSeq()
 	case tLParen:
@@ -760,6 +762,129 @@ func (p *parser) parseCase() (Exp, error) {
 	}
 }
 
+// parseCalc parses `"calc" Expr ("=" Expr "by" Expr)+ "end"` (GRAMMAR §5.7) and
+// desugars it at parse time: the first step's proof is ascribed to its equation,
+// and each later step chains through the subst former —
+//
+//	subst _ prev next prf (fn (w : _) is first = w end) acc
+//
+// so the block proves `first = last` with every `by` pinned to exactly its own
+// equation. Spine-level '=' inside the block belongs to the calc (the §5.4
+// carve-out mechanism); parenthesize an equality proposition inside a step.
+func (p *parser) parseCalc() (Exp, error) {
+	p.next() // 'calc'
+	saved := p.noEq
+	p.noEq = true
+	defer func() { p.noEq = saved }()
+
+	first, err := p.parseExpr()
+	if err != nil {
+		return nil, err
+	}
+	type step struct{ rhs, prf Exp }
+	var steps []step
+	for {
+		if _, err := p.expect(tEquals); err != nil {
+			return nil, err
+		}
+		rhs, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := p.expect(tBy); err != nil {
+			return nil, err
+		}
+		prf, err := p.parseExpr()
+		if err != nil {
+			return nil, err
+		}
+		steps = append(steps, step{rhs: rhs, prf: prf})
+		switch p.peek().kind {
+		case tEquals:
+			continue
+		case tEnd:
+			p.next()
+		case tEOF:
+			return nil, fmt.Errorf("%w: unterminated calc (missing 'end')", ErrIncomplete)
+		default:
+			return nil, fmt.Errorf("expected '=' or 'end' in calc, found %s at offset %d",
+				p.peek().kind, p.peek().pos)
+		}
+		break
+	}
+
+	eq := func(l, r Exp) Exp {
+		return EApp{Fn: EApp{Fn: EApp{Fn: EEq{}, Arg: EHole{}}, Arg: l}, Arg: r}
+	}
+	// The motive duplicates `first` under a new binder; freshen it against
+	// every identifier appearing there so nothing is captured.
+	w := freshAgainst("w", first)
+	acc := Exp(EAnn{Term: steps[0].prf, Ty: eq(first, steps[0].rhs)})
+	cur := steps[0].rhs
+	for _, st := range steps[1:] {
+		motive := ELam{Param: w, Dom: EHole{}, Body: eq(first, EVar{Name: w})}
+		acc = EApp{Fn: EApp{Fn: EApp{Fn: EApp{Fn: EApp{Fn: EApp{Fn: ESubst{},
+			Arg: EHole{}}, Arg: cur}, Arg: st.rhs}, Arg: st.prf}, Arg: motive}, Arg: acc}
+		cur = st.rhs
+	}
+	return acc, nil
+}
+
+// freshAgainst picks a name based on hint that no identifier of e uses.
+func freshAgainst(hint string, e Exp) string {
+	used := map[string]bool{}
+	var walk func(Exp)
+	walk = func(e Exp) {
+		switch x := e.(type) {
+		case EVar:
+			used[x.Name] = true
+		case ELam:
+			used[x.Param] = true
+			walk(x.Dom)
+			walk(x.Body)
+		case EApp:
+			walk(x.Fn)
+			walk(x.Arg)
+		case EPi:
+			used[x.Param] = true
+			walk(x.Dom)
+			walk(x.Cod)
+		case ELet:
+			used[x.Name] = true
+			if x.Ty != nil {
+				walk(x.Ty)
+			}
+			walk(x.Val)
+			walk(x.Body)
+		case EAnn:
+			walk(x.Term)
+			walk(x.Ty)
+		case ECase:
+			walk(x.Scrut)
+			for _, cl := range x.Clauses {
+				used[cl.Ctor] = true
+				for _, n := range cl.Binders {
+					used[n] = true
+				}
+				for _, n := range cl.IHs {
+					used[n] = true
+				}
+				walk(cl.Body)
+			}
+		}
+	}
+	walk(e)
+	if !used[hint] {
+		return hint
+	}
+	for i := 0; ; i++ {
+		cand := fmt.Sprintf("%s%d", hint, i)
+		if !used[cand] {
+			return cand
+		}
+	}
+}
+
 // parseSeq parses `"seq" … "end"` and desugars it to nested let (§5.3, §6). The body
 // is collected raw — newlines and ';' are significant separators here — up to the
 // `end` that matches this `seq`, tracking the nesting of inner fn/seq blocks.
@@ -772,7 +897,7 @@ func (p *parser) parseSeq() (Exp, error) {
 			return nil, fmt.Errorf("%w: unterminated seq (missing 'end')", ErrIncomplete)
 		}
 		switch p.toks[i].kind {
-		case tFn, tSeq, tCase:
+		case tFn, tSeq, tCase, tCalc:
 			depth++
 		case tEnd:
 			if depth == 0 {
@@ -800,7 +925,7 @@ func desugarSeq(toks []token) (Exp, error) {
 	}
 	for _, t := range toks {
 		switch t.kind {
-		case tFn, tSeq, tCase:
+		case tFn, tSeq, tCase, tCalc:
 			depth++
 			cur = append(cur, t)
 		case tEnd:

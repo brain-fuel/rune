@@ -342,3 +342,51 @@ func TestCaseParsing(t *testing.T) {
 		t.Errorf("empty 'with' should be a parse error")
 	}
 }
+
+// TestCalcParsing pins §5.7: a calc desugars to an ascribed first step chained
+// through subst, the motive binder is freshened, and malformed ladders error.
+func TestCalcParsing(t *testing.T) {
+	e, err := surface.ParseExpr("calc a = b by p = c by q end")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	app, ok := e.(surface.EApp)
+	if !ok {
+		t.Fatalf("got %#v, want a subst application", e)
+	}
+	head, args := surface.SpineOf(app)
+	if _, isSubst := head.(surface.ESubst); !isSubst || len(args) != 6 {
+		t.Fatalf("head %#v with %d args, want subst with 6", head, len(args))
+	}
+	if _, isAnn := args[5].(surface.EAnn); !isAnn {
+		t.Fatalf("the accumulator should be the ascribed first step, got %#v", args[5])
+	}
+
+	// One-step calc is just the ascribed proof.
+	e1, err := surface.ParseExpr("calc a = b by p end")
+	if err != nil {
+		t.Fatalf("parse one-step: %v", err)
+	}
+	if _, isAnn := e1.(surface.EAnn); !isAnn {
+		t.Fatalf("one-step calc should be an ascription, got %#v", e1)
+	}
+
+	// The motive binder freshens away from identifiers in the first expression.
+	e2, err := surface.ParseExpr("calc w = b by p = c by q end")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	app2 := e2.(surface.EApp)
+	_, args2 := surface.SpineOf(app2)
+	lam := args2[4].(surface.ELam)
+	if lam.Param == "w" {
+		t.Fatalf("motive binder captured the step variable w")
+	}
+
+	if _, err := surface.ParseExpr("calc a end"); err == nil {
+		t.Errorf("a calc needs at least one step")
+	}
+	if _, err := surface.ParseExpr("calc a = b by p"); !errors.Is(err, surface.ErrIncomplete) {
+		t.Errorf("unterminated calc: want ErrIncomplete, got %v", err)
+	}
+}

@@ -40,6 +40,8 @@ const (
 	tCase    // case (a case expression; GRAMMAR §5.6)
 	tOf      // of   (separates the scrutinee from the clauses)
 	tWith    // with (binds the induction hypotheses in a clause)
+	tCalc    // calc (an equational-reasoning block; GRAMMAR §5.7)
+	tBy      // by   (justifies one calc step)
 )
 
 type token struct {
@@ -114,6 +116,10 @@ func (k tokKind) String() string {
 		return "'of'"
 	case tWith:
 		return "'with'"
+	case tCalc:
+		return "'calc'"
+	case tBy:
+		return "'by'"
 	default:
 		return "token"
 	}
@@ -239,6 +245,10 @@ func keyword(word string, pos int) token {
 		return token{tOf, word, pos}
 	case "with":
 		return token{tWith, word, pos}
+	case "calc":
+		return token{tCalc, word, pos}
+	case "by":
+		return token{tBy, word, pos}
 	case "Prop":
 		return token{tProp, word, pos}
 	case "Eq":

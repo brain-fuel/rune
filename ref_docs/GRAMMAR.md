@@ -51,7 +51,7 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   expression position a numeral is a literal of the `builtin nat`-bound type (§5.5).
 - **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
   equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4),
-  `builtin` (ergonomics rung 2), and `case`, `of`, `with` (rung 4). The bare underscore `_` is
+  `builtin` (ergonomics rung 2), `case`, `of`, `with` (rung 4), and `calc`, `by` (rung 5). The bare underscore `_` is
   reserved as the hole; identifiers may still begin with `_` (`_x` is a name). `|` separates
   constructors inside a `data` block and leads each clause of a `case`.
 - **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
@@ -107,6 +107,7 @@ Atom      ::= Ident
            |  Num                         -- a numeral; requires a builtin nat in scope (§5.5)
            |  "(" Op ")"                  -- an operator, prefix/first-class: (+) x y
            |  Case                        -- case expression (§5.6)
+           |  Calc                        -- equational ladder (§5.7)
            |  "_"                         -- a hole: a metavariable for elaboration (Phase 2)
            |  "U"
            |  "Prop"                      -- the universe of propositions (Phase 3)
@@ -133,6 +134,8 @@ Case      ::= "case" Expr "of" ("|" Clause)+ "end"
 Clause    ::= Pattern ["with" PatName+] "->" Expr
 Pattern   ::= Ident PatName*               -- constructor, then binders; flat (no nesting)
 PatName   ::= Ident | "_"
+
+Calc      ::= "calc" Expr ("=" Expr "by" Expr)+ "end"   -- equational ladder (§5.7)
 ```
 
 Precedence, loosest to tightest: `let … in` and `->` (arrow is **right-associative**), then
@@ -267,6 +270,25 @@ desugaring, since the motive comes from typing:
   body extends until the next `|` or the closing `end`. The block self-delimits (an atom) and
   resets the §5.4 annotation carve-out like any bracketed group.
 
+### 5.7 `calc … end`
+
+```
+calc succ k + n
+  = succ (k + n) by refl (succ (k + n))
+  = succ (n + k) by cong succ (ih n)
+  = n + succ k   by sym (addSucc n k)
+end
+```
+
+An equational-reasoning ladder proving `first = last`: each `by` proof is checked against
+exactly its own step's equation. Parse-time desugaring, with no library dependency — the first
+step's proof is ascribed to its equation, and each later step chains through the `subst`
+former: `subst _ prev next prf (fn (w : _) is first = w end) acc`. The motive's binder is
+freshened against every identifier in `first`, so nothing is captured. Inside the block a
+spine-level `=` is the ladder's own separator (the §5.4 carve-out mechanism); parenthesize an
+equality proposition appearing within a step. `calc` is an atom; like the other blocks it is
+input-only sugar (§8).
+
 ## 6. Desugaring to core
 
 Surface is sugar over the core; resolution lowers as follows.
@@ -291,6 +313,7 @@ Surface is sugar over the core; resolution lowers as follows.
   (§5.5), at parse time.
 - **Case.** `case s of | C₁ a* [with ih*] -> e₁ | … end` ⟶ `DElim params* motive branch* s`
   (§5.6), at elaboration time; each branch is the clause body under its argument and IH binders.
+- **Calc.** A ladder desugars to ascription + nested `subst` (§5.7), at parse time.
 
 ## 7. Examples
 
@@ -359,6 +382,8 @@ modulo each, exactly as it is modulo comments and bound-variable names:
 - **`case`.** Desugars to an eliminator application at elaboration (§5.6) and leaves no trace
   in the core; the printer emits the eliminator application. Input sugar only. (Folding
   recognizable eliminator applications back into `case` is a later cosmetic step.)
+- **`calc`.** Desugars to `subst` chains at parse time (§5.7); the printer emits those. Input
+  sugar only.
 
 The printer DOES emit infix operators: an application `Ref⁺ x y` whose definition hash maps to an
 operator name prints as `x + y`, parenthesized per the §3 precedence table; unsaturated or
