@@ -1,0 +1,164 @@
+-- runelib — the Lesson 10 project, solved.
+-- A small library where the documentation is theorems and the theorems
+-- are checked. Every definition here elaborates, checks, and (for the
+-- runtime fragment) compiles to JavaScript via `rune emit`.
+
+-- ───────────────────────── Milestone 1 — data ─────────────────────────
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data List : U -> U is
+  nil : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+mul : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add n ih end) m
+  end
+end
+
+isZero : Nat -> Bool is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n
+  end
+end
+
+two : Nat is succ (succ zero) end
+three : Nat is succ two end
+six : Nat is mul two three end
+
+-- ─────────────────── Milestone 2 — the proof toolkit ───────────────────
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> Eq A x y -> Eq B (f x) (f y) is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ─────────────── Milestone 3 — the arithmetic theorems ────────────────
+
+addZeroRight : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is cong succ ih end)
+      n
+  end
+end
+
+addSucc : (m : Nat) -> (n : Nat) -> Eq Nat (add m (succ n)) (succ (add m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add k (succ n)) (succ (add k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (add k (succ n)) (succ (add k n))) is cong succ ih end)
+      m
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) -> Eq Nat (add (add a b) c) (add a (add b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add (add k b) c) (add k (add b c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (add (add k b) c) (add k (add b c))) is cong succ ih end)
+      a
+  end
+end
+
+-- The boss. Base: turn addZeroRight around with sym. Step: two hops —
+-- succ both sides of ih, then addSucc pointed backwards — joined by trans.
+addComm : (m : Nat) -> (n : Nat) -> Eq Nat (add m n) (add n m) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (add k n) (add n k) end)
+      (sym (addZeroRight n))
+      (fn (k : Nat) (ih : Eq Nat (add k n) (add n k)) is
+        trans (cong succ ih) (sym (addSucc n k))
+      end)
+      m
+  end
+end
+
+-- ───────────────────── Milestone 4 — verified lists ────────────────────
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (x : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+length : (A : U) -> List A -> Nat is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (x : List A) is Nat end)
+      zero
+      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- The flagship: length is additive over append.
+lengthAppend : (A : U) -> (xs : List A) -> (ys : List A) ->
+    Eq Nat (length A (append A xs ys)) (add (length A xs) (length A ys)) is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A
+      (fn (zs : List A) is
+        Eq Nat (length A (append A zs ys)) (add (length A zs) (length A ys))
+      end)
+      refl
+      (fn (x : A) (rest : List A)
+          (ih : Eq Nat (length A (append A rest ys)) (add (length A rest) (length A ys))) is
+        cong succ ih
+      end)
+      xs
+  end
+end
+
+-- ─────────────────── Milestone 5 — pairs from nothing ──────────────────
+-- A pair is what you can do with one: hand both parts to any consumer.
+-- Quantifying over all P : U lifts Pair A B into U1 (Lesson 3).
+
+Pair : U -> U -> U1 is
+  fn (A : U) (B : U) is (P : U) -> (A -> B -> P) -> P end
+end
+
+pair : {A : U} -> {B : U} -> A -> B -> Pair A B is
+  fn {A : U} {B : U} (a : A) (b : B) is
+    fn (P : U) (k : A -> B -> P) is k a b end
+  end
+end
+
+fst : {A : U} -> {B : U} -> Pair A B -> A is
+  fn {A : U} {B : U} (p : Pair A B) is p A (fn (a : A) (b : B) is a end) end
+end
+
+snd : {A : U} -> {B : U} -> Pair A B -> B is
+  fn {A : U} {B : U} (p : Pair A B) is p B (fn (a : A) (b : B) is b end) end
+end
