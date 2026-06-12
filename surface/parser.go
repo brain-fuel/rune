@@ -215,6 +215,8 @@ func (p *parser) parseData() (DataDef, error) {
 		case tEnd:
 			p.next()
 			return d, nil
+		case tEOF:
+			return DataDef{}, fmt.Errorf("%w: unterminated data declaration (missing 'end')", ErrIncomplete)
 		default:
 			return DataDef{}, fmt.Errorf("expected '|' or 'end' in data declaration, found %s at offset %d",
 				p.peek().kind, p.peek().pos)

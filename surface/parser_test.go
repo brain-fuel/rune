@@ -111,6 +111,17 @@ func TestIncomplete(t *testing.T) {
 			t.Errorf("ParseFile(%q): want ErrIncomplete, got %v", src, err)
 		}
 	}
+	programs := []string{
+		"data Nat : U is",                                // before any constructor
+		"data Nat : U is zero : Nat",                     // after a constructor, missing 'end'
+		"data Nat : U is zero : Nat | succ : Nat -> Nat", // mid constructor list
+	}
+	for _, src := range programs {
+		_, err := surface.ParseProgram(src)
+		if !errors.Is(err, surface.ErrIncomplete) {
+			t.Errorf("ParseProgram(%q): want ErrIncomplete, got %v", src, err)
+		}
+	}
 }
 
 // TestComments pins §2: line comments to end of line, and nestable block comments.
