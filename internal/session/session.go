@@ -32,8 +32,8 @@ type Session struct {
 	st       *store.Store
 	refs     map[string]core.Hash
 	refNames map[core.Hash]string
-	order    []string
-	byName   map[string]Def
+	order    []core.Hash
+	byHash   map[core.Hash]Def
 	// nat is the `builtin nat` binding of the loaded source, if any: it lets
 	// REPL expressions use numerals and the printer fold succ-chains back.
 	nat *surface.BuiltinNat
@@ -55,7 +55,7 @@ func (s *Session) Reset() {
 	s.refs = map[string]core.Hash{}
 	s.refNames = map[core.Hash]string{}
 	s.order = nil
-	s.byName = map[string]Def{}
+	s.byHash = map[core.Hash]Def{}
 	hs := s.st.AddQuot()
 	for i, n := range store.QuotNames() {
 		s.refs[n] = hs[i]
@@ -115,12 +115,12 @@ func (s *Session) AddDef(d surface.Def) (Def, error) {
 	}
 	h := s.st.Add(d.Name, ty, body)
 	rd := Def{Name: d.Name, Ty: ty, Body: body, Hash: h}
-	if _, exists := s.byName[d.Name]; !exists {
-		s.order = append(s.order, d.Name)
+	if _, exists := s.byHash[h]; !exists {
+		s.order = append(s.order, h)
 	}
 	s.refs[d.Name] = h
 	s.refNames[h] = d.Name
-	s.byName[d.Name] = rd
+	s.byHash[h] = rd
 	return rd, nil
 }
 
@@ -202,8 +202,8 @@ func (s *Session) Pretty(t core.Tm) string {
 // Defs returns the session definitions in definition order.
 func (s *Session) Defs() []Def {
 	out := make([]Def, 0, len(s.order))
-	for _, n := range s.order {
-		out = append(out, s.byName[n])
+	for _, h := range s.order {
+		out = append(out, s.byHash[h])
 	}
 	return out
 }
@@ -273,12 +273,12 @@ func (s *Session) AddData(d surface.DataDef) ([]string, error) {
 func (s *Session) bindName(name string, h core.Hash) {
 	ty, _ := s.st.TypeOf(h)
 	rd := Def{Name: name, Ty: ty, Hash: h}
-	if _, exists := s.byName[name]; !exists {
-		s.order = append(s.order, name)
+	if _, exists := s.byHash[h]; !exists {
+		s.order = append(s.order, h)
 	}
 	s.refs[name] = h
 	s.refNames[h] = name
-	s.byName[name] = rd
+	s.byHash[h] = rd
 }
 
 // Certified reports whether the definition currently bound to name has a valid
@@ -312,9 +312,9 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 	// Datatype formers denote types: at runtime they erase to the unit token.
 	// So does the quotient former Quot (a quotient compiles to its carrier).
 	typeRefs := map[core.Hash]bool{}
-	for _, name := range s.order {
-		if _, _, _, ok := s.st.DataDeclOf(s.refs[name]); ok {
-			typeRefs[s.refs[name]] = true
+	for _, h := range s.order {
+		if _, _, _, ok := s.st.DataDeclOf(h); ok {
+			typeRefs[h] = true
 		}
 	}
 	if hs, ok := s.st.QuotHashes(); ok {
@@ -329,9 +329,31 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 			typeRefs[fhs[i]] = true
 		}
 	}
+	// A display name can be bound more than once (later definitions shadow
+	// earlier ones); the emitted globals must stay distinct per HASH, with
+	// the current binding keeping the plain name and shadowed ancestors
+	// suffixed. References erase through this same map, so a body compiled
+	// against the old binding keeps calling the old code.
+	emitNames := map[core.Hash]string{}
+	for _, h := range s.order {
+		n := s.refNames[h]
+		if s.refs[n] != h {
+			n = n + "$" + h.Short()
+		}
+		emitNames[h] = n
+	}
+	// Builtin groups (quotients, the fibrant layer) live in refNames but not
+	// in the definition order; bodies may reference them by hash.
+	eraseNames := map[core.Hash]string{}
+	for h, n := range s.refNames {
+		eraseNames[h] = n
+	}
+	for h, n := range emitNames {
+		eraseNames[h] = n
+	}
 	tainted := map[string]string{}
-	for _, name := range s.order {
-		h := s.refs[name]
+	for _, h := range s.order {
+		name := emitNames[h]
 		// Datatype groups are emitted once, at the former; constructor and
 		// eliminator name entries are covered by it.
 		if decl, ctors, _, ok := s.st.DataDeclOf(h); ok {
@@ -358,7 +380,7 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		if !ok {
 			return p, fmt.Errorf("definition %q has no body to emit", name)
 		}
-		ir := codegen.Erase(body, s.refNames, typeRefs)
+		ir := codegen.Erase(body, eraseNames, typeRefs)
 		// Inner-layer taint: a definition whose erased body references a
 		// fibrant VALUE member (or another tainted definition) checks but
 		// does not deploy in v3 — transport along a ua-path has no erased

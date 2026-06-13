@@ -30,7 +30,7 @@ func TestIllTypedDefinitionRejected(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "type mismatch") {
 		t.Fatalf("ill-typed definition accepted (err=%v)", err)
 	}
-	if _, ok := s.byName["bad"]; ok {
+	if _, ok := s.refs["bad"]; ok {
 		t.Fatal("rejected definition was stored anyway")
 	}
 }

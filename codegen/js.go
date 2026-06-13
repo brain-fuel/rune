@@ -241,6 +241,13 @@ func jsName(n string) string {
 	if m, ok := jsOpNames[n]; ok {
 		return m
 	}
+	// A shadow-suffixed operator ("+$<hash>", from the session's per-hash
+	// emit names) mangles its operator head and keeps the suffix.
+	if i := strings.IndexByte(n, '$'); i > 0 {
+		if m, ok := jsOpNames[n[:i]]; ok {
+			return m + n[i:]
+		}
+	}
 	n = strings.ReplaceAll(n, "'", "$")
 	if n == "" {
 		n = "$x"
