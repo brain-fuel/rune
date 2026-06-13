@@ -167,7 +167,7 @@ modF : Nat -> Nat -> Nat -> Nat is
   end
 end
 
-/ : Nat -> Nat -> Nat is
+// : Nat -> Nat -> Nat is
   fn (m : Nat) (n : Nat) is divF m m n end
 end
 
@@ -200,9 +200,9 @@ end
 -- would. (The general division-algorithm and gcd-divides theorems belong to
 -- the course-of-values chapter; the fuel style proves its results by running.)
 
-seventeenDivFive : 17 / 5 = 3 is refl 3 end
+seventeenDivFive : 17 // 5 = 3 is refl 3 end
 seventeenModFive : 17 % 5 = 2 is refl 2 end
-divModRoundTrip : (17 / 5) * 5 + 17 % 5 = 17 is refl 17 end
+divModRoundTrip : (17 // 5) * 5 + 17 % 5 = 17 is refl 17 end
 gcdTwelveEighteen : gcd 12 18 = 6 is refl 6 end
 gcdOfPrimes : gcd 35 64 = 1 is refl 1 end
 

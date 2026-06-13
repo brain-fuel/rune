@@ -65,7 +65,7 @@ func TestREPLPrelude(t *testing.T) {
 		"1 + 1",
 		"6 * 7",
 		"5 - 7", // truncated subtraction floors at zero
-		"17 / 5",
+		"17 // 5",
 		"17 % 5",
 		"gcd 12 18",
 		"double : Nat -> Nat is fn (n : Nat) is n + n end end",
@@ -85,7 +85,7 @@ func TestREPLPrelude(t *testing.T) {
 		"2 : Nat",  // 1 + 1
 		"42 : Nat", // 6 * 7 and double 21
 		"0 : Nat",  // 5 - 7
-		"3 : Nat",  // 17 / 5
+		"3 : Nat",  // 17 // 5
 		"6 : Nat",  // gcd 12 18
 		"defined double",
 		"session cleared; prelude reloaded",

@@ -58,12 +58,16 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   instead, so an implicit form cannot begin with a literal `-`.
 - **Punctuation:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
   is one token and is never read as `-` `-` `>`, and `--` begins a comment rather than two `-`.
-- **Operators** (ergonomics, 2026-06): `+` `-` `*` `/` `%` are **symbolic identifiers** — they
+- **Operators** (ergonomics, 2026-06; `//` added by the numeric-tower amendment, 2026-06): `+`
+  `-` `*` `/` `//` `%` are **symbolic identifiers** — they
   name top-level definitions exactly as alphabetic identifiers do, and additionally parse infix
   (§3, §5.4). The set is **closed**; no other token lexes as an operator and there are no user
   fixity declarations. `=` is punctuation that *also* parses infix as the equality-proposition
   sugar (§5.4); it is not an identifier and cannot be defined. A bare `-` is the operator;
-  `--` and `->` still take the longest match.
+  `--` and `->` still take the longest match, and `//` is one token, never `/` `/`.
+  By convention (ref_docs/rune-numeric-tower.md): `//` is the flooring quotient and `%` its
+  matched flooring remainder at every numeric type; `/` is exact division and is defined only
+  where exact division is total (fields).
 
 ## 3. Grammar (EBNF)
 
@@ -96,7 +100,7 @@ EqE       ::= Add ["=" Add]               -- equality proposition; NON-associati
 Add       ::= Mul (AddOp Mul)*            -- left-associative
 Mul       ::= App (MulOp App)*            -- left-associative
 AddOp     ::= "+" | "-"
-MulOp     ::= "*" | "/" | "%"
+MulOp     ::= "*" | "/" | "//" | "%"
 Op        ::= AddOp | MulOp
 
 App       ::= Atom Arg*                   -- application, left-associative
@@ -139,7 +143,7 @@ Calc      ::= "calc" Expr ("=" Expr "by" Expr)+ "end"   -- equational ladder (§
 ```
 
 Precedence, loosest to tightest: `let … in` and `->` (arrow is **right-associative**), then
-`=` (**non-associative**), then `+` `-` (**left**), then `*` `/` `%` (**left**), then
+`=` (**non-associative**), then `+` `-` (**left**), then `*` `/` `//` `%` (**left**), then
 application (**left-associative**), then atoms. So `a = b -> c = d` is an implication between
 equations, and `a + b * c = c * b + a` parses as mathematics reads it. `fn`, `seq`, and
 parenthesized forms are fully delimited, so they are atoms and need no surrounding parentheses.

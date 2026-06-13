@@ -26,7 +26,7 @@ func opPrec(name string) int {
 	switch name {
 	case "+", "-":
 		return precAdd
-	case "*", "/", "%":
+	case "*", "/", "//", "%":
 		return precMul
 	}
 	return -1

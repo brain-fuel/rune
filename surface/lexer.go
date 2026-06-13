@@ -188,9 +188,14 @@ func lex(src string) ([]token, error) {
 		case r == '-' && i+1 < len(rs) && rs[i+1] == '>':
 			toks = append(toks, token{tArrow, "->", i})
 			i += 2
+		case r == '/' && i+1 < len(rs) && rs[i+1] == '/':
+			// Longest match: '//' is the flooring quotient, one token
+			// (ref_docs/rune-numeric-tower.md; GRAMMAR §2).
+			toks = append(toks, token{tOp, "//", i})
+			i += 2
 		case r == '+', r == '-', r == '*', r == '/', r == '%':
 			// A bare '-' reaches here only after the longest-match '--' and '->'
-			// cases above have declined it.
+			// cases above have declined it; a bare '/' only after '//'.
 			toks = append(toks, token{tOp, string(r), i})
 			i++
 		case unicode.IsDigit(r):

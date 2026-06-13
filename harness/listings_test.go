@@ -132,7 +132,7 @@ func TestListingsRun(t *testing.T) {
 		s := loadListing(t, "ch11_arithmetic.rune")
 		// The whole ergonomics ladder computing at once: literals, infix,
 		// case, fuel-style Euclid — conversion does arithmetic.
-		normalizesTo(t, s, `17 / 5`, "succ (succ (succ zero))")
+		normalizesTo(t, s, `17 // 5`, "succ (succ (succ zero))")
 		normalizesTo(t, s, `gcd 12 18`,
 			"succ (succ (succ (succ (succ (succ zero)))))")
 	})

@@ -48,7 +48,7 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 		if err := loadPrelude(s); err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "prelude: Nat arithmetic loaded (+ - * / %, gcd; numerals print as digits). `rune repl --no-prelude` for a bare session.")
+		fmt.Fprintln(out, "prelude: Nat arithmetic loaded (+ - * // %, gcd; numerals print as digits). `rune repl --no-prelude` for a bare session.")
 	}
 	fmt.Fprintln(out, "type :help for commands, :quit to exit.")
 

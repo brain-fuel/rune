@@ -49,7 +49,7 @@ You should see:
 
 ```
 rune repl — expressions are type checked and normalized; definitions are checked and cached.
-prelude: Nat arithmetic loaded (+ - * / %, gcd; numerals print as digits). `rune repl --no-prelude` for a bare session.
+prelude: Nat arithmetic loaded (+ - * // %, gcd; numerals print as digits). `rune repl --no-prelude` for a bare session.
 type :help for commands, :quit to exit.
 rune>
 ```
@@ -61,8 +61,9 @@ Type `:quit` (or press Ctrl-D) to exit.
 > calculator out of the box — but this course builds every one of those
 > definitions with you, starting from nothing, and the transcripts assume a
 > bare session. (Lesson 6 is where you build `Nat` yourself; by Lesson 10 you
-> will have rebuilt the entire prelude and proved theorems about it.) For Lesson 9 you'll also want
-[node](https://nodejs.org) on your PATH.
+> will have rebuilt the entire prelude and proved theorems about it.)
+
+For Lesson 9 you'll also want [node](https://nodejs.org) on your PATH.
 
 > **Note:** if `rune repl` prints `usage: rune (fmt|hash) <file>` you have an
 > old build on your PATH. Reinstall with the command above.

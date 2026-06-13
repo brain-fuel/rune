@@ -226,11 +226,12 @@ func prepend(n string, env []string) []string {
 // jsOpNames maps the operator definition names of GRAMMAR §3 (symbolic
 // identifiers, invalid in JS) to mangled JS identifiers.
 var jsOpNames = map[string]string{
-	"+": "$add",
-	"-": "$sub",
-	"*": "$mul",
-	"/": "$div",
-	"%": "$mod",
+	"+":  "$add",
+	"-":  "$sub",
+	"*":  "$mul",
+	"/":  "$div",
+	"//": "$fdiv",
+	"%":  "$mod",
 }
 
 // jsName sanitizes a rune identifier into a JS one. Alphabetic rune identifiers

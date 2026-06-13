@@ -70,7 +70,9 @@ end
 
 -- Division and modulus by repeated subtraction, with the dividend as fuel:
 -- each step removes at least one from the dividend, so the budget suffices
--- exactly. Division by zero is 0; n % 0 is n.
+-- exactly. The flooring quotient of anything by zero is 0; n % 0 is n,
+-- keeping DIV-LAW (a = (a // b) * b + a % b) true at b = 0 too
+-- (ref_docs/rune-numeric-tower.md). `/` is exact division and lives at Rat.
 
 divF : Nat -> Nat -> Nat -> Nat is
   fn (fuel : Nat) is
@@ -108,7 +110,7 @@ modF : Nat -> Nat -> Nat -> Nat is
   end
 end
 
-/ : Nat -> Nat -> Nat is
+// : Nat -> Nat -> Nat is
   fn (m : Nat) (n : Nat) is divF m m n end
 end
 
