@@ -67,8 +67,8 @@ glyph.
 |---|---|---|---|
 | `+` `-` `*` | yes (`-` truncated, as today) | yes (`-` true subtraction) | yes |
 | `/` exact | **absent** | **absent** | yes; `a / 0 = 0`; law: `b ≠ 0 → (a / b) * b = a` |
-| `//` floor quotient | yes (= v3.4.0's `/`) | yes, rounds −∞ | yes; `a // b = ⌊a/b⌋`, integer-valued Rat |
-| `%` floor remainder | yes (= v3.4.0's `%`; F = E = T at Nat) | yes, sign follows divisor | yes; `a % 1` = fractional part |
+| `//` floor quotient | yes (= v3.4.0's `/`) | yes, rounds −∞ | specified; lands with course-of-values (see §7 C3) |
+| `%` floor remainder | yes (= v3.4.0's `%`; F = E = T at Nat) | yes, sign follows divisor | specified (`a % 1` = fractional part); lands with course-of-values |
 | `gcd` (named) | yes | via `natAbs` | — |
 
 Notes:
@@ -123,23 +123,25 @@ computes). Operations by `qlift`, one respect proof each; negation is the
 swap. `//` and `%` defined by case analysis on signs over Nat's flooring
 engine, then lifted; the sign cases are where the F-convention is *earned*.
 
-**Rat** = `Quot (PairZN)` where `(n, d)` denotes n / (d+1) — **the denominator
-is stored off by one.** Equivalence:
-`(n₁, d₁) ~ (n₂, d₂) iff n₁ * (d₂+1) = n₂ * (d₁+1)` in Int. The +1 trick
-means: no positive-denominator Σ-type, no positivity proof obligation at any
-construction site, total constructors everywhere, and the equivalence relation
-needs no side conditions. Normalization (divide by gcd) is *not* part of the
-type — it's a canonical-form function a future shadow may use; the quotient
-makes `1/2 = 2/4` by `qsound`, not by representation.
+**Rat** = `Quot RPair` where `rp a b d` denotes (a − b)/(d+1) — a signed
+numerator as a Nat pair and **the denominator stored off by one.**
+Equivalence is cross-multiplication, one Nat equation:
+`a₁·s₂ + b₂·s₁ = a₂·s₁ + b₁·s₂` (sᵢ = dᵢ+1). The +1 trick means: no
+positive-denominator Σ-type, no positivity proof obligation at any
+construction site, total constructors everywhere, and the relation needs no
+side conditions. Normalization (divide by gcd) is *not* part of the type —
+the quotient makes `1/2 = 2/4` by `qsound`, not by representation.
 
-- `addQ (n₁,d₁) (n₂,d₂) = (n₁*(d₂+1) + n₂*(d₁+1), d₁*d₂ + d₁ + d₂)` — the
-  denominator arithmetic is the +1 trick paying rent: `(d₁+1)(d₂+1) − 1`.
-- `divQ a (n₂,d₂)`: case on the sign of n₂; zero → 0; otherwise multiply by
-  the flipped pair with the sign moved to the numerator. One respect proof,
-  paid once.
-- `floorQ (n,d) = n // (d+1)` in Int; `a // b` at Rat is the injected floor of
-  the exact quotient; `a % b = a - (a // b) * b` — *defined* by DIV-LAW, so
-  the law at Rat is `refl`.
+- `addQ`/`mulQ` by the textbook representative formulas; the denominator
+  arithmetic is the +1 trick paying rent: `(d₁+1)(d₂+1) − 1`.
+- **Division is multiplication by an equation-only flip** (as built in ch13):
+  `flip (rp a b d) = rp ((a∸b)·s) ((b∸a)·s) (Δ·Δ − 1)` with
+  `Δ = (a∸b)+(b∸a)`. When a ≠ b this is ±s/Δ scaled by Δ/Δ; when a = b the
+  numerator is 0 and the denominator 1 — so `flip 0 = 0` and `x / 0 = 0`
+  *fall out* rather than being decreed, and the respect proof needs no sign
+  or zero case analysis beyond one cancellation (`keyLemma`) and one
+  absurdity-from-zero. No order theory anywhere.
+- `floorQ`/`%` at Rat: see §7 C3 — parked on Euclidean uniqueness.
 
 **Injections** are explicit, named, and one-directional: `intOf : Nat -> Int`,
 `ratOf : Int -> Rat`, composite `ratOfNat`. No coercion, no overloading escape
@@ -200,9 +202,14 @@ core or hashes.
    immediate and named, not a wrong answer.*
 2. **C2 — Int.** Quotient library: `+ - * // %` at Int, `quot`/`rem` named,
    `intOf`, `natAbs`. Sign-case instances and DIV-LAW instances certified.
-3. **C3 — Rat.** The +1-denominator quotient, exact `/`, floor `//`,
-   fractional `%`, `ratOf`. Exactness and fractional-part instances. This is
-   the rung where `/` first exists.
+3. **C3 — Rat.** The +1-denominator quotient, exact `/` (as multiplication
+   by an equation-only flip — no sign analysis), `+ - *`, full respect
+   proofs. Exactness and zero-convention instances. This is the rung where
+   `/` first exists. *Amended in execution:* `//` and `%` at Rat are
+   well-defined on the quotient only by Euclidean uniqueness — the
+   course-of-values theorem ch11 already deferred — so they are parked with
+   it (PARKING-LOT) with their semantics pinned by §2; shipping them without
+   the uniqueness proof would mean an unprovable qlift obligation.
 4. **C4 — numerals beyond Nat** (C-major above). Separately decided,
    separately reversible.
 

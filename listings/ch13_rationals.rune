@@ -1,0 +1,1253 @@
+-- Chapter 13 — The rationals: where `/` first exists.
+-- The numeric tower (ref_docs/rune-numeric-tower.md) at its third rung.
+-- ℚ is triples (a, b, d) — meaning (a − b)/(d + 1), the +1 trick killing
+-- every positivity side-condition — modulo cross-multiplication. Exact
+-- division arrives as multiplication by a flip whose sign analysis is
+-- equations, not cases: the flip of (a − b)/s is (s(a∸b) − s(b∸a))/Δ²,
+-- which is s/(a−b) when a ≠ b and 0 when a = b, with x / 0 = 0 falling
+-- out rather than being decreed.
+-- `//` and `%` at ℚ are specified by the tower doc but land with the
+-- course-of-values chapter: a flooring quotient is well-defined on the
+-- quotient only by Euclidean uniqueness, the same theorem the fuel-style
+-- ch11 honestly deferred. The respect proofs here need no such thing —
+-- one cancellation, one absurdity-from-zero, and semiring algebra.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> ih + n
+    end
+  end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is
+    case n of
+    | zero -> 0
+    | succ k -> k
+    end
+  end
+end
+
+- : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case n of
+    | zero -> m
+    | succ k with ih -> pred ih
+    end
+  end
+end
+
+-- The equality toolkit.
+
+sym : {A : U} -> {x : A} -> {y : A} -> x = y -> y = x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is z = x end) (refl x)
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> x = y -> y = z -> x = z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is x = w end) p
+  end
+end
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> x = y -> f x = f y is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is f x = f z end) (refl (f x))
+  end
+end
+
+cong2 : {A : U} -> {B : U} -> {C : U} -> (f : A -> B -> C) ->
+    {x : A} -> {x' : A} -> {y : B} -> {y' : B} ->
+    x = x' -> y = y' -> f x y = f x' y' is
+  fn {A : U} {B : U} {C : U} (f : A -> B -> C)
+     {x : A} {x' : A} {y : B} {y' : B} (p : Eq A x x') (q : Eq B y y') is
+    trans (cong (fn (s : A) is f s y end) p) (cong (f x') q)
+  end
+end
+
+-- Absurdity without an empty type: a goal that is itself an equation
+-- follows from 0 = succ m by congruence with the function selecting the
+-- goal's sides — no discrimination machinery, one cong.
+absurdEq : {A : U} -> {x : A} -> {y : A} -> (m : Nat) -> Eq Nat 0 (succ m) -> x = y is
+  fn {A : U} {x : A} {y : A} (m : Nat) (p : Eq Nat 0 (succ m)) is
+    cong (fn (n : Nat) is
+      case n of
+      | zero -> x
+      | succ k -> y
+      end
+    end) p
+  end
+end
+
+-- Inspection: case on any Nat EXPRESSION, each branch receiving the
+-- equation at the refined shape (the missing `remember` idiom, built from
+-- the raw eliminator).
+caseEq : {P : U} -> (n : Nat) -> (Eq Nat n 0 -> P) -> ((k : Nat) -> Eq Nat n (succ k) -> P) -> P is
+  fn {P : U} (n : Nat) (z : Eq Nat n 0 -> P) (s : (k : Nat) -> Eq Nat n (succ k) -> P) is
+    NatElim (fn (m : Nat) is Eq Nat n m -> P end) z (fn (k : Nat) (ih : Eq Nat n k -> P) is s k end) n (refl n)
+  end
+end
+
+-- Addition laws.
+
+addZeroRight : (n : Nat) -> n + 0 = n is
+  fn (n : Nat) is
+    case n of
+    | zero -> refl 0
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addSucc : (m : Nat) -> (n : Nat) -> m + succ n = succ (m + n) is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> refl (succ n)
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addComm : (m : Nat) -> (n : Nat) -> m + n = n + m is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is sym (addZeroRight n) end
+    | succ k with ih -> fn (n : Nat) is
+        trans (cong succ (ih n)) (sym (addSucc n k))
+      end
+    end
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) -> (a + b) + c = a + (b + c) is
+  fn (a : Nat) is
+    case a of
+    | zero -> fn (b : Nat) (c : Nat) is refl (b + c) end
+    | succ k with ih -> fn (b : Nat) (c : Nat) is cong succ (ih b c) end
+    end
+  end
+end
+
+-- x + (y + z) = y + (x + z).
+swapLeft : (x : Nat) -> (y : Nat) -> (z : Nat) -> x + (y + z) = y + (x + z) is
+  fn (x : Nat) (y : Nat) (z : Nat) is
+    trans (sym (addAssoc x y z))
+      (trans (cong (fn (s : Nat) is s + z end) (addComm x y))
+        (addAssoc y x z))
+  end
+end
+
+-- (w + x) + (y + z) = (w + y) + (x + z).
+interchange : (w : Nat) -> (x : Nat) -> (y : Nat) -> (z : Nat) ->
+    (w + x) + (y + z) = (w + y) + (x + z) is
+  fn (w : Nat) (x : Nat) (y : Nat) (z : Nat) is
+    trans (addAssoc w x (y + z))
+      (trans (cong (fn (s : Nat) is w + s end) (swapLeft x y z))
+        (sym (addAssoc w y (x + z))))
+  end
+end
+
+succInj : {a : Nat} -> {b : Nat} -> succ a = succ b -> a = b is
+  fn {a : Nat} {b : Nat} (p : Eq Nat (succ a) (succ b)) is cong pred p end
+end
+
+addCancelR : (z : Nat) -> (x : Nat) -> (y : Nat) -> x + z = y + z -> x = y is
+  fn (z : Nat) is
+    case z of
+    | zero -> fn (x : Nat) (y : Nat) (r : Eq Nat (x + 0) (y + 0)) is
+        trans (sym (addZeroRight x)) (trans r (addZeroRight y))
+      end
+    | succ k with ih -> fn (x : Nat) (y : Nat) (r : Eq Nat (x + succ k) (y + succ k)) is
+        ih x y (succInj (trans (sym (addSucc x k)) (trans r (addSucc y k))))
+      end
+    end
+  end
+end
+
+-- Multiplication laws.
+
+mulZeroRight : (m : Nat) -> m * 0 = 0 is
+  fn (m : Nat) is
+    case m of
+    | zero -> refl 0
+    | succ k with ih -> trans (addZeroRight (k * 0)) ih
+    end
+  end
+end
+
+mulSuccRight : (m : Nat) -> (n : Nat) -> m * succ n = m * n + m is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is refl 0 end
+    | succ k with ih -> fn (n : Nat) is
+        calc succ k * succ n
+          = succ (k * succ n + n)   by addSucc (k * succ n) n
+          = succ ((k * n + k) + n)  by cong (fn (s : Nat) is succ (s + n) end) (ih n)
+          = succ (k * n + (k + n))  by cong succ (addAssoc (k * n) k n)
+          = succ (k * n + (n + k))  by cong (fn (s : Nat) is succ (k * n + s) end) (addComm k n)
+          = succ ((k * n + n) + k)  by cong succ (sym (addAssoc (k * n) n k))
+          = succ k * n + succ k     by sym (addSucc (k * n + n) k)
+        end
+      end
+    end
+  end
+end
+
+mulComm : (m : Nat) -> (n : Nat) -> m * n = n * m is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is sym (mulZeroRight n) end
+    | succ k with ih -> fn (n : Nat) is
+        calc succ k * n
+          = k * n + n   by refl (k * n + n)
+          = n * k + n   by cong (fn (s : Nat) is s + n end) (ih n)
+          = n + n * k   by addComm (n * k) n
+          = n * succ k  by sym (trans (mulSuccRight n k) (addComm (n * k) n))
+        end
+      end
+    end
+  end
+end
+
+distribR : (x : Nat) -> (y : Nat) -> (z : Nat) -> (x + y) * z = x * z + y * z is
+  fn (x : Nat) is
+    case x of
+    | zero -> fn (y : Nat) (z : Nat) is refl (y * z) end
+    | succ k with ih -> fn (y : Nat) (z : Nat) is
+        calc (succ k + y) * z
+          = (k + y) * z + z       by refl ((k + y) * z + z)
+          = (k * z + y * z) + z   by cong (fn (s : Nat) is s + z end) (ih y z)
+          = k * z + (y * z + z)   by addAssoc (k * z) (y * z) z
+          = k * z + (z + y * z)   by cong (fn (s : Nat) is k * z + s end) (addComm (y * z) z)
+          = (k * z + z) + y * z   by sym (addAssoc (k * z) z (y * z))
+          = succ k * z + y * z    by refl (succ k * z + y * z)
+        end
+      end
+    end
+  end
+end
+
+mulAssoc : (x : Nat) -> (y : Nat) -> (z : Nat) -> (x * y) * z = x * (y * z) is
+  fn (x : Nat) is
+    case x of
+    | zero -> fn (y : Nat) (z : Nat) is refl 0 end
+    | succ k with ih -> fn (y : Nat) (z : Nat) is
+        calc (succ k * y) * z
+          = (k * y + y) * z        by refl ((k * y + y) * z)
+          = (k * y) * z + y * z    by distribR (k * y) y z
+          = k * (y * z) + y * z    by cong (fn (s : Nat) is s + y * z end) (ih y z)
+          = succ k * (y * z)       by refl (succ k * (y * z))
+        end
+      end
+    end
+  end
+end
+
+mulCancelR : (k : Nat) -> (x : Nat) -> (y : Nat) -> x * succ k = y * succ k -> x = y is
+  fn (k : Nat) (x : Nat) is
+    case x of
+    | zero -> fn (y : Nat) is
+        case y of
+        | zero -> fn (r : Eq Nat (0 * succ k) (0 * succ k)) is refl 0 end
+        | succ y' -> fn (r : Eq Nat (0 * succ k) (succ y' * succ k)) is
+            absurdEq (y' * succ k + k)
+              (trans r (addSucc (y' * succ k) k))
+          end
+        end
+      end
+    | succ x' with ih -> fn (y : Nat) is
+        case y of
+        | zero -> fn (r : Eq Nat (succ x' * succ k) (0 * succ k)) is
+            absurdEq (x' * succ k + k)
+              (trans (sym r) (addSucc (x' * succ k) k))
+          end
+        | succ y' -> fn (r : Eq Nat (succ x' * succ k) (succ y' * succ k)) is
+            cong succ (ih y'
+              (addCancelR (succ k) (x' * succ k) (y' * succ k) r))
+          end
+        end
+      end
+    end
+  end
+end
+
+-- mulCancelR's succ/succ case feeds addCancelR an equation
+-- x'·s + s = y'·s + s; succ x' * succ k computes to x'·succ k + succ k,
+-- which addSucc turns into succ (x'·succ k + k) — the same reshaping the
+-- absurd branches use.
+
+sumZeroL : (x : Nat) -> (y : Nat) -> x + y = 0 -> x = 0 is
+  fn (x : Nat) is
+    case x of
+    | zero -> fn (y : Nat) (r : Eq Nat (0 + y) 0) is refl 0 end
+    | succ k -> fn (y : Nat) (r : Eq Nat (succ k + y) 0) is
+        absurdEq (k + y) (sym r)
+      end
+    end
+  end
+end
+
+sumZeroR : (x : Nat) -> (y : Nat) -> x + y = 0 -> y = 0 is
+  fn (x : Nat) (y : Nat) (r : Eq Nat (x + y) 0) is
+    sumZeroL y x (trans (addComm y x) r)
+  end
+end
+
+productZero : (k : Nat) -> (x : Nat) -> x * succ k = 0 -> x = 0 is
+  fn (k : Nat) (x : Nat) is
+    case x of
+    | zero -> fn (r : Eq Nat 0 0) is refl 0 end
+    | succ j -> fn (r : Eq Nat (succ j * succ k) 0) is
+        absurdEq (j * succ k + k)
+          (trans (sym r) (addSucc (j * succ k) k))
+      end
+    end
+  end
+end
+
+-- The monus toolkit (Chapter 12's, plus distribution over a product).
+
+zeroMonus : (b : Nat) -> 0 - b = 0 is
+  fn (b : Nat) is
+    case b of
+    | zero -> refl 0
+    | succ k with ih -> cong pred ih
+    end
+  end
+end
+
+monusSuccSucc : (b : Nat) -> (a : Nat) -> succ a - succ b = a - b is
+  fn (b : Nat) is
+    case b of
+    | zero -> fn (a : Nat) is refl a end
+    | succ k with ih -> fn (a : Nat) is cong pred (ih a) end
+    end
+  end
+end
+
+monusAddCancel : (d : Nat) -> (a : Nat) -> (a + d) - d = a is
+  fn (d : Nat) is
+    case d of
+    | zero -> fn (a : Nat) is addZeroRight a end
+    | succ k with ih -> fn (a : Nat) is
+        calc (a + succ k) - succ k
+          = succ (a + k) - succ k by cong (fn (s : Nat) is s - succ k end) (addSucc a k)
+          = (a + k) - k           by monusSuccSucc k (a + k)
+          = a                     by ih a
+        end
+      end
+    end
+  end
+end
+
+monusAddZero : (c : Nat) -> (b : Nat) -> c - (c + b) = 0 is
+  fn (c : Nat) is
+    case c of
+    | zero -> fn (b : Nat) is zeroMonus b end
+    | succ k with ih -> fn (b : Nat) is
+        calc succ k - (succ k + b)
+          = k - (k + b) by monusSuccSucc (k + b) k
+          = 0           by ih b
+        end
+      end
+    end
+  end
+end
+
+monusEq : (b : Nat) -> (a : Nat) -> (c : Nat) -> (d : Nat) ->
+    a + d = c + b -> a - b = c - d is
+  fn (b : Nat) is
+    case b of
+    | zero -> fn (a : Nat) (c : Nat) (d : Nat) (r : Eq Nat (a + d) (c + 0)) is
+        sym (calc c - d
+          = (a + d) - d by cong (fn (s : Nat) is s - d end) (sym (trans r (addZeroRight c)))
+          = a           by monusAddCancel d a
+        end)
+      end
+    | succ b' with ih -> fn (a : Nat) is
+        case a of
+        | zero -> fn (c : Nat) (d : Nat) (r : Eq Nat (0 + d) (c + succ b')) is
+            trans (zeroMonus (succ b'))
+              (sym (calc c - d
+                = c - (c + succ b') by cong (fn (s : Nat) is c - s end) r
+                = 0                 by monusAddZero c (succ b')
+              end))
+          end
+        | succ a' -> fn (c : Nat) (d : Nat) (r : Eq Nat (succ a' + d) (c + succ b')) is
+            trans (monusSuccSucc b' a')
+              (ih a' c d (succInj (trans r (addSucc c b'))))
+          end
+        end
+      end
+    end
+  end
+end
+
+predMul : (x : Nat) -> (k : Nat) -> pred x * k = x * k - k is
+  fn (x : Nat) is
+    case x of
+    | zero -> fn (k : Nat) is sym (zeroMonus k) end
+    | succ j -> fn (k : Nat) is
+        sym (monusAddCancel k (j * k))
+      end
+    end
+  end
+end
+
+monusMonus : (r : Nat) -> (p : Nat) -> (q : Nat) -> (p - q) - r = p - (q + r) is
+  fn (r : Nat) is
+    case r of
+    | zero -> fn (p : Nat) (q : Nat) is
+        cong (fn (s : Nat) is p - s end) (sym (addZeroRight q))
+      end
+    | succ k with ih -> fn (p : Nat) (q : Nat) is
+        calc (p - q) - succ k
+          = pred ((p - q) - k)   by refl (pred ((p - q) - k))
+          = pred (p - (q + k))   by cong pred (ih p q)
+          = p - succ (q + k)     by refl (p - succ (q + k))
+          = p - (q + succ k)     by cong (fn (s : Nat) is p - s end) (sym (addSucc q k))
+        end
+      end
+    end
+  end
+end
+
+monusMulDistribR : (y : Nat) -> (x : Nat) -> (k : Nat) -> (x - y) * k = x * k - y * k is
+  fn (y : Nat) is
+    case y of
+    | zero -> fn (x : Nat) (k : Nat) is refl (x * k) end
+    | succ j with ih -> fn (x : Nat) (k : Nat) is
+        calc (x - succ j) * k
+          = pred (x - j) * k        by refl (pred (x - j) * k)
+          = (x - j) * k - k         by predMul (x - j) k
+          = (x * k - j * k) - k     by cong (fn (s : Nat) is s - k end) (ih x k)
+          = x * k - (j * k + k)     by monusMonus k (x * k) (j * k)
+          = x * k - succ j * k      by refl (x * k - succ j * k)
+        end
+      end
+    end
+  end
+end
+
+-- Product-shuffle helpers: the four-factor regroupings every respect proof
+-- below leans on, proved once.
+
+distribL : (c : Nat) -> (x : Nat) -> (y : Nat) -> c * (x + y) = c * x + c * y is
+  fn (c : Nat) (x : Nat) (y : Nat) is
+    trans (mulComm c (x + y))
+      (trans (distribR x y c)
+        (cong2 (fn (u : Nat) (v : Nat) is u + v end) (mulComm x c) (mulComm y c)))
+  end
+end
+
+-- (x·u)·(y·v) = (x·y)·(u·v).
+prodSwapMid : (x : Nat) -> (u : Nat) -> (y : Nat) -> (v : Nat) ->
+    (x * u) * (y * v) = (x * y) * (u * v) is
+  fn (x : Nat) (u : Nat) (y : Nat) (v : Nat) is
+    calc (x * u) * (y * v)
+      = x * (u * (y * v))   by mulAssoc x u (y * v)
+      = x * ((u * y) * v)   by cong (fn (s : Nat) is x * s end) (sym (mulAssoc u y v))
+      = x * ((y * u) * v)   by cong (fn (s : Nat) is x * (s * v) end) (mulComm u y)
+      = x * (y * (u * v))   by cong (fn (s : Nat) is x * s end) (mulAssoc y u v)
+      = (x * y) * (u * v)   by sym (mulAssoc x y (u * v))
+    end
+  end
+end
+
+-- (a·c)·u = c·(a·u).
+pullOut : (a : Nat) -> (c : Nat) -> (u : Nat) -> (a * c) * u = c * (a * u) is
+  fn (a : Nat) (c : Nat) (u : Nat) is
+    trans (cong (fn (s : Nat) is s * u end) (mulComm a c)) (mulAssoc c a u)
+  end
+end
+
+-- (x·a)·b = (x·b)·a.
+swapRight : (x : Nat) -> (a : Nat) -> (b : Nat) -> (x * a) * b = (x * b) * a is
+  fn (x : Nat) (a : Nat) (b : Nat) is
+    trans (mulAssoc x a b)
+      (trans (cong (fn (s : Nat) is x * s end) (mulComm a b))
+        (sym (mulAssoc x b a)))
+  end
+end
+
+-- ((u·v)·p)·q = (u·p)·(v·q).
+prod4 : (u : Nat) -> (v : Nat) -> (p : Nat) -> (q : Nat) ->
+    ((u * v) * p) * q = (u * p) * (v * q) is
+  fn (u : Nat) (v : Nat) (p : Nat) (q : Nat) is
+    calc ((u * v) * p) * q
+      = ((u * p) * v) * q   by cong (fn (s : Nat) is s * q end) (swapRight u v p)
+      = (u * p) * (v * q)   by mulAssoc (u * p) v q
+    end
+  end
+end
+
+-- The representation: rp a b d means (a − b) / (d + 1). Total constructors,
+-- no positivity proofs anywhere — the +1 trick.
+
+data RPair : U is
+  rp : Nat -> Nat -> Nat -> RPair
+end
+
+posR : RPair -> Nat is
+  fn (p : RPair) is
+    case p of
+    | rp a b d -> a
+    end
+  end
+end
+
+negR : RPair -> Nat is
+  fn (p : RPair) is
+    case p of
+    | rp a b d -> b
+    end
+  end
+end
+
+denR : RPair -> Nat is
+  fn (p : RPair) is
+    case p of
+    | rp a b d -> d
+    end
+  end
+end
+
+-- Cross-multiplication, in Nat: (a−b)/sd ~ (c−e)/sf iff a·sf + e·sd = c·sd + b·sf.
+QRel : RPair -> RPair -> Prop is
+  fn (p : RPair) (q : RPair) is
+    Eq Nat (posR p * succ (denR q) + negR q * succ (denR p))
+           (posR q * succ (denR p) + negR p * succ (denR q))
+  end
+end
+
+Rat : U is Quot RPair QRel end
+
+-- Operations on representatives.
+
+raddP : RPair -> RPair -> RPair is
+  fn (p : RPair) (q : RPair) is
+    rp (posR p * succ (denR q) + posR q * succ (denR p))
+       (negR p * succ (denR q) + negR q * succ (denR p))
+       ((denR p * denR q + denR p) + denR q)
+  end
+end
+
+rmulP : RPair -> RPair -> RPair is
+  fn (p : RPair) (q : RPair) is
+    rp (posR p * posR q + negR p * negR q)
+       (posR p * negR q + negR p * posR q)
+       ((denR p * denR q + denR p) + denR q)
+  end
+end
+
+rnegP : RPair -> RPair is
+  fn (p : RPair) is rp (negR p) (posR p) (denR p) end
+end
+
+-- The flip: 1/((a−b)/s) as (s(a∸b) − s(b∸a)) / Δ², Δ = (a∸b)+(b∸a).
+-- No case analysis: a = b makes the numerator 0 and the denominator 1,
+-- so the flip of zero is zero and x / 0 = 0 falls out.
+rflipP : RPair -> RPair is
+  fn (p : RPair) is
+    rp ((posR p - negR p) * succ (denR p))
+       ((negR p - posR p) * succ (denR p))
+       ((((posR p - negR p) + (negR p - posR p)) * ((posR p - negR p) + (negR p - posR p))) - 1)
+  end
+end
+
+rdivP : RPair -> RPair -> RPair is
+  fn (p : RPair) (q : RPair) is rmulP p (rflipP q) end
+end
+
+-- The denominator bookkeeping: succ ((d·f + d) + f) = succ d · succ f.
+denSucc : (d : Nat) -> (f : Nat) -> succ ((d * f + d) + f) = succ d * succ f is
+  fn (d : Nat) (f : Nat) is
+    sym (calc succ d * succ f
+      = d * succ f + succ f    by refl (d * succ f + succ f)
+      = (d * f + d) + succ f   by cong (fn (s : Nat) is s + succ f end) (mulSuccRight d f)
+      = succ ((d * f + d) + f) by addSucc (d * f + d) f
+    end)
+  end
+end
+
+-- Respect proofs, as pure Nat lemmas over the components. Notation in the
+-- comments: s1 = succ d1, s2 = succ d2, the representative (a, b, d) being
+-- (a − b)/s.
+
+-- Negation flips the cross equation.
+negCross : (d1 : Nat) -> (d2 : Nat) -> (a : Nat) -> (b : Nat) -> (c : Nat) -> (e : Nat) ->
+    a * succ d2 + e * succ d1 = c * succ d1 + b * succ d2 ->
+    b * succ d2 + c * succ d1 = e * succ d1 + a * succ d2 is
+  fn (d1 : Nat) (d2 : Nat) (a : Nat) (b : Nat) (c : Nat) (e : Nat)
+     (h : Eq Nat (a * succ d2 + e * succ d1) (c * succ d1 + b * succ d2)) is
+    trans (addComm (b * succ d2) (c * succ d1))
+      (trans (sym h) (addComm (a * succ d2) (e * succ d1)))
+  end
+end
+
+-- The flip's algebraic heart: from the two cross equations, the de-warted
+-- flip cross follows by multiplying through s2·s1 and cancelling twice.
+keyLemma : (d1 : Nat) -> (d2 : Nat) -> (x : Nat) -> (y : Nat) -> (D1 : Nat) -> (D2 : Nat) ->
+    x * succ d2 = y * succ d1 ->
+    D1 * succ d2 = D2 * succ d1 ->
+    (x * succ d1) * (D2 * D2) = (y * succ d2) * (D1 * D1) is
+  fn (d1 : Nat) (d2 : Nat) (x : Nat) (y : Nat) (D1 : Nat) (D2 : Nat)
+     (h1 : Eq Nat (x * succ d2) (y * succ d1))
+     (h2 : Eq Nat (D1 * succ d2) (D2 * succ d1)) is
+    mulCancelR d2 ((x * succ d1) * (D2 * D2)) ((y * succ d2) * (D1 * D1))
+      (mulCancelR d1 (((x * succ d1) * (D2 * D2)) * succ d2) (((y * succ d2) * (D1 * D1)) * succ d2)
+        (calc (((x * succ d1) * (D2 * D2)) * succ d2) * succ d1
+          = ((x * succ d1) * succ d2) * ((D2 * D2) * succ d1)
+              by prod4 (x * succ d1) (D2 * D2) (succ d2) (succ d1)
+          = ((x * succ d2) * succ d1) * ((D2 * D2) * succ d1)
+              by cong (fn (t : Nat) is t * ((D2 * D2) * succ d1) end) (swapRight x (succ d1) (succ d2))
+          = ((y * succ d1) * succ d1) * ((D2 * D2) * succ d1)
+              by cong (fn (t : Nat) is (t * succ d1) * ((D2 * D2) * succ d1) end) h1
+          = ((y * succ d1) * succ d1) * ((D2 * succ d1) * D2)
+              by cong (fn (t : Nat) is ((y * succ d1) * succ d1) * t end) (swapRight D2 D2 (succ d1))
+          = ((y * succ d1) * succ d1) * ((D1 * succ d2) * D2)
+              by cong (fn (t : Nat) is ((y * succ d1) * succ d1) * (t * D2) end) (sym h2)
+          = ((y * succ d1) * succ d1) * ((D1 * D2) * succ d2)
+              by cong (fn (t : Nat) is ((y * succ d1) * succ d1) * t end) (swapRight D1 (succ d2) D2)
+          = ((y * succ d1) * (D1 * D2)) * (succ d1 * succ d2)
+              by prodSwapMid (y * succ d1) (succ d1) (D1 * D2) (succ d2)
+          = ((y * (D1 * D2)) * succ d1) * (succ d1 * succ d2)
+              by cong (fn (t : Nat) is t * (succ d1 * succ d2) end) (swapRight y (succ d1) (D1 * D2))
+          = (y * (D1 * D2)) * (succ d1 * (succ d1 * succ d2))
+              by mulAssoc (y * (D1 * D2)) (succ d1) (succ d1 * succ d2)
+          = (y * (D1 * D2)) * (succ d1 * (succ d2 * succ d1))
+              by cong (fn (t : Nat) is (y * (D1 * D2)) * (succ d1 * t) end) (mulComm (succ d1) (succ d2))
+          = (y * (D1 * D2)) * ((succ d1 * succ d2) * succ d1)
+              by cong (fn (t : Nat) is (y * (D1 * D2)) * t end) (sym (mulAssoc (succ d1) (succ d2) (succ d1)))
+          = (y * (D1 * D2)) * ((succ d2 * succ d1) * succ d1)
+              by cong (fn (t : Nat) is (y * (D1 * D2)) * (t * succ d1) end) (mulComm (succ d1) (succ d2))
+          = (y * (D1 * D2)) * (succ d2 * (succ d1 * succ d1))
+              by cong (fn (t : Nat) is (y * (D1 * D2)) * t end) (mulAssoc (succ d2) (succ d1) (succ d1))
+          = ((y * (D1 * D2)) * succ d2) * (succ d1 * succ d1)
+              by sym (mulAssoc (y * (D1 * D2)) (succ d2) (succ d1 * succ d1))
+          = ((y * succ d2) * (D1 * D2)) * (succ d1 * succ d1)
+              by cong (fn (t : Nat) is t * (succ d1 * succ d1) end) (sym (swapRight y (succ d2) (D1 * D2)))
+          = (((y * succ d2) * (D1 * D2)) * succ d1) * succ d1
+              by sym (mulAssoc ((y * succ d2) * (D1 * D2)) (succ d1) (succ d1))
+          = (((y * succ d2) * (D1 * D1)) * succ d2) * succ d1
+              by cong (fn (t : Nat) is t * succ d1 end) (sym (calc ((y * succ d2) * (D1 * D1)) * succ d2
+                  = (y * succ d2) * ((D1 * D1) * succ d2)
+                      by mulAssoc (y * succ d2) (D1 * D1) (succ d2)
+                  = (y * succ d2) * ((D1 * succ d2) * D1)
+                      by cong (fn (t : Nat) is (y * succ d2) * t end) (swapRight D1 D1 (succ d2))
+                  = (y * succ d2) * ((D2 * succ d1) * D1)
+                      by cong (fn (t : Nat) is (y * succ d2) * (t * D1) end) h2
+                  = (y * succ d2) * ((D2 * D1) * succ d1)
+                      by cong (fn (t : Nat) is (y * succ d2) * t end) (swapRight D2 (succ d1) D1)
+                  = (y * succ d2) * ((D1 * D2) * succ d1)
+                      by cong (fn (t : Nat) is (y * succ d2) * (t * succ d1) end) (mulComm D2 D1)
+                  = ((y * succ d2) * (D1 * D2)) * succ d1
+                      by sym (mulAssoc (y * succ d2) (D1 * D2) (succ d1))
+                end))
+        end))
+  end
+end
+
+-- One half of the flip's cross equation, wart and all: caseEq supplies the
+-- zero/nonzero split with its equations, keyLemma does the algebra.
+flipHalf : (d1 : Nat) -> (d2 : Nat) -> (D1 : Nat) -> (D2 : Nat) -> (x : Nat) -> (y : Nat) ->
+    x * succ d2 = y * succ d1 ->
+    D1 * succ d2 = D2 * succ d1 ->
+    (D1 = 0 -> x = 0) ->
+    (D2 = 0 -> y = 0) ->
+    (x * succ d1) * succ (D2 * D2 - 1) = (y * succ d2) * succ (D1 * D1 - 1) is
+  fn (d1 : Nat) (d2 : Nat) (D1 : Nat) (D2 : Nat) (x : Nat) (y : Nat)
+     (h1 : Eq Nat (x * succ d2) (y * succ d1))
+     (h2 : Eq Nat (D1 * succ d2) (D2 * succ d1))
+     (zx : Eq Nat D1 0 -> Eq Nat x 0)
+     (zy : Eq Nat D2 0 -> Eq Nat y 0) is
+    caseEq {Eq Nat ((x * succ d1) * succ (D2 * D2 - 1)) ((y * succ d2) * succ (D1 * D1 - 1))} D1
+      (fn (q1 : Eq Nat D1 0) is
+        trans (cong (fn (t : Nat) is (t * succ d1) * succ (D2 * D2 - 1) end) (zx q1))
+          (sym (cong (fn (t : Nat) is (t * succ d2) * succ (D1 * D1 - 1) end)
+            (productZero d1 y (trans (sym h1) (cong (fn (t : Nat) is t * succ d2 end) (zx q1))))))
+      end)
+      (fn (k1 : Nat) (q1 : Eq Nat D1 (succ k1)) is
+        caseEq {Eq Nat ((x * succ d1) * succ (D2 * D2 - 1)) ((y * succ d2) * succ (D1 * D1 - 1))} D2
+          (fn (q2 : Eq Nat D2 0) is
+            absurdEq k1 (trans
+              (sym (productZero d2 D1 (trans h2 (cong (fn (t : Nat) is t * succ d1 end) q2))))
+              q1)
+          end)
+          (fn (k2 : Nat) (q2 : Eq Nat D2 (succ k2)) is
+            calc (x * succ d1) * succ (D2 * D2 - 1)
+              = (x * succ d1) * (D2 * D2)
+                  by cong (fn (t : Nat) is (x * succ d1) * t end)
+                    (trans (cong (fn (t : Nat) is succ (t - 1) end)
+                        (trans (cong2 (fn (u : Nat) (v : Nat) is u * v end) q2 q2) (addSucc (k2 * succ k2) k2)))
+                      (sym (trans (cong2 (fn (u : Nat) (v : Nat) is u * v end) q2 q2) (addSucc (k2 * succ k2) k2))))
+              = (y * succ d2) * (D1 * D1)
+                  by keyLemma d1 d2 x y D1 D2 h1 h2
+              = (y * succ d2) * succ (D1 * D1 - 1)
+                  by cong (fn (t : Nat) is (y * succ d2) * t end)
+                    (sym (trans (cong (fn (t : Nat) is succ (t - 1) end)
+                        (trans (cong2 (fn (u : Nat) (v : Nat) is u * v end) q1 q1) (addSucc (k1 * succ k1) k1)))
+                      (sym (trans (cong2 (fn (u : Nat) (v : Nat) is u * v end) q1 q1) (addSucc (k1 * succ k1) k1)))))
+            end
+          end)
+      end)
+  end
+end
+
+-- Addition respects ~ in its left argument: gather the a/b-terms against
+-- (F·F), apply the hypothesis once, and watch the c/e-terms commute past.
+addCrossL : (f : Nat) -> (d1 : Nat) -> (d1' : Nat) ->
+    (a : Nat) -> (b : Nat) -> (a' : Nat) -> (b' : Nat) -> (c : Nat) -> (e : Nat) ->
+    a * succ d1' + b' * succ d1 = a' * succ d1 + b * succ d1' ->
+    (a * succ f + c * succ d1) * (succ d1' * succ f) + (b' * succ f + e * succ d1') * (succ d1 * succ f)
+      = (a' * succ f + c * succ d1') * (succ d1 * succ f) + (b * succ f + e * succ d1) * (succ d1' * succ f) is
+  fn (f : Nat) (d1 : Nat) (d1' : Nat)
+     (a : Nat) (b : Nat) (a' : Nat) (b' : Nat) (c : Nat) (e : Nat)
+     (h : Eq Nat (a * succ d1' + b' * succ d1) (a' * succ d1 + b * succ d1')) is
+    calc (a * succ f + c * succ d1) * (succ d1' * succ f) + (b' * succ f + e * succ d1') * (succ d1 * succ f)
+      = ((a * succ f) * (succ d1' * succ f) + (c * succ d1) * (succ d1' * succ f))
+          + ((b' * succ f) * (succ d1 * succ f) + (e * succ d1') * (succ d1 * succ f))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (distribR (a * succ f) (c * succ d1) (succ d1' * succ f))
+              (distribR (b' * succ f) (e * succ d1') (succ d1 * succ f))
+      = ((a * succ f) * (succ d1' * succ f) + (b' * succ f) * (succ d1 * succ f))
+          + ((c * succ d1) * (succ d1' * succ f) + (e * succ d1') * (succ d1 * succ f))
+          by interchange ((a * succ f) * (succ d1' * succ f)) ((c * succ d1) * (succ d1' * succ f))
+              ((b' * succ f) * (succ d1 * succ f)) ((e * succ d1') * (succ d1 * succ f))
+      = ((a * succ d1') * (succ f * succ f) + (b' * succ d1) * (succ f * succ f))
+          + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (prodSwapMid a (succ f) (succ d1') (succ f))
+                (prodSwapMid b' (succ f) (succ d1) (succ f)))
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (prodSwapMid c (succ d1) (succ d1') (succ f))
+                (prodSwapMid e (succ d1') (succ d1) (succ f)))
+      = ((a * succ d1' + b' * succ d1) * (succ f * succ f))
+          + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f))
+          by cong (fn (t : Nat) is t + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f)) end)
+              (sym (distribR (a * succ d1') (b' * succ d1) (succ f * succ f)))
+      = ((a' * succ d1 + b * succ d1') * (succ f * succ f))
+          + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f))
+          by cong (fn (t : Nat) is t * (succ f * succ f) + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f)) end) h
+      = ((a' * succ d1) * (succ f * succ f) + (b * succ d1') * (succ f * succ f))
+          + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f))
+          by cong (fn (t : Nat) is t + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f)) end)
+              (distribR (a' * succ d1) (b * succ d1') (succ f * succ f))
+      = ((a' * succ f) * (succ d1 * succ f) + (b * succ f) * (succ d1' * succ f))
+          + ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (sym (prodSwapMid a' (succ f) (succ d1) (succ f)))
+                (sym (prodSwapMid b (succ f) (succ d1') (succ f))))
+              (refl ((c * succ d1') * (succ d1 * succ f) + (e * succ d1) * (succ d1' * succ f)))
+      = ((a' * succ f) * (succ d1 * succ f) + (c * succ d1') * (succ d1 * succ f))
+          + ((b * succ f) * (succ d1' * succ f) + (e * succ d1) * (succ d1' * succ f))
+          by interchange ((a' * succ f) * (succ d1 * succ f)) ((b * succ f) * (succ d1' * succ f))
+              ((c * succ d1') * (succ d1 * succ f)) ((e * succ d1) * (succ d1' * succ f))
+      = (a' * succ f + c * succ d1') * (succ d1 * succ f) + (b * succ f + e * succ d1) * (succ d1' * succ f)
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (sym (distribR (a' * succ f) (c * succ d1') (succ d1 * succ f)))
+              (sym (distribR (b * succ f) (e * succ d1) (succ d1' * succ f)))
+    end
+  end
+end
+
+-- Addition respects ~ in its right argument: the a/b-terms are equal up to
+-- commuting F·F', the c/e-terms gather against (D·D).
+addCrossR : (d : Nat) -> (f : Nat) -> (f' : Nat) ->
+    (a : Nat) -> (b : Nat) -> (c : Nat) -> (e : Nat) -> (c' : Nat) -> (e' : Nat) ->
+    c * succ f' + e' * succ f = c' * succ f + e * succ f' ->
+    (a * succ f + c * succ d) * (succ d * succ f') + (b * succ f' + e' * succ d) * (succ d * succ f)
+      = (a * succ f' + c' * succ d) * (succ d * succ f) + (b * succ f + e * succ d) * (succ d * succ f') is
+  fn (d : Nat) (f : Nat) (f' : Nat)
+     (a : Nat) (b : Nat) (c : Nat) (e : Nat) (c' : Nat) (e' : Nat)
+     (h : Eq Nat (c * succ f' + e' * succ f) (c' * succ f + e * succ f')) is
+    calc (a * succ f + c * succ d) * (succ d * succ f') + (b * succ f' + e' * succ d) * (succ d * succ f)
+      = ((a * succ f) * (succ d * succ f') + (c * succ d) * (succ d * succ f'))
+          + ((b * succ f') * (succ d * succ f) + (e' * succ d) * (succ d * succ f))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (distribR (a * succ f) (c * succ d) (succ d * succ f'))
+              (distribR (b * succ f') (e' * succ d) (succ d * succ f))
+      = ((a * succ f) * (succ d * succ f') + (b * succ f') * (succ d * succ f))
+          + ((c * succ d) * (succ d * succ f') + (e' * succ d) * (succ d * succ f))
+          by interchange ((a * succ f) * (succ d * succ f')) ((c * succ d) * (succ d * succ f'))
+              ((b * succ f') * (succ d * succ f)) ((e' * succ d) * (succ d * succ f))
+      = ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f))
+          + ((c * succ d) * (succ f' * succ d) + (e' * succ d) * (succ f * succ d))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (prodSwapMid a (succ f) (succ d) (succ f'))
+                (prodSwapMid b (succ f') (succ d) (succ f)))
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (cong (fn (t : Nat) is (c * succ d) * t end) (mulComm (succ d) (succ f')))
+                (cong (fn (t : Nat) is (e' * succ d) * t end) (mulComm (succ d) (succ f))))
+      = ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f))
+          + ((c * succ f') * (succ d * succ d) + (e' * succ f) * (succ d * succ d))
+          by cong (fn (t : Nat) is
+                ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f)) + t end)
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (prodSwapMid c (succ d) (succ f') (succ d))
+                (prodSwapMid e' (succ d) (succ f) (succ d)))
+      = ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f))
+          + ((c * succ f' + e' * succ f) * (succ d * succ d))
+          by cong (fn (t : Nat) is
+                ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f)) + t end)
+              (sym (distribR (c * succ f') (e' * succ f) (succ d * succ d)))
+      = ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f))
+          + ((c' * succ f + e * succ f') * (succ d * succ d))
+          by cong (fn (t : Nat) is
+                ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f))
+                  + t * (succ d * succ d) end) h
+      = ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f))
+          + ((c' * succ f) * (succ d * succ d) + (e * succ f') * (succ d * succ d))
+          by cong (fn (t : Nat) is
+                ((a * succ d) * (succ f * succ f') + (b * succ d) * (succ f' * succ f)) + t end)
+              (distribR (c' * succ f) (e * succ f') (succ d * succ d))
+      = ((a * succ f') * (succ d * succ f) + (b * succ f) * (succ d * succ f'))
+          + ((c' * succ d) * (succ d * succ f) + (e * succ d) * (succ d * succ f'))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (trans (cong (fn (t : Nat) is (a * succ d) * t end) (mulComm (succ f) (succ f')))
+                  (sym (prodSwapMid a (succ f') (succ d) (succ f))))
+                (trans (cong (fn (t : Nat) is (b * succ d) * t end) (mulComm (succ f') (succ f)))
+                  (sym (prodSwapMid b (succ f) (succ d) (succ f')))))
+              (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                (trans (prodSwapMid c' (succ f) (succ d) (succ d))
+                  (cong (fn (t : Nat) is (c' * succ d) * t end) (mulComm (succ f) (succ d))))
+                (trans (prodSwapMid e (succ f') (succ d) (succ d))
+                  (cong (fn (t : Nat) is (e * succ d) * t end) (mulComm (succ f') (succ d)))))
+      = ((a * succ f') * (succ d * succ f) + (c' * succ d) * (succ d * succ f))
+          + ((b * succ f) * (succ d * succ f') + (e * succ d) * (succ d * succ f'))
+          by interchange ((a * succ f') * (succ d * succ f)) ((b * succ f) * (succ d * succ f'))
+              ((c' * succ d) * (succ d * succ f)) ((e * succ d) * (succ d * succ f'))
+      = (a * succ f' + c' * succ d) * (succ d * succ f) + (b * succ f + e * succ d) * (succ d * succ f')
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (sym (distribR (a * succ f') (c' * succ d) (succ d * succ f)))
+              (sym (distribR (b * succ f) (e * succ d) (succ d * succ f')))
+    end
+  end
+end
+
+-- One gathered column of the multiplication respect proof: a coefficient k
+-- rides along while the hypothesis rewrites the gathered factor.
+mulGroup : (k : Nat) -> (P : Nat) -> (P' : Nat) -> (F : Nat) ->
+    (x : Nat) -> (y : Nat) -> (x' : Nat) -> (y' : Nat) ->
+    x * P' + y * P = x' * P + y' * P' ->
+    (x * k) * (P' * F) + (y * k) * (P * F) = (x' * k) * (P * F) + (y' * k) * (P' * F) is
+  fn (k : Nat) (P : Nat) (P' : Nat) (F : Nat)
+     (x : Nat) (y : Nat) (x' : Nat) (y' : Nat)
+     (h : Eq Nat (x * P' + y * P) (x' * P + y' * P')) is
+    calc (x * k) * (P' * F) + (y * k) * (P * F)
+      = (x * P') * (k * F) + (y * P) * (k * F)
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (prodSwapMid x k P' F) (prodSwapMid y k P F)
+      = (x * P' + y * P) * (k * F)
+          by sym (distribR (x * P') (y * P) (k * F))
+      = (x' * P + y' * P') * (k * F)
+          by cong (fn (t : Nat) is t * (k * F) end) h
+      = (x' * P) * (k * F) + (y' * P') * (k * F)
+          by distribR (x' * P) (y' * P') (k * F)
+      = (x' * k) * (P * F) + (y' * k) * (P' * F)
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (sym (prodSwapMid x' k P F)) (sym (prodSwapMid y' k P' F))
+    end
+  end
+end
+
+-- Multiplication respects ~ in its left argument: split into the c-column
+-- and the e-column, each one mulGroup.
+mulCrossL : (f : Nat) -> (d1 : Nat) -> (d1' : Nat) ->
+    (a : Nat) -> (b : Nat) -> (a' : Nat) -> (b' : Nat) -> (c : Nat) -> (e : Nat) ->
+    a * succ d1' + b' * succ d1 = a' * succ d1 + b * succ d1' ->
+    (a * c + b * e) * (succ d1' * succ f) + (a' * e + b' * c) * (succ d1 * succ f)
+      = (a' * c + b' * e) * (succ d1 * succ f) + (a * e + b * c) * (succ d1' * succ f) is
+  fn (f : Nat) (d1 : Nat) (d1' : Nat)
+     (a : Nat) (b : Nat) (a' : Nat) (b' : Nat) (c : Nat) (e : Nat)
+     (h : Eq Nat (a * succ d1' + b' * succ d1) (a' * succ d1 + b * succ d1')) is
+    calc (a * c + b * e) * (succ d1' * succ f) + (a' * e + b' * c) * (succ d1 * succ f)
+      = ((a * c) * (succ d1' * succ f) + (b * e) * (succ d1' * succ f))
+          + ((a' * e) * (succ d1 * succ f) + (b' * c) * (succ d1 * succ f))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (distribR (a * c) (b * e) (succ d1' * succ f))
+              (distribR (a' * e) (b' * c) (succ d1 * succ f))
+      = ((a * c) * (succ d1' * succ f) + (b * e) * (succ d1' * succ f))
+          + ((b' * c) * (succ d1 * succ f) + (a' * e) * (succ d1 * succ f))
+          by cong (fn (t : Nat) is
+                ((a * c) * (succ d1' * succ f) + (b * e) * (succ d1' * succ f)) + t end)
+              (addComm ((a' * e) * (succ d1 * succ f)) ((b' * c) * (succ d1 * succ f)))
+      = ((a * c) * (succ d1' * succ f) + (b' * c) * (succ d1 * succ f))
+          + ((b * e) * (succ d1' * succ f) + (a' * e) * (succ d1 * succ f))
+          by interchange ((a * c) * (succ d1' * succ f)) ((b * e) * (succ d1' * succ f))
+              ((b' * c) * (succ d1 * succ f)) ((a' * e) * (succ d1 * succ f))
+      = ((a' * c) * (succ d1 * succ f) + (b * c) * (succ d1' * succ f))
+          + ((b' * e) * (succ d1 * succ f) + (a * e) * (succ d1' * succ f))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (mulGroup c (succ d1) (succ d1') (succ f) a b' a' b h)
+              (mulGroup e (succ d1) (succ d1') (succ f) b a' b' a
+                (trans (addComm (b * succ d1') (a' * succ d1))
+                  (trans (sym h) (addComm (a * succ d1') (b' * succ d1)))))
+      = ((a' * c) * (succ d1 * succ f) + (b' * e) * (succ d1 * succ f))
+          + ((b * c) * (succ d1' * succ f) + (a * e) * (succ d1' * succ f))
+          by interchange ((a' * c) * (succ d1 * succ f)) ((b * c) * (succ d1' * succ f))
+              ((b' * e) * (succ d1 * succ f)) ((a * e) * (succ d1' * succ f))
+      = ((a' * c) * (succ d1 * succ f) + (b' * e) * (succ d1 * succ f))
+          + ((a * e) * (succ d1' * succ f) + (b * c) * (succ d1' * succ f))
+          by cong (fn (t : Nat) is
+                ((a' * c) * (succ d1 * succ f) + (b' * e) * (succ d1 * succ f)) + t end)
+              (addComm ((b * c) * (succ d1' * succ f)) ((a * e) * (succ d1' * succ f)))
+      = (a' * c + b' * e) * (succ d1 * succ f) + (a * e + b * c) * (succ d1' * succ f)
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (sym (distribR (a' * c) (b' * e) (succ d1 * succ f)))
+              (sym (distribR (a * e) (b * c) (succ d1' * succ f)))
+    end
+  end
+end
+
+-- The mirrored column: the coefficient k on the left, the hypothesis
+-- rewriting the second factors.
+mulGroupR : (k : Nat) -> (D : Nat) -> (F : Nat) -> (F' : Nat) ->
+    (x : Nat) -> (y : Nat) -> (x' : Nat) -> (y' : Nat) ->
+    x * F' + y * F = x' * F + y' * F' ->
+    (k * x) * (D * F') + (k * y) * (D * F) = (k * x') * (D * F) + (k * y') * (D * F') is
+  fn (k : Nat) (D : Nat) (F : Nat) (F' : Nat)
+     (x : Nat) (y : Nat) (x' : Nat) (y' : Nat)
+     (h : Eq Nat (x * F' + y * F) (x' * F + y' * F')) is
+    calc (k * x) * (D * F') + (k * y) * (D * F)
+      = (k * D) * (x * F') + (k * D) * (y * F)
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (prodSwapMid k x D F') (prodSwapMid k y D F)
+      = (k * D) * (x * F' + y * F)
+          by sym (distribL (k * D) (x * F') (y * F))
+      = (k * D) * (x' * F + y' * F')
+          by cong (fn (t : Nat) is (k * D) * t end) h
+      = (k * D) * (x' * F) + (k * D) * (y' * F')
+          by distribL (k * D) (x' * F) (y' * F')
+      = (k * x') * (D * F) + (k * y') * (D * F')
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (sym (prodSwapMid k x' D F)) (sym (prodSwapMid k y' D F'))
+    end
+  end
+end
+
+-- Multiplication respects ~ in its right argument: an a-column and a
+-- b-column, each one mulGroupR.
+mulCrossR : (d : Nat) -> (f : Nat) -> (f' : Nat) ->
+    (a : Nat) -> (b : Nat) -> (c : Nat) -> (e : Nat) -> (c' : Nat) -> (e' : Nat) ->
+    c * succ f' + e' * succ f = c' * succ f + e * succ f' ->
+    (a * c + b * e) * (succ d * succ f') + (a * e' + b * c') * (succ d * succ f)
+      = (a * c' + b * e') * (succ d * succ f) + (a * e + b * c) * (succ d * succ f') is
+  fn (d : Nat) (f : Nat) (f' : Nat)
+     (a : Nat) (b : Nat) (c : Nat) (e : Nat) (c' : Nat) (e' : Nat)
+     (h : Eq Nat (c * succ f' + e' * succ f) (c' * succ f + e * succ f')) is
+    calc (a * c + b * e) * (succ d * succ f') + (a * e' + b * c') * (succ d * succ f)
+      = ((a * c) * (succ d * succ f') + (b * e) * (succ d * succ f'))
+          + ((a * e') * (succ d * succ f) + (b * c') * (succ d * succ f))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (distribR (a * c) (b * e) (succ d * succ f'))
+              (distribR (a * e') (b * c') (succ d * succ f))
+      = ((a * c) * (succ d * succ f') + (a * e') * (succ d * succ f))
+          + ((b * e) * (succ d * succ f') + (b * c') * (succ d * succ f))
+          by interchange ((a * c) * (succ d * succ f')) ((b * e) * (succ d * succ f'))
+              ((a * e') * (succ d * succ f)) ((b * c') * (succ d * succ f))
+      = ((a * c') * (succ d * succ f) + (a * e) * (succ d * succ f'))
+          + ((b * e') * (succ d * succ f) + (b * c) * (succ d * succ f'))
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (mulGroupR a (succ d) (succ f) (succ f') c e' c' e h)
+              (mulGroupR b (succ d) (succ f) (succ f') e c' e' c
+                (trans (addComm (e * succ f') (c' * succ f))
+                  (trans (sym h) (addComm (c * succ f') (e' * succ f)))))
+      = ((a * c') * (succ d * succ f) + (b * e') * (succ d * succ f))
+          + ((a * e) * (succ d * succ f') + (b * c) * (succ d * succ f'))
+          by interchange ((a * c') * (succ d * succ f)) ((a * e) * (succ d * succ f'))
+              ((b * e') * (succ d * succ f)) ((b * c) * (succ d * succ f'))
+      = (a * c' + b * e') * (succ d * succ f) + (a * e + b * c) * (succ d * succ f')
+          by cong2 (fn (u : Nat) (v : Nat) is u + v end)
+              (sym (distribR (a * c') (b * e') (succ d * succ f)))
+              (sym (distribR (a * e) (b * c) (succ d * succ f')))
+    end
+  end
+end
+
+-- Denominator glue: the cross equation transports along the two
+-- denominator-successor equalities, by congruence alone.
+glue2 : (T : Nat) -> (T' : Nat) -> (W : Nat) -> (W' : Nat) ->
+    (X1 : Nat) -> (Y1 : Nat) -> (X2 : Nat) -> (Y2 : Nat) ->
+    T = W -> T' = W' ->
+    X1 * T' + Y2 * T = X2 * T + Y1 * T' ->
+    X1 * W' + Y2 * W = X2 * W + Y1 * W' is
+  fn (T : Nat) (T' : Nat) (W : Nat) (W' : Nat)
+     (X1 : Nat) (Y1 : Nat) (X2 : Nat) (Y2 : Nat)
+     (tu : Eq Nat T W) (tu' : Eq Nat T' W')
+     (px : Eq Nat (X1 * T' + Y2 * T) (X2 * T + Y1 * T')) is
+    trans (cong2 (fn (u : Nat) (v : Nat) is X1 * u + Y2 * v end) (sym tu') (sym tu))
+      (trans px
+        (cong2 (fn (u : Nat) (v : Nat) is X2 * u + Y1 * v end) tu tu'))
+  end
+end
+
+-- The rational operations: each one a qlift, each respect obligation one of
+-- the cross lemmas above (through glue2 where the denominator bookkeeping
+-- applies). The setoid tax, itemized and paid.
+
+negQ : Rat -> Rat is
+  qlift RPair QRel Rat
+    (fn (p : RPair) is qin RPair QRel (rnegP p) end)
+    (fn (p : RPair) (q : RPair) is
+      case p of
+      | rp a b d1 ->
+          case q of
+          | rp c e d2 ->
+              fn (r : QRel (rp a b d1) (rp c e d2)) is
+                qsound RPair QRel (rnegP (rp a b d1)) (rnegP (rp c e d2))
+                  (negCross d1 d2 a b c e r)
+              end
+          end
+      end
+    end)
+end
+
+flipQ : Rat -> Rat is
+  qlift RPair QRel Rat
+    (fn (p : RPair) is qin RPair QRel (rflipP p) end)
+    (fn (p : RPair) (q : RPair) is
+      case p of
+      | rp a b d1 ->
+          case q of
+          | rp c e d2 ->
+              fn (r : QRel (rp a b d1) (rp c e d2)) is
+                qsound RPair QRel (rflipP (rp a b d1)) (rflipP (rp c e d2))
+                  (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                    (flipHalf d1 d2 ((a - b) + (b - a)) ((c - e) + (e - c)) (a - b) (c - e)
+                      (trans (monusMulDistribR b a (succ d2))
+                        (trans (monusEq (b * succ d2) (a * succ d2) (c * succ d1) (e * succ d1) r)
+                          (sym (monusMulDistribR e c (succ d1)))))
+                      (trans (distribR (a - b) (b - a) (succ d2))
+                        (trans (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                          (trans (monusMulDistribR b a (succ d2))
+                            (trans (monusEq (b * succ d2) (a * succ d2) (c * succ d1) (e * succ d1) r)
+                              (sym (monusMulDistribR e c (succ d1)))))
+                          (trans (monusMulDistribR a b (succ d2))
+                            (trans (monusEq (a * succ d2) (b * succ d2) (e * succ d1) (c * succ d1)
+                                (negCross d1 d2 a b c e r))
+                              (sym (monusMulDistribR c e (succ d1))))))
+                          (sym (distribR (c - e) (e - c) (succ d1)))))
+                      (fn (z : Eq Nat ((a - b) + (b - a)) 0) is sumZeroL (a - b) (b - a) z end)
+                      (fn (z : Eq Nat ((c - e) + (e - c)) 0) is sumZeroL (c - e) (e - c) z end))
+                    (flipHalf d2 d1 ((c - e) + (e - c)) ((a - b) + (b - a)) (e - c) (b - a)
+                      (sym (trans (monusMulDistribR a b (succ d2))
+                        (trans (monusEq (a * succ d2) (b * succ d2) (e * succ d1) (c * succ d1)
+                            (negCross d1 d2 a b c e r))
+                          (sym (monusMulDistribR c e (succ d1))))))
+                      (sym (trans (distribR (a - b) (b - a) (succ d2))
+                        (trans (cong2 (fn (u : Nat) (v : Nat) is u + v end)
+                          (trans (monusMulDistribR b a (succ d2))
+                            (trans (monusEq (b * succ d2) (a * succ d2) (c * succ d1) (e * succ d1) r)
+                              (sym (monusMulDistribR e c (succ d1)))))
+                          (trans (monusMulDistribR a b (succ d2))
+                            (trans (monusEq (a * succ d2) (b * succ d2) (e * succ d1) (c * succ d1)
+                                (negCross d1 d2 a b c e r))
+                              (sym (monusMulDistribR c e (succ d1))))))
+                          (sym (distribR (c - e) (e - c) (succ d1))))))
+                      (fn (z : Eq Nat ((c - e) + (e - c)) 0) is sumZeroR (c - e) (e - c) z end)
+                      (fn (z : Eq Nat ((a - b) + (b - a)) 0) is sumZeroR (a - b) (b - a) z end)))
+              end
+          end
+      end
+    end)
+end
+
+-- Addition, by lifting twice (the Chapter 7 shape): the inner lift fixes
+-- the left representative and answers for the right argument; the outer
+-- lift's function-equality obligation is funext-as-reduction, supplied
+-- pointwise by qind.
+addR : RPair -> Rat -> Rat is
+  fn (p : RPair) is
+    qlift RPair QRel Rat
+      (fn (q : RPair) is qin RPair QRel (raddP p q) end)
+      (fn (q : RPair) (q' : RPair) is
+        case p of
+        | rp a b d ->
+            case q of
+            | rp c e f ->
+                case q' of
+                | rp c' e' f' ->
+                    fn (r : QRel (rp c e f) (rp c' e' f')) is
+                      qsound RPair QRel (raddP (rp a b d) (rp c e f)) (raddP (rp a b d) (rp c' e' f'))
+                        (glue2 (succ d * succ f) (succ d * succ f')
+                          (succ ((d * f + d) + f)) (succ ((d * f' + d) + f'))
+                          (a * succ f + c * succ d) (b * succ f + e * succ d)
+                          (a * succ f' + c' * succ d) (b * succ f' + e' * succ d)
+                          (sym (denSucc d f)) (sym (denSucc d f'))
+                          (addCrossR d f f' a b c e c' e' r))
+                    end
+                end
+            end
+        end
+      end)
+  end
+end
+
+addQ : Rat -> Rat -> Rat is
+  qlift RPair QRel (Rat -> Rat) addR
+    (fn (p : RPair) (p' : RPair) is
+      case p of
+      | rp a b d1 ->
+          case p' of
+          | rp a' b' d1' ->
+              fn (r : QRel (rp a b d1) (rp a' b' d1')) is
+                fn (z : Rat) is
+                  qind RPair QRel
+                    (fn (w : Rat) is Eq Rat (addR (rp a b d1) w) (addR (rp a' b' d1') w) end)
+                    (fn (q : RPair) is
+                      case q of
+                      | rp c e f ->
+                          qsound RPair QRel (raddP (rp a b d1) (rp c e f)) (raddP (rp a' b' d1') (rp c e f))
+                            (glue2 (succ d1 * succ f) (succ d1' * succ f)
+                              (succ ((d1 * f + d1) + f)) (succ ((d1' * f + d1') + f))
+                              (a * succ f + c * succ d1) (b * succ f + e * succ d1)
+                              (a' * succ f + c * succ d1') (b' * succ f + e * succ d1')
+                              (sym (denSucc d1 f)) (sym (denSucc d1' f))
+                              (addCrossL f d1 d1' a b a' b' c e r))
+                      end
+                    end)
+                    z
+                end
+              end
+          end
+      end
+    end)
+end
+
+mulR : RPair -> Rat -> Rat is
+  fn (p : RPair) is
+    qlift RPair QRel Rat
+      (fn (q : RPair) is qin RPair QRel (rmulP p q) end)
+      (fn (q : RPair) (q' : RPair) is
+        case p of
+        | rp a b d ->
+            case q of
+            | rp c e f ->
+                case q' of
+                | rp c' e' f' ->
+                    fn (r : QRel (rp c e f) (rp c' e' f')) is
+                      qsound RPair QRel (rmulP (rp a b d) (rp c e f)) (rmulP (rp a b d) (rp c' e' f'))
+                        (glue2 (succ d * succ f) (succ d * succ f')
+                          (succ ((d * f + d) + f)) (succ ((d * f' + d) + f'))
+                          (a * c + b * e) (a * e + b * c)
+                          (a * c' + b * e') (a * e' + b * c')
+                          (sym (denSucc d f)) (sym (denSucc d f'))
+                          (mulCrossR d f f' a b c e c' e' r))
+                    end
+                end
+            end
+        end
+      end)
+  end
+end
+
+mulQ : Rat -> Rat -> Rat is
+  qlift RPair QRel (Rat -> Rat) mulR
+    (fn (p : RPair) (p' : RPair) is
+      case p of
+      | rp a b d1 ->
+          case p' of
+          | rp a' b' d1' ->
+              fn (r : QRel (rp a b d1) (rp a' b' d1')) is
+                fn (z : Rat) is
+                  qind RPair QRel
+                    (fn (w : Rat) is Eq Rat (mulR (rp a b d1) w) (mulR (rp a' b' d1') w) end)
+                    (fn (q : RPair) is
+                      case q of
+                      | rp c e f ->
+                          qsound RPair QRel (rmulP (rp a b d1) (rp c e f)) (rmulP (rp a' b' d1') (rp c e f))
+                            (glue2 (succ d1 * succ f) (succ d1' * succ f)
+                              (succ ((d1 * f + d1) + f)) (succ ((d1' * f + d1') + f))
+                              (a * c + b * e) (a * e + b * c)
+                              (a' * c + b' * e) (a' * e + b' * c)
+                              (sym (denSucc d1 f)) (sym (denSucc d1' f))
+                              (mulCrossL f d1 d1' a b a' b' c e r))
+                      end
+                    end)
+                    z
+                end
+              end
+          end
+      end
+    end)
+end
+
+-- The glyphs arrive at ℚ. Exact division exists for the first time in the
+-- tower: a / b is a · flip b, and a / 0 = 0 because flip 0 = 0.
+
++ : Rat -> Rat -> Rat is addQ end
+- : Rat -> Rat -> Rat is fn (x : Rat) (y : Rat) is addQ x (negQ y) end end
+* : Rat -> Rat -> Rat is mulQ end
+/ : Rat -> Rat -> Rat is fn (x : Rat) (y : Rat) is mulQ x (flipQ y) end end
+
+-- Certificates: conversion computes through the quotient; each refl is a
+-- machine-checked fact about rational arithmetic. Where two representatives
+-- name the same rational, qsound + refl certifies the cross equation.
+
+half : Rat is qin RPair QRel (rp 1 0 1) end
+third : Rat is qin RPair QRel (rp 1 0 2) end
+zeroQ : Rat is qin RPair QRel (rp 0 0 0) end
+
+-- 1/2 = 2/4: the quotient, not the representation, makes it true.
+halfIsTwoQuarters : half = qin RPair QRel (rp 2 0 3) is
+  qsound RPair QRel (rp 1 0 1) (rp 2 0 3) (refl 4)
+end
+
+-- 1/2 + 1/3 computes to the representative 5/6 on the nose.
+sumHalfThird : half + third = qin RPair QRel (rp 5 0 5) is
+  refl (qin RPair QRel (rp 5 0 5))
+end
+
+-- (1/2) · (2/3) = 1/3, through the quotient.
+mulHalfTwoThirds : half * qin RPair QRel (rp 2 0 2) = third is
+  qsound RPair QRel (rp 2 0 5) (rp 1 0 2) (refl 6)
+end
+
+-- 1 - 3 = -2: subtraction is total and signed.
+oneMinusThree : qin RPair QRel (rp 1 0 0) - qin RPair QRel (rp 3 0 0) = qin RPair QRel (rp 0 2 0) is
+  qsound RPair QRel (rp 1 3 0) (rp 0 2 0) (refl 3)
+end
+
+-- EXACTNESS, the law `/` exists for: (a / b) · b = a at a = 7/2, b = 3/5.
+exactness : (qin RPair QRel (rp 7 0 1) / qin RPair QRel (rp 3 0 4)) * qin RPair QRel (rp 3 0 4)
+    = qin RPair QRel (rp 7 0 1) is
+  qsound RPair QRel (rp 315 0 89) (rp 7 0 1) (refl 630)
+end
+
+-- The zero convention: x / 0 = 0, computed, not decreed.
+divByZero : qin RPair QRel (rp 7 0 1) / zeroQ = zeroQ is
+  qsound RPair QRel (rp 0 0 1) (rp 0 0 0) (refl 0)
+end
+
+-- And zero divided by anything is zero.
+zeroDiv : zeroQ / qin RPair QRel (rp 3 0 4) = zeroQ is
+  qsound RPair QRel (rp 0 0 8) (rp 0 0 0) (refl 0)
+end
+
+-- The gate's runnable answer: the numerator representative of
+-- (7/2) / (3/5) — the erased shadow agrees with the checker.
+answer : Nat is posR (rdivP (rp 7 0 1) (rp 3 0 4)) end

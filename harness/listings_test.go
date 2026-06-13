@@ -146,6 +146,15 @@ func TestListingsRun(t *testing.T) {
 			"npair zero (succ (succ (succ zero)))")
 		normalizesTo(t, s, `natAbs (zneg (intOf 7) % intOf 2)`, "succ zero")
 	})
+	t.Run("ch13", func(t *testing.T) {
+		s := loadListing(t, "ch13_rationals.rune")
+		// Exact division through the quotient: (1/2) / (1/2) computes to
+		// the representative 2/2 — the class of one.
+		normalizesTo(t, s, `posR (rdivP (rp 1 0 1) (rp 1 0 1))`,
+			"succ (succ zero)")
+		normalizesTo(t, s, `denR (rdivP (rp 1 0 1) (rp 1 0 1))`,
+			"succ zero")
+	})
 }
 
 // TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant
@@ -180,6 +189,9 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// ch12: the floor convention through the quotient and the shadow
 		// agree — |−7 // 2| is 4, not 3.
 		{"ch12_integer_division.rune", "answer", "4"},
+		// ch13: the numerator representative of (7/2) / (3/5) under the
+		// erased shadow — division through the flip, no proofs at runtime.
+		{"ch13_rationals.rune", "answer", "105"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {

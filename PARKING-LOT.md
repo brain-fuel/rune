@@ -170,3 +170,9 @@ or a later-phase feature with no current consumer.
   computes recursive eliminations eagerly in the switch; a case-with-unused-IH
   on a recursive RECORD type pays the same exponential the nat path used to.
   The nat path got $natD dispatch; generalize when a listing hits it.
+- **`//` and `%` at Rat (numeric tower).** The flooring quotient on ℚ is
+  well-defined on the quotient only by Euclidean uniqueness — the same
+  general division-algorithm theorem ch11 deferred to the course-of-values
+  chapter. ch13 ships `+ - * /` with full respect proofs; the floor pair's
+  Rat semantics are pinned in ref_docs/rune-numeric-tower.md §2 and land
+  with that chapter. Rationale: no sound qlift without the uniqueness proof.
