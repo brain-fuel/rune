@@ -203,9 +203,11 @@ func (m *Machine) Eval(env Env, t Tm) Val {
 	case Pi:
 		dom := m.Eval(env, tm.Dom)
 		cod := tm.Cod
-		return VPi{Name: cod.Name, Icit: tm.Icit, Qty: tm.Qty, Dom: dom, Cod: func(v Val) Val {
-			return m.Eval(env.Extend(v), cod.Body)
-		}}
+		return VPi{Name: cod.Name, Icit: tm.Icit, Qty: tm.Qty, Dom: dom,
+			NonDep: !usesVar(cod.Body, 0),
+			Cod: func(v Val) Val {
+				return m.Eval(env.Extend(v), cod.Body)
+			}}
 	case Lam:
 		body := tm.Body
 		return VLam{Name: body.Name, Icit: tm.Icit, Qty: tm.Qty, Body: func(v Val) Val {
@@ -240,7 +242,18 @@ func (m *Machine) Eval(env Env, t Tm) Val {
 // refVal builds the glued neutral for a definition reference: the spine is the
 // un-unfolded Ref; the lazy unfolding logs the dependency and evaluates the body.
 // The thunk memoizes within this Machine's run.
+//
+// A head KNOWN bodiless (a datatype constructor or eliminator, a quotient or
+// fibrant builtin) is built RIGID up front — no unfolding thunk at all. Forcing
+// such a head was always a no-op (no body is read, no dependency logged), but
+// the thunk made every application over it chain a useless unfold closure of
+// its own (apply glues lazily through f.Unfold). On constructor chains that
+// closure-per-node was the dominant allocation: an n-deep numeral retained n
+// thunks that forcing later re-applied one by one.
 func (m *Machine) refVal(h Hash) Val {
+	if m.rigidHead(h) {
+		return VNeu{Spine: NRef{Hash: h}}
+	}
 	var memo Val
 	return VNeu{Spine: NRef{Hash: h}, Unfold: func() Val {
 		if memo == nil {
@@ -257,6 +270,29 @@ func (m *Machine) refVal(h Hash) Val {
 		}
 		return memo
 	}}
+}
+
+// rigidHead reports whether h is a definition known bodiless WITHOUT reading
+// through the Unfold gateway: datatype constructors and eliminators, and the
+// quotient/fibrant builtin groups, are permanently neutral heads. Everything
+// else stays on the lazy glued path (a data FORMER, for instance, is also
+// bodiless but simply forces to itself there, exactly as before).
+func (m *Machine) rigidHead(h Hash) bool {
+	if m.Data != nil {
+		if _, _, ok := m.Data.CtorOf(h); ok {
+			return true
+		}
+		if _, ok := m.Data.ElimOf(h); ok {
+			return true
+		}
+	}
+	if m.Quot != nil && m.Quot.QuotRoleOf(h) != QRoleNone {
+		return true
+	}
+	if m.Fib != nil && m.Fib.FibRoleOf(h) != FRoleNone {
+		return true
+	}
+	return false
 }
 
 func (m *Machine) logDep(h Hash) {
@@ -291,13 +327,7 @@ func (m *Machine) apply(fn, arg Val, icit Icit) Val {
 		}
 		// ι: a saturated eliminator applied to a constructor-headed scrutinee
 		// computes. This is as much a computation rule as β; it fires eagerly.
-		if red, ok := m.tryIota(out.Spine); ok {
-			return red
-		}
-		if red, ok := m.tryQuotIota(out.Spine); ok {
-			return red
-		}
-		if red, ok := m.tryFibIota(out.Spine); ok {
+		if red, ok := m.tryRules(out.Spine); ok {
 			return red
 		}
 		return out
@@ -377,16 +407,109 @@ func (m *Machine) EvalSubst(a, x, y, prf, pmot, px Val) Val {
 	return VNeu{Spine: NSubst{A: a, X: x, Y: y, Prf: prf, P: pmot, Px: px}}
 }
 
-// spineParts flattens a neutral spine into its head and argument values.
+// spineParts flattens a neutral spine into its head and argument values. The
+// argument slice is built in a single allocation, filled tail-first — the old
+// prepend-and-copy built one slice per spine node, which was the dominant
+// allocation in ι-heavy evaluation.
 func spineParts(n Neutral) (head Neutral, args []Val) {
-	for {
-		app, ok := n.(NApp)
+	ln := 0
+	for s := n; ; {
+		app, ok := s.(NApp)
 		if !ok {
-			return n, args
+			break
 		}
-		args = append([]Val{app.Arg}, args...)
+		ln++
+		s = app.Fn
+	}
+	if ln == 0 {
+		return n, nil
+	}
+	args = make([]Val, ln)
+	for i := ln - 1; i >= 0; i-- {
+		app := n.(NApp)
+		args[i] = app.Arg
 		n = app.Fn
 	}
+	return n, args
+}
+
+// usesVar reports whether the bound variable at de Bruijn index idx occurs in
+// t. It powers VPi.NonDep: evaluation marks a Pi whose codomain never mentions
+// its binder, so callers that only need the result TYPE of an application can
+// skip evaluating the argument. The scan is structural and conservative-exact
+// over the sealed Tm set.
+func usesVar(t Tm, idx int) bool {
+	switch tm := t.(type) {
+	case Var:
+		return tm.Idx == idx
+	case Ref, Univ, Prop, Meta:
+		return false
+	case Pi:
+		return usesVar(tm.Dom, idx) || usesVar(tm.Cod.Body, idx+1)
+	case Lam:
+		return usesVar(tm.Body.Body, idx+1)
+	case App:
+		return usesVar(tm.Fn, idx) || usesVar(tm.Arg, idx)
+	case Let:
+		return (tm.Ty != nil && usesVar(tm.Ty, idx)) || usesVar(tm.Val, idx) || usesVar(tm.Body.Body, idx+1)
+	case Ann:
+		return usesVar(tm.Term, idx) || usesVar(tm.Ty, idx)
+	case Eq:
+		return usesVar(tm.Ty, idx) || usesVar(tm.L, idx) || usesVar(tm.R, idx)
+	case Refl:
+		return usesVar(tm.Tm, idx)
+	case Cast:
+		return usesVar(tm.A, idx) || usesVar(tm.B, idx) || usesVar(tm.P, idx) || usesVar(tm.X, idx)
+	case Subst:
+		return usesVar(tm.A, idx) || usesVar(tm.X, idx) || usesVar(tm.Y, idx) ||
+			usesVar(tm.Prf, idx) || usesVar(tm.P, idx) || usesVar(tm.Px, idx)
+	default:
+		panic("core.usesVar: unknown Tm constructor")
+	}
+}
+
+// tryRules fires the ι computation-rule families on a spine just extended by
+// apply. The head is found first WITHOUT flattening (an allocation-free walk);
+// only when it names a head some rule family could fire on is the spine
+// flattened — once, shared by the family — instead of three head-and-argument
+// copies per application, which was the dominant constant in ι-heavy
+// evaluation. A head cannot belong to two families, so dispatching to exactly
+// one preserves the old try-each-in-order behavior.
+func (m *Machine) tryRules(spine Neutral) (Val, bool) {
+	if m.Data == nil && m.Quot == nil && m.Fib == nil {
+		return nil, false
+	}
+	head := spine
+	for {
+		app, ok := head.(NApp)
+		if !ok {
+			break
+		}
+		head = app.Fn
+	}
+	ref, ok := head.(NRef)
+	if !ok {
+		return nil, false
+	}
+	if m.Data != nil {
+		if sig, ok := m.Data.ElimOf(ref.Hash); ok {
+			_, args := spineParts(spine)
+			return m.tryIota(sig, ref.Hash, args, spine)
+		}
+	}
+	if m.Quot != nil {
+		if role := m.Quot.QuotRoleOf(ref.Hash); role == QRoleLift || role == QRoleInd {
+			_, args := spineParts(spine)
+			return m.tryQuotIota(role, args)
+		}
+	}
+	if m.Fib != nil {
+		if role := m.Fib.FibRoleOf(ref.Hash); role == FRoleEl || role == FRoleJ || role == FRoleCastU {
+			_, args := spineParts(spine)
+			return m.tryFibIota(role, ref.Hash, args)
+		}
+	}
+	return nil, false
 }
 
 // tryQuotIota fires the quotient computation rules (v2) on a saturated spine:
@@ -400,17 +523,9 @@ func spineParts(n Neutral) (head Neutral, args []Val) {
 // rule: qsound is a proof, definitionally irrelevant, and resp is consumed
 // only by the typing judgment. qin and qsound applied to anything are
 // permanently neutral (canonical), like datatype constructors.
-func (m *Machine) tryQuotIota(spine Neutral) (Val, bool) {
-	if m.Quot == nil {
-		return nil, false
-	}
-	head, args := spineParts(spine)
-	ref, ok := head.(NRef)
-	if !ok {
-		return nil, false
-	}
+func (m *Machine) tryQuotIota(role QuotRole, args []Val) (Val, bool) {
 	var fnIdx int
-	switch m.Quot.QuotRoleOf(ref.Hash) {
+	switch role {
 	case QRoleLift:
 		// qlift A R B f resp q — six arguments, f at index 3.
 		if len(args) != 6 {
@@ -453,16 +568,8 @@ func (m *Machine) tryQuotIota(spine Neutral) (Val, bool) {
 // univalence, the §F frontier. El (pathF …) stays neutral: the inner path
 // type is abstract. Scrutinees are forced — logged, as always — so the
 // proof-cache seam is the same one ι-reduction has always used.
-func (m *Machine) tryFibIota(spine Neutral) (Val, bool) {
-	if m.Fib == nil {
-		return nil, false
-	}
-	head, args := spineParts(spine)
-	ref, ok := head.(NRef)
-	if !ok {
-		return nil, false
-	}
-	switch m.Fib.FibRoleOf(ref.Hash) {
+func (m *Machine) tryFibIota(role FibRole, h Hash, args []Val) (Val, bool) {
+	switch role {
 	case FRoleEl:
 		if len(args) != 1 {
 			return nil, false
@@ -484,9 +591,9 @@ func (m *Machine) tryFibIota(spine Neutral) (Val, bool) {
 			}
 		case FRolePiF:
 			if len(cargs) == 2 {
-				dom := m.Apply(m.refVal(ref.Hash), cargs[0])
+				dom := m.Apply(m.refVal(h), cargs[0])
 				fam := cargs[1]
-				elRef := ref.Hash
+				elRef := h
 				return VPi{Name: "x", Dom: dom, Cod: func(x Val) Val {
 					return m.Apply(m.refVal(elRef), m.Apply(fam, x))
 				}}, true
@@ -548,19 +655,9 @@ func fibHeadIs(m *Machine, v Val, role FibRole, arity int) bool {
 // datatype: the result is case_i applied to the constructor's arguments and
 // then to one induction hypothesis (a recursive elimination) per recursive
 // argument. Forcing the scrutinee may unfold definitions — logged, as always.
-func (m *Machine) tryIota(spine Neutral) (Val, bool) {
-	if m.Data == nil {
-		return nil, false
-	}
-	head, args := spineParts(spine)
-	ref, ok := head.(NRef)
-	if !ok {
-		return nil, false
-	}
-	sig, ok := m.Data.ElimOf(ref.Hash)
-	if !ok {
-		return nil, false
-	}
+// spine is the un-flattened original; its prefix (everything under the
+// scrutinee) is SHARED into each IH's spine rather than rebuilt per node.
+func (m *Machine) tryIota(sig ElimSig, h Hash, args []Val, spine Neutral) (Val, bool) {
 	want := sig.NumParams + 1 + len(sig.Ctors) + 1
 	if len(args) != want {
 		return nil, false
@@ -597,20 +694,21 @@ func (m *Machine) tryIota(spine Neutral) (Val, bool) {
 	// made nested eliminations exponential, since the unused IH of one level
 	// recursively constructed the unused IHs of every level below it.
 	elimPrefix := args[:len(args)-1] // params, motive, cases
+	// The applied-eliminator prefix (the spine minus its scrutinee) is shared
+	// from the original spine: tryRules only fires on a just-extended NApp, so
+	// spine.Fn IS `elim p1..pk motive case1..casen`. Rebuilding it per IH was
+	// the per-node spine copy this Machine used to pay on every ι step.
+	prefix := spine.(NApp).Fn
 	for i, rec := range cs.Rec {
 		if !rec {
 			continue
 		}
-		spine := Neutral(NRef{Hash: ref.Hash})
-		for _, a := range elimPrefix {
-			spine = NApp{Fn: spine, Arg: a, Icit: Expl}
-		}
-		spine = NApp{Fn: spine, Arg: ctorArgs[i], Icit: Expl}
+		ihSpine := Neutral(NApp{Fn: prefix, Arg: ctorArgs[i], Icit: Expl})
 		recArg := ctorArgs[i]
 		var memo Val
-		ih := VNeu{Spine: spine, Unfold: func() Val {
+		ih := VNeu{Spine: ihSpine, Unfold: func() Val {
 			if memo == nil {
-				v := Val(m.refVal(ref.Hash))
+				v := Val(m.refVal(h))
 				for _, a := range elimPrefix {
 					v = m.Apply(v, a)
 				}

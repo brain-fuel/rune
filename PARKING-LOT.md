@@ -155,10 +155,23 @@ or a later-phase feature with no current consumer.
 - **Compressed core numerals.** A literal expands to its unary succ-chain at
   parse time (GRAMMAR §5.5), capped at 4096. Literals beyond that need a core
   numeral representation (and a hash-format bump); no listing embeds one yet.
-- **Deep-application evaluation is superlinear.** Machine.Eval on an n-deep
-  constructor chain copies neutral spines per node (core.spineParts), making a
-  4000-deep literal cost ~6s to check. Fix is spine sharing in the Machine;
-  exposed by literals, not caused by them. Profile: Eval 70%, mallocgc 41%.
+- **Deep-application evaluation was superlinear — FIXED (2026-06).** The
+  profile (Eval 70%, mallocgc 41%) had been misread: the quadratic was not in
+  Machine.Eval but in the CHECKERS — Infer/InferCore evaluated each
+  application's argument term from scratch at every node just to feed pi.Cod,
+  O(n²) over an n-deep chain (a 4000 literal cost ~7s to check; now ~25ms).
+  Eval now marks non-dependent Pis (VPi.NonDep, the strict-language stand-in
+  for a lazy argument thunk) and the checkers skip the eval when the codomain
+  ignores it. The Machine's ι path also got the predicted spine sharing as
+  constant-factor work: known-bodiless heads (constructors, eliminators,
+  builtins) are built rigid with no glue thunk, IH spines share the
+  applied-eliminator prefix instead of rebuilding it per node, and apply
+  classifies the head before flattening (one single-allocation spineParts
+  instead of three prepend-copies). 80*100 through the REPL: 2.35s → 0.87s.
+  What remains is intrinsic, not a bug: unary `a * b` via `ih + n` costs
+  ~b·a²/2 ι-steps (each addition re-walks the accumulator), so big products
+  want the erased shadow or a compressed numeral core, not more Machine
+  tuning. Guarded by internal/session/deepchain_test.go.
 - **Recognizing arithmetic shapes in codegen.** The builtin-nat shadow (rung 6)
   compiles zero/succ/NatElim to BigInt and a loop, so user-defined + is O(m)
   per call, not O(1). Mapping canonical add/mul definitions to native BigInt

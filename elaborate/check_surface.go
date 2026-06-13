@@ -119,7 +119,15 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		return core.App{Fn: fn, Arg: arg, Icit: s.Icit}, pi.Cod(e.Eval(c, arg)), nil
+		// The result type needs the argument VALUE only when the Pi is
+		// dependent. Skipping the eval otherwise keeps deep application chains
+		// (numeral succ-towers) linear: evaluating every argument subterm from
+		// scratch at each node is O(n²) in the chain depth.
+		var av core.Val
+		if !pi.NonDep {
+			av = e.Eval(c, arg)
+		}
+		return core.App{Fn: fn, Arg: arg, Icit: s.Icit}, pi.Cod(av), nil
 	case surface.ELet:
 		tm, _, inner, err := e.elabLet(c, s)
 		if err != nil {

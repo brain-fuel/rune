@@ -169,7 +169,14 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 		if err := e.CheckCore(c, tm.Arg, pi.Dom); err != nil {
 			return nil, err
 		}
-		return pi.Cod(e.Eval(c, tm.Arg)), nil
+		// As in the surface elaborator: a non-dependent Pi's codomain ignores
+		// the argument value, and skipping its evaluation keeps n-deep
+		// application chains linear instead of O(n²).
+		var av core.Val
+		if !pi.NonDep {
+			av = e.Eval(c, tm.Arg)
+		}
+		return pi.Cod(av), nil
 	case core.Let:
 		var vty core.Val
 		if tm.Ty != nil {

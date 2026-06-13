@@ -52,12 +52,21 @@ type VRefl struct {
 // VPi is a dependent function type value (x : Dom) -> Cod. Cod is a Go closure:
 // the NbE meaning function. Name is a pretty-printing hint for the binder, like
 // Scope.Name — never part of identity, never hashed (quote drops it into a Scope).
+//
+// NonDep, when true, records that Cod IGNORES its argument: the codomain term
+// never mentions the binder (set by Eval, the strict-language stand-in for a
+// lazy argument thunk). Callers that need only the result type of an
+// application may then skip evaluating the argument — without this, checking
+// an n-deep application chain evaluates each argument subterm from scratch at
+// every node, O(n²) in the chain depth. False is always safe; it is never part
+// of identity (quote and conversion ignore it).
 type VPi struct {
-	Name string
-	Icit Icit
-	Qty  Qty
-	Dom  Val
-	Cod  func(Val) Val
+	Name   string
+	Icit   Icit
+	Qty    Qty
+	NonDep bool
+	Dom    Val
+	Cod    func(Val) Val
 }
 
 // VLam is a lambda value, carrying its meaning as a Go closure. Name is a display
