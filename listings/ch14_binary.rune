@@ -1,0 +1,451 @@
+-- Chapter 14 — Binary numerals: the verified fast implementation.
+-- The kernel's numbers are unary, so the kernel's arithmetic is honest but
+-- slow. The fix that adds nothing to the trusted base: define BINARY
+-- numbers as an ordinary datatype, prove their operations agree with the
+-- unary spec ONCE, then let certificates route their computation through
+-- the binary side. "Trusted implementation" becomes a theorem, not a test:
+-- an implementation is ready exactly when its agreement proof checks.
+-- Pos is 1 | 2p | 2p+1 — no zero bit, so no leading-zero junk and every
+-- number has exactly one representative. BN adjoins zero.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> ih + n
+    end
+  end
+end
+
+-- double, by its own recursion: double (succ k) is succ (succ (double k))
+-- DEFINITIONALLY, which the agreement proofs lean on at every other step.
+double : Nat -> Nat is
+  fn (n : Nat) is
+    case n of
+    | zero -> 0
+    | succ k with ih -> succ (succ ih)
+    end
+  end
+end
+
+-- The equality toolkit.
+
+sym : {A : U} -> {x : A} -> {y : A} -> x = y -> y = x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is z = x end) (refl x)
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> x = y -> y = z -> x = z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is x = w end) p
+  end
+end
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> x = y -> f x = f y is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is f x = f z end) (refl (f x))
+  end
+end
+
+cong2 : {A : U} -> {B : U} -> {C : U} -> (f : A -> B -> C) ->
+    {x : A} -> {x' : A} -> {y : B} -> {y' : B} ->
+    x = x' -> y = y' -> f x y = f x' y' is
+  fn {A : U} {B : U} {C : U} (f : A -> B -> C)
+     {x : A} {x' : A} {y : B} {y' : B} (p : Eq A x x') (q : Eq B y y') is
+    trans (cong (fn (s : A) is f s y end) p) (cong (f x') q)
+  end
+end
+
+-- Addition laws (the ch11 kit, trimmed to what the agreement proofs use).
+
+addZeroRight : (n : Nat) -> n + 0 = n is
+  fn (n : Nat) is
+    case n of
+    | zero -> refl 0
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addSucc : (m : Nat) -> (n : Nat) -> m + succ n = succ (m + n) is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> refl (succ n)
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addComm : (m : Nat) -> (n : Nat) -> m + n = n + m is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is sym (addZeroRight n) end
+    | succ k with ih -> fn (n : Nat) is
+        trans (cong succ (ih n)) (sym (addSucc n k))
+      end
+    end
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) -> (a + b) + c = a + (b + c) is
+  fn (a : Nat) is
+    case a of
+    | zero -> fn (b : Nat) (c : Nat) is refl (b + c) end
+    | succ k with ih -> fn (b : Nat) (c : Nat) is cong succ (ih b c) end
+    end
+  end
+end
+
+distribR : (x : Nat) -> (y : Nat) -> (z : Nat) -> (x + y) * z = x * z + y * z is
+  fn (x : Nat) is
+    case x of
+    | zero -> fn (y : Nat) (z : Nat) is refl (y * z) end
+    | succ k with ih -> fn (y : Nat) (z : Nat) is
+        calc (succ k + y) * z
+          = (k * z + y * z) + z   by cong (fn (s : Nat) is s + z end) (ih y z)
+          = k * z + (y * z + z)   by addAssoc (k * z) (y * z) z
+          = k * z + (z + y * z)   by cong (fn (s : Nat) is k * z + s end) (addComm (y * z) z)
+          = (k * z + z) + y * z   by sym (addAssoc (k * z) z (y * z))
+        end
+      end
+    end
+  end
+end
+
+-- x + 1 = succ x and double as addition: the two bridges the binary side
+-- crosses constantly.
+
+addOneRight : (x : Nat) -> x + 1 = succ x is
+  fn (x : Nat) is
+    trans (addSucc x 0) (cong succ (addZeroRight x))
+  end
+end
+
+doubleIsAdd : (n : Nat) -> double n = n + n is
+  fn (n : Nat) is
+    case n of
+    | zero -> refl 0
+    | succ k with ih -> calc double (succ k)
+        = succ (succ (k + k))  by cong (fn (s : Nat) is succ (succ s) end) ih
+        = succ (k + succ k)    by cong succ (sym (addSucc k k))
+      end
+    end
+  end
+end
+
+doubleAdd : (m : Nat) -> (n : Nat) -> double (m + n) = double m + double n is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is refl (double n) end
+    | succ k with ih -> fn (n : Nat) is
+        cong (fn (s : Nat) is succ (succ s) end) (ih n)
+      end
+    end
+  end
+end
+
+doubleMul : (m : Nat) -> (n : Nat) -> double m * n = double (m * n) is
+  fn (m : Nat) (n : Nat) is
+    calc double m * n
+      = (m + m) * n        by cong (fn (s : Nat) is s * n end) (doubleIsAdd m)
+      = m * n + m * n      by distribR m m n
+      = double (m * n)     by sym (doubleIsAdd (m * n))
+    end
+  end
+end
+
+-- The binary side. Pos: 1 | 2p | 2p+1, least significant decision first.
+
+data Pos : U is
+  pH : Pos
+| pO : Pos -> Pos
+| pI : Pos -> Pos
+end
+
+psucc : Pos -> Pos is
+  fn (p : Pos) is
+    case p of
+    | pH -> pO pH
+    | pO a -> pI a
+    | pI a with ih -> pO ih
+    end
+  end
+end
+
+-- Addition by recursion on the left, the carry absorbed into psucc.
+padd : Pos -> Pos -> Pos is
+  fn (p : Pos) is
+    case p of
+    | pH -> fn (q : Pos) is psucc q end
+    | pO a with ih -> fn (q : Pos) is
+        case q of
+        | pH -> pI a
+        | pO b -> pO (ih b)
+        | pI b -> pI (ih b)
+        end
+      end
+    | pI a with ih -> fn (q : Pos) is
+        case q of
+        | pH -> pO (psucc a)
+        | pO b -> pI (ih b)
+        | pI b -> pO (psucc (ih b))
+        end
+      end
+    end
+  end
+end
+
+-- Multiplication: school method, one bit at a time.
+pmul : Pos -> Pos -> Pos is
+  fn (p : Pos) is
+    case p of
+    | pH -> fn (q : Pos) is q end
+    | pO a with ih -> fn (q : Pos) is pO (ih q) end
+    | pI a with ih -> fn (q : Pos) is padd q (pO (ih q)) end
+    end
+  end
+end
+
+data BN : U is
+  bn0 : BN
+| bnP : Pos -> BN
+end
+
+bnsucc : BN -> BN is
+  fn (b : BN) is
+    case b of
+    | bn0 -> bnP pH
+    | bnP p -> bnP (psucc p)
+    end
+  end
+end
+
+bnadd : BN -> BN -> BN is
+  fn (x : BN) (y : BN) is
+    case x of
+    | bn0 -> y
+    | bnP p ->
+        case y of
+        | bn0 -> bnP p
+        | bnP q -> bnP (padd p q)
+        end
+    end
+  end
+end
+
+bnmul : BN -> BN -> BN is
+  fn (x : BN) (y : BN) is
+    case x of
+    | bn0 -> bn0
+    | bnP p ->
+        case y of
+        | bn0 -> bn0
+        | bnP q -> bnP (pmul p q)
+        end
+    end
+  end
+end
+
+-- The spec maps: binary to unary, and back.
+
+toNatP : Pos -> Nat is
+  fn (p : Pos) is
+    case p of
+    | pH -> 1
+    | pO a with ih -> double ih
+    | pI a with ih -> succ (double ih)
+    end
+  end
+end
+
+toNat : BN -> Nat is
+  fn (b : BN) is
+    case b of
+    | bn0 -> 0
+    | bnP p -> toNatP p
+    end
+  end
+end
+
+fromNat : Nat -> BN is
+  fn (n : Nat) is
+    case n of
+    | zero -> bn0
+    | succ k with ih -> bnsucc ih
+    end
+  end
+end
+
+mulZeroRight : (m : Nat) -> m * 0 = 0 is
+  fn (m : Nat) is
+    case m of
+    | zero -> refl 0
+    | succ k with ih -> trans (addZeroRight (k * 0)) ih
+    end
+  end
+end
+
+-- The agreement theorems: the binary implementation against the unary
+-- spec, proved once. This is the verification layer as a THEOREM — the
+-- implementation is "ready" exactly when these check.
+
+psuccAgree : (p : Pos) -> toNatP (psucc p) = succ (toNatP p) is
+  fn (p : Pos) is
+    case p of
+    | pH -> refl 2
+    | pO a -> refl (succ (double (toNatP a)))
+    | pI a with ih -> cong double ih
+    end
+  end
+end
+
+bnsuccAgree : (b : BN) -> toNat (bnsucc b) = succ (toNat b) is
+  fn (b : BN) is
+    case b of
+    | bn0 -> refl 1
+    | bnP p -> psuccAgree p
+    end
+  end
+end
+
+roundTrip : (n : Nat) -> toNat (fromNat n) = n is
+  fn (n : Nat) is
+    case n of
+    | zero -> refl 0
+    | succ k with ih -> trans (bnsuccAgree (fromNat k)) (cong succ ih)
+    end
+  end
+end
+
+paddAgree : (p : Pos) -> (q : Pos) -> toNatP (padd p q) = toNatP p + toNatP q is
+  fn (p : Pos) is
+    case p of
+    | pH -> fn (q : Pos) is psuccAgree q end
+    | pO a with ih -> fn (q : Pos) is
+        case q of
+        | pH -> sym (addOneRight (double (toNatP a)))
+        | pO b -> trans (cong double (ih b)) (doubleAdd (toNatP a) (toNatP b))
+        | pI b ->
+            trans (cong (fn (s : Nat) is succ (double s) end) (ih b))
+              (trans (cong succ (doubleAdd (toNatP a) (toNatP b)))
+                (sym (addSucc (double (toNatP a)) (double (toNatP b)))))
+        end
+      end
+    | pI a with ih -> fn (q : Pos) is
+        case q of
+        | pH ->
+            trans (cong double (psuccAgree a))
+              (sym (cong succ (addOneRight (double (toNatP a)))))
+        | pO b ->
+            trans (cong (fn (s : Nat) is succ (double s) end) (ih b))
+              (cong succ (doubleAdd (toNatP a) (toNatP b)))
+        | pI b ->
+            trans (cong double (psuccAgree (padd a b)))
+              (trans (cong (fn (s : Nat) is succ (succ (double s)) end) (ih b))
+                (trans (cong (fn (s : Nat) is succ (succ s) end) (doubleAdd (toNatP a) (toNatP b)))
+                  (sym (cong succ (addSucc (double (toNatP a)) (double (toNatP b)))))))
+        end
+      end
+    end
+  end
+end
+
+bnaddAgree : (x : BN) -> (y : BN) -> toNat (bnadd x y) = toNat x + toNat y is
+  fn (x : BN) is
+    case x of
+    | bn0 -> fn (y : BN) is refl (toNat y) end
+    | bnP p -> fn (y : BN) is
+        case y of
+        | bn0 -> sym (addZeroRight (toNatP p))
+        | bnP q -> paddAgree p q
+        end
+      end
+    end
+  end
+end
+
+pmulAgree : (p : Pos) -> (q : Pos) -> toNatP (pmul p q) = toNatP p * toNatP q is
+  fn (p : Pos) is
+    case p of
+    | pH -> fn (q : Pos) is refl (toNatP q) end
+    | pO a with ih -> fn (q : Pos) is
+        trans (cong double (ih q))
+          (sym (doubleMul (toNatP a) (toNatP q)))
+      end
+    | pI a with ih -> fn (q : Pos) is
+        trans (paddAgree q (pO (pmul a q)))
+          (trans (cong (fn (s : Nat) is toNatP q + double s end) (ih q))
+            (trans (cong (fn (s : Nat) is toNatP q + s end) (sym (doubleMul (toNatP a) (toNatP q))))
+              (addComm (toNatP q) (double (toNatP a) * toNatP q))))
+      end
+    end
+  end
+end
+
+bnmulAgree : (x : BN) -> (y : BN) -> toNat (bnmul x y) = toNat x * toNat y is
+  fn (x : BN) is
+    case x of
+    | bn0 -> fn (y : BN) is refl 0 end
+    | bnP p -> fn (y : BN) is
+        case y of
+        | bn0 -> sym (mulZeroRight (toNatP p))
+        | bnP q -> pmulAgree p q
+        end
+      end
+    end
+  end
+end
+
+-- The payoff: a certified UNARY equation whose computation ran in BINARY.
+-- bigMul's chain never multiplies unary numbers: the cong2 leg rewrites the
+-- literals to their binary images (each a linear refl), the agreement
+-- theorem swaps spec for implementation, and the final refl asks the kernel
+-- to convert toNat (bnmul …) with a literal — school-method binary
+-- multiplication plus one linear readback.
+-- (Showcase literals stay ~1500 deep: numerals cap at 4096 in the parser,
+-- and proof terms currently carry their erased-in-spirit implicit numerals
+-- into the JS shadow, where ~1600-deep nesting overflows node's parser —
+-- the 0-fragment call-site erasure gap, recorded in the design note. The
+-- runnable answer below needs no literal and computes 35 · 186 = 6510.)
+
+x35 : Pos is pI (pI (pO (pO (pO pH)))) end
+x41 : Pos is pI (pO (pO (pI (pO pH)))) end
+x93 : Pos is pI (pO (pI (pI (pI (pO pH))))) end
+x186 : Pos is pO x93 end
+
+toNat35 : toNat (bnP x35) = 35 is refl 35 end
+toNat41 : toNat (bnP x41) = 41 is refl 41 end
+
+binProd : toNat (bnmul (bnP x35) (bnP x41)) = 1435 is refl 1435 end
+
+bigMul : 35 * 41 = 1435 is
+  trans (cong2 (fn (u : Nat) (v : Nat) is u * v end) (sym toNat35) (sym toNat41))
+    (trans (sym (bnmulAgree (bnP x35) (bnP x41))) binProd)
+end
+
+-- Addition through the same gate: 35 + 41 = 76.
+bigAdd : 35 + 41 = 76 is
+  trans (cong2 (fn (u : Nat) (v : Nat) is u + v end) (sym toNat35) (sym toNat41))
+    (trans (sym (bnaddAgree (bnP x35) (bnP x41))) (refl 76))
+end
+
+-- The gate's runnable answer: 35 · 186 through binary, read back under the
+-- erased shadow.
+answer : Nat is toNat (bnmul (bnP x35) (bnP x186)) end
