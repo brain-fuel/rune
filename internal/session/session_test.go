@@ -113,3 +113,72 @@ func TestElabExprAndNormalize(t *testing.T) {
 		t.Fatalf("normal form = %q", got)
 	}
 }
+
+// TestBuiltinNatGeneralized: rung C4 of the numeric tower — the binding
+// accepts any terms z : T and s : T -> T, not only data constructors, and a
+// numeral expands through them. The BigInt shadow stays reserved for the
+// constructor form (NatSpec is nil otherwise).
+func TestBuiltinNatGeneralized(t *testing.T) {
+	s := New()
+	src := `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+double : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is succ (succ ih) end) n
+  end
+end
+one : Nat is succ zero end
+builtin nat Nat one double
+three : Nat is 3 end
+`
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatal(err)
+	}
+	// 3 = double (double (double one)) = 8 in constructor terms.
+	e, err := s.ParseSrcExpr("3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm, _, err := s.ElabExpr(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := surface.PrettyWith(s.NormalizeExpr(tm), s.RefNames())
+	want := "succ (succ (succ (succ (succ (succ (succ (succ zero)))))))"
+	if got != want {
+		t.Fatalf("generalized numeral: got %s, want %s", got, want)
+	}
+	// The shadow must NOT claim machine integers for a generalized binding.
+	p, err := s.EmitProgram("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Nat != nil {
+		t.Fatal("NatSpec emitted for a non-constructor builtin nat binding")
+	}
+}
+
+// TestBuiltinNatRejectsIllTyped: a binding whose succ is not T -> T fails.
+func TestBuiltinNatRejectsIllTyped(t *testing.T) {
+	s := New()
+	src := `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+notSucc : Nat -> Bool is fn (n : Nat) is true end end
+`
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddBuiltinNat(surface.BuiltinNat{TyName: "Nat", Zero: "zero", Succ: "notSucc"}); err == nil {
+		t.Fatal("ill-typed builtin nat binding accepted")
+	}
+}

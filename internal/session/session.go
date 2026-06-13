@@ -36,7 +36,10 @@ type Session struct {
 	byHash   map[core.Hash]Def
 	// nat is the `builtin nat` binding of the loaded source, if any: it lets
 	// REPL expressions use numerals and the printer fold succ-chains back.
-	nat *surface.BuiltinNat
+	// natCtors records whether the binding is the data-constructor form,
+	// the only shape the BigInt codegen shadow applies to.
+	nat      *surface.BuiltinNat
+	natCtors bool
 }
 
 // New returns an empty session.
@@ -56,6 +59,8 @@ func (s *Session) Reset() {
 	s.refNames = map[core.Hash]string{}
 	s.order = nil
 	s.byHash = map[core.Hash]Def{}
+	s.nat = nil
+	s.natCtors = false
 	hs := s.st.AddQuot()
 	for i, n := range store.QuotNames() {
 		s.refs[n] = hs[i]
@@ -156,29 +161,49 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 	return added, nil
 }
 
-// AddBuiltinNat validates and registers a `builtin nat` declaration: the three
-// names must be bound, and zero/succ must be constructors of the named type's
-// data group. The declaration is session state only — nothing enters the store.
+// AddBuiltinNat validates and registers a `builtin nat` declaration. The
+// binding accepts any bound TERMS z : T and s : T -> T, not only the
+// constructors of a data declaration (the numeric-tower amendment, rung C4:
+// numerals can mean an integer or a rational). When the binding IS the
+// constructor form, the session remembers that — the BigInt codegen shadow
+// applies only there. The declaration is session state only — nothing enters
+// the store.
 func (s *Session) AddBuiltinNat(b surface.BuiltinNat) error {
-	tyH, ok := s.refs[b.TyName]
-	if !ok {
+	if _, ok := s.refs[b.TyName]; !ok {
 		return fmt.Errorf("builtin nat: unknown type %q", b.TyName)
 	}
-	if _, _, _, isData := s.st.DataDeclOf(tyH); !isData {
-		return fmt.Errorf("builtin nat: %q is not a data type", b.TyName)
-	}
-	for _, n := range []string{b.Zero, b.Succ} {
-		h, ok := s.refs[n]
-		if !ok {
-			return fmt.Errorf("builtin nat: unknown constructor %q", n)
+	for n, ty := range map[string]surface.Exp{
+		b.Zero: surface.EVar{Name: b.TyName},
+		b.Succ: surface.EPi{Param: "_", Dom: surface.EVar{Name: b.TyName}, Cod: surface.EVar{Name: b.TyName}},
+	} {
+		if _, ok := s.refs[n]; !ok {
+			return fmt.Errorf("builtin nat: unknown name %q", n)
 		}
-		dh, _, isCtor := s.st.CtorOf(h)
-		if !isCtor || dh != tyH {
-			return fmt.Errorf("builtin nat: %q is not a constructor of %q", n, b.TyName)
+		el := s.elaborator()
+		if _, _, err := el.ElabDef(surface.Def{Name: "$builtin-nat", Ty: ty, Body: surface.EVar{Name: n}}); err != nil {
+			return fmt.Errorf("builtin nat: %q does not fit the binding: %v", n, err)
 		}
 	}
 	s.nat = &b
+	s.natCtors = s.bindingIsCtors(b)
 	return nil
+}
+
+// bindingIsCtors reports whether a builtin-nat binding names exactly the
+// zero/succ constructors of a data-declared type — the shape the BigInt
+// codegen shadow compiles to machine integers.
+func (s *Session) bindingIsCtors(b surface.BuiltinNat) bool {
+	tyH := s.refs[b.TyName]
+	if _, _, _, isData := s.st.DataDeclOf(tyH); !isData {
+		return false
+	}
+	for _, n := range []string{b.Zero, b.Succ} {
+		dh, _, isCtor := s.st.CtorOf(s.refs[n])
+		if !isCtor || dh != tyH {
+			return false
+		}
+	}
+	return true
 }
 
 // ParseSrcExpr parses a single expression against the session: when a `builtin
@@ -305,8 +330,10 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		}
 		p.Main = main
 	}
-	// A registered `builtin nat` group compiles to machine integers (rung 6).
-	if s.nat != nil {
+	// A registered `builtin nat` group compiles to machine integers (rung 6)
+	// — only in its data-constructor form. A generalized binding (numerals
+	// meaning an integer, a rational, …) computes through its successor term.
+	if s.nat != nil && s.natCtors {
 		p.Nat = &codegen.NatSpec{Zero: s.nat.Zero, Succ: s.nat.Succ, ElimName: s.nat.TyName + "Elim"}
 	}
 	// Datatype formers denote types: at runtime they erase to the unit token.

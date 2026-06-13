@@ -231,15 +231,20 @@ separators:
 builtin nat Nat zero succ
 ```
 
-registers which data type numerals mean: the type, its zero, and its successor, by name. From
+registers what numerals mean: a type, its zero, and its successor, by name. From
 the declaration to the end of the file (and in REPL expressions once a loaded file declared it),
 a numeral `n` in expression position parses as the n-fold application of the successor to the
-zero — pure parser sugar; downstream the constructors are ordinary names resolving to ordinary
-content-hash references, and the declaration itself leaves no trace in the core or the store.
+zero — pure parser sugar; downstream the names resolve to ordinary content-hash references, and
+the declaration itself leaves no trace in the core or the store.
 
 - **No binding in scope → a numeral is a parse error** ("no `builtin nat` declared").
-- The session validates the declaration: the type must be a `data` type and the two names must
-  be its constructors.
+- The session validates the declaration by TYPE, not by shape (the numeric-tower amendment,
+  rung C4): zero must check against the named type `T` and succ against `T -> T` — any bound
+  definitions qualify, so a later library can re-bind numerals to mean an integer or a
+  rational. The data-constructor binding remains the common case, and is the only shape the
+  BigInt codegen shadow compiles to machine integers; a generalized binding computes through
+  its successor term.
+- The LAST `builtin nat` in scope binds digits (one binding at a time, no overloading).
 - A literal is nothing but its unary succ-chain, so numerals **cap at 4096**; a compressed core
   numeral (and the Machine's superlinear deep-chain evaluation, see PARKING-LOT) is parked until
   a listing embeds a constant that big.
