@@ -136,6 +136,16 @@ func TestListingsRun(t *testing.T) {
 		normalizesTo(t, s, `gcd 12 18`,
 			"succ (succ (succ (succ (succ (succ zero)))))")
 	})
+	t.Run("ch12", func(t *testing.T) {
+		s := loadListing(t, "ch12_integer_division.rune")
+		// Floor vs truncate, live: −7 // 2 is −4 (canonical pair (0,4)),
+		// quot −7 2 is −3 — conversion computing through the quotient.
+		normalizesTo(t, s, `obs (zneg (intOf 7) // intOf 2)`,
+			"npair zero (succ (succ (succ (succ zero))))")
+		normalizesTo(t, s, `obs (quot (zneg (intOf 7)) (intOf 2))`,
+			"npair zero (succ (succ (succ zero)))")
+		normalizesTo(t, s, `natAbs (zneg (intOf 7) % intOf 2)`, "succ zero")
+	})
 }
 
 // TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant
@@ -167,6 +177,9 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// ch11 runs on the BigInt shadow: gcd 252 105 in milliseconds, with
 		// case-shaped eliminations emitted as constant-time dispatch.
 		{"ch11_arithmetic.rune", "answer", "21"},
+		// ch12: the floor convention through the quotient and the shadow
+		// agree — |−7 // 2| is 4, not 3.
+		{"ch12_integer_division.rune", "answer", "4"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {

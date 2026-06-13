@@ -1,0 +1,442 @@
+-- Chapter 12 — Integer division: the floor convention, earned.
+-- The numeric tower (ref_docs/rune-numeric-tower.md) at its second rung:
+-- ℤ gets `+ - * // %`, with `//` the flooring quotient and `%` its matched
+-- remainder, sign following the divisor. The chapter's one real proof is
+-- canonResp: canonicalization respects the difference relation. After that,
+-- every operation factors through the canonical form and is respect-free —
+-- the setoid tax is paid exactly once, by one lemma.
+-- `/` does not appear in this chapter: exact division is not total on ℤ,
+-- so on ℤ it does not exist. That is the tower's whole point.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> ih + n
+    end
+  end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is
+    case n of
+    | zero -> 0
+    | succ k -> k
+    end
+  end
+end
+
+- : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case n of
+    | zero -> m
+    | succ k with ih -> pred ih
+    end
+  end
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is true end
+    | succ k with ih -> fn (n : Nat) is
+        case n of
+        | zero -> false
+        | succ j -> ih j
+        end
+      end
+    end
+  end
+end
+
+divF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is 0 end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> 0
+        | succ k ->
+            case leb b a of
+            | true -> succ (ih (a - b) b)
+            | false -> 0
+            end
+        end
+      end
+    end
+  end
+end
+
+// : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is divF m m n end
+end
+
+-- ceilDiv x y = ⌈x/y⌉ for y > 0 (and 0 at y = 0): the negative branches of
+-- floor division round away from zero, which is a ceiling on magnitudes.
+ceilDiv : Nat -> Nat -> Nat is
+  fn (x : Nat) (y : Nat) is (x + (y - 1)) // y end
+end
+
+-- The equality toolkit.
+
+sym : {A : U} -> {x : A} -> {y : A} -> x = y -> y = x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is z = x end) (refl x)
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> x = y -> y = z -> x = z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is x = w end) p
+  end
+end
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> x = y -> f x = f y is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is f x = f z end) (refl (f x))
+  end
+end
+
+cong2 : {A : U} -> {B : U} -> {C : U} -> (f : A -> B -> C) ->
+    {x : A} -> {x' : A} -> {y : B} -> {y' : B} ->
+    x = x' -> y = y' -> f x y = f x' y' is
+  fn {A : U} {B : U} {C : U} (f : A -> B -> C)
+     {x : A} {x' : A} {y : B} {y' : B} (p : Eq A x x') (q : Eq B y y') is
+    trans (cong (fn (s : A) is f s y end) p) (cong (f x') q)
+  end
+end
+
+-- The addition laws this chapter leans on.
+
+addZeroRight : (n : Nat) -> n + 0 = n is
+  fn (n : Nat) is
+    case n of
+    | zero -> refl 0
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addSucc : (m : Nat) -> (n : Nat) -> m + succ n = succ (m + n) is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> refl (succ n)
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+
+addComm : (m : Nat) -> (n : Nat) -> m + n = n + m is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is sym (addZeroRight n) end
+    | succ k with ih -> fn (n : Nat) is
+        trans (cong succ (ih n)) (sym (addSucc n k))
+      end
+    end
+  end
+end
+
+-- The monus toolkit: subtraction facts feeding the canonicalization lemma.
+
+zeroMonus : (b : Nat) -> 0 - b = 0 is
+  fn (b : Nat) is
+    case b of
+    | zero -> refl 0
+    | succ k with ih -> cong pred ih
+    end
+  end
+end
+
+monusSuccSucc : (b : Nat) -> (a : Nat) -> succ a - succ b = a - b is
+  fn (b : Nat) is
+    case b of
+    | zero -> fn (a : Nat) is refl a end
+    | succ k with ih -> fn (a : Nat) is cong pred (ih a) end
+    end
+  end
+end
+
+monusAddCancel : (d : Nat) -> (a : Nat) -> (a + d) - d = a is
+  fn (d : Nat) is
+    case d of
+    | zero -> fn (a : Nat) is addZeroRight a end
+    | succ k with ih -> fn (a : Nat) is
+        calc (a + succ k) - succ k
+          = succ (a + k) - succ k by cong (fn (s : Nat) is s - succ k end) (addSucc a k)
+          = (a + k) - k           by monusSuccSucc k (a + k)
+          = a                     by ih a
+        end
+      end
+    end
+  end
+end
+
+monusAddZero : (c : Nat) -> (b : Nat) -> c - (c + b) = 0 is
+  fn (c : Nat) is
+    case c of
+    | zero -> fn (b : Nat) is zeroMonus b end
+    | succ k with ih -> fn (b : Nat) is
+        calc succ k - (succ k + b)
+          = k - (k + b) by monusSuccSucc (k + b) k
+          = 0           by ih b
+        end
+      end
+    end
+  end
+end
+
+succInj : {a : Nat} -> {b : Nat} -> succ a = succ b -> a = b is
+  fn {a : Nat} {b : Nat} (p : Eq Nat (succ a) (succ b)) is cong pred p end
+end
+
+-- The workhorse: equal differences have equal monuses. By induction on the
+-- subtrahend, then a case on the minuend with the equation generalized into
+-- the motive (the convoy pattern: the branch receives the equation at the
+-- refined index).
+monusEq : (b : Nat) -> (a : Nat) -> (c : Nat) -> (d : Nat) ->
+    a + d = c + b -> a - b = c - d is
+  fn (b : Nat) is
+    case b of
+    | zero -> fn (a : Nat) (c : Nat) (d : Nat) (r : Eq Nat (a + d) (c + 0)) is
+        sym (calc c - d
+          = (a + d) - d by cong (fn (s : Nat) is s - d end) (sym (trans r (addZeroRight c)))
+          = a           by monusAddCancel d a
+        end)
+      end
+    | succ b' with ih -> fn (a : Nat) is
+        case a of
+        | zero -> fn (c : Nat) (d : Nat) (r : Eq Nat (0 + d) (c + succ b')) is
+            trans (zeroMonus (succ b'))
+              (sym (calc c - d
+                = c - (c + succ b') by cong (fn (s : Nat) is c - s end) r
+                = 0                 by monusAddZero c (succ b')
+              end))
+          end
+        | succ a' -> fn (c : Nat) (d : Nat) (r : Eq Nat (succ a' + d) (c + succ b')) is
+            trans (monusSuccSucc b' a')
+              (ih a' c d (succInj (trans r (addSucc c b'))))
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Pairs of naturals: (a, b) names the integer a − b (Chapter 7).
+
+data NatPair : U is
+  npair : Nat -> Nat -> NatPair
+end
+
+fst : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is a end) p
+  end
+end
+
+snd : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is b end) p
+  end
+end
+
+ZRel : NatPair -> NatPair -> Prop is
+  fn (p : NatPair) (q : NatPair) is Eq Nat (fst p + snd q) (fst q + snd p) end
+end
+
+Z : U is Quot NatPair ZRel end
+
+-- The canonical form: subtract the overlap. Exactly one component survives.
+canon : NatPair -> NatPair is
+  fn (p : NatPair) is npair (fst p - snd p) (snd p - fst p) end
+end
+
+-- THE respect proof — the only one in the chapter. Related pairs have equal
+-- canonical forms, one monusEq per component (the second under commuted
+-- equations, the same flip as Chapter 7's negation).
+canonResp : (p : NatPair) -> (q : NatPair) -> ZRel p q -> Eq NatPair (canon p) (canon q) is
+  fn (p : NatPair) (q : NatPair) (r : ZRel p q) is
+    cong2 npair
+      (monusEq (snd p) (fst p) (fst q) (snd q) r)
+      (monusEq (fst p) (snd p) (snd q) (fst q)
+        (trans (addComm (snd p) (fst q)) (trans (sym r) (addComm (fst p) (snd q)))))
+  end
+end
+
+-- obs: the quotient's observer. qlift pays the setoid tax with canonResp;
+-- every operation below factors through obs and needs no proof of its own.
+obs : Z -> NatPair is
+  qlift NatPair ZRel NatPair canon canonResp
+end
+
+intOf : Nat -> Z is fn (n : Nat) is qin NatPair ZRel (npair n 0) end end
+
+-- Operations on representatives. pdiv and pquot dispatch on the sign
+-- structure of CANONICAL pairs (at most one component nonzero): the
+-- F-convention's negative branches round away from zero on magnitudes
+-- (a ceiling), the T-convention's truncate toward it (a floor).
+
+pneg : NatPair -> NatPair is
+  fn (p : NatPair) is npair (snd p) (fst p) end
+end
+
+padd : NatPair -> NatPair -> NatPair is
+  fn (p : NatPair) (q : NatPair) is
+    npair (fst p + fst q) (snd p + snd q)
+  end
+end
+
+pmul : NatPair -> NatPair -> NatPair is
+  fn (p : NatPair) (q : NatPair) is
+    npair (fst p * fst q + snd p * snd q) (fst p * snd q + snd p * fst q)
+  end
+end
+
+pdiv : NatPair -> NatPair -> NatPair is
+  fn (a : NatPair) (b : NatPair) is
+    case snd b of
+    | zero ->
+        case fst b of
+        | zero -> npair 0 0
+        | succ bm ->
+            case snd a of
+            | zero -> npair (fst a // succ bm) 0
+            | succ an -> npair 0 (ceilDiv (succ an) (succ bm))
+            end
+        end
+    | succ bn ->
+        case snd a of
+        | zero -> npair 0 (ceilDiv (fst a) (succ bn))
+        | succ an -> npair (succ an // succ bn) 0
+        end
+    end
+  end
+end
+
+pquot : NatPair -> NatPair -> NatPair is
+  fn (a : NatPair) (b : NatPair) is
+    case snd b of
+    | zero ->
+        case fst b of
+        | zero -> npair 0 0
+        | succ bm ->
+            case snd a of
+            | zero -> npair (fst a // succ bm) 0
+            | succ an -> npair 0 (succ an // succ bm)
+            end
+        end
+    | succ bn ->
+        case snd a of
+        | zero -> npair 0 (fst a // succ bn)
+        | succ an -> npair (succ an // succ bn) 0
+        end
+    end
+  end
+end
+
+-- The integer operations: compose through obs, return by qin. Respect-free.
+
+zneg : Z -> Z is fn (z : Z) is qin NatPair ZRel (pneg (obs z)) end end
+
+zadd : Z -> Z -> Z is
+  fn (y : Z) (z : Z) is qin NatPair ZRel (padd (obs y) (obs z)) end
+end
+
+zmul : Z -> Z -> Z is
+  fn (y : Z) (z : Z) is qin NatPair ZRel (pmul (obs y) (obs z)) end
+end
+
+zsub : Z -> Z -> Z is fn (y : Z) (z : Z) is zadd y (zneg z) end end
+
+zfdiv : Z -> Z -> Z is
+  fn (y : Z) (z : Z) is qin NatPair ZRel (pdiv (obs y) (obs z)) end
+end
+
+-- The flooring remainder IS the division law, read as a definition.
+zfmod : Z -> Z -> Z is
+  fn (y : Z) (z : Z) is zsub y (zmul z (zfdiv y z)) end
+end
+
+-- The truncated pair, named and unglyphed: interop honesty, not arithmetic.
+-- Its law is a = b * (quot a b) + rem a b, with rem's sign following the
+-- DIVIDEND.
+quot : Z -> Z -> Z is
+  fn (y : Z) (z : Z) is qin NatPair ZRel (pquot (obs y) (obs z)) end
+end
+
+rem : Z -> Z -> Z is
+  fn (y : Z) (z : Z) is zsub y (zmul z (quot y z)) end
+end
+
+natAbs : Z -> Nat is
+  fn (z : Z) is fst (obs z) + snd (obs z) end
+end
+
+-- The glyphs arrive at ℤ. From here down, `+ - * // %` are integer
+-- operations; Nat's live on above under the same names, already resolved.
+-- `/` is nowhere: exact division does not exist at this type.
+
++ : Z -> Z -> Z is zadd end
+- : Z -> Z -> Z is zsub end
+* : Z -> Z -> Z is zmul end
+// : Z -> Z -> Z is zfdiv end
+% : Z -> Z -> Z is zfmod end
+
+-- Certificates: every refl is a machine-checked arithmetic fact, conversion
+-- computing through the quotient (lifts reduce on points). Stated through
+-- obs, the canonical observer, so two integers are compared by their
+-- canonical pairs.
+
+-- The F-convention, all four sign quadrants of −7, 7 against ±2:
+floorNegPos : obs (zneg (intOf 7) // intOf 2) = npair 0 4 is refl (npair 0 4) end
+modNegPos   : obs (zneg (intOf 7) % intOf 2) = npair 1 0 is refl (npair 1 0) end
+floorPosNeg : obs (intOf 7 // zneg (intOf 2)) = npair 0 4 is refl (npair 0 4) end
+modPosNeg   : obs (intOf 7 % zneg (intOf 2)) = npair 0 1 is refl (npair 0 1) end
+floorNegNeg : obs (zneg (intOf 7) // zneg (intOf 2)) = npair 3 0 is refl (npair 3 0) end
+modNegNeg   : obs (zneg (intOf 7) % zneg (intOf 2)) = npair 0 1 is refl (npair 0 1) end
+floorPosPos : obs (intOf 7 // intOf 2) = npair 3 0 is refl (npair 3 0) end
+modPosPos   : obs (intOf 7 % intOf 2) = npair 1 0 is refl (npair 1 0) end
+
+-- The truncated pair differs exactly where it should: toward zero,
+-- remainder sign following the dividend.
+quotNegPos : obs (quot (zneg (intOf 7)) (intOf 2)) = npair 0 3 is refl (npair 0 3) end
+remNegPos  : obs (rem (zneg (intOf 7)) (intOf 2)) = npair 0 1 is refl (npair 0 1) end
+
+-- The zero conventions: a // 0 = 0 and a % 0 = a keep DIV-LAW total.
+floorByZero : obs (intOf 7 // intOf 0) = npair 0 0 is refl (npair 0 0) end
+modByZero   : obs (intOf 7 % intOf 0) = npair 7 0 is refl (npair 7 0) end
+
+-- DIV-LAW, computed at the awkward quadrant: −7 = 2 · (−7 // 2) + (−7 % 2).
+divLawNegPos :
+    obs (intOf 2 * (zneg (intOf 7) // intOf 2) + zneg (intOf 7) % intOf 2)
+      = obs (zneg (intOf 7)) is
+  refl (npair 0 7)
+end
+
+-- And the observer agrees with magnitude.
+absNegFour : natAbs (zneg (intOf 7) // intOf 2) = 4 is refl 4 end
+
+-- The gate's runnable answer: |−7 // 2| under the erased shadow.
+answer : Nat is natAbs (zneg (intOf 7) // intOf 2) end
