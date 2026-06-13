@@ -10,8 +10,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strings"
 
+	"goforge.dev/rune/v3/codegen"
 	"goforge.dev/rune/v3/core"
 	"goforge.dev/rune/v3/internal/session"
 	"goforge.dev/rune/v3/surface"
@@ -215,6 +217,8 @@ func runCommand(s *session.Session, cfg Config, line string, out io.Writer) erro
 		return showHash(s, arg, out)
 	case ":type", ":t":
 		return showType(s, arg, out)
+	case ":run":
+		return runShadow(s, arg, out)
 	default:
 		return fmt.Errorf("unknown command %q (try :help)", cmd)
 	}
@@ -287,11 +291,53 @@ func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "  :core <expr>    show the resolved core in explicit de Bruijn form")
 	fmt.Fprintln(out, "  :hash <expr>    show the content hash of the resolved core")
 	fmt.Fprintln(out, "  :type <expr>    (:t) type checking arrives in Phase 1")
+	fmt.Fprintln(out, "  :run <expr>    evaluate through the erased shadow (fast, computation only — no certificate)")
 	fmt.Fprintln(out, "  :list           list session definitions")
 	fmt.Fprintln(out, "  :load <path>    load definitions from a file")
 	fmt.Fprintln(out, "  :reset          clear the session (reloads the prelude unless --no-prelude)")
 	fmt.Fprintln(out, "  :help           (:h) show this help")
 	fmt.Fprintln(out, "  :quit           (:q) exit (Ctrl-D also exits)")
+}
+
+// runShadow is `:run <expr>`: the kernel evaluator PROVES, the erased shadow
+// PERFORMS. The expression is elaborated and type checked against the session
+// exactly as plain evaluation is (the kernel stays the authority on typing),
+// then — instead of NbE-normalizing — lowered through the session's erased-JS
+// shadow and executed under node, computation only, no certificate. Type
+// checking and emission happen BEFORE the node lookup, so an ill-typed
+// expression reports its type error whether or not node is installed.
+func runShadow(s *session.Session, arg string, out io.Writer) error {
+	if strings.TrimSpace(arg) == "" {
+		return fmt.Errorf("usage: :run <expr>")
+	}
+	e, err := s.ParseSrcExpr(arg)
+	if err != nil {
+		return err
+	}
+	p, err := s.EmitExpr(e)
+	if err != nil {
+		return err
+	}
+	if _, err := exec.LookPath("node"); err != nil {
+		return fmt.Errorf("the erased shadow needs node in PATH to run; plain evaluation (the expression without :run) still works")
+	}
+	src, err := codegen.Default().Emit(p)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp("", "rune-repl-*.js")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	if _, err := io.WriteString(f, string(src)); err != nil {
+		f.Close()
+		return err
+	}
+	f.Close()
+	cmd := exec.Command("node", f.Name())
+	cmd.Stdout, cmd.Stderr = out, out
+	return cmd.Run()
 }
 
 // showType elaborates an expression and prints only its inferred type.

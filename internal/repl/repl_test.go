@@ -2,6 +2,7 @@ package repl
 
 import (
 	"bytes"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -100,6 +101,62 @@ func TestREPLPrelude(t *testing.T) {
 	// only if 1+1 did too, so just check the count of value lines is right.
 	if n := strings.Count(got, " : Nat"); n != 8 {
 		t.Errorf("expected 8 Nat value lines, got %d\n--- full output ---\n%s", n, got)
+	}
+}
+
+// TestREPLRunShadow drives `:run` through a prelude session: the expression is
+// type checked by the kernel, then evaluated through the erased JS shadow under
+// node — calculation without a certificate. The BigInt shadow applies (the
+// prelude's builtin nat is constructor-form), so 35 * 186 is arithmetic, not
+// unary chain-walking.
+func TestREPLRunShadow(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not in PATH")
+	}
+	script := []string{
+		":run 35 * 186",
+		":run gcd 252 105",
+		":run", // no argument: usage error, loop continues
+		"double : Nat -> Nat is fn (n : Nat) is n + n end end",
+		":run double 21", // a definition added mid-session is visible to the shadow
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+
+	wants := []string{
+		"6510",               // 35 * 186 through the shadow
+		"21",                 // gcd 252 105
+		"usage: :run <expr>", // bare :run
+		"defined double",     //
+		"42",                 // double 21
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}
+
+// TestREPLRunTypeError checks `:run` reports an ordinary type error for an
+// ill-typed expression. Type checking happens BEFORE emission and before any
+// node lookup, so this needs no node and must not skip.
+func TestREPLRunTypeError(t *testing.T) {
+	script := []string{
+		":run U U", // applying a non-function
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), "applying a non-function") {
+		t.Errorf("expected a type error from :run on an ill-typed expression, got:\n%s", out.String())
 	}
 }
 

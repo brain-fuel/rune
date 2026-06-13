@@ -323,13 +323,70 @@ func (s *Session) Lookup(name string) (core.Hash, bool) {
 // definition order. main, when non-empty, must name a session definition; the
 // emitted program prints its value.
 func (s *Session) EmitProgram(main string) (codegen.Program, error) {
-	var p codegen.Program
 	if main != "" {
 		if _, ok := s.refs[main]; !ok {
-			return p, fmt.Errorf("no definition named %q", main)
+			return codegen.Program{}, fmt.Errorf("no definition named %q", main)
+		}
+	}
+	p, env, err := s.emitDefs()
+	if err != nil {
+		return p, err
+	}
+	if main != "" {
+		if bad, isTainted := env.tainted[main]; isTainted {
+			return p, fmt.Errorf(
+				"definition %q uses the inner layer (%s): inner constructions check but do not deploy in v3 (see ref_docs/rune-v3-design.md §F)",
+				main, bad)
 		}
 		p.Main = main
 	}
+	return p, nil
+}
+
+// EmitExpr elaborates a surface expression against the session (the kernel
+// stays the authority on typing) and lowers it to an erased program whose Main
+// is a synthetic entry — WITHOUT registering the expression as a session
+// definition. This is the REPL's `:run` seam: the kernel evaluator proves, the
+// erased shadow performs.
+func (s *Session) EmitExpr(e surface.Exp) (codegen.Program, error) {
+	tm, _, err := s.ElabExpr(e)
+	if err != nil {
+		return codegen.Program{}, err
+	}
+	p, env, err := s.emitDefs()
+	if err != nil {
+		return p, err
+	}
+	ir := codegen.Erase(tm, env.eraseNames, env.typeRefs)
+	// Inner-layer taint refuses exactly as a tainted main does: transport
+	// along a ua-path has no erased meaning in v3.
+	if bad := innerTaint(ir, env.tainted); bad != "" {
+		return p, fmt.Errorf(
+			"expression uses the inner layer (%s): inner constructions check but do not deploy in v3 (see ref_docs/rune-v3-design.md §F)",
+			bad)
+	}
+	// "$it" cannot collide with a session definition (no legal surface
+	// identifier starts with '$') and survives codegen name mangling intact.
+	const entry = "$it"
+	p.Defs = append(p.Defs, codegen.DefSpec{Name: entry, Body: ir})
+	p.Main = entry
+	return p, nil
+}
+
+// emitEnv is the shared erasure environment emitDefs builds: the per-hash
+// emit names (shadow-suffixed where a name was rebound), the type-denoting
+// hashes that erase to the unit token, and the inner-tainted definitions.
+type emitEnv struct {
+	eraseNames map[core.Hash]string
+	typeRefs   map[core.Hash]bool
+	tainted    map[string]string
+}
+
+// emitDefs lowers every session definition to the erased IR program (no Main)
+// and returns the erasure environment so callers can erase one more body
+// against it.
+func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
+	var p codegen.Program
 	// A registered `builtin nat` group compiles to machine integers (rung 6)
 	// — only in its data-constructor form. A generalized binding (numerals
 	// meaning an integer, a rational, …) computes through its successor term.
@@ -405,7 +462,7 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		}
 		body, ok := s.st.Unfold(h)
 		if !ok {
-			return p, fmt.Errorf("definition %q has no body to emit", name)
+			return p, emitEnv{}, fmt.Errorf("definition %q has no body to emit", name)
 		}
 		ir := codegen.Erase(body, eraseNames, typeRefs)
 		// Inner-layer taint: a definition whose erased body references a
@@ -413,19 +470,14 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		// does not deploy in v3 — transport along a ua-path has no erased
 		// meaning yet, and emitting it would silently compute the wrong
 		// function. Tainted definitions are skipped; only a tainted MAIN is
-		// an error (see ref_docs/rune-v3-design.md §F).
+		// an error (the callers' check; see ref_docs/rune-v3-design.md §F).
 		if bad := innerTaint(ir, tainted); bad != "" {
 			tainted[name] = bad
-			if name == main {
-				return p, fmt.Errorf(
-					"definition %q uses the inner layer (%s): inner constructions check but do not deploy in v3 (see ref_docs/rune-v3-design.md §F)",
-					name, bad)
-			}
 			continue
 		}
 		p.Defs = append(p.Defs, codegen.DefSpec{Name: name, Body: ir})
 	}
-	return p, nil
+	return p, emitEnv{eraseNames: eraseNames, typeRefs: typeRefs, tainted: tainted}, nil
 }
 
 // innerTaint reports the inner-layer name (a fibrant value member, or a
