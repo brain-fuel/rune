@@ -155,6 +155,14 @@ func TestListingsRun(t *testing.T) {
 		normalizesTo(t, s, `denR (rdivP (rp 1 0 1) (rp 1 0 1))`,
 			"succ zero")
 	})
+	t.Run("ch14", func(t *testing.T) {
+		s := loadListing(t, "ch14_binary.rune")
+		// Binary multiplication agrees with the unary spec by THEOREM
+		// (bigMul checked on load); here conversion computes a small
+		// product through the binary side and reads it back.
+		normalizesTo(t, s, `toNatP (pmul (pI (pO pH)) (pI pH))`,
+			"succ (succ (succ (succ (succ (succ (succ (succ (succ (succ (succ (succ (succ (succ (succ zero))))))))))))))")
+	})
 }
 
 // TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant
@@ -192,6 +200,8 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// ch13: the numerator representative of (7/2) / (3/5) under the
 		// erased shadow — division through the flip, no proofs at runtime.
 		{"ch13_rationals.rune", "answer", "105"},
+		// ch14: 35 · 186 computed in binary, read back through toNat.
+		{"ch14_binary.rune", "answer", "6510"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {
