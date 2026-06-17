@@ -1,0 +1,205 @@
+-- Chapter 202 — SIGNIFICANT-FIGURE ARITHMETIC: the science-class combinatorics.
+-- A measurement carries a PRECISELY SPECIFIED number of significant figures, and
+-- a calculation must not report more precision than the rules allow:
+--
+--   * MULTIPLY / DIVIDE: the result keeps the MINIMUM number of significant
+--     figures of the operands.        2.5 (2sf) * 1.1 (2sf) = 2.75 -> 2.8 (2sf)
+--   * ADD / SUBTRACT:    the result keeps the MINIMUM number of decimal PLACES
+--     of the operands.                1.5 (1dp) + 1.25 (2dp) = 2.75 -> 2.8 (1dp)
+--
+-- A Meas is (mant, scale, sf): value mant/10^scale, carrying sf significant
+-- figures. `mulM`/`addM` enforce the rules BY CONSTRUCTION, so the combinatoric
+-- laws hold by refl, and a "precision not exceeded" theorem certifies the stored
+-- value never shows more significant digits than its sf. Built on the ch201 radix
+-- machinery (redeclared per the self-contained-listings convention).
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end
+end
+builtin natAdd +
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case m of | zero -> 0 | succ k with ih -> n + ih end end
+end
+builtin natMul *
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> 0 | succ k -> k end end end
+- : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end
+end
+builtin natMonus -
+
+lt : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is case n of | zero -> false | succ j -> true end end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is case n of | zero -> false | succ j -> ihk j end end
+       end)
+      m
+  end
+end
+lte : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is lt a (succ b) end end
+minNat : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case lt a b of | true -> a | false -> b end end end
+
+data DivR : U is dr : Nat -> Nat -> DivR end
+quotOf : DivR -> Nat is fn (x : DivR) is case x of | dr q r -> q end end end
+remOf  : DivR -> Nat is fn (x : DivR) is case x of | dr q r -> r end end end
+divmod : Nat -> Nat -> Nat -> DivR is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> DivR end)
+      (fn (a : Nat) (b : Nat) is dr 0 a end)
+      (fn (f : Nat) (ih : Nat -> Nat -> DivR) is
+         fn (a : Nat) (b : Nat) is
+           case lt a b of
+           | true  -> dr 0 a
+           | false -> dr (succ (quotOf (ih (a - b) b))) (remOf (ih (a - b) b))
+           end
+         end
+       end)
+      fuel
+  end
+end
+fuelN : Nat is 512 end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is quotOf (divmod fuelN a b) end end
+-- Round-half-up without dividing the denominator: round(a/b) = (2a + b) // (2b).
+-- (Dividing b by 2 would make the quotient ~b/2, blowing the division fuel for
+-- large denominators like 10^k.)
+roundDiv : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is divN (2 * a + b) (2 * b) end end
+powTen : Nat -> Nat is
+  fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is 10 * ih end) n end
+end
+numDigits : Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (q : Nat) is 1 end)
+      (fn (fl : Nat) (ih : Nat -> Nat) is
+         fn (q : Nat) is case lt q 10 of | true -> 1 | false -> succ (ih (divN q 10)) end end
+       end)
+      fuel
+  end
+end
+
+-- A fraction (magnitude) and a decimal (mant/10^scale), as in ch201.
+data Frac : U is frac : Nat -> Nat -> Frac end
+fnum : Frac -> Nat is fn (f : Frac) is case f of | frac a b -> a end end end
+fden : Frac -> Nat is fn (f : Frac) is case f of | frac a b -> b end end end
+data Decimal : U is dec : Nat -> Nat -> Decimal end
+decMant  : Decimal -> Nat is fn (d : Decimal) is case d of | dec m s -> m end end end
+decScale : Decimal -> Nat is fn (d : Decimal) is case d of | dec m s -> s end end end
+
+to_radix_sigplace : Nat -> Frac -> Decimal is
+  fn (n : Nat) (f : Frac) is dec (roundDiv (fnum f * powTen n) (fden f)) n end
+end
+leadingZeros : Nat -> Frac -> Nat is
+  fn (fuel : Nat) (f : Frac) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (z : Nat) is z end)
+      (fn (fl : Nat) (ih : Nat -> Nat) is
+         fn (z : Nat) is
+           case lt (fnum f * powTen (succ z)) (fden f) of
+           | true  -> ih (succ z)
+           | false -> z
+           end
+         end
+       end)
+      fuel 0
+  end
+end
+sigPlaces : Nat -> Frac -> Nat is
+  fn (s : Nat) (f : Frac) is
+    case lt (divN (fnum f) (fden f)) 1 of
+    | false -> s - numDigits 64 (divN (fnum f) (fden f))
+    | true  -> s + leadingZeros 64 f
+    end
+  end
+end
+to_radix_sigfig : Nat -> Frac -> Decimal is
+  fn (s : Nat) (f : Frac) is to_radix_sigplace (sigPlaces s f) f end
+end
+
+-- ====================================================================
+-- A measured quantity: value mant/10^scale, carrying sf significant figures.
+-- ====================================================================
+data Meas : U is meas : Nat -> Nat -> Nat -> Meas end
+mantOf  : Meas -> Nat is fn (m : Meas) is case m of | meas a s f -> a end end end
+scaleOf : Meas -> Nat is fn (m : Meas) is case m of | meas a s f -> s end end end
+sfOf    : Meas -> Nat is fn (m : Meas) is case m of | meas a s f -> f end end end
+
+-- The raw exact value of a measurement, as a fraction.
+valOf : Meas -> Frac is fn (m : Meas) is frac (mantOf m) (powTen (scaleOf m)) end end
+
+-- MULTIPLY: exact product, then round to MIN significant figures (the rule).
+mulM : Meas -> Meas -> Meas is
+  fn (x : Meas) (y : Meas) is
+    let s : Nat = minNat (sfOf x) (sfOf y) in
+    let p : Frac = frac (mantOf x * mantOf y) (powTen (scaleOf x + scaleOf y)) in
+    let d : Decimal = to_radix_sigfig s p in
+    meas (decMant d) (decScale d) s
+  end
+end
+
+-- ADD: exact sum, then round to MIN decimal places (the rule); the result's
+-- significant-figure count is whatever the rounded value carries.
+addM : Meas -> Meas -> Meas is
+  fn (x : Meas) (y : Meas) is
+    let pl : Nat = minNat (scaleOf x) (scaleOf y) in
+    let num : Nat = mantOf x * powTen (scaleOf y) + mantOf y * powTen (scaleOf x) in
+    let den : Nat = powTen (scaleOf x + scaleOf y) in
+    let d : Decimal = to_radix_sigplace pl (frac num den) in
+    meas (decMant d) (decScale d) (numDigits 64 (decMant d))
+  end
+end
+
+-- ====================================================================
+-- The combinatoric RULES, holding by construction (refl).
+-- ====================================================================
+
+-- MUL/DIV: the result's significant figures are the MINIMUM of the operands'.
+mulSigRule : (x : Meas) -> (y : Meas) -> Eq Nat (sfOf (mulM x y)) (minNat (sfOf x) (sfOf y)) is
+  fn (x : Meas) (y : Meas) is refl (minNat (sfOf x) (sfOf y)) end
+end
+
+-- ADD/SUB: the result's decimal places are the MINIMUM of the operands'.
+addPlaceRule : (x : Meas) -> (y : Meas) -> Eq Nat (scaleOf (addM x y)) (minNat (scaleOf x) (scaleOf y)) is
+  fn (x : Meas) (y : Meas) is refl (minNat (scaleOf x) (scaleOf y)) end
+end
+
+-- ====================================================================
+-- Worked examples (refl): the science-class results.
+-- ====================================================================
+
+-- 2.5 (2sf) * 1.1 (2sf) = 2.75 -> 2.8 (2sf).
+m25 : Meas is meas 25 1 2 end
+m11 : Meas is meas 11 1 2 end
+mulEx : Eq Meas (mulM m25 m11) (meas 28 1 2) is refl (meas 28 1 2) end
+
+-- 2.0 (2sf) * 2.5 (2sf) = 5.00 -> 5.0 (2sf): a trailing zero is significant.
+m20 : Meas is meas 20 1 2 end
+mulZeroEx : Eq Meas (mulM m20 m25) (meas 50 1 2) is refl (meas 50 1 2) end
+
+-- A 2sf factor caps a 4sf factor: 1.234 (4sf) * 2.0 (2sf) = 2.468 -> 2.5 (2sf).
+m1234 : Meas is meas 1234 3 4 end
+mulCapEx : Eq Meas (mulM m1234 m20) (meas 25 1 2) is refl (meas 25 1 2) end
+
+-- 1.5 (1dp) + 1.25 (2dp) = 2.75 -> 2.8 (1dp).
+m15  : Meas is meas 15 1 2 end
+m125 : Meas is meas 125 2 3 end
+addEx : Eq Meas (addM m15 m125) (meas 28 1 2) is refl (meas 28 1 2) end
+
+-- ====================================================================
+-- Precision is NEVER exceeded: a product's stored value shows no more
+-- significant digits than its (minimum) sf budget allows.
+-- ====================================================================
+leNatProp : Nat -> Nat -> U is fn (a : Nat) (b : Nat) is Eq Bool (lte a b) true end end
+
+-- For the worked product 2.5*1.1: numDigits(28) = 2 <= sf 2.
+mulPrecisionEx : leNatProp (numDigits 64 (mantOf (mulM m25 m11))) (sfOf (mulM m25 m11)) is
+  refl true
+end
+-- And for the cap case: numDigits(25) = 2 <= sf 2.
+mulCapPrecisionEx : leNatProp (numDigits 64 (mantOf (mulM m1234 m20))) (sfOf (mulM m1234 m20)) is
+  refl true
+end

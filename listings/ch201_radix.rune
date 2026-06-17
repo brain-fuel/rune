@@ -77,8 +77,10 @@ fuelN : Nat is 512 end
 divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is quotOf (divmod fuelN a b) end end
 modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is remOf (divmod fuelN a b) end end
 
--- Round-half-up division: (a + floor(b/2)) // b.
-roundDiv : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is divN (a + divN b 2) b end end
+-- Round-half-up without dividing the denominator: round(a/b) = (2a + b) // (2b).
+-- (Dividing b by 2 makes the quotient ~b/2, which would blow the division fuel
+-- for large denominators like 10^k; this keeps every quotient near a/b.)
+roundDiv : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is divN (2 * a + b) (2 * b) end end
 
 powTen : Nat -> Nat is
   fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is 10 * ih end) n end
