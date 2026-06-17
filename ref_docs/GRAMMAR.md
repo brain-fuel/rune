@@ -59,13 +59,16 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   instead, so an implicit form cannot begin with a literal `-`.
 - **Punctuation:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
   is one token and is never read as `-` `-` `>`, and `--` begins a comment rather than two `-`.
-- **Operators** (ergonomics, 2026-06; `//` added by the numeric-tower amendment, 2026-06): `+`
-  `-` `*` `/` `//` `%` are **symbolic identifiers** — they
+- **Operators** (ergonomics, 2026-06; `//` added by the numeric-tower amendment, 2026-06; `|>`
+  the pipe added 2026-06): `+` `-` `*` `/` `//` `%` are **symbolic identifiers** — they
   name top-level definitions exactly as alphabetic identifiers do, and additionally parse infix
   (§3, §5.4). The set is **closed**; no other token lexes as an operator and there are no user
-  fixity declarations. `=` is punctuation that *also* parses infix as the equality-proposition
-  sugar (§5.4); it is not an identifier and cannot be defined. A bare `-` is the operator;
-  `--` and `->` still take the longest match, and `//` is one token, never `/` `/`.
+  fixity declarations. The pipe `|>` also lexes as an operator token but is NOT a name — it is
+  reverse-application syntax (`x |> f` ⟶ `f x`, §5.4). `=` is punctuation that *also* parses
+  infix as the equality-proposition sugar (§5.4); it is not an identifier and cannot be defined.
+  A bare `-` is the operator (binary subtraction, or — before an operand — prefix negation sugar
+  `-e` ⟶ `0 - e`, §5.4); `--` and `->` still take the longest match, `//` is one token never `/`
+  `/`, and `|>` is one token never `|` `>`.
   By convention (ref_docs/rune-numeric-tower.md): `//` is the flooring quotient and `%` its
   matched flooring remainder at every numeric type; `/` is exact division and is defined only
   where exact division is total (fields).
@@ -99,12 +102,14 @@ Arrow     ::= Binder "->" Expr            -- dependent:     (x : A) -> B   (righ
            |  IBinder "->" Expr           -- implicit:      {x : A} -> B   (Phase 2)
            |  EqE ["->" Expr]             -- non-dependent: A -> B,  or just EqE
 
-EqE       ::= Add ["=" Add]               -- equality proposition; NON-associative (§5.4)
+EqE       ::= Pipe ["=" Pipe]             -- equality proposition; NON-associative (§5.4)
+Pipe      ::= Add ("|>" Add)*             -- left-associative; LOOSEST binary level
 Add       ::= Mul (AddOp Mul)*            -- left-associative
-Mul       ::= App (MulOp App)*            -- left-associative
+Mul       ::= Unary (MulOp Unary)*        -- left-associative
+Unary     ::= "-" Unary | App            -- prefix minus: `-e` ⟶ `0 - e` (type-directed)
 AddOp     ::= "+" | "-"
 MulOp     ::= "*" | "/" | "//" | "%"
-Op        ::= AddOp | MulOp
+Op        ::= AddOp | MulOp | "|>"
 
 App       ::= Atom Arg*                   -- application, left-associative
 Arg       ::= Atom                        -- explicit argument
@@ -146,8 +151,10 @@ Calc      ::= "calc" Expr ("=" Expr "by" Expr)+ "end"   -- equational ladder (§
 ```
 
 Precedence, loosest to tightest: `let … in` and `->` (arrow is **right-associative**), then
-`=` (**non-associative**), then `+` `-` (**left**), then `*` `/` `//` `%` (**left**), then
-application (**left-associative**), then atoms. So `a = b -> c = d` is an implication between
+`=` (**non-associative**), then `|>` (**left**), then `+` `-` (**left**), then `*` `/` `//` `%`
+(**left**), then prefix `-` (**right**, binds an application), then application
+(**left-associative**), then atoms. So `3/4 |> to_radix_sigfig 1` is `(to_radix_sigfig 1) (3/4)`
+and `-3/4 |> f` is `f (0 - 3/4)`. So `a = b -> c = d` is an implication between
 equations, and `a + b * c = c * b + a` parses as mathematics reads it. `fn`, `seq`, and
 parenthesized forms are fully delimited, so they are atoms and need no surrounding parentheses.
 
@@ -215,6 +222,14 @@ separators:
   left-then-right — and resolution treats `+` like any free identifier: it must resolve to a
   top-level definition (else "unresolved name: +"). Operators cannot be binder names (`fn` and
   `let` binders are alphabetic `Ident`s only); the parenthesized atom `(+)` is the prefix form.
+- **`|>` is pure syntax, NOT a name.** The pipe is reverse application: `x |> f` parses directly
+  to `f x` (no `EVar "|>"`, no definition required), so it composes with any function and chains
+  left-associatively — `x |> f |> g` is `g (f x)`. There is no `(|>)` first-class form.
+- **Prefix `-` is type-directed negation sugar.** `-e` parses to `0 - e` — the numeral `0` and
+  the binary `-` are both resolved by the EXPECTED TYPE, so `-5 : Z` is `zsub (intOf 0) (intOf 5)`
+  and `-3/4 : Frac` negates the fraction. No dedicated negation operator; a bare `-` after a
+  complete operand is binary subtraction (so `8 - 5` is unaffected; `- 8 5` is `(0-8) 5`, an
+  application). It binds tighter than the infix operators but looser than application.
 - **`=` is the equality-proposition sugar:** `l = r` parses to `Eq _ l r` — the `Eq` former with
   a hole for elaboration to solve. It is non-associative: `x = y = z` is a parse error
   ("an equality cannot be chained; parenthesize"). `=` is INPUT sugar only (§8).

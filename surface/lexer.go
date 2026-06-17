@@ -191,6 +191,11 @@ func lex(src string) ([]token, error) {
 		case r == ';':
 			toks = append(toks, token{tSemi, ";", i})
 			i++
+		case r == '|' && i+1 < len(rs) && rs[i+1] == '>':
+			// Longest match: '|>' is the pipe (reverse-application) operator, one
+			// token, lexed before the bare '|' so it is not split (GRAMMAR §2/§3).
+			toks = append(toks, token{tOp, "|>", i})
+			i += 2
 		case r == '|':
 			toks = append(toks, token{tBar, "|", i})
 			i++

@@ -2,6 +2,7 @@ package surface_test
 
 import (
 	"errors"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -198,6 +199,49 @@ func TestInfixOperators(t *testing.T) {
 		{"x = y", eq(v("x"), v("y"))},
 		{"a + b = b + a", eq(bin("+", v("a"), v("b")), bin("+", v("b"), v("a")))},
 		{"x = y -> y = x", surface.EPi{Param: "_", Dom: eq(v("x"), v("y")), Cod: eq(v("y"), v("x"))}},
+	}
+	for _, c := range cases {
+		got, err := surface.ParseExpr(c.src)
+		if err != nil {
+			t.Errorf("parse %q: %v", c.src, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%q: got %#v, want %#v", c.src, got, c.want)
+		}
+	}
+}
+
+// TestPipeAndPrefixMinus pins §5.4: `|>` is reverse application (pure syntax),
+// loosest binary level, left-associative; prefix `-` desugars to `0 - e`.
+func TestPipeAndPrefixMinus(t *testing.T) {
+	v := func(n string) surface.Exp { return surface.EVar{Name: n} }
+	app := func(f, x surface.Exp) surface.Exp { return surface.EApp{Fn: f, Arg: x} }
+	bin := func(op string, l, r surface.Exp) surface.Exp {
+		return surface.EApp{Fn: surface.EApp{Fn: surface.EVar{Name: op}, Arg: l}, Arg: r}
+	}
+	// prefix `-e` is `0 - e`; the zero's Pos is the `-` token offset.
+	negAt := func(pos int, e surface.Exp) surface.Exp {
+		return bin("-", surface.ENum{Val: new(big.Int), Pos: pos}, e)
+	}
+	cases := []struct {
+		src  string
+		want surface.Exp
+	}{
+		// pipe = reverse application
+		{"x |> f", app(v("f"), v("x"))},
+		// left-associative chaining: g (f x)
+		{"x |> f |> g", app(v("g"), app(v("f"), v("x")))},
+		// pipe is looser than +: f (a + b)
+		{"a + b |> f", app(v("f"), bin("+", v("a"), v("b")))},
+		// pipe RHS may be an application: (g y) x
+		{"x |> g y", app(app(v("g"), v("y")), v("x"))},
+		// prefix minus at start: 0 - x  (the `-` is at offset 0)
+		{"-x", negAt(0, v("x"))},
+		// binary minus is unaffected
+		{"a - b", bin("-", v("a"), v("b"))},
+		// prefix minus on the RHS of binary minus: a - (0 - b), the inner `-` at offset 4
+		{"a - -b", bin("-", v("a"), negAt(4, v("b")))},
 	}
 	for _, c := range cases {
 		got, err := surface.ParseExpr(c.src)

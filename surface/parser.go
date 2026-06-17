@@ -454,7 +454,7 @@ func (p *parser) parseArrow() (Exp, error) {
 // Suppressed (p.noEq) at the spine of a let/seq type annotation, where '='
 // belongs to the binding.
 func (p *parser) parseEq() (Exp, error) {
-	lhs, err := p.parseAdd()
+	lhs, err := p.parsePipe()
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +462,7 @@ func (p *parser) parseEq() (Exp, error) {
 		return lhs, nil
 	}
 	p.next()
-	rhs, err := p.parseAdd()
+	rhs, err := p.parsePipe()
 	if err != nil {
 		return nil, err
 	}
@@ -470,6 +470,26 @@ func (p *parser) parseEq() (Exp, error) {
 		return nil, fmt.Errorf("an equality cannot be chained; parenthesize one side (offset %d)", p.peek().pos)
 	}
 	return EApp{Fn: EApp{Fn: EApp{Fn: EEq{}, Arg: EHole{}}, Arg: lhs}, Arg: rhs}, nil
+}
+
+// parsePipe parses `Add ("|>" Add)*`, left-associative, the LOOSEST binary level.
+// `x |> f` is pure reverse application — sugar for `f x`, NOT a named definition —
+// so it composes with any function and needs no library binding: `3/4 |> to_radix`
+// is `to_radix (3/4)`, and `x |> f |> g` is `g (f x)` (§5.4).
+func (p *parser) parsePipe() (Exp, error) {
+	lhs, err := p.parseAdd()
+	if err != nil {
+		return nil, err
+	}
+	for p.peek().kind == tOp && pipeLevel(p.peek().text) {
+		p.next() // '|>'
+		rhs, err := p.parseAdd()
+		if err != nil {
+			return nil, err
+		}
+		lhs = EApp{Fn: rhs, Arg: lhs}
+	}
+	return lhs, nil
 }
 
 // parseAdd parses `Mul (("+"|"-") Mul)*`, left-associative. An infix operator is
@@ -490,15 +510,17 @@ func (p *parser) parseAdd() (Exp, error) {
 	return lhs, nil
 }
 
-// parseMul parses `App (("*"|"/"|"%") App)*`, left-associative.
+// parseMul parses `Unary (("*"|"/"|"%"|"//") Unary)*`, left-associative. The
+// pipe `|>` is excluded (it is the looser parsePipe level), so it is not grabbed
+// here as a multiplicative operator.
 func (p *parser) parseMul() (Exp, error) {
-	lhs, err := p.parseApp()
+	lhs, err := p.parseUnary()
 	if err != nil {
 		return nil, err
 	}
-	for p.peek().kind == tOp && !addLevel(p.peek().text) {
+	for p.peek().kind == tOp && !addLevel(p.peek().text) && !pipeLevel(p.peek().text) {
 		op := p.next().text
-		rhs, err := p.parseApp()
+		rhs, err := p.parseUnary()
 		if err != nil {
 			return nil, err
 		}
@@ -507,10 +529,34 @@ func (p *parser) parseMul() (Exp, error) {
 	return lhs, nil
 }
 
+// parseUnary parses a PREFIX minus before an application: `-e` desugars to the
+// type-directed `0 - e` (reusing the binary `-`/subtraction of the expected type,
+// so `-5 : Z` is `zsub (intOf 0) (intOf 5)` and `-3/4 : Frac` negates the
+// fraction). No new lowering machinery — the zero and the subtraction are both
+// resolved by the expected type. A bare `-` operand elsewhere is binary (handled
+// by parseAdd), so `a - b` is unaffected.
+func (p *parser) parseUnary() (Exp, error) {
+	if p.peek().kind == tOp && p.peek().text == "-" {
+		neg := p.next()
+		operand, err := p.parseUnary()
+		if err != nil {
+			return nil, err
+		}
+		zero := ENum{Val: new(big.Int), Pos: neg.pos}
+		return EApp{Fn: EApp{Fn: EVar{Name: "-"}, Arg: zero}, Arg: operand}, nil
+	}
+	return p.parseApp()
+}
+
 // addLevel reports whether an operator sits at the loose additive level; the
-// closed operator table of GRAMMAR §3 has exactly two levels.
+// closed operator table of GRAMMAR §3 has three levels (pipe < add < mul).
 func addLevel(op string) bool {
 	return op == "+" || op == "-"
+}
+
+// pipeLevel reports whether an operator is the pipe `|>` (the loosest level).
+func pipeLevel(op string) bool {
+	return op == "|>"
 }
 
 // projTail consumes trailing postfix Σ projections (.1 / .2), binding tighter
