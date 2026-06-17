@@ -199,16 +199,12 @@ func (e *Elaborator) insertImplicits(c *Ctx, tm core.Tm, ty core.Val) (core.Tm, 
 		if !ok || pi.Icit != core.Impl {
 			return tm, ty
 		}
-		// C2: if the implicit's domain is a registered typeclass, resolve the
-		// dictionary by instance search instead of inserting a metavariable.
-		if e.InstanceFor != nil {
-			if class, arg, ok := e.classKey(c, pi.Dom); ok {
-				if inst, found := e.InstanceFor(class, arg); found {
-					tm = core.App{Fn: tm, Arg: inst, Icit: core.Impl}
-					ty = pi.Cod(e.Eval(c, inst))
-					continue
-				}
-			}
+		// C2/C2b: if the implicit's domain is a registered typeclass, resolve the
+		// dictionary by (recursive) instance search instead of inserting a meta.
+		if dict, ok := e.resolveClass(c, pi.Dom); ok {
+			tm = core.App{Fn: tm, Arg: dict, Icit: core.Impl}
+			ty = pi.Cod(e.Eval(c, dict))
+			continue
 		}
 		m := e.freshMeta(c, "implicit argument")
 		tm = core.App{Fn: tm, Arg: m, Icit: core.Impl}
@@ -249,6 +245,92 @@ func (e *Elaborator) classKey(c *Ctx, dom core.Val) (class, arg core.Hash, ok bo
 		return core.Hash{}, core.Hash{}, false
 	}
 	return ref.Hash, lref.Hash, true
+}
+
+// resolveClass resolves a typeclass dictionary for the constraint type `want`
+// (e.g. `Eq (List Nat)`) by instance search (C2/C2b). It looks up the instance
+// registered under (class-former, last-argument-head), then drives that
+// instance through its OWN leading implicits: type/value parameters (domain a
+// sort) become metas solved by unifying the instance's codomain with `want`,
+// and constraint premises (domain a class application, e.g. `Eq A`) are
+// discharged by RECURSIVE search once that unification has fixed the parameters.
+// So `instance {A} -> Eq A -> Eq (List A)` resolves `Eq (List Nat)` to
+// `listEq Nat eqNat`, building the dictionary bottom-up. The non-parametric case
+// (an instance with no leading implicits, e.g. `Eq Nat`) falls straight through:
+// no premises, the codomain IS the instance type, unify-and-return. Overlap /
+// priority and cycle detection stay parked (no consumer); first registered
+// instance per key wins. Returns ok=false when `want` is not a class application
+// or no instance resolves, so ordinary implicits fall through to a metavariable.
+func (e *Elaborator) resolveClass(c *Ctx, want core.Val) (core.Tm, bool) {
+	if e.InstanceFor == nil {
+		return nil, false
+	}
+	class, arg, ok := e.classKey(c, want)
+	if !ok {
+		return nil, false
+	}
+	instTm, found := e.InstanceFor(class, arg)
+	if !found {
+		return nil, false
+	}
+	ref, isRef := instTm.(core.Ref)
+	if !isRef {
+		return nil, false
+	}
+	instTy, err := e.refType(ref.Hash)
+	if err != nil {
+		return nil, false
+	}
+	tm := core.Tm(ref)
+	ty := instTy
+	// Insert a meta for each leading implicit; record the constraint premises
+	// (domain not a sort) to discharge after the parameters are fixed.
+	var premiseMetas []core.Tm
+	var premiseDoms []core.Val
+	for {
+		pi, ok := e.M.Force(ty).(core.VPi)
+		if !ok || pi.Icit != core.Impl {
+			break
+		}
+		m := e.freshMeta(c, "instance argument")
+		if !isSortVal(e.M.Force(pi.Dom)) {
+			premiseMetas = append(premiseMetas, m)
+			premiseDoms = append(premiseDoms, pi.Dom)
+		}
+		tm = core.App{Fn: tm, Arg: m, Icit: core.Impl}
+		ty = pi.Cod(e.Eval(c, m))
+	}
+	// Fix the type/value parameters: the instance codomain must be `want`.
+	if e.Unify(c.Lvl(), ty, want) != nil {
+		return nil, false
+	}
+	// Discharge each premise recursively on its now-concrete type, solving the
+	// premise's meta to the resolved dictionary.
+	for i, dom := range premiseDoms {
+		// Re-zonk: the codomain unification solved the parameter metas, so the
+		// premise type (e.g. `Self ?A`) must have them substituted (`Self Bool`)
+		// before its class key is read — Quote alone does not replace solved metas.
+		concrete := e.Eval(c, e.Zonk(c.Lvl(), e.M.Quote(c.Lvl(), dom)))
+		dict, ok := e.resolveClass(c, concrete)
+		if !ok {
+			return nil, false
+		}
+		if e.Unify(c.Lvl(), e.Eval(c, premiseMetas[i]), e.Eval(c, dict)) != nil {
+			return nil, false
+		}
+	}
+	return tm, true
+}
+
+// isSortVal reports whether v is a universe or Prop — the domains of an
+// instance's type/value PARAMETERS, as opposed to its constraint premises.
+func isSortVal(v core.Val) bool {
+	switch v.(type) {
+	case core.VU, core.VProp:
+		return true
+	default:
+		return false
+	}
 }
 
 // expectPi unifies a (typically meta-headed) type with a fresh Pi of the given

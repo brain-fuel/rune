@@ -293,6 +293,14 @@ first and forces only on mismatch, so the fast path logs nothing.
     session table keyed (class-head, arg-head); a class-constrained `{d : C T}`
     implicit is resolved by instance search at the use site (zero new core; the
     inserted dictionary is kernel-re-validated). ch31. Explicit `{d}` is the floor.
+  - **C2b** — PARAMETRIC instance search: an instance may be `{A} -> {Self A} ->
+    Self (List A)`; resolution recurses — unify the instance codomain to fix the
+    parameters, then discharge each constraint premise by nested search, building
+    the dictionary bottom-up (elaborate/resolveClass; classKeyOfType peels leading
+    Pis to key off the codomain). Zero core, elaborator-only; overlap/priority +
+    cycle detection stay parked. ch200. The Rule-5 REWRITE MANDATE sweep is a no-op
+    on the current corpus (the only instance is ch31's base `selfBool` — nothing
+    derivable to migrate). This CLOSES Track C (C1–C7 all landed).
   - **C3 / R-EFFECT** — IO monad group (types).
   - **C4 / R-PART** — general recursion via `partial` definitions: the head is
     permanently neutral in eval/conversion (the firewall — the normalizer cannot

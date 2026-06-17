@@ -1,0 +1,58 @@
+-- Chapter 200 — PARAMETRIC instance search (C2b).
+-- C2 (ch31) resolves a dictionary by an exact (class, type-head) table lookup.
+-- C2b lets an instance be PARAMETRIC — `{A : U} -> {s : Self A} -> Self (List A)`
+-- — and resolves it RECURSIVELY: to find `Self (List Bool)` the search picks the
+-- List instance, unifies its codomain to fix `A := Bool`, then discharges the
+-- premise `Self Bool` by a nested search (which finds the Bool instance), building
+-- the dictionary `selfList {Bool} {selfBool}` bottom-up. Zero core, elaborator-only.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- A one-method class: the canonical self-map on A (as in ch31).
+Self : U -> U is fn (A : U) is A -> A end end
+
+-- The base instance, registered under (Self, Bool).
+instance selfBool : Self Bool is fn (b : Bool) is b end end
+
+map : (A : U) -> (A -> A) -> List A -> List A is
+  fn (A : U) (f : A -> A) (xs : List A) is
+    ListElim A (fn (z : List A) is List A end)
+      (nil A)
+      (fn (x : A) (rest : List A) (ih : List A) is cons A (f x) ih end)
+      xs
+  end
+end
+
+-- The PARAMETRIC instance, registered under (Self, List): given a self-map on A,
+-- the self-map on List A is the pointwise map. Its premise {s : Self A} is found
+-- by the recursive search.
+instance selfList : {A : U} -> {s : Self A} -> Self (List A) is
+  fn {A : U} {s : Self A} is fn (xs : List A) is map A s xs end end
+end
+
+-- A class-constrained function (ch31's), resolved at each call.
+applySelf : (A : U) -> {s : Self A} -> A -> A is
+  fn (A : U) {s : Self A} (x : A) is s x end
+end
+
+-- The recursive resolution in action: `Self (List Bool)` resolves to
+-- `selfList {Bool} {selfBool}`. selfBool is the identity, so mapping it leaves
+-- the list unchanged — certified by refl.
+oneTrue : List Bool is cons Bool true (nil Bool) end
+resolved : Eq (List Bool) (applySelf (List Bool) oneTrue) oneTrue is refl oneTrue end
+
+-- A nested case: `Self (List (List Bool))` resolves to
+-- `selfList {List Bool} {selfList {Bool} {selfBool}}` — two layers of recursion.
+nested : List (List Bool) is cons (List Bool) oneTrue (nil (List Bool)) end
+resolvedNested : Eq (List (List Bool)) (applySelf (List (List Bool)) nested) nested is refl nested end
+
+-- The explicit-dictionary floor still works alongside search.
+explicit : Eq (List Bool) (applySelf (List Bool) {selfList {Bool} {selfBool}} oneTrue) oneTrue is refl oneTrue end

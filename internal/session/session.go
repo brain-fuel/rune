@@ -342,7 +342,7 @@ func (s *Session) AddDef(d surface.Def) (Def, error) {
 		if class, arg, ok := classKeyOfType(ty); ok {
 			s.instances[[2]core.Hash{class, arg}] = h
 		} else {
-			return Def{}, fmt.Errorf("instance %q: its type must be a saturated class application (e.g. Monoid Nat); parametric instances are not yet supported", d.Name)
+			return Def{}, fmt.Errorf("instance %q: its type must be a class application (e.g. Monoid Nat), or a parametric instance ending in one (e.g. {A : U} -> Eq A -> Eq (List A))", d.Name)
 		}
 	}
 	return rd, nil
@@ -727,9 +727,19 @@ func (s *Session) elaborator() *elaborate.Elaborator {
 
 // classKeyOfType extracts (class-former, last-arg-head) from an instance's type
 // `C … T` (e.g. Monoid Nat → (Monoid, Nat)) so it can be registered in the
-// instance table. Returns ok=false if the type is not a saturated ref-headed
-// application (parametric instances — leading Pis — are the C2b increment).
+// instance table. PARAMETRIC instances (C2b) carry leading Pis — `{A : U} -> Eq A
+// -> Eq (List A)` — which are peeled first so the key is read off the CODOMAIN's
+// class application (here (Eq, List)); the premises are resolved by recursive
+// search at the use site (elaborate/resolveClass). Returns ok=false if the
+// codomain is not a ref-headed class application.
 func classKeyOfType(ty core.Tm) (class, arg core.Hash, ok bool) {
+	for {
+		if pi, isPi := ty.(core.Pi); isPi {
+			ty = pi.Cod.Body
+			continue
+		}
+		break
+	}
 	var args []core.Tm
 	for {
 		if app, isApp := ty.(core.App); isApp {
