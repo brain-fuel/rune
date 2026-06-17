@@ -247,6 +247,16 @@ func (e *Elaborator) unifySpine(lvl int, p, q core.Neutral) error {
 		if y, ok := q.(core.NSnd); ok {
 			return e.unifySpine(lvl, x.P, y.P)
 		}
+	case core.NNatLit:
+		// Two compressed numerals unify iff they denote the same number of the
+		// SAME nat binding — an O(1) big.Int compare (mirrors conv.go's convSpine).
+		// Without this case, two EQUAL big literals fail the syntactic match and the
+		// caller δ-peels both one succ-layer at a time, recursing N deep (a stack
+		// overflow at N ~ 10^12). A literal vs a hand-written succ-chain still
+		// inter-converts via the caller's one-layer δ-unfold, bounded by the chain.
+		if y, ok := q.(core.NNatLit); ok && x.Zero == y.Zero && x.Succ == y.Succ && x.N.Cmp(y.N) == 0 {
+			return nil
+		}
 	}
 	return fmt.Errorf("spine mismatch")
 }

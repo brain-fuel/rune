@@ -212,6 +212,25 @@ type BuiltinNatOp struct {
 	DefName string
 }
 
+// BuiltinNumInj is a typed numeral-injection declaration (numeric-tower rung C4):
+//
+//	builtin int Z intOf
+//	builtin rat Rat ratOf
+//
+// It registers a `Nat -> T` injection so a numeral CHECKED AT T (the integers Z,
+// the rationals Rat) lowers to `inj (NatLit n)` — the inner literal stays a real
+// Nat (bignum + accel), and the injection carries it into the tower type. The
+// base `builtin nat` is unaffected; multiple injections coexist, dispatched by
+// the expected type. Negative/fractional literal syntax is NOT added (write
+// `zneg`/`/`). Session state only — nothing enters the store. Kind is one of
+// "int" | "rat"; TyName is the codomain type (validated against the injection);
+// InjName is the injection function.
+type BuiltinNumInj struct {
+	Kind    string // "int" | "rat"
+	TyName  string
+	InjName string
+}
+
 // ENum is a numeral literal, carried unexpanded (a parser cannot know which
 // type it means). Pos is its source offset, for error messages. It is lowered
 // by NumConfig: the resolver to the unary default, the elaborator by the
@@ -229,8 +248,9 @@ type Item interface {
 
 func (Def) isItem()          {}
 func (DataDef) isItem()      {}
-func (BuiltinNat) isItem()   {}
-func (BuiltinNatOp) isItem() {}
+func (BuiltinNat) isItem()    {}
+func (BuiltinNatOp) isItem()  {}
+func (BuiltinNumInj) isItem() {}
 
 func (ESubst) isExp() {}
 func (ECase) isExp()  {}

@@ -81,8 +81,9 @@ Program   ::= (Definition | DataDecl | BuiltinDecl)*
 Definition ::= DefName ":" Expr "is" Expr "end"
 DefName   ::= Ident | Op
 
-BuiltinDecl ::= "builtin" "nat" Ident Ident Ident                       -- type, zero, succ (§5.5)
-             |  "builtin" "bin" Ident Ident Ident Ident Ident Ident Ident -- BN, bn0, bnP, Pos, pH, pO, pI (§5.5)
+BuiltinDecl ::= "builtin" "nat" Ident Ident Ident          -- type, zero, succ (§5.5)
+             |  "builtin" ("natAdd"|"natMul"|"natMonus") DefName  -- accelerate a Nat op (C7 / R-NUM)
+             |  "builtin" ("int"|"rat") Ident DefName      -- typed numeral injection: codomain T, `Nat -> T` (§5.5)
 
 DataDecl  ::= "data" Ident ":" Expr "is" ["|"] Ctor ("|" Ctor)* "end"   -- Phase 4
 Ctor      ::= Ident ":" Expr
@@ -256,6 +257,18 @@ content-hash references, and it leaves no trace of its own in the core or store.
   common case, and is the only shape the BigInt codegen shadow compiles to machine
   integers.
 - The LAST `builtin nat` binding in scope governs (one at a time, no overloading).
+- **Typed numeral injections** `builtin int Z intOf` / `builtin rat Rat ratOf`
+  (numeric-tower rung C4) register a `Nat -> T` function so a numeral CHECKED AT
+  the codomain `T` (the integers, the rationals) lowers to `inj (NatLit n)` — the
+  inner literal stays a genuine Nat (bignum + accel intact) and the injection
+  carries it into the tower type. Unlike re-binding `builtin nat`, injections do
+  NOT displace the base Nat: `7 : Nat`, `7 : Z`, `7 : Rat` coexist, dispatched by
+  the expected type (a numeral with a flexible/Nat expectation stays the base Nat;
+  an injection fires only on a rigid expectation equal to its codomain). The
+  injection is type-validated (`Nat -> T`) at the declaration site and requires an
+  active `builtin nat`. Negative and fractional literal SYNTAX is deliberately not
+  added — write `zneg 7` / `3 / 4` (the latter is `ratOf 3 / ratOf 4` once `/` is
+  the rational divide and both operands check at `Rat`).
 - There is **NO cap**: a `NatLit` is a single node carrying a `big.Int`, so a bare
   numeral of any size elaborates and computes (the old 4096 unary cap is gone).
   Kernel arithmetic on closed literals is accelerated via the `builtin natAdd`/

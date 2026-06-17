@@ -403,11 +403,32 @@ func (e *Elaborator) elabNum(c *Ctx, s surface.ENum, want core.Val) (core.Tm, er
 	if err != nil {
 		return nil, err
 	}
-	if err := e.Unify(c.Lvl(), natTy, want); err != nil {
-		return nil, fmt.Errorf("numeral %d is a %s, but %s was expected",
-			s.Val, e.pretty(c, natTy), e.pretty(c, want))
+	// Base case: a Nat (or a flexible expectation, which unify solves to Nat — the
+	// established numeral default).
+	if e.Unify(c.Lvl(), natTy, want) == nil {
+		return tm, nil
 	}
-	return tm, nil
+	// Typed injection (numeric-tower rung C4): a numeral checked at a registered
+	// `Nat -> T` injection's codomain (the integers Z, the rationals Rat) lowers to
+	// `inj (NatLit n)`. The inner NatLit is a genuine Nat (bignum + accel intact);
+	// the injection carries it into the tower type. Dispatch is by `want`'s rigid
+	// head — the base unify above already consumed the flexible/Nat case.
+	for _, inj := range e.Num.Injs {
+		injTy, err := e.refType(inj.Inj)
+		if err != nil {
+			continue
+		}
+		pi, ok := e.M.Force(injTy).(core.VPi)
+		if !ok {
+			continue
+		}
+		cod := pi.Cod(e.M.Eval(nil, tm)) // Nat -> T is non-dependent; arg is ignored
+		if e.Unify(c.Lvl(), cod, want) == nil {
+			return core.App{Fn: core.Ref{Hash: inj.Inj}, Arg: tm, Icit: core.Expl}, nil
+		}
+	}
+	return nil, fmt.Errorf("numeral %d is a %s, but %s was expected",
+		s.Val, e.pretty(c, natTy), e.pretty(c, want))
 }
 
 // natType is the type a unary numeral inhabits — the type of the registered

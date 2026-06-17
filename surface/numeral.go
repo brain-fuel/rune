@@ -32,9 +32,27 @@ import (
 // `Pos`/`BN` datatypes and their agreement proofs remain ordinary user data.
 //
 // Hashes are resolved once, when the binding is registered.
+//
+// Injs are the typed numeral INJECTIONS (numeric-tower rung C4): each registers
+// a `Nat -> T` function (e.g. `intOf : Nat -> Z`, `ratOf : Nat -> Rat`) so a
+// numeral CHECKED AT T lowers to `inj (NatLit n)` — the inner literal is a
+// genuine Nat (bignum + accel still apply), and the injection carries it into
+// the tower type. The untyped/default lowering is always the base Nat (Injs are
+// consulted only by the typed elaborator, which knows the expected type). Negative
+// and fractional literal SYNTAX is deliberately not added: write `zneg`/`/`.
 type NumConfig struct {
 	HasNat           bool
 	NatZero, NatSucc core.Hash
+	Injs             []NumInj
+}
+
+// NumInj is one registered typed numeral injection. Kind is the declaring
+// keyword ("int" | "rat"), used only for diagnostics; Inj is the content hash of
+// the `Nat -> T` injection the literal is wrapped in. The codomain T is read off
+// Inj's own type by the elaborator, so nothing else need be stored.
+type NumInj struct {
+	Kind string
+	Inj  core.Hash
 }
 
 // Nat lowers n to a compressed core numeral NatLit (definitionally succ^n zero).

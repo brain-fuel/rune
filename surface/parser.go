@@ -166,8 +166,17 @@ func (p *parser) parseBuiltin() (Item, error) {
 			return nil, err
 		}
 		return BuiltinNatOp{Kind: kind.text, DefName: names[0]}, nil
+	case "int", "rat":
+		// builtin int Z intOf  /  builtin rat Rat ratOf — a typed numeral
+		// injection (numeric-tower rung C4): a numeral checked at the codomain
+		// type lowers to inj (NatLit n).
+		names, err := p.builtinNames(2)
+		if err != nil {
+			return nil, err
+		}
+		return BuiltinNumInj{Kind: kind.text, TyName: names[0], InjName: names[1]}, nil
 	default:
-		return nil, fmt.Errorf("unknown builtin kind %q at offset %d (only \"nat\", \"natAdd\", \"natMul\", and \"natMonus\" exist)", kind.text, kind.pos)
+		return nil, fmt.Errorf("unknown builtin kind %q at offset %d (only \"nat\", \"int\", \"rat\", \"natAdd\", \"natMul\", and \"natMonus\" exist)", kind.text, kind.pos)
 	}
 }
 

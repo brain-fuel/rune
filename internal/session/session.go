@@ -44,6 +44,11 @@ type Session struct {
 	// the only shape the BigInt codegen shadow applies to.
 	nat      *surface.BuiltinNat
 	natCtors bool
+	// numInjs are the registered typed numeral injections (numeric-tower rung C4):
+	// `builtin int Z intOf` / `builtin rat Rat ratOf`. A numeral checked at an
+	// injection's codomain lowers to inj(NatLit). Consulted only by the typed
+	// elaborator (via numConfig); the untyped default stays the base Nat.
+	numInjs []surface.BuiltinNumInj
 	// natAccel is the C7 / R-NUM Decision-1 acceleration table: a `builtin natAdd
 	// add` (etc.) maps the named def's content hash to a NatOp, so a call on two
 	// compressed literals takes the one-bigint-step fast path (core.tryNatAccel)
@@ -268,6 +273,9 @@ func (s *Session) numConfig() surface.NumConfig {
 		cfg.NatZero = s.refs[s.nat.Zero]
 		cfg.NatSucc = s.refs[s.nat.Succ]
 	}
+	for _, inj := range s.numInjs {
+		cfg.Injs = append(cfg.Injs, surface.NumInj{Kind: inj.Kind, Inj: s.refs[inj.InjName]})
+	}
 	return cfg
 }
 
@@ -411,6 +419,10 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 			if err := s.AddBuiltinNatOp(d); err != nil {
 				return added, err
 			}
+		case surface.BuiltinNumInj:
+			if err := s.AddBuiltinNumInj(d); err != nil {
+				return added, err
+			}
 		}
 	}
 	return added, nil
@@ -441,6 +453,43 @@ func (s *Session) AddBuiltinNat(b surface.BuiltinNat) error {
 	}
 	s.nat = &b
 	s.natCtors = s.bindingIsCtors(b)
+	return nil
+}
+
+// AddBuiltinNumInj validates and registers a typed numeral injection (numeric-
+// tower rung C4): `builtin int Z intOf` / `builtin rat Rat ratOf`. It requires an
+// active `builtin nat` (the injection's domain is that Nat) and validates the
+// named function has type `Nat -> Ty`. Thereafter a numeral CHECKED AT Ty lowers
+// to `inj (NatLit n)` (elaborate/check_surface.go elabNum) — the inner literal is
+// a genuine Nat (bignum + accel intact), and inj carries it into the tower type.
+// Session state only; nothing enters the store. Multiple injections coexist,
+// dispatched by the expected type; a re-declaration of the same kind replaces it.
+func (s *Session) AddBuiltinNumInj(b surface.BuiltinNumInj) error {
+	if s.nat == nil {
+		return fmt.Errorf("builtin %s: requires a `builtin nat` binding (the injection's domain is that Nat); declare `builtin nat` first", b.Kind)
+	}
+	if _, ok := s.refs[b.TyName]; !ok {
+		return fmt.Errorf("builtin %s: unknown type %q", b.Kind, b.TyName)
+	}
+	if _, ok := s.refs[b.InjName]; !ok {
+		return fmt.Errorf("builtin %s: unknown name %q", b.Kind, b.InjName)
+	}
+	// Type validation: the injection must be `Nat -> Ty` against the active
+	// `builtin nat` type — the rung-C4 discipline (validate by TYPE, not shape).
+	natTy := surface.EVar{Name: s.nat.TyName}
+	want := surface.EPi{Param: "_", Dom: natTy, Cod: surface.EVar{Name: b.TyName}}
+	el := s.elaborator()
+	if _, _, err := el.ElabDef(surface.Def{Name: "$builtin-numinj", Ty: want, Body: surface.EVar{Name: b.InjName}}); err != nil {
+		return fmt.Errorf("builtin %s: %q is not a %s -> %s injection: %v", b.Kind, b.InjName, s.nat.TyName, b.TyName, err)
+	}
+	// Replace any prior injection of the same kind; otherwise append.
+	for i := range s.numInjs {
+		if s.numInjs[i].Kind == b.Kind {
+			s.numInjs[i] = b
+			return nil
+		}
+	}
+	s.numInjs = append(s.numInjs, b)
 	return nil
 }
 

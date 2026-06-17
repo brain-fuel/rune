@@ -1,0 +1,70 @@
+-- Chapter 199 — TYPED NUMERAL LITERALS for the tower (rung C4).
+-- A bare numeral defaults to Nat, but the numeric tower wants `7 : Z` and
+-- `7 : Rat` to read as the integer / rational seven too. `builtin int Z intOf`
+-- registers the injection `intOf : Nat -> Z`; thereafter a numeral CHECKED AT Z
+-- lowers to `intOf (NatLit n)` — the inner literal is a genuine Nat (so bignum +
+-- accel still apply) and the injection carries it into the integers. No new core
+-- node, no negative/fraction syntax (write `zneg`/`/`): just type-directed
+-- lowering. The base `builtin nat` is untouched, so `7 : Nat` is unchanged and
+-- `7 : Z` and `7 : Nat` coexist, dispatched by the expected type.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+-- The integers as the difference quotient of pairs of naturals (the ch12 tower
+-- rung, reduced to just the injection we need).
+data NatPair : U is
+  npair : Nat -> Nat -> NatPair
+end
+
+fst : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is a end) p
+  end
+end
+
+snd : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is b end) p
+  end
+end
+
+ZRel : NatPair -> NatPair -> Prop is
+  fn (p : NatPair) (q : NatPair) is Eq Nat (fst p + snd q) (fst q + snd p) end
+end
+
+Z : U is Quot NatPair ZRel end
+
+intOf : Nat -> Z is fn (n : Nat) is qin NatPair ZRel (npair n 0) end end
+
+-- The rung-C4 declaration: a numeral at Z means `intOf` of that numeral.
+builtin int Z intOf
+
+-- A numeral checked at Z is the injected integer, definitionally equal to the
+-- explicit injection — refl proves it even though Eq is stuck at a quotient,
+-- because both sides ARE `intOf (NatLit 7)`.
+sevenZ : Z is 7 end
+sevenIsIntOf : Eq Z 7 (intOf 7) is refl (intOf 7) end
+
+-- The base Nat literal is unaffected: `7 : Nat` is still the bare NatLit, and Z
+-- and Nat numerals coexist (dispatched by the expected type).
+sevenN : Nat is 7 end
+sevenNok : Eq Nat 7 (succ (succ (succ (succ (succ (succ (succ zero))))))) is refl 7 end
+
+-- A big literal at Z rides the same path — the inner NatLit is bignum, intOf
+-- wraps it; no cap.
+bigZ : Z is 1000000000000 end
+bigZok : Eq Z 1000000000000 (intOf 1000000000000) is refl (intOf 1000000000000) end
