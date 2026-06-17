@@ -9,6 +9,7 @@ package session
 
 import (
 	"fmt"
+	"math/big"
 
 	"goforge.dev/rune/v3/codegen"
 	"goforge.dev/rune/v3/core"
@@ -536,11 +537,11 @@ func (s *Session) unfoldedNatCall(defName string, a, b int64) (int64, error) {
 	if !cfg.HasNat {
 		return 0, fmt.Errorf("no `builtin nat`")
 	}
-	litA, err := cfg.Nat(int(a))
+	litA, err := cfg.Nat(big.NewInt(a))
 	if err != nil {
 		return 0, err
 	}
-	litB, err := cfg.Nat(int(b))
+	litB, err := cfg.Nat(big.NewInt(b))
 	if err != nil {
 		return 0, err
 	}

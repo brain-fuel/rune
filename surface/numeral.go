@@ -38,13 +38,14 @@ type NumConfig struct {
 }
 
 // Nat lowers n to a compressed core numeral NatLit (definitionally succ^n zero).
-// There is NO cap: a literal is one node of any size (C7 / R-NUM, Decision 2).
-func (c NumConfig) Nat(n int) (core.Tm, error) {
+// There is NO cap: a literal is one big.Int node of any size (C7 / R-NUM,
+// Decision 2). n is arbitrary-precision all the way from the lexer.
+func (c NumConfig) Nat(n *big.Int) (core.Tm, error) {
 	if !c.HasNat {
-		return nil, fmt.Errorf("numeral %d has no meaning: no `builtin nat` declared", n)
+		return nil, fmt.Errorf("numeral %s has no meaning: no `builtin nat` declared", n)
 	}
-	if n < 0 {
-		return nil, fmt.Errorf("numeral %d is negative; Nat has no negatives", n)
+	if n.Sign() < 0 {
+		return nil, fmt.Errorf("numeral %s is negative; Nat has no negatives", n)
 	}
-	return core.NatLit{N: big.NewInt(int64(n)), Zero: c.NatZero, Succ: c.NatSucc}, nil
+	return core.NatLit{N: new(big.Int).Set(n), Zero: c.NatZero, Succ: c.NatSucc}, nil
 }

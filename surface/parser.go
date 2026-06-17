@@ -3,7 +3,7 @@ package surface
 import (
 	"errors"
 	"fmt"
-	"strconv"
+	"math/big"
 
 	"goforge.dev/rune/v3/core"
 )
@@ -719,11 +719,12 @@ func qtyOf(text string) core.Qty {
 // numLit reads a numeral token into an unexpanded ENum. Expansion is deferred
 // to lowering (resolver or elaborator), where the meaning — the unary
 // `builtin nat`, lowered to a compressed NatLit — is fixed by the expected type
-// (see numeral.go). The only check here is that the digits fit a machine int.
+// (see numeral.go). Numerals are arbitrary-precision (one big.Int): there is no
+// size cap, so a digit run of any length parses.
 func (p *parser) numLit(t token) (Exp, error) {
-	n, err := strconv.Atoi(t.text)
-	if err != nil {
-		return nil, fmt.Errorf("numeral %s at offset %d is not a representable integer", t.text, t.pos)
+	n, ok := new(big.Int).SetString(t.text, 10)
+	if !ok {
+		return nil, fmt.Errorf("numeral %s at offset %d is not a valid base-10 integer", t.text, t.pos)
 	}
 	return ENum{Val: n, Pos: t.pos}, nil
 }

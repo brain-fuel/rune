@@ -334,18 +334,23 @@ qty : (0 A : U) -> (1 x : A) -> A is fn {- placeholder -} (0 A : U) (1 x : A) is
 	if _, err := surface.ParseProgram("builtin bin BN bn0 bnP Pos pH pO pI"); err == nil {
 		t.Errorf("`builtin bin` should no longer parse (the kind is retired)")
 	}
-	if got, ok := two.(surface.ENum); !ok || got.Val != 2 {
+	if got, ok := two.(surface.ENum); !ok || got.Val.Int64() != 2 {
 		t.Errorf("2 parsed to %#v, want surface.ENum{Val: 2}", two)
 	}
 	// A bare numeral parses with no binding at all — lowering, not parsing, is
 	// where a missing binding is reported.
 	if e, err := surface.ParseExpr("2"); err != nil {
 		t.Errorf("bare numeral should parse: %v", err)
-	} else if n, ok := e.(surface.ENum); !ok || n.Val != 2 {
+	} else if n, ok := e.(surface.ENum); !ok || n.Val.Int64() != 2 {
 		t.Errorf("bare 2 parsed to %#v, want ENum{Val: 2}", e)
 	}
-	if _, err := surface.ParseExpr("99999999999999999999999999"); err == nil {
-		t.Errorf("numeral exceeding int range should fail to parse")
+	// Numerals are arbitrary-precision: a value far beyond int64 parses (it lowers
+	// to one big.Int NatLit node — no surface cap).
+	big1 := "99999999999999999999999999"
+	if e, err := surface.ParseExpr(big1); err != nil {
+		t.Errorf("a numeral beyond int64 should parse: %v", err)
+	} else if n, ok := e.(surface.ENum); !ok || n.Val.String() != big1 {
+		t.Errorf("big numeral parsed to %#v, want ENum{Val: %s}", e, big1)
 	}
 }
 

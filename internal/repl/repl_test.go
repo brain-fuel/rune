@@ -114,6 +114,7 @@ func TestREPLLargeArithAndAST(t *testing.T) {
 		"4000 * 4000", // accel: instant, was a stack overflow
 		"4000 + 4000",
 		"1000 - 1",
+		"1000000000000000 * 10000002341234123412341234", // beyond int64: arbitrary precision
 		":ast 1 + 2",
 		":quit",
 	}
@@ -127,7 +128,8 @@ func TestREPLLargeArithAndAST(t *testing.T) {
 		"16000000 : Nat", // 4000 * 4000, accelerated
 		"8000 : Nat",     // 4000 + 4000
 		"999 : Nat",      // 1000 - 1
-		"((+ 1) 2)",      // :ast — names, not @hash; NatLits shown, not ?
+		"10000002341234123412341234000000000000000 : Nat", // beyond int64, exact
+		"((+ 1) 2)", // :ast — names, not @hash; NatLits shown, not ?
 	} {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)

@@ -7,7 +7,11 @@
 // definition references (content hashes). There is no type elaboration in Phase 0.
 package surface
 
-import "goforge.dev/rune/v3/core"
+import (
+	"math/big"
+
+	"goforge.dev/rune/v3/core"
+)
 
 // Exp is a named surface expression. Like core.Tm it is a sealed interface matched
 // by type switch; the marker keeps the constructor set closed.
@@ -211,9 +215,10 @@ type BuiltinNatOp struct {
 // ENum is a numeral literal, carried unexpanded (a parser cannot know which
 // type it means). Pos is its source offset, for error messages. It is lowered
 // by NumConfig: the resolver to the unary default, the elaborator by the
-// expected type (see numeral.go).
+// expected type (see numeral.go). Val is arbitrary-precision: a numeral has no
+// size cap (it lowers to one big.Int NatLit node), so the surface must not cap it.
 type ENum struct {
-	Val int
+	Val *big.Int
 	Pos int
 }
 
