@@ -1,0 +1,45 @@
+-- Chapter 198 — NATIVE ARBITRARY-PRECISION nat (telos-2 / M4, B4 bignum tail).
+-- The two NATIVE backends (C, LLVM-IR) used to box a builtin-nat as a machine
+-- i64, so a numeral past 2^63 was unrepresentable when DEPLOYED (the source
+-- backends already carried arbitrary precision via the host bigint: JS BigInt,
+-- Python int, …). This chapter is the consumer that closes that gap: a product
+-- whose result is a 41-digit number, deployed and shown byte-identical on ALL
+-- backends — naive limb bignum (base 1e9, schoolbook ×) in the native runtimes.
+--
+-- 1000000000000000 (10^15) × 10000002341234123412341234 evaluates EXACTLY to
+-- 10000002341234123412341234000000000000000. The accel path (builtin natMul)
+-- folds it in one bignum step; the result is far beyond i64 (~9.2 × 10^18).
+
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+-- Plain-identifier names (not the operator glyphs) so the def survives emission
+-- to every backend uniformly (some targets cannot name a top-level `$mul`).
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+builtin natAdd addW
+
+mulW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> addW ih n
+    end
+  end
+end
+
+builtin natMul mulW
+
+-- A 41-digit product, exact on every backend including the native C/LLVM runtimes.
+answer : Whole is mulW 1000000000000000 10000002341234123412341234 end

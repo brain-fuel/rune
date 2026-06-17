@@ -273,18 +273,21 @@ func (em *cEmitter) emitCtorC(b *strings.Builder, c CtorSpec) {
 // closure incrementing its argument, the eliminator a fold loop — exactly the
 // rep the other backends give nat (so the conformance output is byte-identical).
 func (em *cEmitter) emitNatC(b *strings.Builder, n NatSpec) {
-	// zero
-	fmt.Fprintf(b, "static Value %s(void) { return mkint(0); }\n", cThunkName(n.Zero))
-	// succ: x -> x+1
-	fmt.Fprintf(b, "static Value %s_code(Value arg, Value* env) { (void)env; return mkint(as_int(arg) + 1); }\n", cName(n.Succ))
+	// zero: the empty bignum.
+	fmt.Fprintf(b, "static Value %s(void) { return big_from_long(0); }\n", cThunkName(n.Zero))
+	// succ: x -> x+1 (bignum increment).
+	fmt.Fprintf(b, "static Value %s_code(Value arg, Value* env) { (void)env; return big_succ(arg); }\n", cName(n.Succ))
 	fmt.Fprintf(b, "static Value %s(void) { return mkclo(&%s_code, 0); }\n", cThunkName(n.Succ), cName(n.Succ))
 	// eliminator: m -> c0 -> c1 -> x -> fold (m erased/ignored)
 	base := cName(n.ElimName)
-	// 4 curried code blocks capturing m, c0, c1; the last folds.
+	// 4 curried code blocks capturing m, c0, c1; the last folds c1 over 0..x-1
+	// with a BIGNUM counter (arg = x is a bignum, possibly past i64). O(x) by
+	// construction — the same cost the succ-chain elimination always had.
 	fmt.Fprintf(b, "static Value %s_b3(Value arg, Value* env) {\n", base)
-	b.WriteString("  /* arg = x; env = {m, c0, c1} */\n")
-	b.WriteString("  long x = as_int(arg); Value acc = env[1];\n")
-	b.WriteString("  for (long k = 0; k < x; k++) acc = apply(apply(env[2], mkint(k)), acc);\n")
+	b.WriteString("  /* arg = x (bignum); env = {m, c0, c1} */\n")
+	b.WriteString("  Value acc = env[1];\n")
+	b.WriteString("  for (Value k = big_from_long(0); big_cmp(k, arg) < 0; k = big_succ(k))\n")
+	b.WriteString("    acc = apply(apply(env[2], k), acc);\n")
 	b.WriteString("  return acc;\n}\n")
 	fmt.Fprintf(b, "static Value %s_b2(Value arg, Value* env) {\n", base)
 	fmt.Fprintf(b, "  Value c = mkclo(&%s_b3, 3); clo_set(c,0,env[0]); clo_set(c,1,env[1]); clo_set(c,2,arg); return c;\n}\n", base)
@@ -325,9 +328,10 @@ func (em *cEmitter) exprIn(t CIr, locals []string) string {
 	case CLit:
 		switch x.Kind {
 		case LitNat:
-			// A compressed numeral deploys as the native immediate int — the SAME
-			// rep NatSpec gives nat, so it is interchangeable with a succ-chain.
-			return fmt.Sprintf("mkint(%s)", x.Nat)
+			// A compressed numeral deploys as a bignum parsed from its decimal
+			// magnitude — arbitrary precision, interchangeable with a succ-chain
+			// (zero/succ are the same bignum rep). No i64 cap.
+			return fmt.Sprintf("big_parse(%s)", cstr(x.Nat))
 		case LitStr:
 			return fmt.Sprintf("mkstr(%s)", cstr(x.Str))
 		case LitPtr:
@@ -535,8 +539,9 @@ const cRuntime = `#include <stdio.h>
 
 typedef intptr_t Value;
 
-/* Object kinds. */
-enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5 };
+/* Object kinds. K_BIG is a naive arbitrary-precision integer (builtin-nat): see
+   the bignum section. */
+enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6 };
 
 typedef struct Obj {
   int kind;
@@ -662,6 +667,10 @@ static size_t gc_obj_size(Obj* o) {
     case K_CLO:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break;
     case K_CON:  extra = o->nfield > 0 ? o->nfield - 1 : 0; break;
     case K_PAIR: extra = 1; break; /* mkpair allocates sizeof(Obj)+sizeof(Value) => slots[0..1] */
+    /* K_BIG sizes off nenv = the ALLOCATED limb capacity (nfield is the LOGICAL
+       limb count, which big_norm may shrink — so capacity, not nfield, bounds the
+       object). The limbs are raw words, never traced (default in gc_mark_obj). */
+    case K_BIG:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break;
     default:     extra = 0; break; /* K_STR, K_PTR, K_UNIT: just the header */
   }
   size_t sz = base + (size_t)extra * sizeof(Value);
@@ -815,13 +824,132 @@ static Value apply(Value clo, Value arg) {
   return o->code(arg, o->slots);
 }
 
-/* nat accel ops on the native int rep (saturating Peano monus). */
-static Value nat_add(Value a, Value b) { return mkint(as_int(a) + as_int(b)); }
-static Value nat_mul(Value a, Value b) { return mkint(as_int(a) * as_int(b)); }
-static Value nat_monus(Value a, Value b) {
-  long x = as_int(a), y = as_int(b);
-  return mkint(x > y ? x - y : 0);
+/* ===========================================================================
+   NAIVE ARBITRARY-PRECISION INTEGERS (R-NATIVE bignum) — the builtin-nat rep.
+
+   A nat/whole is a K_BIG object: a sign (tag; 0 = nonneg — nat is always
+   nonneg, the field is kept for the eventual signed Int) and a magnitude as
+   base-1e9 limbs (little-endian, each in [0,1e9)). nfield = the LOGICAL limb
+   count (big_norm strips leading zeros); nenv = the ALLOCATED capacity (sizes
+   the object for the GC). Zero is the empty bignum (nfield 0).
+
+   This is the NAIVE cut (schoolbook add/mul, saturating magnitude monus): every
+   nat is boxed, no immediate-int fast path for small values — that optimization
+   lands later. The native FFI LitInt keeps the IS_INT immediate rep; only
+   builtin-nat is bignum, so the two coexist. The limbs are raw words, never heap
+   pointers, so K_BIG traces no slots (default in gc_mark_obj). =============== */
+#define BIG_BASE 1000000000L
+
+static Value mkbig(int nlimbs) {
+  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (nlimbs > 0 ? (nlimbs - 1) : 0) * sizeof(Value));
+  o->kind = K_BIG; o->tag = 0; o->nfield = nlimbs; o->nenv = nlimbs;
+  return (Value)o;
 }
+static int  big_nlimbs(Value v) { return obj(v)->nfield; }
+static long big_limb(Value v, int i) { return (long)obj(v)->slots[i]; }
+static void big_setlimb(Value v, int i, long x) { obj(v)->slots[i] = (Value)x; }
+
+/* canonicalize: drop leading-zero limbs (logical nfield only; capacity stays). */
+static Value big_norm(Value v) {
+  Obj* o = obj(v);
+  while (o->nfield > 0 && o->slots[o->nfield - 1] == 0) o->nfield--;
+  return v;
+}
+
+static Value big_from_long(long n) {
+  if (n <= 0) return mkbig(0);
+  int k = 0; long t = n;
+  while (t > 0) { k++; t /= BIG_BASE; }
+  Value v = mkbig(k);
+  for (int i = 0; i < k; i++) { big_setlimb(v, i, n % BIG_BASE); n /= BIG_BASE; }
+  return v;
+}
+
+/* parse a decimal magnitude string (the LitNat payload) into a bignum. */
+static Value big_parse(const char* s) {
+  int len = (int)strlen(s);
+  int k = (len + 8) / 9;            /* ceil(len/9) base-1e9 limbs */
+  Value v = mkbig(k);
+  int idx = 0, end = len;
+  while (end > 0) {
+    int start = end - 9; if (start < 0) start = 0;
+    long limb = 0;
+    for (int i = start; i < end; i++) limb = limb * 10 + (s[i] - '0');
+    big_setlimb(v, idx++, limb);
+    end = start;
+  }
+  return big_norm(v);
+}
+
+static int big_cmp(Value a, Value b) {     /* compare magnitudes: -1, 0, 1 */
+  int na = big_nlimbs(a), nb = big_nlimbs(b);
+  if (na != nb) return na < nb ? -1 : 1;
+  for (int i = na - 1; i >= 0; i--) {
+    long x = big_limb(a, i), y = big_limb(b, i);
+    if (x != y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+static Value big_add(Value a, Value b) {
+  int na = big_nlimbs(a), nb = big_nlimbs(b);
+  int n = (na > nb ? na : nb) + 1;
+  Value r = mkbig(n);
+  long carry = 0;
+  for (int i = 0; i < n; i++) {
+    long s = carry;
+    if (i < na) s += big_limb(a, i);
+    if (i < nb) s += big_limb(b, i);
+    big_setlimb(r, i, s % BIG_BASE);
+    carry = s / BIG_BASE;
+  }
+  return big_norm(r);
+}
+
+static Value big_mul(Value a, Value b) {
+  int na = big_nlimbs(a), nb = big_nlimbs(b);
+  if (na == 0 || nb == 0) return mkbig(0);
+  Value r = mkbig(na + nb);                 /* gc_alloc zeroes the limbs */
+  for (int i = 0; i < na; i++) {
+    long carry = 0, ai = big_limb(a, i);
+    for (int j = 0; j < nb; j++) {
+      long cur = big_limb(r, i + j) + ai * big_limb(b, j) + carry;
+      big_setlimb(r, i + j, cur % BIG_BASE);
+      carry = cur / BIG_BASE;
+    }
+    big_setlimb(r, i + nb, big_limb(r, i + nb) + carry);
+  }
+  return big_norm(r);
+}
+
+/* saturating magnitude subtraction (Peano monus): a - b, floored at 0. */
+static Value big_monus(Value a, Value b) {
+  if (big_cmp(a, b) <= 0) return mkbig(0);
+  int na = big_nlimbs(a), nb = big_nlimbs(b);
+  Value r = mkbig(na);
+  long borrow = 0;
+  for (int i = 0; i < na; i++) {
+    long d = big_limb(a, i) - borrow - (i < nb ? big_limb(b, i) : 0);
+    if (d < 0) { d += BIG_BASE; borrow = 1; } else borrow = 0;
+    big_setlimb(r, i, d);
+  }
+  return big_norm(r);
+}
+
+static Value big_succ(Value a) { return big_add(a, big_from_long(1)); }
+
+/* print a bignum as a decimal magnitude (top limb plain, the rest 0-padded). */
+static void big_print(Value v) {
+  int n = big_nlimbs(v);
+  if (n == 0) { putchar('0'); return; }
+  printf("%ld", big_limb(v, n - 1));
+  for (int i = n - 2; i >= 0; i--) printf("%09ld", big_limb(v, i));
+}
+
+/* nat accel ops, now on the bignum rep (saturating Peano monus). */
+static Value nat_add(Value a, Value b) { return big_add(a, b); }
+static Value nat_mul(Value a, Value b) { return big_mul(a, b); }
+static Value nat_monus(Value a, Value b) { return big_monus(a, b); }
 
 static void rt_abort(void) { fprintf(stderr, "rune-c: impossible (unmatched constructor tag)\n"); exit(1); }
 
@@ -844,6 +972,7 @@ static void show(Value v) {
   if (IS_INT(v)) { printf("%ld", INT_VAL(v)); return; }
   Obj* o = obj(v);
   switch (o->kind) {
+    case K_BIG: big_print(v); return;
     case K_CLO: printf("<function>"); return;
     case K_PTR: printf("<ptr>"); return;
     case K_STR: printf("%s", o->str); return;

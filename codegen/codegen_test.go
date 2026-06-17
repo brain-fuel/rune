@@ -506,9 +506,9 @@ func TestNatLitCompactEmission(t *testing.T) {
 	}{
 		{"js", codegen.JS{}, "5000n"},
 		{"py", codegen.Py{}, "5000"},
-		{"go", codegen.Go{}, "any(5000)"},
-		{"rs", codegen.Rust{}, "V::Int(5000)"},
-		{"jvm", codegen.JVM{}, "new VInt(5000L)"},
+		{"go", codegen.Go{}, `any(_bigFromDec("5000"))`},
+		{"rs", codegen.Rust{}, `V::Nat(_big_from_dec("5000"))`},
+		{"jvm", codegen.JVM{}, `new VNat(new java.math.BigInteger("5000"))`},
 		{"erl", codegen.Beam{}, "5000"},
 	}
 	for _, c := range cases {
@@ -570,7 +570,7 @@ func TestNatLitCrossBackendRuns(t *testing.T) {
 			func(src, out string) *exec.Cmd { return exec.Command("rustc", "--edition", "2021", "-o", out, src) }},
 		{"erl", "escript", "erl", codegen.Beam{}, func(f string) *exec.Cmd { return exec.Command("escript", f) }, nil},
 	}
-	// JVM (Java 25+): the NatSpec representation is a VInt(long); resolve a JDK 25
+	// JVM (Java 25+): the NatSpec representation is a VNat(BigInteger); resolve a JDK 25
 	// toolchain explicitly (PATH java may be older) and run main from the class dir.
 	if javac25, java25, ok := findJDK25(); ok {
 		backends = append(backends, backend{"jvm", javac25, "java", codegen.JVM{},
@@ -682,8 +682,8 @@ func TestAccelNativeEmission(t *testing.T) {
 		{"js-monus", codegen.JS{}, "diff", "8n", "_natElim"}, // saturating ternary, BigInt operands
 		{"py-add", codegen.Py{}, "sum", "(5000 + 3000)", "_natElim"},
 		{"py-mul", codegen.Py{}, "prod", "(100 * 100)", "_natElim"},
-		{"go-add", codegen.Go{}, "sum", "_natAdd(any(5000), any(3000))", "_natElim"},
-		{"go-mul", codegen.Go{}, "prod", "_natMul(any(100), any(100))", "_natElim"},
+		{"go-add", codegen.Go{}, "sum", `_natAdd(any(_bigFromDec("5000")), any(_bigFromDec("3000")))`, "_natElim"},
+		{"go-mul", codegen.Go{}, "prod", `_natMul(any(_bigFromDec("100")), any(_bigFromDec("100")))`, "_natElim"},
 		{"go-monus", codegen.Go{}, "diff", "_natMonus(", "_natElim"},
 		{"rs-add", codegen.Rust{}, "sum", "_nat_add(", "_nat_elim"},
 		{"rs-monus", codegen.Rust{}, "diff", "_nat_monus(", "_nat_elim"},

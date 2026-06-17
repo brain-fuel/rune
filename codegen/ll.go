@@ -353,22 +353,18 @@ func (em *llEmitter) emitCachedThunk(b *strings.Builder, name string, body func(
 // emitNatLL emits the builtin-nat group natively, mirroring emitNatC: zero is the
 // immediate 0, succ a +1 closure, the eliminator a 4-block curried fold loop.
 func (em *llEmitter) emitNatLL(b *strings.Builder, n NatSpec) {
-	// zero: immediate 0
+	// zero: the empty bignum
 	em.emitCachedThunk(b, n.Zero, func(f *llFunc) string {
 		r := f.fresh()
-		fmt.Fprintf(b, "  %s = call i64 @rt_mkint(i64 0)\n", r)
+		fmt.Fprintf(b, "  %s = call i64 @rt_big_from_long(i64 0)\n", r)
 		return r
 	})
-	// succ code: x -> x+1
+	// succ code: x -> x+1 (bignum increment)
 	sc := llName(n.Succ) + "_code"
 	fmt.Fprintf(b, "define i64 @%s(i64 %%arg, i64* %%env) {\nentry:\n", sc)
 	f := &llFunc{em: em}
-	x := f.fresh()
-	fmt.Fprintf(b, "  %s = call i64 @rt_as_int(i64 %%arg)\n", x)
-	x1 := f.fresh()
-	fmt.Fprintf(b, "  %s = add i64 %s, 1\n", x1, x)
 	r := f.fresh()
-	fmt.Fprintf(b, "  %s = call i64 @rt_mkint(i64 %s)\n", r, x1)
+	fmt.Fprintf(b, "  %s = call i64 @rt_big_succ(i64 %%arg)\n", r)
 	fmt.Fprintf(b, "  ret i64 %s\n}\n", r)
 	em.emitCachedThunk(b, n.Succ, func(f *llFunc) string {
 		rr := f.fresh()
@@ -380,17 +376,21 @@ func (em *llEmitter) emitNatLL(b *strings.Builder, n NatSpec) {
 	// b3: the fold. env = {m, c0, c1}, arg = x.
 	fmt.Fprintf(b, "define i64 @%s_b3(i64 %%arg, i64* %%env) {\nentry:\n", base)
 	ff := &llFunc{em: em}
-	xv := ff.fresh()
-	fmt.Fprintf(b, "  %s = call i64 @rt_as_int(i64 %%arg)\n", xv)
+	// arg is the scrutinee x, a BIGNUM (not unboxed to i64); the counter k is a
+	// bignum too, compared against x via rt_big_cmp and stepped by rt_big_succ.
+	// Both acc and k live in allocas across the allocating apply/succ calls, so
+	// the GC's conservative stack scan keeps them (and arg, kept live by the
+	// loop condition) marked.
 	c0 := ff.loadEnv(b, 1)
 	c1 := ff.loadEnv(b, 2)
-	// loop: acc = c0; for k in 0..x: acc = apply(apply(c1, mkint(k)), acc)
 	accSlot := ff.fresh()
 	fmt.Fprintf(b, "  %s = alloca i64\n", accSlot)
 	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", c0, accSlot)
 	kSlot := ff.fresh()
 	fmt.Fprintf(b, "  %s = alloca i64\n", kSlot)
-	fmt.Fprintf(b, "  store i64 0, i64* %s\n", kSlot)
+	k0 := ff.fresh()
+	fmt.Fprintf(b, "  %s = call i64 @rt_big_from_long(i64 0)\n", k0)
+	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", k0, kSlot)
 	lcond := ff.freshLabel("cond")
 	lbody := ff.freshLabel("body")
 	ldone := ff.freshLabel("done")
@@ -398,21 +398,21 @@ func (em *llEmitter) emitNatLL(b *strings.Builder, n NatSpec) {
 	fmt.Fprintf(b, "%s:\n", lcond)
 	kv := ff.fresh()
 	fmt.Fprintf(b, "  %s = load i64, i64* %s\n", kv, kSlot)
+	cmpv := ff.fresh()
+	fmt.Fprintf(b, "  %s = call i64 @rt_big_cmp(i64 %s, i64 %%arg)\n", cmpv, kv)
 	cmp := ff.fresh()
-	fmt.Fprintf(b, "  %s = icmp slt i64 %s, %s\n", cmp, kv, xv)
+	fmt.Fprintf(b, "  %s = icmp slt i64 %s, 0\n", cmp, cmpv)
 	fmt.Fprintf(b, "  br i1 %s, label %%%s, label %%%s\n", cmp, lbody, ldone)
 	fmt.Fprintf(b, "%s:\n", lbody)
-	ki := ff.fresh()
-	fmt.Fprintf(b, "  %s = call i64 @rt_mkint(i64 %s)\n", ki, kv)
 	step := ff.fresh()
-	fmt.Fprintf(b, "  %s = call i64 @rt_apply(i64 %s, i64 %s)\n", step, c1, ki)
+	fmt.Fprintf(b, "  %s = call i64 @rt_apply(i64 %s, i64 %s)\n", step, c1, kv)
 	accv := ff.fresh()
 	fmt.Fprintf(b, "  %s = load i64, i64* %s\n", accv, accSlot)
 	nacc := ff.fresh()
 	fmt.Fprintf(b, "  %s = call i64 @rt_apply(i64 %s, i64 %s)\n", nacc, step, accv)
 	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", nacc, accSlot)
 	k1 := ff.fresh()
-	fmt.Fprintf(b, "  %s = add i64 %s, 1\n", k1, kv)
+	fmt.Fprintf(b, "  %s = call i64 @rt_big_succ(i64 %s)\n", k1, kv)
 	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", k1, kSlot)
 	fmt.Fprintf(b, "  br label %%%s\n", lcond)
 	fmt.Fprintf(b, "%s:\n", ldone)
@@ -538,11 +538,10 @@ func (f *llFunc) emitLit(b *strings.Builder, x CLit) string {
 	r := f.fresh()
 	switch x.Kind {
 	case LitNat:
-		// A compressed numeral is the native immediate int (the SAME rep NatSpec
-		// gives nat, interchangeable with a succ-chain). The magnitude rides a
-		// decimal string; emit it as an i64 literal (machine-int bound, matching the
-		// Go/Rust/JVM source backends).
-		fmt.Fprintf(b, "  %s = call i64 @rt_mkint(i64 %s)\n", r, x.Nat)
+		// A compressed numeral parses to a bignum from its decimal magnitude
+		// (arbitrary precision, interchangeable with a succ-chain since zero/succ
+		// share the bignum rep). No i64 cap.
+		fmt.Fprintf(b, "  %s = call i64 @rt_big_parse(i8* %s)\n", r, f.em.cStr(x.Nat))
 	case LitStr:
 		fmt.Fprintf(b, "  %s = call i64 @rt_mkstr(i8* %s)\n", r, f.em.cStr(x.Str))
 	case LitPtr:

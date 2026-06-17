@@ -92,8 +92,8 @@ func emitCtorJVM(b *strings.Builder, c CtorSpec) {
 }
 
 func emitNatJVM(b *strings.Builder, n NatSpec) {
-	fmt.Fprintf(b, "  static V %s() { return new VInt(0); }\n", jvmThunk(n.Zero))
-	fmt.Fprintf(b, "  static V %s() { return fun(x -> new VInt(_int(x) + 1)); }\n", jvmThunk(n.Succ))
+	fmt.Fprintf(b, "  static V %s() { return new VNat(java.math.BigInteger.ZERO); }\n", jvmThunk(n.Zero))
+	fmt.Fprintf(b, "  static V %s() { return fun(x -> new VNat(_nat(x).add(java.math.BigInteger.ONE))); }\n", jvmThunk(n.Succ))
 	fmt.Fprintf(b, "  static V %s() { return %s; }\n", jvmThunk(n.ElimName),
 		jvmCurry([]string{"m", "c0", "c1", "x"}, "_nat_elim(c0, c1, x)"))
 }
@@ -121,11 +121,10 @@ func (em *jvmEmitter) expr(t Ir, env []string) string {
 		// Native host literal marshalled at the FFI boundary (B4): a VInt scalar or
 		// VStr (a dedicated record variant so strings never alias ints).
 		if x.Kind == LitNat {
-			// C7 / R-NUM: a compressed numeral deploys as a native VInt — the SAME
-			// representation NatSpec gives nat (`new VInt(0)`, `_int(x) + 1`), O(1)
-			// source instead of a succ-chain. Machine-bounded (long), matching the
-			// succ-chain-to-long path it replaces.
-			return fmt.Sprintf("new VInt(%sL)", x.Nat)
+			// C7 / R-NUM: a compressed numeral deploys as a native VNat — the SAME
+			// representation NatSpec gives nat (`VNat(ZERO)`, `+1`), arbitrary
+			// precision (java.math.BigInteger), O(1) source instead of a succ-chain.
+			return fmt.Sprintf("new VNat(new java.math.BigInteger(%q))", x.Nat)
 		}
 		if x.Kind == LitStr {
 			return fmt.Sprintf("new VStr(%q)", x.Str)
@@ -293,9 +292,10 @@ var jvmReserved = map[string]bool{
 
 // jvmRuntime is the sealed value interface and its record variants (Java 25).
 const jvmRuntime = `import java.util.function.Function;
-sealed interface V permits VUnit, VInt, VStr, VPtr, VFun, VCtor, VPair {}
+sealed interface V permits VUnit, VInt, VNat, VStr, VPtr, VFun, VCtor, VPair {}
 record VUnit() implements V {}
-record VInt(long n) implements V {}
+record VInt(long n) implements V {}            // host machine int (FFI LitInt)
+record VNat(java.math.BigInteger n) implements V {} // builtin-nat: arbitrary precision
 record VStr(String s) implements V {}
 record VPtr(long h) implements V {} // opaque host pointer (B4): never shown structurally
 record VFun(Function<V,V> f) implements V {}
@@ -318,6 +318,9 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
   static long _int(V v) {
     return switch (v) { case VInt i -> i.n(); default -> throw new RuntimeException("rune: expected an int"); };
   }
+  static java.math.BigInteger _nat(V v) {
+    return switch (v) { case VNat i -> i.n(); default -> throw new RuntimeException("rune: expected a nat"); };
+  }
   static V _fst(V p) {
     return switch (p) { case VPair pr -> pr.a(); default -> throw new RuntimeException("rune: fst of a non-pair"); };
   }
@@ -333,24 +336,27 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
   static V _impossible() { throw new RuntimeException("impossible: unmatched constructor tag"); }
   static V _nat_elim(V c0, V c1, V x) {
     V acc = c0;
-    long n = _int(x);
-    for (long k = 0; k < n; k++) { acc = ap(ap(c1, new VInt(k)), acc); }
+    java.math.BigInteger n = _nat(x);
+    for (java.math.BigInteger k = java.math.BigInteger.ZERO; k.compareTo(n) < 0; k = k.add(java.math.BigInteger.ONE)) {
+      acc = ap(ap(c1, new VNat(k)), acc);
+    }
     return acc;
   }
   static V _nat_d(V c0, V c1, V x) {
-    long n = _int(x);
-    return n == 0 ? c0 : ap(ap(c1, new VInt(n - 1)), unit());
+    java.math.BigInteger n = _nat(x);
+    return n.signum() == 0 ? c0 : ap(ap(c1, new VNat(n.subtract(java.math.BigInteger.ONE))), unit());
   }
-  static V _nat_add(V a, V b) { return new VInt(_int(a) + _int(b)); }
-  static V _nat_mul(V a, V b) { return new VInt(_int(a) * _int(b)); }
+  static V _nat_add(V a, V b) { return new VNat(_nat(a).add(_nat(b))); }
+  static V _nat_mul(V a, V b) { return new VNat(_nat(a).multiply(_nat(b))); }
   static V _nat_monus(V a, V b) {
-    long x = _int(a), y = _int(b);
-    return new VInt(x > y ? x - y : 0L);
+    java.math.BigInteger x = _nat(a), y = _nat(b);
+    return new VNat(x.compareTo(y) > 0 ? x.subtract(y) : java.math.BigInteger.ZERO);
   }
   static String _show(V v) {
     return switch (v) {
       case VUnit u -> "()";
       case VInt i -> Long.toString(i.n());
+      case VNat i -> i.n().toString();
       case VStr s -> s.s();
       case VPtr p -> "<ptr>";
       case VFun f -> "<function>";

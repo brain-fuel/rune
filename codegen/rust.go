@@ -105,8 +105,8 @@ func emitCtorRust(b *strings.Builder, c CtorSpec) {
 }
 
 func emitNatRust(b *strings.Builder, n NatSpec) {
-	fmt.Fprintf(b, "fn %s() -> Rc<V> { Rc::new(V::Int(0)) }\n", rustThunk(n.Zero))
-	fmt.Fprintf(b, "fn %s() -> Rc<V> { vfun(move |x: Rc<V>| -> Rc<V> { Rc::new(V::Int(_int(&x) + 1)) }) }\n", rustThunk(n.Succ))
+	fmt.Fprintf(b, "fn %s() -> Rc<V> { Rc::new(V::Nat(Vec::new())) }\n", rustThunk(n.Zero))
+	fmt.Fprintf(b, "fn %s() -> Rc<V> { vfun(move |x: Rc<V>| -> Rc<V> { Rc::new(V::Nat(_big_succ(_nat(&x)))) }) }\n", rustThunk(n.Succ))
 	body := "_nat_elim(c0.clone(), c1.clone(), x.clone())"
 	fmt.Fprintf(b, "fn %s() -> Rc<V> { %s }\n", rustThunk(n.ElimName),
 		rustCurry([]string{"m", "c0", "c1", "x"}, body))
@@ -136,11 +136,10 @@ func (em *rustEmitter) expr(t Ir, env []string) string {
 		// Native host literal marshalled at the FFI boundary (B4): a V::Int scalar
 		// or V::Str (a dedicated value-domain case so strings never alias ints).
 		if x.Kind == LitNat {
-			// C7 / R-NUM: a compressed numeral deploys as a native V::Int — the SAME
-			// representation NatSpec gives nat (`V::Int(0)`, `_int(&x) + 1`), O(1)
-			// source instead of a succ-chain. Machine-bounded (i64), matching the
-			// succ-chain-to-int path it replaces.
-			return fmt.Sprintf("Rc::new(V::Int(%s))", x.Nat)
+			// C7 / R-NUM: a compressed numeral deploys as a native V::Nat — the SAME
+			// representation NatSpec gives nat (`V::Nat(empty)`, `_big_succ`),
+			// arbitrary precision, O(1) source instead of a succ-chain.
+			return fmt.Sprintf("Rc::new(V::Nat(_big_from_dec(%q)))", x.Nat)
 		}
 		if x.Kind == LitStr {
 			return fmt.Sprintf("Rc::new(V::Str(%q.to_string()))", x.Str)
@@ -314,7 +313,8 @@ var rustReserved = map[string]bool{
 const rustRuntime = `use std::rc::Rc;
 enum V {
     Unit,
-    Int(i64),
+    Int(i64),                 // host machine int (FFI LitInt)
+    Nat(Vec<u32>),            // builtin-nat: arbitrary-precision base-1e9 limbs (little-endian)
     Str(String),
     Ptr(i64),
     Fun(Rc<dyn Fn(Rc<V>) -> Rc<V>>),
@@ -342,27 +342,105 @@ fn _field(v: Rc<V>, i: usize) -> Rc<V> {
     match &*v { V::Ctor(_, _, a) => a[i].clone(), _ => panic!("rune: field of a non-constructor") }
 }
 fn _impossible() -> Rc<V> { panic!("impossible: unmatched constructor tag") }
+// ---- naive arbitrary-precision nat: base-1e9 limbs (no std bignum), schoolbook
+// ops, mirroring the C/LLVM native runtimes. Empty Vec is zero. ----
+const BIG_BASE: u64 = 1_000_000_000;
+fn _nat<'a>(v: &'a Rc<V>) -> &'a Vec<u32> {
+    match &**v { V::Nat(l) => l, _ => panic!("rune: expected a nat") }
+}
+fn _big_norm(mut l: Vec<u32>) -> Vec<u32> { while let Some(&0) = l.last() { l.pop(); } l }
+fn _big_from_u64(mut n: u64) -> Vec<u32> {
+    let mut l = Vec::new();
+    while n > 0 { l.push((n % BIG_BASE) as u32); n /= BIG_BASE; }
+    l
+}
+fn _big_from_dec(s: &str) -> Vec<u32> {
+    let b = s.as_bytes();
+    let mut l: Vec<u32> = Vec::new();
+    let mut end = b.len();
+    while end > 0 {
+        let start = if end >= 9 { end - 9 } else { 0 };
+        let mut limb: u32 = 0;
+        for i in start..end { limb = limb * 10 + (b[i] - b'0') as u32; }
+        l.push(limb);
+        end = start;
+    }
+    _big_norm(l)
+}
+fn _big_cmp(a: &Vec<u32>, b: &Vec<u32>) -> i32 {
+    if a.len() != b.len() { return if a.len() < b.len() { -1 } else { 1 }; }
+    for i in (0..a.len()).rev() { if a[i] != b[i] { return if a[i] < b[i] { -1 } else { 1 }; } }
+    0
+}
+fn _big_add(a: &Vec<u32>, b: &Vec<u32>) -> Vec<u32> {
+    let n = a.len().max(b.len());
+    let mut r = Vec::with_capacity(n + 1);
+    let mut carry: u64 = 0;
+    for i in 0..n {
+        let mut s = carry;
+        if i < a.len() { s += a[i] as u64; }
+        if i < b.len() { s += b[i] as u64; }
+        r.push((s % BIG_BASE) as u32);
+        carry = s / BIG_BASE;
+    }
+    if carry > 0 { r.push(carry as u32); }
+    _big_norm(r)
+}
+fn _big_mul(a: &Vec<u32>, b: &Vec<u32>) -> Vec<u32> {
+    if a.is_empty() || b.is_empty() { return Vec::new(); }
+    let mut r = vec![0u64; a.len() + b.len()];
+    for i in 0..a.len() {
+        let mut carry: u64 = 0;
+        let ai = a[i] as u64;
+        for j in 0..b.len() {
+            let cur = r[i + j] + ai * (b[j] as u64) + carry;
+            r[i + j] = cur % BIG_BASE;
+            carry = cur / BIG_BASE;
+        }
+        r[i + b.len()] += carry;
+    }
+    _big_norm(r.iter().map(|&x| x as u32).collect())
+}
+fn _big_monus(a: &Vec<u32>, b: &Vec<u32>) -> Vec<u32> {
+    if _big_cmp(a, b) <= 0 { return Vec::new(); }
+    let mut r = Vec::with_capacity(a.len());
+    let mut borrow: i64 = 0;
+    for i in 0..a.len() {
+        let mut d = a[i] as i64 - borrow - if i < b.len() { b[i] as i64 } else { 0 };
+        if d < 0 { d += BIG_BASE as i64; borrow = 1; } else { borrow = 0; }
+        r.push(d as u32);
+    }
+    _big_norm(r)
+}
+fn _big_succ(a: &Vec<u32>) -> Vec<u32> { _big_add(a, &_big_from_u64(1)) }
+fn _big_to_string(l: &Vec<u32>) -> String {
+    if l.is_empty() { return "0".to_string(); }
+    let mut s = l[l.len() - 1].to_string();
+    for i in (0..l.len() - 1).rev() { s.push_str(&format!("{:09}", l[i])); }
+    s
+}
 fn _nat_elim(c0: Rc<V>, c1: Rc<V>, x: Rc<V>) -> Rc<V> {
     let mut acc = c0;
-    for k in 0.._int(&x) {
-        acc = ap(ap(c1.clone(), Rc::new(V::Int(k))), acc);
+    let n = _nat(&x).clone();
+    let mut k: Vec<u32> = Vec::new();
+    while _big_cmp(&k, &n) < 0 {
+        acc = ap(ap(c1.clone(), Rc::new(V::Nat(k.clone()))), acc);
+        k = _big_succ(&k);
     }
     acc
 }
 fn _nat_d(c0: Rc<V>, c1: Rc<V>, x: Rc<V>) -> Rc<V> {
-    let n = _int(&x);
-    if n == 0 { c0 } else { ap(ap(c1, Rc::new(V::Int(n - 1))), unit()) }
+    let n = _nat(&x);
+    if n.is_empty() { c0 } else { ap(ap(c1, Rc::new(V::Nat(_big_monus(n, &_big_from_u64(1))))), unit()) }
 }
-fn _nat_add(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Int(_int(&a) + _int(&b))) }
-fn _nat_mul(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Int(_int(&a) * _int(&b))) }
-fn _nat_monus(a: Rc<V>, b: Rc<V>) -> Rc<V> {
-    let (x, y) = (_int(&a), _int(&b));
-    Rc::new(V::Int(if x > y { x - y } else { 0 }))
-}
+fn _nat_add(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_add(_nat(&a), _nat(&b)))) }
+fn _nat_mul(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_mul(_nat(&a), _nat(&b)))) }
+fn _nat_monus(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_monus(_nat(&a), _nat(&b)))) }
 fn _show(v: &Rc<V>) -> String {
     match &**v {
         V::Unit => "()".to_string(),
         V::Int(n) => n.to_string(),
+        V::Nat(l) => _big_to_string(l),
         V::Str(s) => s.clone(),
         V::Ptr(_) => "<ptr>".to_string(),
         V::Fun(_) => "<function>".to_string(),

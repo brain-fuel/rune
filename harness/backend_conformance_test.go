@@ -96,6 +96,11 @@ func TestBackendConformance(t *testing.T) {
 		// and runs byte-identically across ALL backends (incl. JVM 25 / BEAM / Rust) —
 		// portable, proof-carrying replicated consensus.
 		{"ch191_actor_agreement.rune", "deployedB", "succ (succ (succ (succ (succ (succ zero)))))"},
+		// ch198: a 41-digit product (10^15 × a 26-digit number) deployed to every
+		// backend. The native C/LLVM runtimes now carry naive arbitrary-precision
+		// bignum (base-1e9 limbs), so the result is byte-identical to the source
+		// backends' host bigints — past i64, the B4 native-bignum tail closed.
+		{"ch198_native_bignum.rune", "answer", "10000002341234123412341234000000000000000"},
 	}
 	type backend struct {
 		name    string

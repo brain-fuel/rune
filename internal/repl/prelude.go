@@ -9,8 +9,9 @@ import (
 
 // preludeSrc is ordinary surface rune loaded through the same pipeline as a
 // :load — the prelude has no special status in the core or the cache. It is
-// what makes a fresh prompt behave like a calculator: Nat with the numeral
-// binding, the five infix operators, and gcd.
+// what makes a fresh prompt behave like a calculator: Whole (the numeric
+// tower's foundation) with the numeral binding, the five infix operators, gcd,
+// and the counting type Nat with its wholeOf injection.
 //
 //go:embed prelude.rune
 var preludeSrc string

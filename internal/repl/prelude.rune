@@ -2,16 +2,23 @@
 -- Everything here is ordinary surface rune — the same definitions as the
 -- ch11 listing, no special status in the core. `rune repl --no-prelude`
 -- starts a bare session (the book's discipline: nothing you didn't write).
+--
+-- The numeric tower. `Whole` is the FOUNDATION — the initial algebra {0,1,2,…}
+-- with `zero`/`succ`, the type induction bottoms out on and the one bare
+-- numerals bind to (so `0` has a type). `Nat` is the COUNTING numbers {1,2,3,…}
+-- sitting one rung up (no zero), injected into `Whole` by `wholeOf`. `Int` and
+-- `Rat` are the quotient libraries above (see the int/rational listings). The
+-- calculator (`+ - * // %`, gcd) lives at `Whole`.
 
-data Nat : U is
-  zero : Nat
-| succ : Nat -> Nat
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
 end
 
-builtin nat Nat zero succ
+builtin nat Whole zero succ
 
-+ : Nat -> Nat -> Nat is
-  fn (m : Nat) (n : Nat) is
++ : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
     case m of
     | zero -> n
     | succ k with ih -> succ ih
@@ -25,8 +32,8 @@ end
 -- it fires ONLY when both arguments are NatLit, leaving open terms to the proof.
 builtin natAdd +
 
-* : Nat -> Nat -> Nat is
-  fn (m : Nat) (n : Nat) is
+* : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
     case m of
     | zero -> 0
     | succ k with ih -> ih + n
@@ -38,8 +45,8 @@ end
 -- materialising 16 million succ nodes (and overflowing the stack at readback).
 builtin natMul *
 
-pred : Nat -> Nat is
-  fn (n : Nat) is
+pred : Whole -> Whole is
+  fn (n : Whole) is
     case n of
     | zero -> 0
     | succ k -> k
@@ -47,9 +54,9 @@ pred : Nat -> Nat is
   end
 end
 
--- Truncated subtraction: m - n stops at zero (Nat has nothing below it).
-- : Nat -> Nat -> Nat is
-  fn (m : Nat) (n : Nat) is
+-- Truncated subtraction: m - n stops at zero (Whole has nothing below it).
+- : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
     case n of
     | zero -> m
     | succ k with ih -> pred ih
@@ -67,11 +74,11 @@ end
 
 -- leb m n decides m <= n; recursion on m produces the comparison FUNCTION,
 -- so the induction hypothesis is "compare against k" awaiting its argument.
-leb : Nat -> Nat -> Bool is
-  fn (m : Nat) is
+leb : Whole -> Whole -> Bool is
+  fn (m : Whole) is
     case m of
-    | zero -> fn (n : Nat) is true end
-    | succ k with ih -> fn (n : Nat) is
+    | zero -> fn (n : Whole) is true end
+    | succ k with ih -> fn (n : Whole) is
         case n of
         | zero -> false
         | succ j -> ih j
@@ -87,11 +94,11 @@ end
 -- keeping DIV-LAW (a = (a // b) * b + a % b) true at b = 0 too
 -- (ref_docs/rune-numeric-tower.md). `/` is exact division and lives at Rat.
 
-divF : Nat -> Nat -> Nat -> Nat is
-  fn (fuel : Nat) is
+divF : Whole -> Whole -> Whole -> Whole is
+  fn (fuel : Whole) is
     case fuel of
-    | zero -> fn (a : Nat) (b : Nat) is 0 end
-    | succ f with ih -> fn (a : Nat) (b : Nat) is
+    | zero -> fn (a : Whole) (b : Whole) is 0 end
+    | succ f with ih -> fn (a : Whole) (b : Whole) is
         case b of
         | zero -> 0
         | succ k ->
@@ -105,11 +112,11 @@ divF : Nat -> Nat -> Nat -> Nat is
   end
 end
 
-modF : Nat -> Nat -> Nat -> Nat is
-  fn (fuel : Nat) is
+modF : Whole -> Whole -> Whole -> Whole is
+  fn (fuel : Whole) is
     case fuel of
-    | zero -> fn (a : Nat) (b : Nat) is a end
-    | succ f with ih -> fn (a : Nat) (b : Nat) is
+    | zero -> fn (a : Whole) (b : Whole) is a end
+    | succ f with ih -> fn (a : Whole) (b : Whole) is
         case b of
         | zero -> a
         | succ k ->
@@ -123,21 +130,21 @@ modF : Nat -> Nat -> Nat -> Nat is
   end
 end
 
-// : Nat -> Nat -> Nat is
-  fn (m : Nat) (n : Nat) is divF m m n end
+// : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is divF m m n end
 end
 
-% : Nat -> Nat -> Nat is
-  fn (m : Nat) (n : Nat) is modF m m n end
+% : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is modF m m n end
 end
 
 -- Euclid. The second argument strictly decreases (a % b < b), so its
 -- successor is budget enough.
-gcdF : Nat -> Nat -> Nat -> Nat is
-  fn (fuel : Nat) is
+gcdF : Whole -> Whole -> Whole -> Whole is
+  fn (fuel : Whole) is
     case fuel of
-    | zero -> fn (a : Nat) (b : Nat) is a end
-    | succ f with ih -> fn (a : Nat) (b : Nat) is
+    | zero -> fn (a : Whole) (b : Whole) is a end
+    | succ f with ih -> fn (a : Whole) (b : Whole) is
         case b of
         | zero -> a
         | succ k -> ih b (a % b)
@@ -147,6 +154,48 @@ gcdF : Nat -> Nat -> Nat -> Nat is
   end
 end
 
-gcd : Nat -> Nat -> Nat is
-  fn (a : Nat) (b : Nat) is gcdF (succ b) a b end
+gcd : Whole -> Whole -> Whole is
+  fn (a : Whole) (b : Whole) is gcdF (succ b) a b end
+end
+
+-- isPos decides nonzero-ness: false on zero, true on every successor. It is the
+-- predicate that carves the counting numbers out of the wholes.
+isPos : Whole -> Bool is
+  fn (n : Whole) is
+    case n of
+    | zero -> false
+    | succ k -> true
+    end
+  end
+end
+
+-- Nat: the counting numbers {1,2,3,…} as the POSITIVE wholes — a whole paired
+-- with a proof it is nonzero. A bare Peano `data Nat is one | nsucc` would be
+-- HASH-IDENTICAL to Whole (same shape, and identity is structure not names), so
+-- the distinct type must have distinct structure: this Σ. `zero` cannot inhabit
+-- it — that would need `Eq Bool false true`, which is uninhabited — so Nat is
+-- zeroless by construction. `wholeOf` is the injection Nat ↪ Whole (= .1).
+Nat : U is
+  Sig Whole (fn (n : Whole) is Eq Bool (isPos n) true end)
+end
+
+-- one = 1, the least counting number; the proof is refl since isPos (succ zero)
+-- computes to true.
+one : Nat is
+  Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ zero) (refl true)
+end
+
+-- nsucc steps a counting number up; the successor of anything is positive, so
+-- the nonzero proof is refl regardless of the predecessor.
+nsucc : Nat -> Nat is
+  fn (k : Nat) is
+    Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ (k.1)) (refl true)
+  end
+end
+
+-- The injection up the tower: a counting number IS its underlying whole. Nat is
+-- literally a subset of Whole, so wholeOf is the first projection; its image is
+-- exactly the positives {1,2,3,…}.
+wholeOf : Nat -> Whole is
+  fn (k : Nat) is k.1 end
 end

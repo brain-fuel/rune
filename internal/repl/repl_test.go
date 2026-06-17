@@ -69,7 +69,7 @@ func TestREPLPrelude(t *testing.T) {
 		"17 // 5",
 		"17 % 5",
 		"gcd 12 18",
-		"double : Nat -> Nat is fn (n : Nat) is n + n end end",
+		"double : Whole -> Whole is fn (n : Whole) is n + n end end",
 		"double 21",
 		":reset",
 		"2 + 2", // the prelude survives :reset
@@ -83,24 +83,25 @@ func TestREPLPrelude(t *testing.T) {
 	got := out.String()
 
 	wants := []string{
-		"2 : Nat",  // 1 + 1
-		"42 : Nat", // 6 * 7 and double 21
-		"0 : Nat",  // 5 - 7
-		"3 : Nat",  // 17 // 5
-		"6 : Nat",  // gcd 12 18
+		"2 : Whole",  // 1 + 1
+		"42 : Whole", // 6 * 7 and double 21
+		"0 : Whole",  // 5 - 7
+		"3 : Whole",  // 17 // 5
+		"6 : Whole",  // gcd 12 18
 		"defined double",
 		"session cleared; prelude reloaded",
-		"4 : Nat", // 2 + 2 after :reset
+		"4 : Whole", // 2 + 2 after :reset
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
 		}
 	}
-	// 17 % 5 = 2 must appear AFTER 17 / 5's "3 : Nat" — both print "2 : Nat"
+	// 17 % 5 = 2 must appear AFTER 17 / 5's "3 : Whole" — both print "2 : Whole"
 	// only if 1+1 did too, so just check the count of value lines is right.
-	if n := strings.Count(got, " : Nat"); n != 8 {
-		t.Errorf("expected 8 Nat value lines, got %d\n--- full output ---\n%s", n, got)
+	// Numerals bind to Whole (the tower's foundation), so results print as Whole.
+	if n := strings.Count(got, " : Whole"); n != 8 {
+		t.Errorf("expected 8 Whole value lines, got %d\n--- full output ---\n%s", n, got)
 	}
 }
 
@@ -125,11 +126,45 @@ func TestREPLLargeArithAndAST(t *testing.T) {
 	}
 	got := out.String()
 	for _, w := range []string{
-		"16000000 : Nat", // 4000 * 4000, accelerated
-		"8000 : Nat",     // 4000 + 4000
-		"999 : Nat",      // 1000 - 1
-		"10000002341234123412341234000000000000000 : Nat", // beyond int64, exact
+		"16000000 : Whole", // 4000 * 4000, accelerated
+		"8000 : Whole",     // 4000 + 4000
+		"999 : Whole",      // 1000 - 1
+		"10000002341234123412341234000000000000000 : Whole", // beyond int64, exact
 		"((+ 1) 2)", // :ast — names, not @hash; NatLits shown, not ?
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}
+
+// TestREPLNumericTower guards the Nat/Whole split: Whole is the foundation
+// {0,1,2,…} that bare numerals bind to; Nat is the counting numbers {1,2,3,…}
+// realized as the POSITIVE wholes (a Σ with a nonzero proof), a genuinely
+// distinct type (a bare Peano Nat would hash-collide with Whole); wholeOf
+// injects Nat ↪ Whole; and zero cannot inhabit Nat.
+func TestREPLNumericTower(t *testing.T) {
+	script := []string{
+		"5",                   // a bare numeral is a Whole
+		":type wholeOf",       // the injection Nat -> Whole (proves Nat is a distinct named type)
+		"wholeOf one",         // 1, the least counting number, in Whole
+		"wholeOf (nsucc one)", // 2, landed in Whole
+		// zero is not a counting number: the nonzero proof is unsatisfiable.
+		"bad : Nat is Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) zero (refl true) end",
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		"5 : Whole",                    // numerals are Whole
+		"Nat -> Whole",                 // :type wholeOf — distinct types, injection
+		"1 : Whole",                    // wholeOf one
+		"2 : Whole",                    // wholeOf (nsucc one)
+		"cannot unify true with false", // zero rejected from Nat
 	} {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
@@ -150,7 +185,7 @@ func TestREPLRunShadow(t *testing.T) {
 		":run 35 * 186",
 		":run gcd 252 105",
 		":run", // no argument: usage error, loop continues
-		"double : Nat -> Nat is fn (n : Nat) is n + n end end",
+		"double : Whole -> Whole is fn (n : Whole) is n + n end end",
 		":run double 21", // a definition added mid-session is visible to the shadow
 		":quit",
 	}
