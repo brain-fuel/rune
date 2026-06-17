@@ -1,0 +1,40 @@
+-- Chapter 76 — Functoriality of `ap` (the action of a function on a path), §F / telos-1. A path
+-- `p : x = y` maps under `f` to `ap f p : f x = f y`, by `pabs (λi. f (p @ i))`. This action is
+-- FUNCTORIAL — it preserves identity and composition — and here BY REFL: the cubical definition
+-- makes the functor laws hold definitionally (papp/pabs β + path η), no transport needed. The
+-- groupoid action of functions on paths, computing.
+
+-- explicit `ap`: the action of f on a path, observed pointwise along the interval.
+apE : (A : UF) -> (B : UF) -> (f : El A -> El B) -> (x : El A) -> (y : El A)
+   -> El (pathF A x y) -> El (pathF B (f x) (f y)) is
+  fn (A : UF) (B : UF) (f : El A -> El B) (x : El A) (y : El A) (p : El (pathF A x y)) is
+    pabs B (fn (i : I) is f (papp A x y p i) end)
+  end
+end
+
+-- IDENTITY LAW: ap of the identity function is the path itself — `ap id p ≡ p`, by `refl` (path
+-- η: `pabs (λi. p @ i) ≡ p`, the inner-path η `convPathEta`).
+apId : (A : UF) -> (x : El A) -> (y : El A) -> (p : El (pathF A x y))
+   -> Eq (El (pathF A x y)) (apE A A (fn (z : El A) is z end) x y p) p is
+  fn (A : UF) (x : El A) (y : El A) (p : El (pathF A x y)) is refl end
+end
+
+-- COMPOSITION LAW: ap respects function composition — `ap g (ap f p) ≡ ap (g ∘ f) p`, by `refl`.
+-- Both sides are `pabs (λi. g (f (p @ i)))` after the papp/pabs β fires on the inner `ap f p`.
+apComp : (A : UF) -> (B : UF) -> (C : UF)
+   -> (f : El A -> El B) -> (g : El B -> El C)
+   -> (x : El A) -> (y : El A) -> (p : El (pathF A x y))
+   -> Eq (El (pathF C (g (f x)) (g (f y))))
+        (apE B C g (f x) (f y) (apE A B f x y p))
+        (apE A C (fn (z : El A) is g (f z) end) x y p) is
+  fn (A : UF) (B : UF) (C : UF) (f : El A -> El B) (g : El B -> El C)
+     (x : El A) (y : El A) (p : El (pathF A x y)) is refl end
+end
+
+-- CONSTANT LAW: ap of a constant function is the reflexivity path at the constant — `ap (λ_. c)
+-- p ≡ refl c`, by `refl` (each `f (p @ i) ~> c`, so `pabs (λi. c)` is constant, η-equal to
+-- `preflF C c` via `convPathEta`).
+apConst : (A : UF) -> (C : UF) -> (c : El C) -> (x : El A) -> (y : El A) -> (p : El (pathF A x y))
+   -> Eq (El (pathF C c c)) (apE A C (fn (z : El A) is c end) x y p) (preflF C c) is
+  fn (A : UF) (C : UF) (c : El C) (x : El A) (y : El A) (p : El (pathF A x y)) is refl end
+end

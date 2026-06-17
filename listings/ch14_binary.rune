@@ -228,6 +228,13 @@ data BN : U is
 | bnP : Pos -> BN
 end
 
+-- The binary constants are written as ordinary bit-spines (least-significant
+-- decision innermost): `35` at Pos is pI (pI (pO (pO (pO pH)))), six nodes, not
+-- thirty-five. (Earlier drafts of this chapter abbreviated such constants with a
+-- `builtin bin` literal binding; that binding is retired — C7 / R-NUM,
+-- Decision 5 — because the compressed core numeral NatLit subsumes it for Nat,
+-- and Pos/BN are better served as the explicit datatype this chapter is about.)
+
 bnsucc : BN -> BN is
   fn (b : BN) is
     case b of
@@ -418,17 +425,16 @@ end
 -- literals to their binary images (each a linear refl), the agreement
 -- theorem swaps spec for implementation, and the final refl asks the kernel
 -- to convert toNat (bnmul …) with a literal — school-method binary
--- multiplication plus one linear readback.
--- (Showcase literals stay ~1500 deep: numerals cap at 4096 in the parser,
--- and proof terms currently carry their erased-in-spirit implicit numerals
--- into the JS shadow, where ~1600-deep nesting overflows node's parser —
--- the 0-fragment call-site erasure gap, recorded in the design note. The
--- runnable answer below needs no literal and computes 35 · 186 = 6510.)
+-- multiplication plus one linear readback. The Nat literals on the right are
+-- compressed core numerals (NatLit), one node each of any size — no 4096 cap.
+-- The runnable answer below computes 35 · 186 = 6510 through binary.
 
+-- The binary constants, written as explicit bit-spines (the `builtin bin`
+-- literal abbreviation is retired; these ARE what it expanded to).
 x35 : Pos is pI (pI (pO (pO (pO pH)))) end
 x41 : Pos is pI (pO (pO (pI (pO pH)))) end
 x93 : Pos is pI (pO (pI (pI (pI (pO pH))))) end
-x186 : Pos is pO x93 end
+x186 : Pos is pO (pI (pO (pI (pI (pI (pO pH)))))) end
 
 toNat35 : toNat (bnP x35) = 35 is refl 35 end
 toNat41 : toNat (bnP x41) = 41 is refl 41 end

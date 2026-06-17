@@ -1,0 +1,426 @@
+-- Chapter 99 — VERIFIED MAP DELETE (M6 / telos-3 tiered-verified stdlib). Chapter 75 certified a
+-- finite Map over Nat keys with the insert/lookup correctness law `lookup k (insert k v m) = some
+-- v`. A map library is not complete until DELETE is certified against `lookup` too — the contract
+-- of `delete` is its action on `lookup`:
+--   lookupDeleteSame   lookup k (delete k m) = none          (a deleted key is gone)
+--   lookupDeleteOther  j /= k -> lookup k (delete j m) = lookup k m   (others are preserved)
+-- and, rounding out the insert side alongside ch75's `lookupInsertSame`:
+--   lookupInsertOther  j /= k -> lookup k (insert j v m) = lookup k m
+--
+-- DESIGN — `delete j m` walks the association list (the `put`-cons of `Entry`s) and DROPS every
+-- entry whose key `eqNat`-matches j, exactly the ch96 delete-via-filter idiom transposed onto the
+-- Map/Entry eliminators. Both `lookup` and `delete` recurse on the Map, so the laws are
+-- assoc-list inductions over `MapElim`, mirroring ch75's `lookupInsertSame` and ch96's
+-- `memberDelete`: the `put` case double-branches (`BoolElim`) on the entry key versus the deleted
+-- key j and versus the looked-up key k, and `eqNat j k = false` (lookupDeleteOther) separates the
+-- two. `eqNatRefl` collapses the `same` guards; `symBool` flips orientation for `subst`.
+--
+-- Per the self-contained-listings convention, every primitive is redeclared BYTE-IDENTICAL to
+-- ch75: Bool, Nat, Option/none/some, Entry/mkE, Map/empty/put, eqNat, eqNatRefl, symBool, insert,
+-- lookup, lookupInsertSame.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- a key/value entry and a map as a list of entries.
+data Entry : U -> U is
+  mkE : (V : U) -> Nat -> V -> Entry V
+end
+
+data Map : U -> U is
+  empty : (V : U) -> Map V
+| put   : (V : U) -> Entry V -> Map V -> Map V
+end
+
+-- DECIDABLE Nat equality: zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true. base refl; step is the IH on the nose (eqNat (succ k)
+-- (succ k) ~> eqNat k k definitionally).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+insert : (V : U) -> Nat -> V -> Map V -> Map V is
+  fn (V : U) (k : Nat) (v : V) (m : Map V) is put V (mkE V k v) m end
+end
+
+-- lookup: walk the entries; the first whose key equals `k` (by eqNat) wins.
+lookup : (V : U) -> Nat -> Map V -> Option V is
+  fn (V : U) (k : Nat) (m : Map V) is
+    MapElim V (fn (w : Map V) is Option V end)
+      (none V)
+      (fn (e : Entry V) (rest : Map V) (ih : Option V) is
+         EntryElim V (fn (w : Entry V) is Option V end)
+           (fn (k2 : Nat) (v2 : V) is
+              BoolElim (fn (b : Bool) is Option V end)
+                (some V v2)
+                ih
+                (eqNat k k2)
+            end)
+           e
+       end)
+      m
+  end
+end
+
+-- THE INSERT CORRECTNESS LAW (verbatim ch75): lookup of a freshly inserted key returns its value.
+lookupInsertSame : (V : U) -> (k : Nat) -> (v : V) -> (m : Map V)
+   -> Eq (Option V) (lookup V k (insert V k v m)) (some V v) is
+  fn (V : U) (k : Nat) (v : V) (m : Map V) is
+    subst Bool true (eqNat k k) (symBool (eqNat k k) true (eqNatRefl k))
+      (fn (b : Bool) is
+         Eq (Option V)
+           (BoolElim (fn (w : Bool) is Option V end) (some V v) (lookup V k m) b)
+           (some V v) end)
+      (refl (some V v))
+  end
+end
+
+-- ====================================================================================
+-- DELETE — drop every entry whose key eqNat-matches the deleted key. The Map/Entry analog of
+-- ch96's delete-via-filter. Walk the assoc-list (MapElim): at `put (mkE k2 v2) rest`, branch
+-- (BoolElim) on `eqNat j k2` — drop the entry (~> ih) when it matches j, otherwise keep it
+-- (~> put (mkE k2 v2) ih).
+-- ====================================================================================
+
+delete : (V : U) -> Nat -> Map V -> Map V is
+  fn (V : U) (j : Nat) (m : Map V) is
+    MapElim V (fn (w : Map V) is Map V end)
+      (empty V)
+      (fn (e : Entry V) (rest : Map V) (ih : Map V) is
+         EntryElim V (fn (w : Entry V) is Map V end)
+           (fn (k2 : Nat) (v2 : V) is
+              BoolElim (fn (b : Bool) is Map V end)
+                ih
+                (put V (mkE V k2 v2) ih)
+                (eqNat j k2)
+            end)
+           e
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- LAW 1 — lookupDeleteSame: a deleted key is gone. `lookup k (delete k m) = none`. Induction on m.
+--   empty: lookup k (delete k empty) ~> lookup k empty ~> none. refl.
+--   put (mkE k2 v2) rest: branch (BoolElim) on `eqNat k k2`, abstracting it where it guards BOTH
+--     delete's drop/keep choice AND lookup's match.
+--     eqNat k k2 = true: delete DROPS the entry (~> delete k rest); lookup never sees it; close
+--          by the IH (lookup k (delete k rest) = none).
+--     eqNat k k2 = false: delete KEEPS it (~> put (mkE k2 v2) (delete k rest)); lookup's guard
+--          `eqNat k k2` is false too, so it skips to lookup k (delete k rest) = ih = none.
+--   Both arms reduce to the IH; the guard's two roles (delete + lookup) share the same `eqNat k
+--   k2`, so one BoolElim closes both.
+-- ====================================================================================
+
+lookupDeleteSame : (V : U) -> (k : Nat) -> (m : Map V)
+   -> Eq (Option V) (lookup V k (delete V k m)) (none V) is
+  fn (V : U) (k : Nat) (m : Map V) is
+    MapElim V
+      (fn (w : Map V) is Eq (Option V) (lookup V k (delete V k w)) (none V) end)
+      -- empty: lookup k (delete k empty) ~> lookup k empty ~> none.
+      (refl (none V))
+      (fn (e : Entry V) (rest : Map V)
+          (ih : Eq (Option V) (lookup V k (delete V k rest)) (none V)) is
+         -- destructure the entry to expose its key k2 / value v2.
+         EntryElim V
+           (fn (w : Entry V) is
+              Eq (Option V) (lookup V k (delete V k (put V w rest))) (none V) end)
+           (fn (k2 : Nat) (v2 : V) is
+              -- branch on eqNat k k2. The motive abstracts the guard as it appears in BOTH delete's
+              -- drop/keep BoolElim and (in the keep arm) lookup's match BoolElim.
+              BoolElim
+                (fn (g : Bool) is
+                   Eq Bool (eqNat k k2) g
+                     -> Eq (Option V)
+                          (lookup V k
+                             (BoolElim (fn (b : Bool) is Map V end)
+                                (delete V k rest)
+                                (put V (mkE V k2 v2) (delete V k rest))
+                                g))
+                          (none V) end)
+                -- eqNat k k2 = true: delete DROPS; lookup k (delete k rest) = ih.
+                (fn (hg : Eq Bool (eqNat k k2) true) is ih end)
+                -- eqNat k k2 = false: delete KEEPS; lookup steps past the head (its guard eqNat k
+                -- k2 is false) to lookup k (delete k rest) = ih. Rewrite the lookup guard to false.
+                (fn (hg : Eq Bool (eqNat k k2) false) is
+                   subst Bool false (eqNat k k2) (symBool (eqNat k k2) false hg)
+                     (fn (g2 : Bool) is
+                        Eq (Option V)
+                          (BoolElim (fn (b : Bool) is Option V end)
+                             (some V v2)
+                             (lookup V k (delete V k rest))
+                             g2)
+                          (none V) end)
+                     ih end)
+                (eqNat k k2)
+                (refl (eqNat k k2)) end)
+           e
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- LAW 2 — lookupDeleteOther: deleting key j preserves the lookup of any other key k (j /= k, i.e.
+-- `eqNat j k = false`). `lookup k (delete j m) = lookup k m`. Induction on m.
+--   empty: both sides ~> none. refl.
+--   put (mkE k2 v2) rest: branch on `eqNat j k2` (delete's drop/keep). The RHS `lookup k (put
+--     (mkE k2 v2) rest)` reduces under a guard `eqNat k k2` independent of j, so we ALSO branch on
+--     `eqNat k k2` to expose the head's lookup behaviour on both sides.
+--     eqNat j k2 = true: delete DROPS the head. We must show lookup k (delete j rest) = lookup k
+--          (put (mkE k2 v2) rest). Since eqNat j k2 = true, eqNatSound gives j = k2; with j /= k
+--          (hjk) the head key k2 /= k, so the head does NOT match k in lookup — RHS skips it to
+--          lookup k rest, and LHS = lookup k (delete j rest) = ih. We rewrite k2 to j (so the head
+--          guard becomes eqNat k j) then flip eqNat k j to false (from eqNat j k = false via
+--          eqNatSymFalse) to drop the head from the RHS lookup, landing on ih.
+--     eqNat j k2 = false: delete KEEPS the head (~> put (mkE k2 v2) (delete j rest)). Both LHS and
+--          RHS lookups now lead with the SAME head guard eqNat k k2; branch on it:
+--            eqNat k k2 = true: both sides ~> some v2. refl.
+--            eqNat k k2 = false: both sides skip the head; LHS ~> lookup k (delete j rest), RHS ~>
+--                 lookup k rest, related by the IH.
+-- Mirrors ch96's memberDelete double case-split, with eqNatSound/eqNatSymFalse handling the
+-- key-collision arithmetic.
+-- ====================================================================================
+
+-- eqNat is SOUND: eqNat x y = true -> x = y (verbatim ch85/ch96). Used to learn j = k2 from a
+-- matched delete guard. At the `true` branch the motive is Eq Nat x x = refl x; mixed branches
+-- discharge an absurd `false = true`.
+eqNatSound : (x : Nat) -> (y : Nat) -> Eq Bool (eqNat x y) true -> Eq Nat x y is
+  fn (x : Nat) is
+    NatElim
+      (fn (w : Nat) is (y : Nat) -> Eq Bool (eqNat w y) true -> Eq Nat w y end)
+      (fn (y : Nat) is
+         NatElim
+           (fn (u : Nat) is Eq Bool (eqNat zero u) true -> Eq Nat zero u end)
+           (fn (h : Eq Bool true true) is refl zero end)
+           (fn (m : Nat) (ihm : Eq Bool (eqNat zero m) true -> Eq Nat zero m) is
+              fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat zero (succ m)
+                     | false -> Eq Nat zero zero
+                     end
+                   end)
+                  (refl zero) end
+            end)
+           y end)
+      (fn (k : Nat) (ih : (y : Nat) -> Eq Bool (eqNat k y) true -> Eq Nat k y) is
+         fn (y : Nat) is
+           NatElim
+             (fn (u : Nat) is Eq Bool (eqNat (succ k) u) true -> Eq Nat (succ k) u end)
+             (fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat (succ k) zero
+                     | false -> Eq Nat (succ k) (succ k)
+                     end
+                   end)
+                  (refl (succ k)) end)
+             (fn (m : Nat) (ihm : Eq Bool (eqNat (succ k) m) true -> Eq Nat (succ k) m) is
+                fn (h : Eq Bool (eqNat k m) true) is
+                  subst Nat k m (ih m h)
+                    (fn (z : Nat) is Eq Nat (succ k) (succ z) end)
+                    (refl (succ k)) end
+              end)
+             y end
+       end)
+      x
+  end
+end
+
+-- eqNat is SYMMETRIC, false-preserving: eqNat m n = false -> eqNat n m = false (verbatim ch96).
+eqNatSymFalse : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) false -> Eq Bool (eqNat n m) false is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) false -> Eq Bool (eqNat n x) false end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) false -> Eq Bool (eqNat y zero) false end)
+           (fn (h : Eq Bool true false) is h end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) false -> Eq Bool (eqNat j zero) false) is
+              fn (h : Eq Bool false false) is refl false end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) false -> Eq Bool (eqNat n k) false) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) false -> Eq Bool (eqNat y (succ k)) false end)
+             (fn (h : Eq Bool false false) is refl false end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) false -> Eq Bool (eqNat j (succ k)) false) is
+                fn (h : Eq Bool (eqNat k j) false) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+lookupDeleteOther : (V : U) -> (j : Nat) -> (k : Nat) -> (m : Map V)
+   -> Eq Bool (eqNat j k) false
+   -> Eq (Option V) (lookup V k (delete V j m)) (lookup V k m) is
+  fn (V : U) (j : Nat) (k : Nat) (m : Map V) (hjk : Eq Bool (eqNat j k) false) is
+    MapElim V
+      (fn (w : Map V) is Eq (Option V) (lookup V k (delete V j w)) (lookup V k w) end)
+      -- empty: both ~> none.
+      (refl (none V))
+      (fn (e : Entry V) (rest : Map V)
+          (ih : Eq (Option V) (lookup V k (delete V j rest)) (lookup V k rest)) is
+         EntryElim V
+           (fn (w : Entry V) is
+              Eq (Option V)
+                (lookup V k (delete V j (put V w rest)))
+                (lookup V k (put V w rest)) end)
+           (fn (k2 : Nat) (v2 : V) is
+              -- branch on eqNat j k2 (delete's drop/keep guard). The RHS lookup of the unchanged
+              -- map leads with eqNat k k2; we abstract that guard on the RHS in the motive.
+              BoolElim
+                (fn (gj : Bool) is
+                   Eq Bool (eqNat j k2) gj
+                     -> Eq (Option V)
+                          (lookup V k
+                             (BoolElim (fn (b : Bool) is Map V end)
+                                (delete V j rest)
+                                (put V (mkE V k2 v2) (delete V j rest))
+                                gj))
+                          (BoolElim (fn (b : Bool) is Option V end)
+                             (some V v2)
+                             (lookup V k rest)
+                             (eqNat k k2)) end)
+                -- eqNat j k2 = true: delete DROPS the head. j = k2 (eqNatSound), and j /= k, so the
+                -- head key k2 /= k: the RHS head guard eqNat k k2 must be false. Rewrite k2 to j so
+                -- the RHS guard becomes eqNat k j; flip it to false (eqNatSymFalse on hjk) to drop
+                -- the head; LHS = lookup k (delete j rest) = ih = lookup k rest = RHS.
+                (fn (hgj : Eq Bool (eqNat j k2) true) is
+                   subst Nat j k2 (eqNatSound j k2 hgj)
+                     (fn (kk : Nat) is
+                        Eq (Option V)
+                          (lookup V k (delete V j rest))
+                          (BoolElim (fn (b : Bool) is Option V end)
+                             (some V v2)
+                             (lookup V k rest)
+                             (eqNat k kk)) end)
+                     (subst Bool false (eqNat k j) (symBool (eqNat k j) false (eqNatSymFalse j k hjk))
+                        (fn (g2 : Bool) is
+                           Eq (Option V)
+                             (lookup V k (delete V j rest))
+                             (BoolElim (fn (b : Bool) is Option V end)
+                                (some V v2)
+                                (lookup V k rest)
+                                g2) end)
+                        ih) end)
+                -- eqNat j k2 = false: delete KEEPS the head. Both lookups now lead with eqNat k k2;
+                -- branch on it.
+                (fn (hgj : Eq Bool (eqNat j k2) false) is
+                   BoolElim
+                     (fn (gk : Bool) is
+                        Eq Bool (eqNat k k2) gk
+                          -> Eq (Option V)
+                               (BoolElim (fn (b : Bool) is Option V end)
+                                  (some V v2)
+                                  (lookup V k (delete V j rest))
+                                  gk)
+                               (BoolElim (fn (b : Bool) is Option V end)
+                                  (some V v2)
+                                  (lookup V k rest)
+                                  gk) end)
+                     -- eqNat k k2 = true: both ~> some v2.
+                     (fn (hgk : Eq Bool (eqNat k k2) true) is refl (some V v2) end)
+                     -- eqNat k k2 = false: both skip the head; LHS lookup k (delete j rest), RHS
+                     -- lookup k rest, related by ih.
+                     (fn (hgk : Eq Bool (eqNat k k2) false) is ih end)
+                     (eqNat k k2)
+                     (refl (eqNat k k2)) end)
+                (eqNat j k2)
+                (refl (eqNat j k2)) end)
+           e
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- BONUS — lookupInsertOther: inserting key j preserves the lookup of any other key k. Insert is a
+-- single `put` at the front, so this is NOT an induction — it unfolds in one step. `lookup k
+-- (insert j v m) = lookup k (put (mkE j v) m)` leads with the guard `eqNat k j`; with `eqNat j k
+-- = false` (so `eqNat k j = false` by eqNatSymFalse) lookup skips the new head to `lookup k m`.
+-- The companion to ch75's lookupInsertSame.
+-- ====================================================================================
+
+lookupInsertOther : (V : U) -> (j : Nat) -> (k : Nat) -> (v : V) -> (m : Map V)
+   -> Eq Bool (eqNat j k) false
+   -> Eq (Option V) (lookup V k (insert V j v m)) (lookup V k m) is
+  fn (V : U) (j : Nat) (k : Nat) (v : V) (m : Map V) (hjk : Eq Bool (eqNat j k) false) is
+    -- lookup k (insert j v m) ~> if eqNat k j then some v else lookup k m. Rewrite the guard
+    -- eqNat k j to false (eqNatSymFalse on hjk) so it reduces to the else branch lookup k m.
+    subst Bool false (eqNat k j) (symBool (eqNat k j) false (eqNatSymFalse j k hjk))
+      (fn (g : Bool) is
+         Eq (Option V)
+           (BoolElim (fn (b : Bool) is Option V end) (some V v) (lookup V k m) g)
+           (lookup V k m) end)
+      (refl (lookup V k m))
+  end
+end
+
+-- ====================================================================================
+-- SANITY (representation-agnostic: assert via Eq + refl)
+-- ====================================================================================
+
+-- a concrete map { 1 -> 1, 2 -> 2 } over Nat values.
+mapOneTwo : Map Nat is
+  put Nat (mkE Nat (succ zero) (succ zero))
+    (put Nat (mkE Nat (succ (succ zero)) (succ (succ zero))) (empty Nat))
+end
+
+-- lookup 1 (delete 1 m) = none (key 1 was deleted).
+delete1Gone : Eq (Option Nat)
+   (lookup Nat (succ zero) (delete Nat (succ zero) mapOneTwo)) (none Nat) is
+  refl (none Nat)
+end
+
+-- lookup 2 (delete 1 m) = some 2 (key 2 survives deleting key 1).
+delete1Keeps2 : Eq (Option Nat)
+   (lookup Nat (succ (succ zero)) (delete Nat (succ zero) mapOneTwo))
+   (some Nat (succ (succ zero))) is
+  refl (some Nat (succ (succ zero)))
+end

@@ -20,17 +20,7 @@ type parser struct {
 	// let/seq type annotation, where '=' belongs to the binding (GRAMMAR §5.4). It
 	// is inherited through arrows and operators and reset inside bracketed groups.
 	noEq bool
-	// natZero/natSucc are the constructor names a `builtin nat` declaration
-	// registered; numerals expand against them at parse time (GRAMMAR §5.5).
-	// Empty means no binding: a numeral is then a parse error.
-	natZero, natSucc string
 }
-
-// numMax caps numeral expansion: a literal is nothing but its unary succ-chain
-// (a compressed core numeral is parked), and evaluating an n-deep chain is
-// currently superlinear in the Machine (spine copying — see PARKING-LOT), so
-// an over-sized literal must fail loudly rather than stall the checker.
-const numMax = 1 << 12
 
 // skipNL advances past tNewline tokens. Newlines are insignificant everywhere the
 // ordinary peek/next path runs; only seq item collection reads tokens raw (§2, §5.3).
@@ -105,6 +95,24 @@ func ParseProgram(src string) ([]Item, error) {
 	p := &parser{toks: appendEOF(toks)}
 	var items []Item
 	for p.peek().kind != tEOF {
+		if p.peek().kind == tModule {
+			mod, err := p.parseModule()
+			if err != nil {
+				return nil, err
+			}
+			for _, d := range mod {
+				items = append(items, d)
+			}
+			continue
+		}
+		if p.peek().kind == tForeign {
+			d, err := p.parseForeign()
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, d)
+			continue
+		}
 		if p.peek().kind == tData {
 			d, err := p.parseData()
 			if err != nil {
@@ -130,47 +138,50 @@ func ParseProgram(src string) ([]Item, error) {
 	return items, nil
 }
 
-// parseBuiltin parses `builtin nat Ident Ident Ident` (GRAMMAR §3) and registers
-// the binding with the parser, so numerals in the rest of the file expand
-// against it (§5.5).
-func (p *parser) parseBuiltin() (BuiltinNat, error) {
+// parseBuiltin parses a builtin binding (GRAMMAR §3):
+//
+//	builtin nat Nat zero succ
+//	builtin natMul mul
+//
+// and returns the corresponding item. Numerals are NOT expanded at parse time
+// (numLit defers that); the binding governs lowering downstream (§5.5). The old
+// `builtin bin` binary-numeral binding is retired (C7 / R-NUM, Decision 5):
+// NatLit subsumes it.
+func (p *parser) parseBuiltin() (Item, error) {
 	p.next() // 'builtin'
 	kind, err := p.expect(tIdent)
 	if err != nil {
-		return BuiltinNat{}, err
+		return nil, err
 	}
-	if kind.text != "nat" {
-		return BuiltinNat{}, fmt.Errorf("unknown builtin kind %q at offset %d (only \"nat\" exists)", kind.text, kind.pos)
+	switch kind.text {
+	case "nat":
+		names, err := p.builtinNames(3)
+		if err != nil {
+			return nil, err
+		}
+		return BuiltinNat{TyName: names[0], Zero: names[1], Succ: names[2]}, nil
+	case "natAdd", "natMul", "natMonus":
+		names, err := p.builtinNames(1)
+		if err != nil {
+			return nil, err
+		}
+		return BuiltinNatOp{Kind: kind.text, DefName: names[0]}, nil
+	default:
+		return nil, fmt.Errorf("unknown builtin kind %q at offset %d (only \"nat\", \"natAdd\", \"natMul\", and \"natMonus\" exist)", kind.text, kind.pos)
 	}
-	var names [3]string
+}
+
+// builtinNames reads n identifiers after a builtin kind keyword.
+func (p *parser) builtinNames(n int) ([]string, error) {
+	names := make([]string, n)
 	for i := range names {
 		id, err := p.expect(tIdent)
 		if err != nil {
-			return BuiltinNat{}, err
+			return nil, err
 		}
 		names[i] = id.text
 	}
-	b := BuiltinNat{TyName: names[0], Zero: names[1], Succ: names[2]}
-	p.natZero, p.natSucc = b.Zero, b.Succ
-	return b, nil
-}
-
-// ParseExprNat is ParseExpr with a registered `builtin nat` binding, so numerals
-// in the expression expand. The REPL uses it once a session has the binding.
-func ParseExprNat(src, zero, succ string) (Exp, error) {
-	toks, err := lex(src)
-	if err != nil {
-		return nil, err
-	}
-	p := &parser{toks: toks, natZero: zero, natSucc: succ}
-	e, err := p.parseExpr()
-	if err != nil {
-		return nil, err
-	}
-	if p.peek().kind != tEOF {
-		return nil, fmt.Errorf("unexpected %s at offset %d", p.peek().kind, p.peek().pos)
-	}
-	return e, nil
+	return names, nil
 }
 
 // parseData parses `data Ident ":" Expr "is" Ctor ("|" Ctor)* "end"` with
@@ -241,9 +252,78 @@ func ParseFile(src string) ([]Def, error) {
 	return defs, nil
 }
 
+// parseForeign parses `foreign Name : Type end` (R-FFI / B4): a bodiless typed
+// axiom whose type is its contract. No body — its meaning is supplied by the
+// host at link time, and it is tracked as an assumption.
+func (p *parser) parseForeign() (Def, error) {
+	if _, err := p.expect(tForeign); err != nil {
+		return Def{}, err
+	}
+	id := p.peek()
+	if id.kind != tIdent && id.kind != tOp {
+		return Def{}, fmt.Errorf("expected a foreign name, found %s at offset %d", id.kind, id.pos)
+	}
+	p.next()
+	if _, err := p.expect(tColon); err != nil {
+		return Def{}, err
+	}
+	ty, err := p.parseExpr()
+	if err != nil {
+		return Def{}, err
+	}
+	if _, err := p.expect(tEnd); err != nil {
+		return Def{}, err
+	}
+	return Def{Name: id.text, Ty: ty, IsForeign: true}, nil
+}
+
+// parseModule parses `module Name is <Def>* end` (C6): a namespace block. Each
+// inner definition's name is prefixed with `Name.`, and it is otherwise an
+// ordinary top-level def — references write the qualified name `Name.member`
+// (one identifier token, since the lexer absorbs `.member` segments). Modules
+// nest by name concatenation; only definitions (not datatypes) live inside for
+// now. A module is just sugar over qualified-named defs — no new core.
+func (p *parser) parseModule() ([]Def, error) {
+	if _, err := p.expect(tModule); err != nil {
+		return nil, err
+	}
+	name := p.peek()
+	if name.kind != tIdent {
+		return nil, fmt.Errorf("expected a module name, found %s at offset %d", name.kind, name.pos)
+	}
+	p.next()
+	if _, err := p.expect(tIs); err != nil {
+		return nil, err
+	}
+	var defs []Def
+	for p.peek().kind != tEnd {
+		if p.peek().kind == tEOF {
+			return nil, fmt.Errorf("%w: module %q is missing its 'end'", ErrIncomplete, name.text)
+		}
+		d, err := p.parseDef()
+		if err != nil {
+			return nil, err
+		}
+		d.Name = name.text + "." + d.Name
+		defs = append(defs, d)
+	}
+	p.next() // consume 'end'
+	return defs, nil
+}
+
 // parseDef parses `DefName ":" Expr "is" Expr "end"`. The type annotation is
 // mandatory in v0.2.0. A definition name is an identifier or an operator (§3).
 func (p *parser) parseDef() (Def, error) {
+	isInstance := false
+	if p.peek().kind == tInstance {
+		p.next()
+		isInstance = true
+	}
+	isPartial := false
+	if p.peek().kind == tPartial {
+		p.next()
+		isPartial = true
+	}
 	id := p.peek()
 	if id.kind != tIdent && id.kind != tOp {
 		if id.kind == tEOF {
@@ -269,7 +349,7 @@ func (p *parser) parseDef() (Def, error) {
 	if _, err := p.expect(tEnd); err != nil {
 		return Def{}, err
 	}
-	return Def{Name: id.text, Ty: ty, Body: body}, nil
+	return Def{Name: id.text, Ty: ty, Body: body, IsInstance: isInstance, IsPartial: isPartial}, nil
 }
 
 func (p *parser) parseExpr() (Exp, error) {
@@ -418,11 +498,26 @@ func addLevel(op string) bool {
 	return op == "+" || op == "-"
 }
 
+// projTail consumes trailing postfix Σ projections (.1 / .2), binding tighter
+// than application: m.2.1 is ((m.2).1), and f x.1 is f (x.1).
+func (p *parser) projTail(e Exp) Exp {
+	for p.peek().kind == tProj {
+		t := p.next()
+		if t.text == "1" {
+			e = EFst{P: e}
+		} else {
+			e = ESnd{P: e}
+		}
+	}
+	return e
+}
+
 func (p *parser) parseApp() (Exp, error) {
 	fn, err := p.parseAtom()
 	if err != nil {
 		return nil, err
 	}
+	fn = p.projTail(fn)
 	for {
 		if p.peek().kind == tLBrace {
 			// f {e}: an explicitly-supplied implicit argument. The braces reset
@@ -448,7 +543,7 @@ func (p *parser) parseApp() (Exp, error) {
 		if err != nil {
 			return nil, err
 		}
-		fn = EApp{Fn: fn, Arg: arg}
+		fn = EApp{Fn: fn, Arg: p.projTail(arg)}
 	}
 }
 
@@ -489,12 +584,32 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tSubst:
 		p.next()
 		return ESubst{}, nil
+	case tSig:
+		p.next()
+		return ESig{}, nil
+	case tPair:
+		p.next()
+		return EPair{}, nil
+	case tFst:
+		p.next()
+		a, err := p.parseAtom()
+		if err != nil {
+			return nil, err
+		}
+		return EFst{P: p.projTail(a)}, nil
+	case tSnd:
+		p.next()
+		a, err := p.parseAtom()
+		if err != nil {
+			return nil, err
+		}
+		return ESnd{P: p.projTail(a)}, nil
 	case tIdent:
 		p.next()
 		return EVar{Name: t.text}, nil
 	case tNum:
 		p.next()
-		return p.expandNum(t)
+		return p.numLit(t)
 	case tFn:
 		return p.parseLam()
 	case tCase:
@@ -595,23 +710,16 @@ func qtyOf(text string) core.Qty {
 	return core.QOne
 }
 
-// expandNum desugars a numeral against the registered `builtin nat` binding:
-// n becomes the n-fold application of Succ to Zero (GRAMMAR §5.5, §6). The
-// expansion is pure parser sugar — downstream the constructors are ordinary
-// names resolving to ordinary content-hash references.
-func (p *parser) expandNum(t token) (Exp, error) {
-	if p.natZero == "" {
-		return nil, fmt.Errorf("numeral %s at offset %d has no meaning: no `builtin nat` declared", t.text, t.pos)
-	}
+// numLit reads a numeral token into an unexpanded ENum. Expansion is deferred
+// to lowering (resolver or elaborator), where the meaning — the unary
+// `builtin nat`, lowered to a compressed NatLit — is fixed by the expected type
+// (see numeral.go). The only check here is that the digits fit a machine int.
+func (p *parser) numLit(t token) (Exp, error) {
 	n, err := strconv.Atoi(t.text)
-	if err != nil || n > numMax {
-		return nil, fmt.Errorf("numeral %s at offset %d is too large to expand (unary literals cap at %d)", t.text, t.pos, numMax)
+	if err != nil {
+		return nil, fmt.Errorf("numeral %s at offset %d is not a representable integer", t.text, t.pos)
 	}
-	e := Exp(EVar{Name: p.natZero})
-	for range n {
-		e = EApp{Fn: EVar{Name: p.natSucc}, Arg: e}
-	}
-	return e, nil
+	return ENum{Val: n, Pos: t.pos}, nil
 }
 
 // isQtyTok reports whether a token is a usage annotation in binder position:

@@ -1,0 +1,547 @@
+-- Chapter 86 — A CERTIFIED SORT, ASSEMBLED: the two halves bundled into ONE theorem.
+-- ch84 proved insertion sort produces a SORTED list (`sortSorts`); ch85 proved it is a
+-- PERMUTATION of its input — every key keeps its occurrence count (`sortPerm`). A certified
+-- sort is BOTH at once. With Σ in the outer core (C1: `Sig`/`Pair`/`Fst`/`Snd`, ch26/ch27)
+-- and conjunction as a non-dependent Σ, we package the output list together with BOTH
+-- certificates in a single Σ-value:
+--   sortCorrect : (xs : List Nat)
+--      -> Sig (List Nat) (fn (ys : List Nat) is
+--           And (Sorted ys) ((k : Nat) -> Eq Nat (count k ys) (count k xs)) end)
+-- — there EXISTS a list `ys` (it is `sort xs`) that is sorted AND has the same counts as
+-- `xs`. The proof is trivial ASSEMBLY: `Pair` the witness `sort xs` with the conjunction
+-- `andI (sortSorts xs) (fn k. sortPerm k xs)` of the two ch84/ch85 lemmas. This is the
+-- full functional specification of sorting, one type, one term, machine-checked.
+--
+-- Per the self-contained-listings convention, everything the statement and proof consume is
+-- redeclared VERBATIM from ch84 (order primitives, reflection lemmas, `Sorted`, `insert`,
+-- the preservation chain, `sort`, `sortSorts`) and ch85 (`eqNat`, `count`, `bump`,
+-- `bumpSwap`, `insertCount`, `sortPerm`). Conjunction `And` is a non-dependent `Sig`
+-- (`Sig P (fn _. Q)`), the idiom ch27 uses for Σ-records, with intro `andI` = `Pair`.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- lte a b = (a <= b), verbatim from ch84/ch65: zero is below everything; succ k <= zero
+-- is false; succ k <= succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- Boolean conjunction by BoolElim on the first argument: `and true b ~> b`, `and false _ ~>
+-- false`. (`or` from ch83 is needed only by the totality statement below.)
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- ABSURDITY (ch80): from `false = true`, conclude any ordering.
+lteAbsurd : (a : Nat) -> (c : Nat) -> Eq Bool false true -> Eq Bool (lte a c) true is
+  fn (a : Nat) (c : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- TRANSITIVITY (ch80), redeclared verbatim — the bound is threaded through it.
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TOTALITY (ch83), redeclared verbatim — the comparison `insert` branches on.
+lteTotal : (a : Nat) -> (b : Nat)
+   -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN-CONJUNCTION REFLECTION
+-- ====================================================================================
+
+andTrueL : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool x true end)
+      (fn (h : Eq Bool b true) is refl true end)
+      (fn (h : Eq Bool false true) is h end)
+      a
+  end
+end
+
+andTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool b true) is h end)
+      (fn (h : Eq Bool false true) is
+         subst Bool false true h
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool b true
+              | false -> Eq Bool true true
+              end
+            end)
+           (refl true) end)
+      a
+  end
+end
+
+andIntro : (a : Bool) -> (b : Bool)
+   -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool x true -> Eq Bool b true -> Eq Bool (and x b) true end)
+      (fn (ha : Eq Bool true true) (hb : Eq Bool b true) is hb end)
+      (fn (ha : Eq Bool false true) (hb : Eq Bool b true) is
+         subst Bool false true ha
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool (and false b) true
+              | false -> Eq Bool (and false b) (and false b)
+              end
+            end)
+           (refl (and false b)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- SORTEDNESS (decidable, then reflected into U)
+-- ====================================================================================
+
+allLte : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (y : Nat) (rest : List Nat) (ih : Bool) is and (lte x y) ih end)
+      xs
+  end
+end
+
+sortedb : List Nat -> Bool is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (x : Nat) (rest : List Nat) (ih : Bool) is and (allLte x rest) ih end)
+      xs
+  end
+end
+
+lteAll : Nat -> List Nat -> U is
+  fn (x : Nat) (xs : List Nat) is Eq Bool (allLte x xs) true end
+end
+
+Sorted : List Nat -> U is
+  fn (xs : List Nat) is Eq Bool (sortedb xs) true end
+end
+
+-- ordered insertion: drop x in front of the first element it does not exceed.
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (cons Nat x (nil Nat))
+      (fn (y : Nat) (ys : List Nat) (rest : List Nat) is
+         BoolElim (fn (b : Bool) is List Nat end)
+           (cons Nat x (cons Nat y ys))
+           (cons Nat y rest)
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- PRESERVATION
+-- ====================================================================================
+
+lteAllTrans : (a : Nat) -> (b : Nat) -> (xs : List Nat)
+   -> Eq Bool (lte a b) true -> lteAll b xs -> lteAll a xs is
+  fn (a : Nat) (b : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (lte a b) true -> lteAll b w -> lteAll a w end)
+      (fn (hab : Eq Bool (lte a b) true) (hall : lteAll b (nil Nat)) is refl true end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Bool (lte a b) true -> lteAll b ys -> lteAll a ys) is
+         fn (hab : Eq Bool (lte a b) true) (hall : lteAll b (cons Nat y ys)) is
+           andIntro (lte a y) (allLte a ys)
+             (lteTrans a b y hab (andTrueL (lte b y) (allLte b ys) hall))
+             (ih hab (andTrueR (lte b y) (allLte b ys) hall))
+         end
+       end)
+      xs
+  end
+end
+
+insertAll : (x : Nat) -> (b : Nat) -> (xs : List Nat)
+   -> Eq Bool (lte b x) true -> lteAll b xs -> lteAll b (insert x xs) is
+  fn (x : Nat) (b : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (lte b x) true -> lteAll b w -> lteAll b (insert x w) end)
+      (fn (hbx : Eq Bool (lte b x) true) (hall : lteAll b (nil Nat)) is
+         andIntro (lte b x) true hbx (refl true) end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Bool (lte b x) true -> lteAll b ys -> lteAll b (insert x ys)) is
+         fn (hbx : Eq Bool (lte b x) true) (hall : lteAll b (cons Nat y ys)) is
+           BoolElim
+             (fn (bb : Bool) is
+                lteAll b
+                  (BoolElim (fn (c : Bool) is List Nat end)
+                     (cons Nat x (cons Nat y ys))
+                     (cons Nat y (insert x ys))
+                     bb) end)
+             (andIntro (lte b x) (allLte b (cons Nat y ys)) hbx hall)
+             (andIntro (lte b y) (allLte b (insert x ys))
+                (andTrueL (lte b y) (allLte b ys) hall)
+                (ih hbx (andTrueR (lte b y) (allLte b ys) hall)))
+             (lte x y)
+         end
+       end)
+      xs
+  end
+end
+
+yLeX : (x : Nat) -> (y : Nat)
+   -> Eq Bool (lte x y) false -> Eq Bool (lte y x) true is
+  fn (x : Nat) (y : Nat) (heq : Eq Bool (lte x y) false) is
+    subst Bool (lte x y) false heq
+      (fn (z : Bool) is Eq Bool (or z (lte y x)) true end)
+      (lteTotal x y)
+  end
+end
+
+insertSorted : (x : Nat) -> (xs : List Nat) -> Sorted xs -> Sorted (insert x xs) is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Sorted w -> Sorted (insert x w) end)
+      (fn (s : Sorted (nil Nat)) is refl true end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Sorted ys -> Sorted (insert x ys)) is
+         fn (s : Sorted (cons Nat y ys)) is
+           BoolElim
+             (fn (bb : Bool) is
+                Eq Bool (lte x y) bb
+                  -> Sorted
+                       (BoolElim (fn (c : Bool) is List Nat end)
+                          (cons Nat x (cons Nat y ys))
+                          (cons Nat y (insert x ys))
+                          bb) end)
+             (fn (heq : Eq Bool (lte x y) true) is
+                andIntro (allLte x (cons Nat y ys)) (sortedb (cons Nat y ys))
+                  (andIntro (lte x y) (allLte x ys)
+                     heq
+                     (lteAllTrans x y ys heq
+                        (andTrueL (allLte y ys) (sortedb ys) s)))
+                  s end)
+             (fn (heq : Eq Bool (lte x y) false) is
+                andIntro (allLte y (insert x ys)) (sortedb (insert x ys))
+                  (insertAll x y ys
+                     (yLeX x y heq)
+                     (andTrueL (allLte y ys) (sortedb ys) s))
+                  (ih (andTrueR (allLte y ys) (sortedb ys) s)) end)
+             (lte x y)
+             (refl (lte x y))
+         end
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- INSERTION SORT  +  THE SORTEDNESS CERTIFICATE (ch84)
+-- ====================================================================================
+
+sort : List Nat -> List Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is insert x ih end)
+      xs
+  end
+end
+
+sortSorts : (xs : List Nat) -> Sorted (sort xs) is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Sorted (sort w) end)
+      (refl true)
+      (fn (x : Nat) (rest : List Nat) (ih : Sorted (sort rest)) is
+         insertSorted x (sort rest) ih end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- OCCURRENCE COUNT  +  THE PERMUTATION CERTIFICATE (ch85)
+-- ====================================================================================
+
+-- DECIDABLE Nat equality (verbatim from ch75/ch85).
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+count : Nat -> List Nat -> Nat is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (y : Nat) (ys : List Nat) (ih : Nat) is
+         BoolElim (fn (b : Bool) is Nat end) (succ ih) ih (eqNat k y)
+       end)
+      xs
+  end
+end
+
+bump : Bool -> Nat -> Nat is
+  fn (c : Bool) (n : Nat) is BoolElim (fn (b : Bool) is Nat end) (succ n) n c end
+end
+
+bumpSwap : (cx : Bool) -> (cy : Bool) -> (n : Nat)
+   -> Eq Nat (bump cy (bump cx n)) (bump cx (bump cy n)) is
+  fn (cx : Bool) (cy : Bool) (n : Nat) is
+    BoolElim
+      (fn (cyv : Bool) is Eq Nat (bump cyv (bump cx n)) (bump cx (bump cyv n)) end)
+      (BoolElim
+         (fn (bx : Bool) is Eq Nat (succ (bump bx n)) (bump bx (succ n)) end)
+         (refl (succ (succ n)))
+         (refl (succ n))
+         cx)
+      (refl (bump cx n))
+      cy
+  end
+end
+
+insertCount : (k : Nat) -> (x : Nat) -> (xs : List Nat)
+   -> Eq Nat (count k (insert x xs)) (count k (cons Nat x xs)) is
+  fn (k : Nat) (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Nat (count k (insert x w)) (count k (cons Nat x w)) end)
+      (refl (count k (cons Nat x (nil Nat))))
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Nat (count k (insert x ys)) (count k (cons Nat x ys))) is
+         BoolElim
+           (fn (bb : Bool) is
+              Eq Nat
+                (count k
+                   (BoolElim (fn (c : Bool) is List Nat end)
+                      (cons Nat x (cons Nat y ys))
+                      (cons Nat y (insert x ys))
+                      bb))
+                (count k (cons Nat x (cons Nat y ys))) end)
+           (refl (count k (cons Nat x (cons Nat y ys))))
+           (subst Nat (count k (cons Nat x ys)) (count k (insert x ys))
+              (subst Nat (count k (insert x ys)) (count k (cons Nat x ys)) ih
+                 (fn (z : Nat) is Eq Nat z (count k (insert x ys)) end)
+                 (refl (count k (insert x ys))))
+              (fn (z : Nat) is
+                 Eq Nat
+                   (bump (eqNat k y) z)
+                   (count k (cons Nat x (cons Nat y ys))) end)
+              (bumpSwap (eqNat k x) (eqNat k y) (count k ys)))
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+sortPerm : (k : Nat) -> (xs : List Nat)
+   -> Eq Nat (count k (sort xs)) (count k xs) is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Nat (count k (sort w)) (count k w) end)
+      (refl zero)
+      (fn (x : Nat) (rest : List Nat)
+          (ih : Eq Nat (count k (sort rest)) (count k rest)) is
+         subst Nat (count k (sort rest)) (count k rest) ih
+           (fn (z : Nat) is
+              Eq Nat (count k (insert x (sort rest))) (bump (eqNat k x) z) end)
+           (insertCount k x (sort rest))
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- CONJUNCTION as a non-dependent Σ  (the ch27 record idiom)
+-- ====================================================================================
+
+-- And P Q := Σ (_ : P), Q — a pair of proofs, ignoring the first as a witness.
+And : U -> U -> U is
+  fn (P : U) (Q : U) is Sig P (fn (p : P) is Q end) end
+end
+
+-- intro: pair the two proofs. `andFst`/`andSnd` are just the Σ projections (`.1`/`.2`).
+andI : (P : U) -> (Q : U) -> P -> Q -> And P Q is
+  fn (P : U) (Q : U) (p : P) (q : Q) is
+    Pair P (fn (w : P) is Q end) p q
+  end
+end
+
+-- ====================================================================================
+-- THE CERTIFIED SORT, BUNDLED INTO ONE THEOREM
+-- ====================================================================================
+
+-- sortCorrect: for EVERY input there EXISTS an output list that is sorted AND a permutation
+-- of the input (same count for every key). The witness is `sort xs`; the certificate is the
+-- conjunction of ch84's `sortSorts` and ch85's `sortPerm` (applied at the witness). Pure
+-- assembly — `Pair` the witness with `andI` of the two lemmas; the types line up on the nose.
+sortCorrect : (xs : List Nat)
+   -> Sig (List Nat) (fn (ys : List Nat) is
+        And (Sorted ys) ((k : Nat) -> Eq Nat (count k ys) (count k xs)) end) is
+  fn (xs : List Nat) is
+    Pair (List Nat)
+      (fn (ys : List Nat) is
+         And (Sorted ys) ((k : Nat) -> Eq Nat (count k ys) (count k xs)) end)
+      (sort xs)
+      (andI (Sorted (sort xs))
+            ((k : Nat) -> Eq Nat (count k (sort xs)) (count k xs))
+            (sortSorts xs)
+            (fn (k : Nat) is sortPerm k xs end))
+  end
+end
+
+-- ====================================================================================
+-- SANITY: the bundled certificate for [3,1,2]
+-- ====================================================================================
+
+threeOneTwo : List Nat is
+  cons Nat (succ (succ (succ zero)))
+    (cons Nat (succ zero)
+      (cons Nat (succ (succ zero)) (nil Nat)))
+end
+
+-- The single bundled certificate.
+sortCorrectExample : Sig (List Nat) (fn (ys : List Nat) is
+     And (Sorted ys) ((k : Nat) -> Eq Nat (count k ys) (count k threeOneTwo)) end) is
+  sortCorrect threeOneTwo
+end
+
+-- Project the witness list out of the bundle (it is `sort [3,1,2]`).
+sortedWitness : List Nat is sortCorrectExample.1 end
+
+-- Project the SORTEDNESS half of the certificate.
+witnessSorted : Sorted sortCorrectExample.1 is sortCorrectExample.2.1 end
+
+-- Project the PERMUTATION half and apply it at the key 2.
+witnessPerm2 : Eq Nat
+   (count (succ (succ zero)) sortCorrectExample.1)
+   (count (succ (succ zero)) threeOneTwo) is
+  sortCorrectExample.2.2 (succ (succ zero))
+end

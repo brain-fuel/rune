@@ -28,9 +28,13 @@ func (h Hash) Short() string { return hex.EncodeToString(h[:])[:12] }
 // hashFormatVersion is the preimage tag that prefixes every term digest. Bumping it
 // changes every content hash, which is the intended migration lever if the core's
 // serialization or hash algorithm changes. NEVER reuse a tag across incompatible
-// encodings. 0x04: universe levels joined the Univ preimage (Phase 6).
+// encodings. 0x06: bare numerals lower to a compressed core numeral NatLit by
+// DEFAULT (C7 / R-NUM, Decision 2) — every numeral-bearing def re-hashes; the
+// deliberate one-time cache event paired with the default-lowering switch.
+// 0x05: dependent pairs (Sig/Pair/Fst/Snd) joined the core (C1/R-SUM).
+// 0x04: universe levels joined the Univ preimage (Phase 6).
 // 0x03 added quantity; 0x02 plicity; 0x01 BLAKE3; 0x00 sha256.
-const hashFormatVersion byte = 0x04
+const hashFormatVersion byte = 0x06
 
 // Constructor tags. Each core constructor gets a distinct, stable byte so that
 // differently-shaped terms cannot collide by accident. Append-only: never renumber.
@@ -48,6 +52,11 @@ const (
 	tagRefl
 	tagCast
 	tagSubst
+	tagSig
+	tagPair
+	tagFst
+	tagSnd
+	tagNatLit
 )
 
 // HashTerm computes the structural Merkle hash of a core term.
@@ -121,6 +130,36 @@ func writeTerm(h hash.Hash, t Tm) {
 		writeTerm(h, tm.Prf)
 		writeTerm(h, tm.P)
 		writeTerm(h, tm.Px)
+	case Sig:
+		h.Write([]byte{tagSig, byte(tm.Qty)})
+		writeTerm(h, tm.Dom)
+		writeScope(h, tm.Cod)
+	case Pair:
+		h.Write([]byte{tagPair})
+		writeTerm(h, tm.Dom)
+		writeScope(h, tm.Cod)
+		writeTerm(h, tm.A)
+		writeTerm(h, tm.B)
+	case Fst:
+		h.Write([]byte{tagFst})
+		writeTerm(h, tm.P)
+	case Snd:
+		h.Write([]byte{tagSnd})
+		writeTerm(h, tm.P)
+	case NatLit:
+		// A compressed numeral hashes its number (canonical big-endian, sign-free
+		// for Nat) framed by an explicit length, plus the nat binding's zero/succ
+		// constructor hashes (a literal is RELATIVE to a particular nat, so two
+		// bindings give distinct terms). Structural and eval-free, per the
+		// standing rule. tagNatLit is append-only. As of C7 / R-NUM the default
+		// numeral lowering emits NatLit, so numeral-bearing defs re-hash — the
+		// deliberate event the hashFormatVersion 0x06 bump records.
+		h.Write([]byte{tagNatLit})
+		b := tm.N.Bytes() // big-endian magnitude; empty for 0
+		writeInt(h, len(b))
+		h.Write(b)
+		h.Write(tm.Zero[:])
+		h.Write(tm.Succ[:])
 	case Meta:
 		// A metavariable has no content identity. Reaching one here means a
 		// definition was stored before being zonked — a checker bug, not data.

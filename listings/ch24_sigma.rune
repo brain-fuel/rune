@@ -1,0 +1,25 @@
+-- Chapter 24 — Inner dependent pairs (§F / R-SIGMA / A5).
+-- The fibrant universe gains a Σ former, its intro, and two computing
+-- projections — the inner-stratum twin of the outer-core Σ. `El (sigmaF A B)`
+-- stays abstract (no decode, like `El (pathF …)`); the content lives in the
+-- projection ι-rules:
+--
+--   fstF A B (pairF A B a b)  ~>  a
+--   sndF A B (pairF A B a b)  ~>  b
+--
+-- This is what lets `Equiv = Σ f, isEquiv f` be stated, the prerequisite for
+-- Glue (A6). pairF is a canonical neutral intro; fstF/sndF compute.
+
+-- First projection of a pair is its first component.
+sigFstBeta : (A : UF) -> (B : (x : El A) -> UF) -> (a : El A) -> (b : El (B a)) ->
+    Eq (El A) (fstF A B (pairF A B a b)) a is
+  fn (A : UF) (B : (x : El A) -> UF) (a : El A) (b : El (B a)) is refl a end
+end
+
+-- Second projection of a pair is its second component — and the DEPENDENT type
+-- lines up on the nose because fstF (pairF a b) ~> a definitionally, so
+-- El (B (fstF A B (pairF A B a b))) is El (B a).
+sigSndBeta : (A : UF) -> (B : (x : El A) -> UF) -> (a : El A) -> (b : El (B a)) ->
+    Eq (El (B a)) (sndF A B (pairF A B a b)) b is
+  fn (A : UF) (B : (x : El A) -> UF) (a : El A) (b : El (B a)) is refl b end
+end

@@ -1,0 +1,523 @@
+-- Chapter 94 — (Nat, min, max) is a BOUNDED DISTRIBUTIVE LATTICE (M6 / D-track stdlib).
+-- ch92 proved the JOIN face (max, maxComm/maxIdem/maxAssoc/minMaxAbsorb, the LUB lemmas
+-- lteMaxL/lteMaxR/maxLub) and ch93 the MEET face (min, minComm/minIdem/minAssoc, the GLB
+-- lemmas lteMinL/lteMinR/minGlb). A lattice is a poset whose every pair has a meet and a
+-- join; the two ABSORPTION laws are what tie meet and join into one algebra. ch92 gave one
+-- side — `minMaxAbsorb : min a (max a b) = a`. This chapter lands the DUAL absorption and
+-- the law that promotes the lattice to a DISTRIBUTIVE one:
+--   - `maxMinAbsorb : max a (min a b) = a` (the dual of ch92's minMaxAbsorb), and
+--   - `minMaxDistrib : min a (max b c) = max (min a b) (min a c)` (meet distributes over
+--     join — the DISTRIBUTIVITY axiom).
+-- With ch92+ch93+ch94 the structure (Nat, min, max, 0) is a verified bounded distributive
+-- lattice: a poset (lteRefl/lteAntisym/lteTrans), totally ordered (lteTotal), with meet/join
+-- (min/max) satisfying commutativity, idempotence, associativity, BOTH absorption laws, and
+-- distributivity — the complete classical axiomatisation.
+--
+-- The order primitives (Bool, Nat, lte, or, sym, lteRefl, lteAntisym, lteTotal, lteTrans,
+-- yLeX, min, max, the GLB/LUB lemmas) are redeclared VERBATIM from ch65/ch80/ch82/ch83/ch92/
+-- ch93 per the self-contained-listings convention.
+--
+-- DESIGN.
+--   - maxMinAbsorb: max a (min a b) — by maxComm it equals max (min a b) a, and
+--     max (min a b) a = BoolElim _ a (min a b) (lte (min a b) a). `lteMinL a b` says
+--     lte (min a b) a = true, so that BoolElim takes the `a` branch — subst lteMinL into the
+--     abstracted BoolElim, the dual of ch92's minMaxAbsorb idiom. Compose with maxComm by trans.
+--   - minMaxDistrib: by ANTISYMMETRY of two lte-bounds, reusing the universal properties.
+--     RHS <= LHS: maxLub, since both min a b and min a c are <= min a (max b c) (each by minGlb
+--       from lteMinL + lteMinR-then-lteMax{L,R}-then-lteTrans).
+--     LHS <= RHS: a single case-split on `lte b c` (which selects max b c). When true, max b c
+--       is c, so min a (max b c) = min a c <= RHS by lteMaxR; when false it is b, so = min a b
+--       <= RHS by lteMaxL. The motive abstracts the Bool scrutinised by max's BoolElim AND the
+--       branch equation, so each arm computes.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- lte a b = (a <= b), verbatim from ch65/ch80/ch82/ch83.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- or a b = Boolean disjunction (ch83).
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- SYMMETRY of the ambient equality (ch03), redeclared verbatim.
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+
+-- TRANSITIVITY of the ambient equality (ch03), redeclared verbatim — maxMinAbsorb chains
+-- through maxComm with it.
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- REFLEXIVITY (ch65), redeclared verbatim.
+lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end)
+      n
+  end
+end
+
+-- ANTISYMMETRY (ch82), redeclared verbatim.
+lteAbsurdNat : (a : Nat) -> (b : Nat) -> Eq Bool false true -> Eq Nat a b is
+  fn (a : Nat) (b : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Nat a b
+         | false -> Eq Nat a a
+         end
+       end)
+      (refl a)
+  end
+end
+
+lteAntisym : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b a) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b x) true
+           -> Eq Nat x b end)
+      (fn (b : Nat) is
+         NatElim
+           (fn (y : Nat) is
+              Eq Bool (lte zero y) true -> Eq Bool (lte y zero) true
+                -> Eq Nat zero y end)
+           (fn (hab : Eq Bool (lte zero zero) true)
+               (hba : Eq Bool (lte zero zero) true) is
+              refl zero end)
+           (fn (b' : Nat)
+               (ihb : Eq Bool (lte zero b') true -> Eq Bool (lte b' zero) true
+                        -> Eq Nat zero b') is
+              fn (hab : Eq Bool (lte zero (succ b')) true)
+                 (hba : Eq Bool false true) is
+                lteAbsurdNat zero (succ b') hba end
+            end)
+           b
+       end)
+      (fn (a' : Nat)
+          (ih : (b : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b a') true
+                  -> Eq Nat a' b) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (lte (succ a') y) true -> Eq Bool (lte y (succ a')) true
+                  -> Eq Nat (succ a') y end)
+             (fn (hab : Eq Bool false true)
+                 (hba : Eq Bool (lte zero (succ a')) true) is
+                lteAbsurdNat (succ a') zero hab end)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' (succ a')) true
+                          -> Eq Nat (succ a') b') is
+                fn (hab : Eq Bool (lte a' b') true)
+                   (hba : Eq Bool (lte b' a') true) is
+                  subst Nat a' b' (ih b' hab hba)
+                    (fn (z : Nat) is Eq Nat (succ a') (succ z) end)
+                    (refl (succ a'))
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TOTALITY (ch83), redeclared verbatim.
+lteTotal : (a : Nat) -> (b : Nat)
+   -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TRANSITIVITY of the order (ch80), redeclared verbatim — the antisymmetry-bound proofs of
+-- minMaxDistrib thread the order through it.
+lteAbsurd : (a : Nat) -> (c : Nat) -> Eq Bool false true -> Eq Bool (lte a c) true is
+  fn (a : Nat) (c : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- The OTHER totality disjunct (ch84 yLeX), verbatim — used by lteMinL.
+yLeX : (x : Nat) -> (y : Nat)
+   -> Eq Bool (lte x y) false -> Eq Bool (lte y x) true is
+  fn (x : Nat) (y : Nat) (heq : Eq Bool (lte x y) false) is
+    subst Bool (lte x y) false heq
+      (fn (z : Bool) is Eq Bool (or z (lte y x)) true end)
+      (lteTotal x y)
+  end
+end
+
+-- ====================================================================================
+-- THE MEET AND JOIN (verbatim ch92/ch93)
+-- ====================================================================================
+
+min : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (x : Bool) is Nat end) a b (lte a b)
+  end
+end
+
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (x : Bool) is Nat end) b a (lte a b)
+  end
+end
+
+-- ====================================================================================
+-- THE LUB LEMMAS (verbatim ch92) and GLB LEMMAS (verbatim ch93)
+-- ====================================================================================
+
+-- a <= max a b (ch92 lteMaxL).
+lteMaxL : (a : Nat) -> (b : Nat) -> Eq Bool (lte a (max a b)) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte a (BoolElim (fn (x : Bool) is Nat end) b a p)) true end)
+      (fn (hab : Eq Bool (lte a b) true) is hab end)
+      (fn (hab : Eq Bool (lte a b) false) is lteRefl a end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- b <= max a b (ch92 lteMaxR).
+lteMaxR : (a : Nat) -> (b : Nat) -> Eq Bool (lte b (max a b)) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte b (BoolElim (fn (x : Bool) is Nat end) b a p)) true end)
+      (fn (hab : Eq Bool (lte a b) true) is lteRefl b end)
+      (fn (hab : Eq Bool (lte a b) false) is yLeX a b hab end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- max is the LEAST upper bound (ch92 maxLub).
+maxLub : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a c) true -> Eq Bool (lte b c) true -> Eq Bool (lte (max a b) c) true is
+  fn (a : Nat) (b : Nat) (c : Nat)
+     (hac : Eq Bool (lte a c) true) (hbc : Eq Bool (lte b c) true) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte (BoolElim (fn (x : Bool) is Nat end) b a p) c) true end)
+      (fn (hab : Eq Bool (lte a b) true) is hbc end)
+      (fn (hab : Eq Bool (lte a b) false) is hac end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- min a b <= a (ch93 lteMinL).
+lteMinL : (a : Nat) -> (b : Nat) -> Eq Bool (lte (min a b) a) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte (BoolElim (fn (x : Bool) is Nat end) a b p) a) true end)
+      (fn (hab : Eq Bool (lte a b) true) is lteRefl a end)
+      (fn (hab : Eq Bool (lte a b) false) is yLeX a b hab end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- min a b <= b (ch93 lteMinR).
+lteMinR : (a : Nat) -> (b : Nat) -> Eq Bool (lte (min a b) b) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte (BoolElim (fn (x : Bool) is Nat end) a b p) b) true end)
+      (fn (hab : Eq Bool (lte a b) true) is hab end)
+      (fn (hab : Eq Bool (lte a b) false) is lteRefl b end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- min is the GREATEST lower bound (ch93 minGlb).
+minGlb : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte c a) true -> Eq Bool (lte c b) true -> Eq Bool (lte c (min a b)) true is
+  fn (a : Nat) (b : Nat) (c : Nat)
+     (hca : Eq Bool (lte c a) true) (hcb : Eq Bool (lte c b) true) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte c (BoolElim (fn (x : Bool) is Nat end) a b p)) true end)
+      (fn (hab : Eq Bool (lte a b) true) is hca end)
+      (fn (hab : Eq Bool (lte a b) false) is hcb end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- ====================================================================================
+-- THE DUAL ABSORPTION — maxMinAbsorb : max a (min a b) = a
+-- ====================================================================================
+
+-- max (min a b) a = a. The scrutinee of this `max` is `lte (min a b) a`, which lteMinL says
+-- is true, so the BoolElim takes the `a` branch (the second argument of `max`, the larger).
+-- subst lteMinL into the abstracted BoolElim — the exact dual of ch92's minMaxAbsorb idiom.
+maxMinAbsorbFlip : (a : Nat) -> (b : Nat) -> Eq Nat (max (min a b) a) a is
+  fn (a : Nat) (b : Nat) is
+    subst Bool true (lte (min a b) a)
+      (sym Bool (lte (min a b) a) true (lteMinL a b))
+      (fn (z : Bool) is
+         Eq Nat (BoolElim (fn (x : Bool) is Nat end) a (min a b) z) a end)
+      (refl a)
+  end
+end
+
+-- COMMUTATIVITY of max (ch92 maxComm), verbatim — maxMinAbsorb flips max a (min a b) to
+-- max (min a b) a through it.
+bothFalseAbsurd : (a : Nat) -> (b : Nat) -> (r : Nat) -> (s : Nat)
+   -> Eq Bool (lte a b) false -> Eq Bool (lte b a) false -> Eq Nat r s is
+  fn (a : Nat) (b : Nat) (r : Nat) (s : Nat)
+     (hab : Eq Bool (lte a b) false) (hba : Eq Bool (lte b a) false) is
+    lteAbsurdNat r s
+      (subst Bool (lte b a) false hba
+         (fn (z : Bool) is Eq Bool (or false z) true end)
+         (subst Bool (lte a b) false hab
+            (fn (z : Bool) is Eq Bool (or z (lte b a)) true end)
+            (lteTotal a b)))
+  end
+end
+
+maxComm : (a : Nat) -> (b : Nat) -> Eq Nat (max a b) (max b a) is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Nat (BoolElim (fn (x : Bool) is Nat end) b a p)
+                     (BoolElim (fn (x : Bool) is Nat end) a b (lte b a)) end)
+      (fn (hab : Eq Bool (lte a b) true) is
+         BoolElim
+           (fn (q : Bool) is
+              Eq Bool (lte b a) q
+                -> Eq Nat b (BoolElim (fn (x : Bool) is Nat end) a b q) end)
+           (fn (hba : Eq Bool (lte b a) true) is lteAntisym b a hba hab end)
+           (fn (hba : Eq Bool (lte b a) false) is refl b end)
+           (lte b a)
+           (refl (lte b a)) end)
+      (fn (hab : Eq Bool (lte a b) false) is
+         BoolElim
+           (fn (q : Bool) is
+              Eq Bool (lte b a) q
+                -> Eq Nat a (BoolElim (fn (x : Bool) is Nat end) a b q) end)
+           (fn (hba : Eq Bool (lte b a) true) is refl a end)
+           (fn (hba : Eq Bool (lte b a) false) is bothFalseAbsurd a b a b hab hba end)
+           (lte b a)
+           (refl (lte b a)) end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- THE DUAL ABSORPTION LAW. max a (min a b) = max (min a b) a (maxComm) = a (maxMinAbsorbFlip).
+maxMinAbsorb : (a : Nat) -> (b : Nat) -> Eq Nat (max a (min a b)) a is
+  fn (a : Nat) (b : Nat) is
+    trans Nat (max a (min a b)) (max (min a b) a) a
+      (maxComm a (min a b))
+      (maxMinAbsorbFlip a b)
+  end
+end
+
+-- ====================================================================================
+-- DISTRIBUTIVITY — minMaxDistrib : min a (max b c) = max (min a b) (min a c)
+-- ====================================================================================
+
+-- DIRECTION 1 (the EASY direction): max (min a b) (min a c) <= min a (max b c). By maxLub,
+-- each of min a b, min a c is <= min a (max b c):
+--   min a b <= min a (max b c) : <= a (lteMinL) and <= max b c (min a b <= b <= max b c), minGlb;
+--   min a c <= min a (max b c) : <= a (lteMinL) and <= max b c (min a c <= c <= max b c), minGlb.
+distLe1 : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte (max (min a b) (min a c)) (min a (max b c))) true is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    maxLub (min a b) (min a c) (min a (max b c))
+      -- min a b <= min a (max b c).
+      (minGlb a (max b c) (min a b)
+         (lteMinL a b)
+         -- min a b <= b (lteMinR) <= max b c (lteMaxL).
+         (lteTrans (min a b) b (max b c)
+            (lteMinR a b)
+            (lteMaxL b c)))
+      -- min a c <= min a (max b c).
+      (minGlb a (max b c) (min a c)
+         (lteMinL a c)
+         -- min a c <= c (lteMinR) <= max b c (lteMaxR).
+         (lteTrans (min a c) c (max b c)
+            (lteMinR a c)
+            (lteMaxR b c)))
+  end
+end
+
+-- DIRECTION 2 (the DISTRIBUTIVITY direction): min a (max b c) <= max (min a b) (min a c).
+-- `max b c` is selected by `lte b c`; we case-split on it with a motive abstracting BOTH the
+-- Bool scrutinised by max's BoolElim AND its branch equation, so each arm computes:
+--   lte b c = true : max b c ~> c, so min a (max b c) ~> min a c, and min a c <= RHS by lteMaxR;
+--   lte b c = false: max b c ~> b, so min a (max b c) ~> min a b, and min a b <= RHS by lteMaxL.
+distLe2 : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte (min a (max b c)) (max (min a b) (min a c))) true is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte b c) p
+           -> Eq Bool
+                (lte (min a (BoolElim (fn (x : Bool) is Nat end) c b p))
+                     (max (min a b) (min a c)))
+                true end)
+      -- lte b c = true: max b c ~> c; min a (max b c) ~> min a c <= max (min a b) (min a c).
+      (fn (hbc : Eq Bool (lte b c) true) is lteMaxR (min a b) (min a c) end)
+      -- lte b c = false: max b c ~> b; min a (max b c) ~> min a b <= max (min a b) (min a c).
+      (fn (hbc : Eq Bool (lte b c) false) is lteMaxL (min a b) (min a c) end)
+      (lte b c)
+      (refl (lte b c))
+  end
+end
+
+-- DISTRIBUTIVITY of meet over join, by antisymmetry of the two bounds.
+minMaxDistrib : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (min a (max b c)) (max (min a b) (min a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    lteAntisym (min a (max b c)) (max (min a b) (min a c))
+      (distLe2 a b c)
+      (distLe1 a b c)
+  end
+end
+
+-- ====================================================================================
+-- SANITY
+-- ====================================================================================
+
+two : Nat is succ (succ zero) end
+three : Nat is succ (succ (succ zero)) end
+
+-- max 2 (min 2 3) = 2 (the dual absorption at a concrete point).
+absorbExample : Eq Nat (max two (min two three)) two is refl two end
+
+-- min 2 (max 3 2) = 2, and max (min 2 3) (min 2 2) = 2 — the two sides of distributivity
+-- agree at a concrete point (asserted via Eq + refl so representation changes are harmless).
+distLhsExample : Eq Nat (min two (max three two)) two is refl two end
+distRhsExample : Eq Nat (max (min two three) (min two two)) two is refl two end

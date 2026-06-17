@@ -1,0 +1,711 @@
+-- Chapter 92 — A VERIFIED min/max LATTICE on Nat (M6 / D-track stdlib). The now-complete
+-- Nat TOTAL order — reflexivity (ch65 `lteRefl`), antisymmetry (ch82 `lteAntisym`), and
+-- TOTALITY (ch83 `lteTotal`) — is exactly the data a lattice rides on: `min`/`max` are the
+-- meet/join of the linear order, and the lattice laws (commutativity, idempotence,
+-- absorption) are theorems about that order, not assumptions. This chapter proves
+-- (Nat, min, max) a bounded LATTICE: `minComm`/`maxComm`, `minIdem`/`maxIdem`,
+-- `minAssoc`/`maxAssoc`, and the absorption law `minMaxAbsorb`. It then folds the meet/join
+-- into `minimum`/`maximum` over `List Nat` with their computation rules.
+--
+-- The order primitives (`Bool`, `Nat`, `List`, `lte`, `or`, `lteRefl`, `lteAntisym`,
+-- `lteTotal`) are redeclared VERBATIM from ch65/ch82/ch83 per the self-contained-listings
+-- convention.
+--
+-- DESIGN. `min a b = BoolElim _ a b (lte a b)` (the smaller; verbatim ch65) and dually
+-- `max a b = BoolElim _ b a (lte a b)` (the larger). A `BoolElim` fires only on a LITERAL
+-- `true`/`false`, so a law about a NEUTRAL comparison (variable arguments) is proven by
+-- `subst`-ing the relevant order fact into a motive that abstracts the Bool being scrutinised:
+--   - IDEMPOTENCE `min a a = a`: `subst` `lteRefl a : lte a a = true` — the `true` branch is `a`.
+--   - COMMUTATIVITY `min a b = min b a`: a double case split on `lte a b` and `lte b a` (each
+--     abstracting its branch equation). Three cases compute (refl); the all-true case needs
+--     `a = b` from `lteAntisym`, and the all-false case is ruled out by `lteTotal` (the
+--     disjunction `or false false ~> false ≠ true`).
+--   - ABSORPTION `min a (max a b) = a`: `a <= max a b` always (`lteMaxL`, branch on `lte a b`),
+--     so `min a (max a b)` takes the `a` branch by `subst` of that fact.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- lte a b = (a <= b), verbatim from ch65/ch80/ch82/ch83: zero is below everything; succ k <=
+-- zero is false; succ k <= succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- or a b = Boolean disjunction (ch83): `or true _ ~> true`, `or false b ~> b`.
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- SYMMETRY of the ambient equality (ch03), redeclared verbatim — used to flip an order fact
+-- into the rewrite direction `subst` consumes.
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+
+-- REFLEXIVITY (ch65), redeclared verbatim — idempotence rides on it.
+lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end)
+      n
+  end
+end
+
+-- ANTISYMMETRY (ch82), redeclared verbatim — commutativity's all-true case rides on it.
+lteAbsurdNat : (a : Nat) -> (b : Nat) -> Eq Bool false true -> Eq Nat a b is
+  fn (a : Nat) (b : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Nat a b
+         | false -> Eq Nat a a
+         end
+       end)
+      (refl a)
+  end
+end
+
+lteAntisym : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b a) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b x) true
+           -> Eq Nat x b end)
+      (fn (b : Nat) is
+         NatElim
+           (fn (y : Nat) is
+              Eq Bool (lte zero y) true -> Eq Bool (lte y zero) true
+                -> Eq Nat zero y end)
+           (fn (hab : Eq Bool (lte zero zero) true)
+               (hba : Eq Bool (lte zero zero) true) is
+              refl zero end)
+           (fn (b' : Nat)
+               (ihb : Eq Bool (lte zero b') true -> Eq Bool (lte b' zero) true
+                        -> Eq Nat zero b') is
+              fn (hab : Eq Bool (lte zero (succ b')) true)
+                 (hba : Eq Bool false true) is
+                lteAbsurdNat zero (succ b') hba end
+            end)
+           b
+       end)
+      (fn (a' : Nat)
+          (ih : (b : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b a') true
+                  -> Eq Nat a' b) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (lte (succ a') y) true -> Eq Bool (lte y (succ a')) true
+                  -> Eq Nat (succ a') y end)
+             (fn (hab : Eq Bool false true)
+                 (hba : Eq Bool (lte zero (succ a')) true) is
+                lteAbsurdNat (succ a') zero hab end)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' (succ a')) true
+                          -> Eq Nat (succ a') b') is
+                fn (hab : Eq Bool (lte a' b') true)
+                   (hba : Eq Bool (lte b' a') true) is
+                  subst Nat a' b' (ih b' hab hba)
+                    (fn (z : Nat) is Eq Nat (succ a') (succ z) end)
+                    (refl (succ a'))
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TOTALITY (ch83), redeclared verbatim — commutativity's all-false case is ruled out by it.
+lteTotal : (a : Nat) -> (b : Nat)
+   -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- THE MEET AND JOIN
+-- ====================================================================================
+
+-- min picks the smaller by branching on the comparison (BoolElim), verbatim ch65.
+min : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (x : Bool) is Nat end) a b (lte a b)
+  end
+end
+
+-- max picks the larger: when a <= b the answer is b, otherwise a. Dual to min.
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (x : Bool) is Nat end) b a (lte a b)
+  end
+end
+
+-- ====================================================================================
+-- IDEMPOTENCE
+-- ====================================================================================
+
+-- min a a = a. lte a a = true (lteRefl), so the `true` branch (a) is taken — but the scrutinee
+-- is a NEUTRAL comparison, so we subst lteRefl into a motive abstracting the Bool.
+minIdem : (a : Nat) -> Eq Nat (min a a) a is
+  fn (a : Nat) is
+    subst Bool true (lte a a) (sym Bool (lte a a) true (lteRefl a))
+      (fn (z : Bool) is Eq Nat (BoolElim (fn (x : Bool) is Nat end) a a z) a end)
+      (refl a)
+  end
+end
+
+-- max a a = a, dually.
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    subst Bool true (lte a a) (sym Bool (lte a a) true (lteRefl a))
+      (fn (z : Bool) is Eq Nat (BoolElim (fn (x : Bool) is Nat end) a a z) a end)
+      (refl a)
+  end
+end
+
+-- ====================================================================================
+-- COMMUTATIVITY
+-- ====================================================================================
+
+-- ABSURDITY at a Nat equation, from the all-false case: `or false false ~> false`, and the
+-- totality witness says that is `true`, which is absurd — conclude any Nat equation. We rewrite
+-- both comparisons to `false` inside `lteTotal a b`, collapsing it to `Eq Bool false true`.
+bothFalseAbsurd : (a : Nat) -> (b : Nat) -> (r : Nat) -> (s : Nat)
+   -> Eq Bool (lte a b) false -> Eq Bool (lte b a) false -> Eq Nat r s is
+  fn (a : Nat) (b : Nat) (r : Nat) (s : Nat)
+     (hab : Eq Bool (lte a b) false) (hba : Eq Bool (lte b a) false) is
+    -- lteTotal a b : or (lte a b) (lte b a) = true. Rewrite lte a b ~> false, then lte b a ~>
+    -- false: the disjunction becomes `or false false ~> false`, so we hold `false = true`.
+    lteAbsurdNat r s
+      (subst Bool (lte b a) false hba
+         (fn (z : Bool) is Eq Bool (or false z) true end)
+         (subst Bool (lte a b) false hab
+            (fn (z : Bool) is Eq Bool (or z (lte b a)) true end)
+            (lteTotal a b)))
+  end
+end
+
+-- COMMUTATIVITY of min. Double case split on `lte a b` and `lte b a`, each via BoolElim with a
+-- motive abstracting the branch equation (`Eq Bool (lte _ _) bb`, discharged by refl). The four
+-- arms:
+--   p=true , q=true : min a b ~> a, min b a ~> b; need a = b — lteAntisym (both directions hold).
+--   p=true , q=false: min a b ~> a, min b a ~> a; refl a.
+--   p=false, q=true : min a b ~> b, min b a ~> b; refl b.
+--   p=false, q=false: impossible — bothFalseAbsurd (lteTotal rules it out).
+minComm : (a : Nat) -> (b : Nat) -> Eq Nat (min a b) (min b a) is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Nat (BoolElim (fn (x : Bool) is Nat end) a b p)
+                     (BoolElim (fn (x : Bool) is Nat end) b a (lte b a)) end)
+      -- lte a b = true.
+      (fn (hab : Eq Bool (lte a b) true) is
+         BoolElim
+           (fn (q : Bool) is
+              Eq Bool (lte b a) q
+                -> Eq Nat a (BoolElim (fn (x : Bool) is Nat end) b a q) end)
+           -- q = true: need a = b.
+           (fn (hba : Eq Bool (lte b a) true) is lteAntisym a b hab hba end)
+           -- q = false: BoolElim picks a; refl.
+           (fn (hba : Eq Bool (lte b a) false) is refl a end)
+           (lte b a)
+           (refl (lte b a)) end)
+      -- lte a b = false.
+      (fn (hab : Eq Bool (lte a b) false) is
+         BoolElim
+           (fn (q : Bool) is
+              Eq Bool (lte b a) q
+                -> Eq Nat b (BoolElim (fn (x : Bool) is Nat end) b a q) end)
+           -- q = true: BoolElim picks b; refl.
+           (fn (hba : Eq Bool (lte b a) true) is refl b end)
+           -- q = false: impossible.
+           (fn (hba : Eq Bool (lte b a) false) is bothFalseAbsurd a b b a hab hba end)
+           (lte b a)
+           (refl (lte b a)) end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- COMMUTATIVITY of max, the exact dual. min a b ~> a / max a b ~> b on the `true` branch, so the
+-- arms swap which side is picked; the absurd/antisym cases are identical.
+maxComm : (a : Nat) -> (b : Nat) -> Eq Nat (max a b) (max b a) is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Nat (BoolElim (fn (x : Bool) is Nat end) b a p)
+                     (BoolElim (fn (x : Bool) is Nat end) a b (lte b a)) end)
+      -- lte a b = true: max a b ~> b.
+      (fn (hab : Eq Bool (lte a b) true) is
+         BoolElim
+           (fn (q : Bool) is
+              Eq Bool (lte b a) q
+                -> Eq Nat b (BoolElim (fn (x : Bool) is Nat end) a b q) end)
+           -- q = true: max b a ~> a; need b = a — antisym (swapped order).
+           (fn (hba : Eq Bool (lte b a) true) is lteAntisym b a hba hab end)
+           -- q = false: max b a ~> b; refl.
+           (fn (hba : Eq Bool (lte b a) false) is refl b end)
+           (lte b a)
+           (refl (lte b a)) end)
+      -- lte a b = false: max a b ~> a.
+      (fn (hab : Eq Bool (lte a b) false) is
+         BoolElim
+           (fn (q : Bool) is
+              Eq Bool (lte b a) q
+                -> Eq Nat a (BoolElim (fn (x : Bool) is Nat end) a b q) end)
+           -- q = true: max b a ~> a; refl.
+           (fn (hba : Eq Bool (lte b a) true) is refl a end)
+           -- q = false: impossible.
+           (fn (hba : Eq Bool (lte b a) false) is bothFalseAbsurd a b a b hab hba end)
+           (lte b a)
+           (refl (lte b a)) end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- ====================================================================================
+-- ABSORPTION
+-- ====================================================================================
+
+-- a <= max a b, always. Branch on lte a b: when true, max a b ~> b and a <= b is the witness;
+-- when false, max a b ~> a and a <= a is lteRefl.
+lteMaxL : (a : Nat) -> (b : Nat) -> Eq Bool (lte a (max a b)) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte a (BoolElim (fn (x : Bool) is Nat end) b a p)) true end)
+      -- lte a b = true: max ~> b; the witness is hab itself.
+      (fn (hab : Eq Bool (lte a b) true) is hab end)
+      -- lte a b = false: max ~> a; the witness is lteRefl a.
+      (fn (hab : Eq Bool (lte a b) false) is lteRefl a end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- ABSORPTION: min a (max a b) = a. Since a <= max a b (lteMaxL), the `min` comparison
+-- `lte a (max a b)` is true, so min takes the `a` branch — subst lteMaxL into the abstracted
+-- BoolElim, exactly the idempotence idiom but with the second argument `max a b`.
+minMaxAbsorb : (a : Nat) -> (b : Nat) -> Eq Nat (min a (max a b)) a is
+  fn (a : Nat) (b : Nat) is
+    subst Bool true (lte a (max a b)) (sym Bool (lte a (max a b)) true (lteMaxL a b))
+      (fn (z : Bool) is
+         Eq Nat (BoolElim (fn (x : Bool) is Nat end) a (max a b) z) a end)
+      (refl a)
+  end
+end
+
+-- ====================================================================================
+-- ASSOCIATIVITY
+-- ====================================================================================
+
+-- ANTISYMMETRY-FREE absurd for the order: from `false = true` conclude any ordering (ch80).
+lteAbsurd : (a : Nat) -> (c : Nat) -> Eq Bool false true -> Eq Bool (lte a c) true is
+  fn (a : Nat) (c : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- TRANSITIVITY (ch80), redeclared verbatim — associativity threads the order through it.
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- The OTHER totality disjunct (ch84 yLeX): `lte a b = false` forces `lte b a = true`.
+yLeX : (x : Nat) -> (y : Nat)
+   -> Eq Bool (lte x y) false -> Eq Bool (lte y x) true is
+  fn (x : Nat) (y : Nat) (heq : Eq Bool (lte x y) false) is
+    subst Bool (lte x y) false heq
+      (fn (z : Bool) is Eq Bool (or z (lte y x)) true end)
+      (lteTotal x y)
+  end
+end
+
+-- ASSOCIATIVITY of max. We prove it by ANTISYMMETRY: each side <= the other. The two bounds are
+-- symmetric; each is a triple case-split on the three comparisons, with `lteTrans` threading
+-- the order through the nested `max`. To keep the case analysis tractable we expose two upper-
+-- bound facts about `max` first.
+
+-- b <= max a b (the right injection), dual to lteMaxL. Branch on lte a b.
+lteMaxR : (a : Nat) -> (b : Nat) -> Eq Bool (lte b (max a b)) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte b (BoolElim (fn (x : Bool) is Nat end) b a p)) true end)
+      -- lte a b = true: max ~> b; b <= b by lteRefl.
+      (fn (hab : Eq Bool (lte a b) true) is lteRefl b end)
+      -- lte a b = false: max ~> a; b <= a is the OTHER disjunct (yLeX).
+      (fn (hab : Eq Bool (lte a b) false) is yLeX a b hab end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- maxLub: if a <= c and b <= c then max a b <= c (max is the LEAST upper bound). Branch on
+-- lte a b: max a b is whichever of b, a is selected, and the matching premise discharges it.
+maxLub : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a c) true -> Eq Bool (lte b c) true -> Eq Bool (lte (max a b) c) true is
+  fn (a : Nat) (b : Nat) (c : Nat)
+     (hac : Eq Bool (lte a c) true) (hbc : Eq Bool (lte b c) true) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte (BoolElim (fn (x : Bool) is Nat end) b a p) c) true end)
+      -- lte a b = true: max ~> b; b <= c is hbc.
+      (fn (hab : Eq Bool (lte a b) true) is hbc end)
+      -- lte a b = false: max ~> a; a <= c is hac.
+      (fn (hab : Eq Bool (lte a b) false) is hac end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- max a (max b c) <= max (max a b) c. a <= max(max a b) c via two right/left injections +
+-- trans; max b c <= max(max a b) c via maxLub on b and c; then maxLub combines.
+maxAssocLe1 : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte (max a (max b c)) (max (max a b) c)) true is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    maxLub a (max b c) (max (max a b) c)
+      -- a <= max (max a b) c : a <= max a b (lteMaxL) <= max (max a b) c (lteMaxL).
+      (lteTrans a (max a b) (max (max a b) c)
+         (lteMaxL a b)
+         (lteMaxL (max a b) c))
+      -- max b c <= max (max a b) c : b <= it and c <= it, then maxLub.
+      (maxLub b c (max (max a b) c)
+         -- b <= max a b (lteMaxR) <= max (max a b) c (lteMaxL).
+         (lteTrans b (max a b) (max (max a b) c)
+            (lteMaxR a b)
+            (lteMaxL (max a b) c))
+         -- c <= max (max a b) c (lteMaxR).
+         (lteMaxR (max a b) c))
+  end
+end
+
+-- max (max a b) c <= max a (max b c), the mirror image.
+maxAssocLe2 : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte (max (max a b) c) (max a (max b c))) true is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    maxLub (max a b) c (max a (max b c))
+      -- max a b <= max a (max b c) : a <= it and b <= it, then maxLub.
+      (maxLub a b (max a (max b c))
+         -- a <= max a (max b c) (lteMaxL).
+         (lteMaxL a (max b c))
+         -- b <= max b c (lteMaxL) <= max a (max b c) (lteMaxR).
+         (lteTrans b (max b c) (max a (max b c))
+            (lteMaxL b c)
+            (lteMaxR a (max b c))))
+      -- c <= max b c (lteMaxR) <= max a (max b c) (lteMaxR).
+      (lteTrans c (max b c) (max a (max b c))
+         (lteMaxR b c)
+         (lteMaxR a (max b c)))
+  end
+end
+
+-- ASSOCIATIVITY of max, by antisymmetry of the two bounds.
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (max a (max b c)) (max (max a b) c) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    lteAntisym (max a (max b c)) (max (max a b) c)
+      (maxAssocLe1 a b c)
+      (maxAssocLe2 a b c)
+  end
+end
+
+-- ====================================================================================
+-- minimum / maximum FOLDS over List Nat
+-- ====================================================================================
+
+-- maximum xs = foldr max zero xs: nil ~> zero (the bottom of the lattice, a unit for max),
+-- cons x rest ~> max x (maximum rest). A small elimination into Nat.
+maximum : List Nat -> Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (x : Nat) (rest : List Nat) (ih : Nat) is max x ih end)
+      xs
+  end
+end
+
+-- COMPUTATION RULES for maximum — the fold's defining equations, both by refl.
+maxNil : Eq Nat (maximum (nil Nat)) zero is refl zero end
+
+maxFoldCons : (x : Nat) -> (xs : List Nat)
+   -> Eq Nat (maximum (cons Nat x xs)) (max x (maximum xs)) is
+  fn (x : Nat) (xs : List Nat) is refl (max x (maximum xs)) end
+end
+
+-- SPEC LEMMA — maximum is an UPPER BOUND of every element. `mem x xs` is Boolean membership
+-- (decidable: `or (eq? x y) (mem x rest)`); the theorem: if x is a member then x <= maximum xs.
+-- Proof by induction on xs, using maxLub-style reasoning at each cons: the head bound is
+-- lteMaxL (x <= max x _) when x is the head, and the IH composed with lteMaxR otherwise.
+
+-- Boolean Nat equality, verbatim from ch75 idiom: zero=zero true; succ/zero false; recurse.
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Bool end) true (fn (m : Nat) (ih2 : Bool) is false end) n end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (m : Nat) (ih2 : Bool) is ih m end) n end
+       end)
+      a
+  end
+end
+
+-- x = x reflects to true (induction on x), the membership-of-head witness.
+eqNatRefl : (x : Nat) -> Eq Bool (eqNat x x) true is
+  fn (x : Nat) is
+    NatElim (fn (w : Nat) is Eq Bool (eqNat w w) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      x
+  end
+end
+
+-- mem x xs : x occurs in xs (a Bool). nil ~> false; cons y rest ~> or (eqNat x y) (mem x rest).
+mem : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (rest : List Nat) (ih : Bool) is or (eqNat x y) ih end)
+      xs
+  end
+end
+
+-- When eqNat x y = true, x = y (decidable equality is sound). subst the BoolElim guard, exactly
+-- the ch75 idiom: at the `true` branch the motive is Eq Nat x x = refl x.
+eqNatSound : (x : Nat) -> (y : Nat) -> Eq Bool (eqNat x y) true -> Eq Nat x y is
+  fn (x : Nat) is
+    NatElim
+      (fn (w : Nat) is (y : Nat) -> Eq Bool (eqNat w y) true -> Eq Nat w y end)
+      -- x = zero.
+      (fn (y : Nat) is
+         NatElim
+           (fn (u : Nat) is Eq Bool (eqNat zero u) true -> Eq Nat zero u end)
+           (fn (h : Eq Bool true true) is refl zero end)
+           (fn (m : Nat) (ihm : Eq Bool (eqNat zero m) true -> Eq Nat zero m) is
+              fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat zero (succ m)
+                     | false -> Eq Nat zero zero
+                     end
+                   end)
+                  (refl zero) end
+            end)
+           y end)
+      -- x = succ k.
+      (fn (k : Nat) (ih : (y : Nat) -> Eq Bool (eqNat k y) true -> Eq Nat k y) is
+         fn (y : Nat) is
+           NatElim
+             (fn (u : Nat) is Eq Bool (eqNat (succ k) u) true -> Eq Nat (succ k) u end)
+             -- y = zero: eqNat (succ k) zero ~> false; absurd.
+             (fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat (succ k) zero
+                     | false -> Eq Nat (succ k) (succ k)
+                     end
+                   end)
+                  (refl (succ k)) end)
+             -- y = succ m: eqNat (succ k) (succ m) ~> eqNat k m; IH then congSucc.
+             (fn (m : Nat) (ihm : Eq Bool (eqNat (succ k) m) true -> Eq Nat (succ k) m) is
+                fn (h : Eq Bool (eqNat k m) true) is
+                  subst Nat k m (ih m h)
+                    (fn (z : Nat) is Eq Nat (succ k) (succ z) end)
+                    (refl (succ k)) end
+              end)
+             y end
+       end)
+      x
+  end
+end
+
+-- The upper-bound congruence: from x <= w conclude x <= max y w (compose with lteMaxR + trans).
+lteMaxOfTail : (x : Nat) -> (y : Nat) -> (w : Nat)
+   -> Eq Bool (lte x w) true -> Eq Bool (lte x (max y w)) true is
+  fn (x : Nat) (y : Nat) (w : Nat) (h : Eq Bool (lte x w) true) is
+    lteTrans x w (max y w) h (lteMaxR y w)
+  end
+end
+
+-- maximumUB: every member is bounded by the maximum. Induction on xs. At nil, membership is
+-- `false = true`, absurd. At cons y rest, `mem x ~> or (eqNat x y) (mem x rest)`; we case on
+-- `eqNat x y`: if true, x = y and x <= max y (maximum rest) by lteMaxL (after rewriting x to y);
+-- if false, membership collapses to `mem x rest`, the IH gives x <= maximum rest, and lteMaxR
+-- lifts it through the head `max y _`.
+maximumUB : (xs : List Nat) -> (x : Nat)
+   -> Eq Bool (mem x xs) true -> Eq Bool (lte x (maximum xs)) true is
+  fn (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         (x : Nat) -> Eq Bool (mem x w) true -> Eq Bool (lte x (maximum w)) true end)
+      -- nil: mem x nil ~> false; the premise is false = true, absurd.
+      (fn (x : Nat) (h : Eq Bool false true) is lteAbsurd x (maximum (nil Nat)) h end)
+      (fn (y : Nat) (rest : List Nat)
+          (ih : (x : Nat) -> Eq Bool (mem x rest) true -> Eq Bool (lte x (maximum rest)) true) is
+         fn (x : Nat) is
+           -- mem x (cons y rest) ~> or (eqNat x y) (mem x rest). Case on eqNat x y, abstracting
+           -- its branch equation so the disjunction reduces in each arm.
+           BoolElim
+             (fn (e : Bool) is
+                Eq Bool (eqNat x y) e
+                  -> Eq Bool (or e (mem x rest)) true
+                  -> Eq Bool (lte x (max y (maximum rest))) true end)
+             -- eqNat x y = true: x = y. The goal head is `max y (maximum rest)`; lteMaxL y _ gives
+             -- `lte y (max y (maximum rest)) = true`, and we rewrite ONLY the leading `y` back to x.
+             (fn (heq : Eq Bool (eqNat x y) true) (hmem : Eq Bool true true) is
+                subst Nat y x (sym Nat x y (eqNatSound x y heq))
+                  (fn (z : Nat) is Eq Bool (lte z (max y (maximum rest))) true end)
+                  (lteMaxL y (maximum rest)) end)
+             -- eqNat x y = false: membership ~> or false (mem x rest) ~> mem x rest. IH + lteMaxR.
+             (fn (heq : Eq Bool (eqNat x y) false) (hmem : Eq Bool (mem x rest) true) is
+                lteMaxOfTail x y (maximum rest) (ih x hmem) end)
+             (eqNat x y)
+             (refl (eqNat x y))
+         end
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- SANITY
+-- ====================================================================================
+
+-- min 2 3 = 2 and max 2 3 = 3, the canonical refls.
+two : Nat is succ (succ zero) end
+three : Nat is succ (succ (succ zero)) end
+
+minTwoThree : Eq Nat (min two three) two is refl two end
+maxTwoThree : Eq Nat (max two three) three is refl three end
+
+-- maximum [1,3,2] = 3.
+oneThreeTwo : List Nat is
+  cons Nat (succ zero)
+    (cons Nat three
+      (cons Nat two (nil Nat)))
+end
+
+maxExample : Eq Nat (maximum oneThreeTwo) three is refl three end

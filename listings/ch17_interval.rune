@@ -1,0 +1,48 @@
+-- Chapter 17 — The cubical interval (§F phase 1).
+-- The frontier that makes inner univalence COMPUTE begins here: the inner
+-- stratum becomes cubical. The first brick is the INTERVAL — not a datatype
+-- (you cannot case on it), but a De Morgan algebra, shipped as a builtin group
+-- exactly the way quotients and the fibrant universe were. It is ambient: a
+-- session already knows
+--
+--   I    : U              the interval (morally a pretype: no transport over it)
+--   i0   : I              endpoint 0
+--   i1   : I              endpoint 1
+--   ineg : I -> I         reversal
+--   imin : I -> I -> I    the ∧ connection (min)
+--   imax : I -> I -> I    the ∨ connection (max)
+--
+-- The endpoints are DISTINCT neutrals — the strict Eq can neither identify nor
+-- refute i0 and i1 — and there is no eliminator. The interval is driven by Kan
+-- operations (phase 3), not by pattern matching. What ships now is the
+-- computation of the connectives on endpoints; everything below is a machine-
+-- checked fact about that algebra.
+
+-- Reversal swaps the endpoints, and is involutive ON endpoints.
+negZero : Eq I (ineg i0) i1 is refl i1 end
+negOne  : Eq I (ineg i1) i0 is refl i0 end
+negNeg  : Eq I (ineg (ineg i0)) i0 is refl i0 end
+
+-- ∧ is min: i0 is the zero, i1 the unit.
+minZeroL : (i : I) -> Eq I (imin i0 i) i0 is fn (i : I) is refl i0 end end
+minOneL  : (i : I) -> Eq I (imin i1 i) i  is fn (i : I) is refl i  end end
+minZeroR : (i : I) -> Eq I (imin i i0) i0 is fn (i : I) is refl i0 end end
+minOneR  : (i : I) -> Eq I (imin i i1) i  is fn (i : I) is refl i  end end
+
+-- ∨ is max: i1 is the one, i0 the unit.
+maxOneL  : (i : I) -> Eq I (imax i1 i) i1 is fn (i : I) is refl i1 end end
+maxZeroL : (i : I) -> Eq I (imax i0 i) i  is fn (i : I) is refl i  end end
+maxOneR  : (i : I) -> Eq I (imax i i1) i1 is fn (i : I) is refl i1 end end
+maxZeroR : (i : I) -> Eq I (imax i i0) i  is fn (i : I) is refl i  end end
+
+-- The endpoints collapse the connections (the cube's corners).
+corner00 : Eq I (imin i0 i0) i0 is refl i0 end
+corner11 : Eq I (imin i1 i1) i1 is refl i1 end
+cornerMax01 : Eq I (imax i0 i1) i1 is refl i1 end
+cornerMin10 : Eq I (imin i1 i0) i0 is refl i0 end
+
+-- A free interval variable bottoms out: imin i i is stuck (idempotence is NOT
+-- definitional on neutrals — it becomes a PATH once paths exist, phase 2). So
+-- the algebra is honest: only the endpoint reductions are definitional. The
+-- identities above are exactly the ones a Kan composition will lean on.
+diagIsItself : (i : I) -> Eq I (imin i i) (imin i i) is fn (i : I) is refl (imin i i) end end

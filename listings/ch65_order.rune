@@ -1,0 +1,94 @@
+-- Chapter 65 — Decidable order (D1, the proven tier): the ≤ comparison on Nat with
+-- its order laws proven, plus `min`. This is the comparison D2's sorting and balanced
+-- Map/Set rebalancing need; the laws are proven, not assumed. `lte` recurses on its
+-- first argument (an inner NatElim cases the second), so `lte zero n` and the
+-- successor-of-successor step reduce definitionally — the proofs only bridge what
+-- computation leaves open, exactly as the numeric-tower laws (ch63).
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- lte a b = (a <= b): zero is below everything; succ k <= zero is false; succ k <=
+-- succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- 0 <= n always — definitionally (lte zero n reduces to true), so refl.
+lteZero : (n : Nat) -> Eq Bool (lte zero n) true is
+  fn (n : Nat) is refl true end
+end
+
+-- REFLEXIVITY: n <= n, by induction on n. Base lte zero zero = true; the succ step
+-- reduces lte (succ k) (succ k) to lte k k, so the IH discharges it directly.
+lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end)
+      n
+  end
+end
+
+-- MONOTONICITY at the successor: n <= succ n, same induction shape (the succ step
+-- reduces lte (succ k) (succ (succ k)) to lte k (succ k) = the IH).
+lteSucc : (n : Nat) -> Eq Bool (lte n (succ n)) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x (succ x)) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k (succ k)) true) is ih end)
+      n
+  end
+end
+
+-- min picks the smaller by branching on the comparison (BoolElim).
+min : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (x : Bool) is Nat end) a b (lte a b)
+  end
+end
+
+-- min zero n = zero — definitionally: lte zero n reduces to true, so BoolElim takes
+-- the first branch (zero). The order law `min` discharges by computation alone.
+minZeroL : (n : Nat) -> Eq Nat (min zero n) zero is
+  fn (n : Nat) is refl zero end
+end
+
+-- add (numeric tower, ch63) — needed to relate order to arithmetic.
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- MONOTONICITY of addition under the order: a <= a + b, by induction on a. Base
+-- lte zero (add zero b) reduces to lte zero b = true; the succ step reduces
+-- lte (succ k) (add (succ k) b) = lte (succ k) (succ (add k b)) to lte k (add k b),
+-- discharged by the IH. The order law D2's sorting bounds rely on.
+lteAddR : (a : Nat) -> (b : Nat) -> Eq Bool (lte a (add a b)) true is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x (add x b)) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k (add k b)) true) is ih end)
+      a
+  end
+end

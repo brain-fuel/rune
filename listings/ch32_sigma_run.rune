@@ -1,0 +1,15 @@
+-- Chapter 32 — Σ runs: a dependent pair built, projected, and executed.
+-- Σ is OUTER (not inner-tainted): records erase to tuples and DEPLOY. Here a
+-- pair of Bools is built and its second component projected — the answer the
+-- erased JS shadow computes.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+mkPair : Sig Bool (fn (b : Bool) is Bool end) is
+  Pair Bool (fn (b : Bool) is Bool end) true false
+end
+
+answer : Bool is mkPair.2 end

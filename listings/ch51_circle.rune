@@ -1,0 +1,62 @@
+-- Chapter 51 — The circle, the first higher inductive type (§F / R-HIT / A9).
+-- A HIT is a fibrant type with PATH constructors, not only point constructors.
+-- The circle has one point `base` and one path `loop : base = base` that the
+-- checker will NOT equate with `refl base` — `loop` is a genuine, distinct
+-- generator. Its recursor `circElim` maps out of the circle by sending `base` to
+-- a chosen point and `loop` to a chosen loop, and it COMPUTES on both. This is the
+-- first place the language touches a non-trivial loop and runs with it.
+
+-- The recursor: map out of the circle into any fibrant type P by choosing where
+-- `base` and `loop` go. Here the identity map (base ↦ base, loop ↦ loop).
+circId : El Circle -> El Circle is
+  circElim Circle base loop
+end
+
+-- The recursor computes on the point constructor: circId base ~> base. We witness
+-- it as a refl — the two sides are definitionally equal because the point branch
+-- of the eliminator fires (circElim P b l base ~> b).
+circIdBase : Eq (El Circle) (circId base) base is
+  refl base
+end
+
+-- A constant map: everything (both base and the loop) goes to a single point.
+-- The loop is sent to the constant path `preflF P p` (refl). This is `S¹ -> P`
+-- for a point p — the recursor with a reflexive loop method.
+constMap : (P : UF) -> (p : El P) -> El Circle -> El P is
+  fn (P : UF) (p : El P) is
+    circElim P p (preflF P p)
+  end
+end
+
+-- The loop boundary holds definitionally: papp Circle base base loop i0 ~> base.
+-- This is the path-constructor boundary the eliminator's coherence rests on — and
+-- it computes for the circle's loop with no extra rule (the path group supplies
+-- the boundary for ANY path, the loop included).
+loopAtZero : Eq (El Circle) (papp Circle base base loop i0) base is
+  refl base
+end
+
+loopAtOne : Eq (El Circle) (papp Circle base base loop i1) base is
+  refl base
+end
+
+-- Transport over the CONSTANT circle line is the identity — and it needs no new
+-- machinery: the Kan regularity rule (a type-line constant in i transports by the
+-- identity) already fires through the circle former. transp (λ_. Circle) base
+-- reduces to base, witnessed by refl.
+transpConst : Eq (El Circle) (transp (fn (i : I) is Circle end) base) base is
+  refl base
+end
+
+-- The circle is a genuine Kan type: homogeneous composition `hcomp Circle φ u u0`
+-- on a proper face is itself a canonical generator (the formal hcomp cell — CHM's
+-- "hcomp-as-constructor"), and the recursor COMMUTES with it, pushing the chosen
+-- motive's composition over the box. So mapping out of the circle respects
+-- composition, not only base and loop. This term type-checks because circElim
+-- eliminates an hcomp scrutinee, witnessing the Kan structure.
+circIdRespectsHcomp : (phi : F)
+   -> (u : I -> holds phi -> El Circle) -> (u0 : El Circle) -> El Circle is
+  fn (phi : F) (u : I -> holds phi -> El Circle) (u0 : El Circle) is
+    circElim Circle base loop (hcomp Circle phi u u0)
+  end
+end

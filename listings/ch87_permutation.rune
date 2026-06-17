@@ -1,0 +1,313 @@
+-- Chapter 87 — PERMUTATION as a FIRST-CLASS PREDICATE, and an EQUIVALENCE RELATION.
+-- ch85 proved insertion sort is a permutation of its input by showing it preserves the
+-- OCCURRENCE COUNT of every key (`sortPerm`); ch86 bundled that with sortedness. Both spoke
+-- the count-equality family inline. Here we EXTRACT it as a named relation
+--   Permutation xs ys := (k : Nat) -> Eq Nat (count k xs) (count k ys)
+-- — "xs and ys agree on the multiplicity of every key" — and prove it is an EQUIVALENCE
+-- RELATION: reflexive (`permRefl`), symmetric (`permSym`), transitive (`permTrans`). The three
+-- proofs are pointwise lifts of the corresponding Eq laws: refl, symmetry, transitivity of the
+-- ambient observational equality, applied at each key k. We then RESTATE the certified-sort
+-- permutation theorem over the named predicate (`sortPermutes : Permutation (sort xs) xs`) and
+-- bundle it (`sortCorrect'`) — the same content as ch86, now phrased through `Permutation`.
+--
+-- Per the self-contained-listings convention, `Bool`, `Nat`, `List`, `lte`, `eqNat`, ch84's
+-- `insert`/`sort`, and ch85's `count`/`bump`/`bumpSwap`/`insertCount`/`sortPerm` are redeclared
+-- VERBATIM. The Eq laws `sym`/`trans` are redeclared verbatim from ch03 (Leibniz transport).
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- lte a b = (a <= b), verbatim from ch84/ch65.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- DECIDABLE Nat equality (verbatim from ch75/ch85).
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- ordered insertion, IDENTICAL to ch84.
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (cons Nat x (nil Nat))
+      (fn (y : Nat) (ys : List Nat) (rest : List Nat) is
+         BoolElim (fn (b : Bool) is List Nat end)
+           (cons Nat x (cons Nat y ys))
+           (cons Nat y rest)
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+-- insertion sort, IDENTICAL to ch84.
+sort : List Nat -> List Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is insert x ih end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- THE AMBIENT EQUALITY LAWS (verbatim from ch03)
+-- ====================================================================================
+
+-- symmetry, by Leibniz transport.
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+-- transitivity, by Leibniz transport.
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ====================================================================================
+-- OCCURRENCE COUNT (verbatim from ch85)
+-- ====================================================================================
+
+count : Nat -> List Nat -> Nat is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (y : Nat) (ys : List Nat) (ih : Nat) is
+         BoolElim (fn (b : Bool) is Nat end) (succ ih) ih (eqNat k y)
+       end)
+      xs
+  end
+end
+
+bump : Bool -> Nat -> Nat is
+  fn (c : Bool) (n : Nat) is BoolElim (fn (b : Bool) is Nat end) (succ n) n c end
+end
+
+bumpSwap : (cx : Bool) -> (cy : Bool) -> (n : Nat)
+   -> Eq Nat (bump cy (bump cx n)) (bump cx (bump cy n)) is
+  fn (cx : Bool) (cy : Bool) (n : Nat) is
+    BoolElim
+      (fn (cyv : Bool) is Eq Nat (bump cyv (bump cx n)) (bump cx (bump cyv n)) end)
+      (BoolElim
+         (fn (bx : Bool) is Eq Nat (succ (bump bx n)) (bump bx (succ n)) end)
+         (refl (succ (succ n)))
+         (refl (succ n))
+         cx)
+      (refl (bump cx n))
+      cy
+  end
+end
+
+insertCount : (k : Nat) -> (x : Nat) -> (xs : List Nat)
+   -> Eq Nat (count k (insert x xs)) (count k (cons Nat x xs)) is
+  fn (k : Nat) (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Nat (count k (insert x w)) (count k (cons Nat x w)) end)
+      (refl (count k (cons Nat x (nil Nat))))
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Nat (count k (insert x ys)) (count k (cons Nat x ys))) is
+         BoolElim
+           (fn (bb : Bool) is
+              Eq Nat
+                (count k
+                   (BoolElim (fn (c : Bool) is List Nat end)
+                      (cons Nat x (cons Nat y ys))
+                      (cons Nat y (insert x ys))
+                      bb))
+                (count k (cons Nat x (cons Nat y ys))) end)
+           (refl (count k (cons Nat x (cons Nat y ys))))
+           (subst Nat (count k (cons Nat x ys)) (count k (insert x ys))
+              (subst Nat (count k (insert x ys)) (count k (cons Nat x ys)) ih
+                 (fn (z : Nat) is Eq Nat z (count k (insert x ys)) end)
+                 (refl (count k (insert x ys))))
+              (fn (z : Nat) is
+                 Eq Nat
+                   (bump (eqNat k y) z)
+                   (count k (cons Nat x (cons Nat y ys))) end)
+              (bumpSwap (eqNat k x) (eqNat k y) (count k ys)))
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+sortPerm : (k : Nat) -> (xs : List Nat)
+   -> Eq Nat (count k (sort xs)) (count k xs) is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Nat (count k (sort w)) (count k w) end)
+      (refl zero)
+      (fn (x : Nat) (rest : List Nat)
+          (ih : Eq Nat (count k (sort rest)) (count k rest)) is
+         subst Nat (count k (sort rest)) (count k rest) ih
+           (fn (z : Nat) is
+              Eq Nat (count k (insert x (sort rest))) (bump (eqNat k x) z) end)
+           (insertCount k x (sort rest))
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- PERMUTATION as a NAMED PREDICATE
+-- ====================================================================================
+
+-- Permutation xs ys: xs and ys agree on the occurrence count of EVERY key. This is the
+-- count-characterisation of "same elements with the same multiplicities" — eliminator-friendly,
+-- no permutation datatype. ch85/ch86 spoke this family inline; here it is first-class.
+Permutation : List Nat -> List Nat -> U is
+  fn (xs : List Nat) (ys : List Nat) is
+    (k : Nat) -> Eq Nat (count k xs) (count k ys)
+  end
+end
+
+-- ====================================================================================
+-- PERMUTATION IS AN EQUIVALENCE RELATION
+-- ====================================================================================
+
+-- REFLEXIVE: every list is a permutation of itself — each count equals itself by refl.
+permRefl : (xs : List Nat) -> Permutation xs xs is
+  fn (xs : List Nat) is
+    fn (k : Nat) is refl (count k xs) end
+  end
+end
+
+-- SYMMETRIC: pointwise symmetry of the ambient Eq. p k : count k xs = count k ys, so
+-- sym (p k) : count k ys = count k xs.
+permSym : (xs : List Nat) -> (ys : List Nat)
+   -> Permutation xs ys -> Permutation ys xs is
+  fn (xs : List Nat) (ys : List Nat) (p : Permutation xs ys) is
+    fn (k : Nat) is
+      sym Nat (count k xs) (count k ys) (p k)
+    end
+  end
+end
+
+-- TRANSITIVE: pointwise transitivity of the ambient Eq. p k : count k xs = count k ys and
+-- q k : count k ys = count k zs chain to count k xs = count k zs.
+permTrans : (xs : List Nat) -> (ys : List Nat) -> (zs : List Nat)
+   -> Permutation xs ys -> Permutation ys zs -> Permutation xs zs is
+  fn (xs : List Nat) (ys : List Nat) (zs : List Nat)
+     (p : Permutation xs ys) (q : Permutation ys zs) is
+    fn (k : Nat) is
+      trans Nat (count k xs) (count k ys) (count k zs) (p k) (q k)
+    end
+  end
+end
+
+-- ====================================================================================
+-- THE CERTIFIED SORT, RESTATED OVER `Permutation`
+-- ====================================================================================
+
+-- sortPermutes: the output of `sort` is a permutation of its input — ch85's `sortPerm`
+-- repackaged into the named relation. sortPerm k xs : count k (sort xs) = count k xs is
+-- EXACTLY the k-th component of Permutation (sort xs) xs, so the proof is `fn k. sortPerm k xs`
+-- on the nose (no symmetry needed — the orientation already matches).
+sortPermutes : (xs : List Nat) -> Permutation (sort xs) xs is
+  fn (xs : List Nat) is
+    fn (k : Nat) is sortPerm k xs end
+  end
+end
+
+-- ====================================================================================
+-- BUNDLED: an EXISTENTIAL output that permutes the input
+-- ====================================================================================
+
+-- And P Q := Σ (_ : P), Q (the ch27 record idiom), with intro `andI` = `Pair`.
+And : U -> U -> U is
+  fn (P : U) (Q : U) is Sig P (fn (p : P) is Q end) end
+end
+
+andI : (P : U) -> (Q : U) -> P -> Q -> And P Q is
+  fn (P : U) (Q : U) (p : P) (q : Q) is
+    Pair P (fn (w : P) is Q end) p q
+  end
+end
+
+-- sortCorrect': for every input there EXISTS an output list that is a permutation of the input.
+-- The witness is `sort xs`; the certificate is `sortPermutes xs`. (ch86's `sortCorrect` also
+-- bundled SORTEDNESS; here we state the permutation half through the named predicate, the
+-- equivalence-relation phrasing of the certified-sort spec.)
+sortCorrect' : (xs : List Nat)
+   -> Sig (List Nat) (fn (ys : List Nat) is Permutation ys xs end) is
+  fn (xs : List Nat) is
+    Pair (List Nat)
+      (fn (ys : List Nat) is Permutation ys xs end)
+      (sort xs)
+      (sortPermutes xs)
+  end
+end
+
+-- ====================================================================================
+-- SANITY: the equivalence laws and the certified sort, concretely
+-- ====================================================================================
+
+threeOneTwo : List Nat is
+  cons Nat (succ (succ (succ zero)))
+    (cons Nat (succ zero)
+      (cons Nat (succ (succ zero)) (nil Nat)))
+end
+
+-- `sort [3,1,2]` is a permutation of `[3,1,2]` (the named predicate).
+sortPermExample : Permutation (sort threeOneTwo) threeOneTwo is
+  sortPermutes threeOneTwo
+end
+
+-- ... and by symmetry, `[3,1,2]` is a permutation of `sort [3,1,2]`.
+sortPermExampleSym : Permutation threeOneTwo (sort threeOneTwo) is
+  permSym (sort threeOneTwo) threeOneTwo (sortPermutes threeOneTwo)
+end
+
+-- Reflexivity at a concrete list.
+reflExample : Permutation threeOneTwo threeOneTwo is
+  permRefl threeOneTwo
+end
+
+-- Transitivity: sort threeOneTwo ~ threeOneTwo ~ sort threeOneTwo, chained back to itself.
+transExample : Permutation (sort threeOneTwo) (sort threeOneTwo) is
+  permTrans (sort threeOneTwo) threeOneTwo (sort threeOneTwo)
+    (sortPermutes threeOneTwo)
+    (sortPermExampleSym)
+end

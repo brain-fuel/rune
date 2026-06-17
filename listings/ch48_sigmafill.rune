@@ -1,0 +1,34 @@
+-- Chapter 48 — Filling a dependent pair: hcomp over a DEPENDENT sigmaF (§F/A5b).
+-- Homogeneous composition in a Σ is elementwise: the first component fills in A,
+-- and the second fills along the B-fibre line over the first component's FILLER
+-- a* = hfill (CCHM). The dependent case (B genuinely varying in its argument) is
+-- what A5a left open; it is unblocked now that `hfill` is expressible via the
+-- face-split eliminator `fsplit`.
+--
+--   hcomp (sigmaF A B) φ u u0
+--     ~> pairF A B (hcomp A φ (fst∘u) (fst u0))            -- a1
+--                  (comp (λj. B (a* j)) φ (snd∘u) (snd u0)) -- b1, over B(a* j)
+--
+-- Here the dependent family is B x = pathF A x x. The FIRST component of the fill
+-- is exactly the hcomp of the first projections — certified by reflexivity (the
+-- second component is a symbolic comp over the dependent fibre line).
+
+sigmaHcompFst : (A : UF) -> (phi : F)
+   -> (u : I -> holds phi -> El (sigmaF A (fn (x : El A) is pathF A x x end)))
+   -> (u0 : El (sigmaF A (fn (x : El A) is pathF A x x end)))
+   -> Eq (El A)
+        (fstF A (fn (x : El A) is pathF A x x end)
+          (hcomp (sigmaF A (fn (x : El A) is pathF A x x end)) phi u u0))
+        (hcomp A phi
+          (fn (i : I) (h : holds phi) is
+             fstF A (fn (x : El A) is pathF A x x end) (u i h) end)
+          (fstF A (fn (x : El A) is pathF A x x end) u0)) is
+  fn (A : UF) (phi : F)
+     (u : I -> holds phi -> El (sigmaF A (fn (x : El A) is pathF A x x end)))
+     (u0 : El (sigmaF A (fn (x : El A) is pathF A x x end))) is
+    refl (hcomp A phi
+            (fn (i : I) (h : holds phi) is
+               fstF A (fn (x : El A) is pathF A x x end) (u i h) end)
+            (fstF A (fn (x : El A) is pathF A x x end) u0))
+  end
+end

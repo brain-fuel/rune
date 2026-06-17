@@ -57,6 +57,28 @@ func (e *Elaborator) ElabData(d surface.DataDef) (store.DataDecl, error) {
 	inner.M.Data = e.M.Data
 	inner.M.Quot = e.M.Quot
 	inner.M.Fib = e.M.Fib
+	inner.M.Iv = e.M.Iv
+	inner.M.Pa = e.M.Pa
+	inner.M.Fc = e.M.Fc
+	inner.M.Sy = e.M.Sy
+	inner.M.Kn = e.M.Kn
+	inner.M.Si = e.M.Si
+	inner.M.Cn = e.M.Cn
+	inner.M.Gl = e.M.Gl
+	inner.M.Fs = e.M.Fs
+	inner.M.SyU = e.M.SyU
+	inner.M.FsD = e.M.FsD
+	inner.M.Fa = e.M.Fa
+	inner.M.Pu = e.M.Pu
+	inner.M.PpU = e.M.PpU
+	inner.M.Hi = e.M.Hi
+	inner.M.Su = e.M.Su
+	inner.M.Qh = e.M.Qh
+	inner.M.Pp = e.M.Pp
+	inner.M.Ci = e.M.Ci
+	inner.M.SuI = e.M.SuI
+	inner.M.QuI = e.M.QuI
+	inner.M.Tr = e.M.Tr
 
 	decl := store.DataDecl{Name: d.Name, Ty: ty, NumParams: k}
 	for _, ctor := range d.Ctors {
@@ -277,24 +299,29 @@ func caseType(d store.DataDecl, ph core.Hash, i int) core.Tm {
 	}
 	result := core.Tm(core.App{Fn: core.Var{Idx: motiveIdx}, Arg: capp, Icit: core.Expl})
 
-	// Wrap IH binders, last recursive argument first. The IH for arg r (with
-	// h IHs already wrapped INSIDE this one — i.e., later recursive args) is
-	// m a_r where a_r's index skips those h inner IHs.
-	ihWrapped := 0
+	// Wrap IH binders, last recursive argument first (so IH for arg j is OUTER
+	// than IH for any later recursive arg, matching the type
+	//   (a0)…(an) -> (IH_{r0}: m a_{r0}) -> … -> m (C a*)).
+	// The Dom `m a_j` of this IH lives in the scope OUTSIDE this binder, so it
+	// sees only the IHs that ENCLOSE it — the OUTER ones, i.e. recursive args
+	// with a SMALLER index (wrapped later). (Using the inner count was an
+	// off-by-n bug that only manifested for ≥2 recursive arguments.)
 	for j := sig.Arity - 1; j >= 0; j-- {
 		if !sig.Rec[j] {
 			continue
 		}
-		// Scope at this IH binder, innermost first: the IHs already wrapped
-		// inside it, then all args, then earlier cases, then the motive.
-		inner := ihWrapped
-		argIdx := (sig.Arity - 1 - j) + inner
-		mIdx := inner + sig.Arity + i
+		outer := 0
+		for jj := 0; jj < j; jj++ {
+			if sig.Rec[jj] {
+				outer++
+			}
+		}
+		argIdx := (sig.Arity - 1 - j) + outer
+		mIdx := outer + sig.Arity + i
 		result = core.Pi{
 			Dom: core.App{Fn: core.Var{Idx: mIdx}, Arg: core.Var{Idx: argIdx}, Icit: core.Expl},
 			Cod: core.Scope{Name: "ih", Body: result},
 		}
-		ihWrapped++
 	}
 
 	// Wrap argument binders, last first. Arg j's dom was elaborated in the

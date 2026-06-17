@@ -1,0 +1,59 @@
+-- Chapter 74 — The 2-sphere S² = Susp S¹, a dim-2 higher inductive type (§F / R-HIT, the M3
+-- frontier). The suspension's full β (ch53: poles + meridian) now lets spheres be built by
+-- iterated suspension and ELIMINATED genuinely two-dimensionally: a map out of S² = Susp Circle
+-- chooses two poles and, FOR EACH CIRCLE POINT, a path between them — and because the circle
+-- carries a loop, that meridian family is itself a circle elimination, so the loop becomes a
+-- 2-CELL. Here we build the map S² → S¹ that sends every meridian to the circle's loop, and
+-- verify it computes on the pole AND along a meridian (the dim-2 recursor β).
+
+-- S² as the suspension of the circle. (Circle/base/loop and Susp/north/south/merid are ambient
+-- HIT builtins; `circElim`/`suspElim` are their recursors.)
+S2 : UF is Susp Circle end
+
+-- The meridian family, by CIRCLE elimination into the PATH type `base = base`: the circle's
+-- point `base` maps to the loop, and the circle's `loop` maps to the trivial 2-cell `refl loop`
+-- (a path between loops). This is the genuinely 2-dimensional datum — a map Circle → (base = base)
+-- that respects the loop.
+loopFam : El Circle -> El (pathF Circle base base) is
+  circElim (pathF Circle base base) loop (preflF (pathF Circle base base) loop)
+end
+
+-- THE dim-2 MAP S² → S¹: both poles to `base`, each meridian to `loopFam` of that circle point.
+-- `suspElim` (the suspension recursor) assembles it; the meridian argument is the 2-dimensional
+-- family above.
+mapS2 : El S2 -> El Circle is
+  suspElim Circle Circle base base loopFam
+end
+
+-- COMPUTES ON THE POLE, by `refl` (suspElim north-β): mapS2 north ~> base.
+mapS2North : Eq (El Circle) (mapS2 (north Circle)) base is
+  refl base
+end
+
+-- COMPUTES ALONG A MERIDIAN, by `refl` (the dim-2 recursor β = suspRecMerid ▸ circElim base-β):
+-- the meridian over the circle point `base`, observed at interval `i`, maps to the loop observed
+-- at `i`. `mapS2 (papp (merid Circle base) i) ≡ papp loop i`. So the suspension's meridian and
+-- the circle's loop compose: S²'s 2-cell IS S¹'s loop, definitionally.
+mapS2MeridBase : (i : I)
+   -> Eq (El Circle)
+        (mapS2 (papp (Susp Circle) (north Circle) (south Circle) (merid Circle base) i))
+        (papp Circle base base loop i) is
+  fn (i : I) is refl end
+end
+
+-- And at a GENERAL circle point `c`, the meridian maps to `loopFam c` observed at `i` — the full
+-- dim-2 β, parametric in the circle point (so it holds along the circle's loop too).
+mapS2MeridGen : (c : El Circle) -> (i : I)
+   -> Eq (El Circle)
+        (mapS2 (papp (Susp Circle) (north Circle) (south Circle) (merid Circle c) i))
+        (papp Circle base base (loopFam c) i) is
+  fn (c : El Circle) (i : I) is refl end
+end
+
+-- The poles of S² are themselves connected by every meridian: `merid c : north = south` in S²
+-- for each circle point `c` — a genuine 2-parameter cell (one interval from the meridian, one
+-- circle dimension from `c`). The boundary holds definitionally.
+s2MeridBoundary : (c : El Circle)
+   -> Eq (El S2) (papp (Susp Circle) (north Circle) (south Circle) (merid Circle c) i0) (north Circle) is
+  fn (c : El Circle) is refl end
+end

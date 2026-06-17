@@ -1,5 +1,7 @@
 package core
 
+import "math/big"
+
 // Val is the glued NbE value domain. SHAPE ONLY in Phase 0: the constructors are
 // fixed here so the Phase-1 evaluator and quoter have a target, but eval and quote
 // are NOT implemented.
@@ -78,6 +80,26 @@ type VLam struct {
 	Body func(Val) Val
 }
 
+// VSig is a dependent pair type value Σ (x : Dom), Cod. Cod is a Go closure (the
+// NbE meaning function), like VPi.Cod. Name is a display hint only.
+type VSig struct {
+	Name string
+	Qty  Qty
+	Dom  Val
+	Cod  func(Val) Val
+}
+
+// VPair is a pair value (A, B) at type Σ Dom Cod. Dom/Cod are carried for
+// quotation (so the type is recoverable); conversion ignores them and compares
+// A, B componentwise (with η).
+type VPair struct {
+	Name string
+	Dom  Val
+	Cod  func(Val) Val
+	A    Val
+	B    Val
+}
+
 func (VNeu) isVal()  {}
 func (VU) isVal()    {}
 func (VProp) isVal() {}
@@ -85,6 +107,8 @@ func (VEq) isVal()   {}
 func (VRefl) isVal() {}
 func (VPi) isVal()   {}
 func (VLam) isVal()  {}
+func (VSig) isVal()  {}
+func (VPair) isVal() {}
 
 // Neutral is the un-unfolded spine of a stuck computation: a head (a free variable
 // at a de Bruijn level, or a definition reference) under a stack of eliminators.
@@ -131,9 +155,35 @@ type NSubst struct {
 	A, X, Y, Prf, P, Px Val
 }
 
-func (NVar) isNeutral()   {}
-func (NSubst) isNeutral() {}
-func (NRef) isNeutral()   {}
-func (NApp) isNeutral()   {}
-func (NMeta) isNeutral()  {}
-func (NCast) isNeutral()  {}
+// NFst is a stuck first projection p.1 on a neutral pair p.
+type NFst struct {
+	P Neutral
+}
+
+// NSnd is a stuck second projection p.2 on a neutral pair p.
+type NSnd struct {
+	P Neutral
+}
+
+// NNatLit is the spine head of a compressed numeral value (C7 / R-NUM). A
+// VNatLit is represented as a GLUED neutral: this spine is the fast-path
+// representative (two literals compare by big.Int.Cmp without forcing), and the
+// neutral's Unfold thunk peels ONE succ layer — `zero` when N=0, else
+// `succ (NatLit (N-1))` — so the literal inter-converts with the unary
+// succ-chain on demand (defeq preserved) and any eliminator forcing the
+// scrutinee fires its ordinary constructor ι-rule. Zero/Succ are carried so the
+// peel can build the session's nat constructors.
+type NNatLit struct {
+	N          *big.Int
+	Zero, Succ Hash
+}
+
+func (NVar) isNeutral()    {}
+func (NSubst) isNeutral()  {}
+func (NRef) isNeutral()    {}
+func (NApp) isNeutral()    {}
+func (NMeta) isNeutral()   {}
+func (NCast) isNeutral()   {}
+func (NFst) isNeutral()    {}
+func (NSnd) isNeutral()    {}
+func (NNatLit) isNeutral() {}

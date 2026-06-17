@@ -1,0 +1,27 @@
+-- Chapter 40 — Foreign functions with contracts (R-FFI / B4).
+-- The bridge to host ecosystems: a `foreign` declaration introduces a bodiless
+-- axiom whose TYPE is its contract. It type-checks and composes like any value,
+-- stays a NEUTRAL during evaluation (no body to reduce), and is recorded as an
+-- ASSUMPTION (trusted, not proven — `rune assumptions` would list it). Codegen
+-- emits a reference to a host-provided global of the same name. This is the
+-- typed interface every binding (NumPy/BLAS/OS, the D3–D6 interop) rides on; the
+-- richer pre/post refinement contracts and per-backend marshalling are the
+-- follow-up.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- A foreign function: the contract is the dependent type. No body — the host
+-- supplies the implementation; Rune trusts it (an assumption).
+foreign hostPow : Nat -> Nat -> Nat end
+
+-- It composes in ordinary typed code, exactly like a defined function.
+square : Nat -> Nat is fn (n : Nat) is hostPow n (succ (succ zero)) end end
+
+-- and is first-class — passed where a Nat -> Nat -> Nat is expected.
+apply2 : (Nat -> Nat -> Nat) -> Nat -> Nat is
+  fn (f : Nat -> Nat -> Nat) (n : Nat) is f n n end
+end
+diag : Nat -> Nat is apply2 hostPow end

@@ -1,0 +1,93 @@
+-- Chapter 38 — Synchronisation: rendezvous in the process calculus (E1).
+-- The heart of a process calculus is communication: two parallel branches, one
+-- ready to output and one to input, take a step TOGETHER. Here (single channel,
+-- so every out meets every inp) the small step prefers a rendezvous, falling
+-- back to interleaving. Multi-channel matching and bisimulation are the R-CALC
+-- remainder; rendezvous itself computes and is certified by refl.
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Proc : U is
+  halt : Proc
+| out  : Proc -> Proc
+| inp  : Proc -> Proc
+| par  : Proc -> Proc -> Proc
+end
+
+-- views: the continuation behind an output / input prefix, if any.
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (q : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      x
+  end
+end
+
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (q : Proc) (ih : Option Proc) is some Proc q end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      x
+  end
+end
+
+-- interleaving fallback: step the left branch if it can, else the right.
+interleave : Option Proc -> Option Proc -> Proc -> Proc -> Option Proc is
+  fn (ra : Option Proc) (rb : Option Proc) (a : Proc) (b : Proc) is
+    OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+         (none Proc)
+         (fn (b2 : Proc) is some Proc (par a b2) end)
+         rb)
+      (fn (a2 : Proc) is some Proc (par a2 b) end)
+      ra
+  end
+end
+
+-- one small step: a prefix alone is stuck (awaiting a partner); a parallel
+-- composition rendezvouses (out|inp -> the two continuations in parallel), else
+-- interleaves.
+reduce : Proc -> Option Proc is
+  fn (q : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (r : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+           (interleave iha ihb a b)
+           (fn (p : Proc) is
+              OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+                (interleave iha ihb a b)
+                (fn (qc : Proc) is some Proc (par p qc) end)
+                (inpCont b)
+            end)
+           (outCont a)
+       end)
+      q
+  end
+end
+
+-- rendezvous: out|inp steps to the two continuations running in parallel.
+sync : Eq (Option Proc) (reduce (par (out halt) (inp halt))) (some Proc (par halt halt)) is
+  refl (some Proc (par halt halt))
+end
+
+-- a lone prefix is stuck.
+outStuck : Eq (Option Proc) (reduce (out halt)) (none Proc) is refl (none Proc) end
+
+-- interleaving: an inner rendezvous fires under an outer parallel.
+nested :
+    Eq (Option Proc) (reduce (par (par (out halt) (inp halt)) halt))
+       (some Proc (par (par halt halt) halt)) is
+  refl (some Proc (par (par halt halt) halt))
+end

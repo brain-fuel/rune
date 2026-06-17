@@ -1,0 +1,36 @@
+-- Chapter 22 — Composition, the endpoint rules (§F phase 3d–3e).
+-- Two more Kan operations fill a box rather than transport a point:
+--
+--   hcomp : (A : UF) -> (φ : F) -> (I -> holds φ -> El A) -> El A -> El A
+--   comp  : (A : I -> UF) -> (φ : F) -> ((i:I) -> holds φ -> El (A i))
+--             -> El (A i0) -> El (A i1)
+--
+-- hcomp composes over a HOMOGENEOUS type A; comp over a type-LINE A. Their
+-- first computing rule is the TOTAL system: when the face φ is ⊤ the partial
+-- path is defined everywhere, so the lid is just that path at i1 — and the proof
+-- that ⊤ holds is `htop`. comp adds the DEGENERATE rule: an empty system (φ = ⊥)
+-- on a constant type-line collapses comp to the identity (regularity again).
+-- The structural fills — over piF/pathF, and on a PROPER face by recursion on
+-- A's former — stay stuck, honestly, until the next increment.
+
+-- hcomp with a total face: the lid is the system evaluated at i1.
+hcompTop : {A : UF} -> (u : I -> holds ftop -> El A) -> (u0 : El A) ->
+    Eq (El A) (hcomp A ftop u u0) (u i1 htop) is
+  fn {A : UF} (u : I -> holds ftop -> El A) (u0 : El A) is refl (u i1 htop) end
+end
+
+-- comp with a total face: same lid, now along a varying type-line A. The
+-- endpoint El (A i1) is exactly where the system at i1 lands.
+compTop : {A : I -> UF} -> (u : (i : I) -> holds ftop -> El (A i)) -> (u0 : El (A i0)) ->
+    Eq (El (A i1)) (comp A ftop u u0) (u i1 htop) is
+  fn {A : I -> UF} (u : (i : I) -> holds ftop -> El (A i)) (u0 : El (A i0)) is
+    refl (u i1 htop)
+  end
+end
+
+-- comp with an empty face on a constant line: no sides to fill, a degenerate
+-- line to transport along — the floor u0 comes straight back out as the lid.
+compBot : {A : UF} -> (u : (i : I) -> holds fbot -> El A) -> (u0 : El A) ->
+    Eq (El A) (comp (fn (i : I) is A end) fbot u u0) u0 is
+  fn {A : UF} (u : (i : I) -> holds fbot -> El A) (u0 : El A) is refl u0 end
+end

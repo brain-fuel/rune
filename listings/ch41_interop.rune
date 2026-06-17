@@ -1,0 +1,34 @@
+-- Chapter 41 — Numeric / array interop, the typed layer (D3/D4 over R-FFI).
+-- The Math/Stats/AI/ML reach (the NumPy/BLAS surface) enters Wootz as TYPED
+-- foreign axioms: opaque host types (Float, Array) and operations whose
+-- dependent types are their contracts. Programs compose and type-check against
+-- this interface now; the host implementation (BLAS/NumPy) is linked at codegen
+-- and the values are trusted assumptions. Shape-indexed arrays + finiteness
+-- contracts are the richer R-INTEROP follow-up.
+
+foreign Float : U end
+foreign fzero : Float end
+foreign fadd  : Float -> Float -> Float end
+foreign fmul  : Float -> Float -> Float end
+
+-- A polymorphic host array and the vectorised primitives over it.
+foreign Array : U -> U end
+foreign amap  : (A : U) -> (B : U) -> (A -> B) -> Array A -> Array B end
+foreign asum  : Array Float -> Float end
+
+-- A typed numeric pipeline: scale every element by k, then sum — the shape of a
+-- dot-product / weighted reduction, checked end-to-end against the foreign
+-- contracts (this is exactly what a verified ML kernel's glue layer looks like).
+scaleSum : Float -> Array Float -> Float is
+  fn (k : Float) (xs : Array Float) is
+    asum (amap Float Float (fn (x : Float) is fmul k x end) xs)
+  end
+end
+
+-- map fusion stated as a typed equation over the interface (a law a backend or
+-- an optimiser may rely on); here it is the well-typed composition itself.
+fuse : (A : U) -> (B : U) -> (C : U) -> (A -> B) -> (B -> C) -> Array A -> Array C is
+  fn (A : U) (B : U) (C : U) (f : A -> B) (g : B -> C) (xs : Array A) is
+    amap B C g (amap A B f xs)
+  end
+end

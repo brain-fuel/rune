@@ -33,6 +33,21 @@ type EHole struct{}
 // EProp is the universe of propositions, Prop (Phase 3).
 type EProp struct{}
 
+// ESig is the dependent-pair type former head, `Sig`, saturated as `Sig A B`
+// where B is the family (a function `A -> U`): Σ (x : A), B x.
+type ESig struct{}
+
+// EPair is the pair intro head, `pair`, saturated as `pair A B a b` at Σ A B.
+type EPair struct{}
+
+// EFst is the first projection of a Σ pair. The operand is embedded (not applied
+// via the spine), so `Fst p` / `p.1` is one node and `p.1 x` applies x to the
+// projection rather than over-saturating a keyword head.
+type EFst struct{ P Exp }
+
+// ESnd is the second projection of a Σ pair; operand embedded like EFst.
+type ESnd struct{ P Exp }
+
 // EEq is the equality former head, `Eq`. It is applied like a function and must
 // be saturated with three arguments: Eq T l r.
 type EEq struct{}
@@ -134,6 +149,15 @@ type Def struct {
 	Name string
 	Ty   Exp
 	Body Exp
+	// IsInstance marks a typeclass instance (C2): the def is additionally
+	// registered in the session instance table and resolved by implicit search.
+	IsInstance bool
+	// IsPartial marks a general-recursive `partial` definition (C4): its own name
+	// is in scope in its body, and its head stays neutral in type-checking.
+	IsPartial bool
+	// IsForeign marks a `foreign` axiom (R-FFI / B4): a bodiless typed constant
+	// whose TYPE is its contract; tracked as an assumption. Body is nil.
+	IsForeign bool
 }
 
 // Ctor is one constructor of a datatype declaration: Name : Ty.
@@ -165,14 +189,48 @@ type BuiltinNat struct {
 	Succ   string
 }
 
-// Item is one top-level program item: a Def, a DataDef, or a BuiltinNat.
+// BuiltinNatOp is a kernel-acceleration declaration (C7 / R-NUM, Decision 1):
+//
+//	builtin natAdd add
+//	builtin natMul mul
+//	builtin natMonus monus
+//
+// It tags an already-defined binary nat function as a kernel-accelerated
+// arithmetic op. From its position the def's content hash is registered with the
+// corresponding NatOp in the session acceleration table, so a call on two
+// compressed literals (NatLit) short-circuits to one bigint step instead of
+// O(a·b) eliminator peeling. The accelerated op IS the user's own def — the
+// bridge to its recursive body is refl. Like `builtin nat`, the declaration is
+// session state only; nothing enters the store. Kind is one of "natAdd",
+// "natMul", "natMonus"; DefName is the function being accelerated.
+type BuiltinNatOp struct {
+	Kind    string // "natAdd" | "natMul" | "natMonus"
+	DefName string
+}
+
+// ENum is a numeral literal, carried unexpanded (a parser cannot know which
+// type it means). Pos is its source offset, for error messages. It is lowered
+// by NumConfig: the resolver to the unary default, the elaborator by the
+// expected type (see numeral.go).
+type ENum struct {
+	Val int
+	Pos int
+}
+
+// Item is one top-level program item: a Def, a DataDef, or a builtin binding.
 type Item interface {
 	isItem()
 }
 
-func (Def) isItem()        {}
-func (DataDef) isItem()    {}
-func (BuiltinNat) isItem() {}
+func (Def) isItem()          {}
+func (DataDef) isItem()      {}
+func (BuiltinNat) isItem()   {}
+func (BuiltinNatOp) isItem() {}
 
 func (ESubst) isExp() {}
 func (ECase) isExp()  {}
+func (ENum) isExp()   {}
+func (ESig) isExp()   {}
+func (EPair) isExp()  {}
+func (EFst) isExp()   {}
+func (ESnd) isExp()   {}

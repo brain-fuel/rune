@@ -1,0 +1,48 @@
+-- Chapter 66 — Bisimilarity as a path, the FORWARD direction (R-COIND / E2). The
+-- distributed track's correctness currency is bisimilarity: "this stream/process is
+-- observationally equal to that one". On the cubical inner stratum (M2) that
+-- equivalence is a PATH. Here, for coinductive streams, a path between two streams
+-- induces a path between every observation of them — `head`/`tail` carry the path
+-- (functoriality of the observations). So `pathF (Str A) s t` ENTAILS pointwise
+-- bisimilarity: equal heads, and a path between the tails (recurse). The converse
+-- (bisimilar ⟹ path) needs the guarded fixpoint and is the labelled E2 tail.
+
+-- A stream of A is the final coalgebra of X ↦ A × X (head : A, tail : the rest).
+Str : UF -> UF is
+  fn (A : UF) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end
+end
+
+-- The two observations, by `out` then projection.
+head : (A : UF) -> El (Str A) -> El A is
+  fn (A : UF) (s : El (Str A)) is
+    fstF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+tail : (A : UF) -> El (Str A) -> El (Str A) is
+  fn (A : UF) (s : El (Str A)) is
+    sndF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+-- A path between streams carries to a path between their HEADS: apply `head`
+-- pointwise along the interval. The endpoints line up because `papp … p i0 ~> s`
+-- and `… i1 ~> t`, so `head` evaluated along the path runs from `head s` to `head t`.
+headPath : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> El (pathF (Str A) s t) -> El (pathF A (head A s) (head A t)) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A)) (p : El (pathF (Str A) s t)) is
+    pabs A (fn (i : I) is head A (papp (Str A) s t p i) end)
+  end
+end
+
+-- Likewise the TAILS: a path between streams carries to a path between their tails,
+-- so bisimilarity is preserved under observation — the coinductive step of "equal
+-- heads and bisimilar tails", here derived from the single path.
+tailPath : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> El (pathF (Str A) s t) -> El (pathF (Str A) (tail A s) (tail A t)) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A)) (p : El (pathF (Str A) s t)) is
+    pabs (Str A) (fn (i : I) is tail A (papp (Str A) s t p i) end)
+  end
+end

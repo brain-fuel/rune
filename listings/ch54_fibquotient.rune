@@ -1,0 +1,65 @@
+-- Chapter 54 — The fibrant quotient, a quotient that COMPUTES with its relation
+-- (§F / R-HIT / A9). The strict `Quot` (ch06) identifies related points up to a
+-- Prop-valued relation, with the identification UIP-collapsed — sound, but the
+-- relation leaves no computational trace. The fibrant quotient `Quotient A R`
+-- instead adds a genuine PATH `qrel a b r : qinc a = qinc b` for every witness
+-- `r : R a b`, so the eliminator and transport RESPECT the relation cubically.
+-- It is a higher inductive type: a point constructor and a path constructor.
+
+-- The recursor: define a function on the quotient by a function `f` on the
+-- carrier that RESPECTS the relation — for each witness r : R a b, a path
+-- rel a b r : f a = f b. The recursor packages f and its respect-proof into a
+-- map `Quotient A R -> P`.
+quotRec : (A : UF) -> (R : El A -> El A -> UF) -> (P : UF)
+   -> (f : El A -> El P)
+   -> (rel : (a : El A) -> (b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b)))
+   -> El (Quotient A R) -> El P is
+  fn (A : UF) (R : El A -> El A -> UF) (P : UF)
+     (f : El A -> El P)
+     (rel : (a : El A) -> (b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b))) is
+    quotElim A R P f rel
+  end
+end
+
+-- Computes on points: quotRec … (qinc a) ~> f a, witnessed by refl.
+quotRecInc : (A : UF) -> (R : El A -> El A -> UF) -> (P : UF)
+   -> (f : El A -> El P)
+   -> (rel : (a : El A) -> (b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b)))
+   -> (a : El A) -> Eq (El P) (quotRec A R P f rel (qinc A R a)) (f a) is
+  fn (A : UF) (R : El A -> El A -> UF) (P : UF)
+     (f : El A -> El P)
+     (rel : (a : El A) -> (b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b)))
+     (a : El A) is
+    refl (f a)
+  end
+end
+
+-- The relation path's boundary is the two included points, definitionally:
+-- papp … (qrel A R a b r) i0 ~> qinc A R a.
+qrelStart : (A : UF) -> (R : El A -> El A -> UF)
+   -> (a : El A) -> (b : El A) -> (r : El (R a b))
+   -> Eq (El (Quotient A R))
+        (papp (Quotient A R) (qinc A R a) (qinc A R b) (qrel A R a b r) i0)
+        (qinc A R a) is
+  fn (A : UF) (R : El A -> El A -> UF)
+     (a : El A) (b : El A) (r : El (R a b)) is
+    refl (qinc A R a)
+  end
+end
+
+-- The relation is respected on the nose: applying the recursor along a relation
+-- path runs the chosen respect-proof. circElim-style, the eliminator sends
+-- qrel a b r to rel a b r — this is the EFFECTIVE quotient (the relation has
+-- computational content), which the strict Quot cannot provide.
+quotRecRel : (A : UF) -> (R : El A -> El A -> UF) -> (P : UF)
+   -> (f : El A -> El P)
+   -> (rel : (a : El A) -> (b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b)))
+   -> (a : El A) -> (b : El A) -> (r : El (R a b)) -> (i : I) -> El P is
+  fn (A : UF) (R : El A -> El A -> UF) (P : UF)
+     (f : El A -> El P)
+     (rel : (a : El A) -> (b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b)))
+     (a : El A) (b : El A) (r : El (R a b)) (i : I) is
+    quotElim A R P f rel
+      (papp (Quotient A R) (qinc A R a) (qinc A R b) (qrel A R a b r) i)
+  end
+end

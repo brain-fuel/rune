@@ -1,0 +1,61 @@
+-- Chapter 77 — List is a FUNCTOR (M6 stdlib). `map` lifts a function over a list; it preserves
+-- identity (`map id = id`) and composition (`map g ∘ map f = map (g ∘ f)`) — the two functor
+-- laws, proven by induction over the ambient observational `Eq`. With ch36 (length) and ch73
+-- (append monoid + reverse), the verified list algebra now includes its functorial structure.
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+map : (A : U) -> (B : U) -> (f : A -> B) -> List A -> List B is
+  fn (A : U) (B : U) (f : A -> B) (xs : List A) is
+    ListElim A (fn (w : List A) is List B end)
+      (nil B)
+      (fn (x : A) (rest : List A) (ih : List B) is cons B (f x) ih end)
+      xs
+  end
+end
+
+-- cons-congruence over Eq (List B), by subst (the inductive steps rewrite the tail under cons).
+congCons : (B : U) -> (y : B) -> (xs : List B) -> (ys : List B)
+   -> Eq (List B) xs ys -> Eq (List B) (cons B y xs) (cons B y ys) is
+  fn (B : U) (y : B) (xs : List B) (ys : List B) (e : Eq (List B) xs ys) is
+    subst (List B) xs ys e (fn (z : List B) is Eq (List B) (cons B y xs) (cons B y z) end)
+      (refl (cons B y xs))
+  end
+end
+
+-- IDENTITY LAW: mapping the identity is the identity — `map id xs ≡ xs`. Base `map id nil ~> nil`
+-- (refl); the cons step rewrites the tail by the IH under `cons x` (congCons).
+mapId : (A : U) -> (xs : List A) -> Eq (List A) (map A A (fn (z : A) is z end) xs) xs is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Eq (List A) (map A A (fn (z : A) is z end) w) w end)
+      (refl (nil A))
+      (fn (x : A) (rest : List A) (ih : Eq (List A) (map A A (fn (z : A) is z end) rest) rest) is
+         congCons A x (map A A (fn (z : A) is z end) rest) rest ih end)
+      xs
+  end
+end
+
+-- COMPOSITION LAW: map fuses — `map g (map f xs) ≡ map (g ∘ f) xs`. Base both `nil` (refl); the
+-- cons step rewrites the tail by the IH under `cons (g (f x))` (congCons). The key fusion law
+-- (a `map`/`map` deforestation, here a definitional theorem).
+mapComp : (A : U) -> (B : U) -> (C : U) -> (f : A -> B) -> (g : B -> C) -> (xs : List A)
+   -> Eq (List C)
+        (map B C g (map A B f xs))
+        (map A C (fn (z : A) is g (f z) end) xs) is
+  fn (A : U) (B : U) (C : U) (f : A -> B) (g : B -> C) (xs : List A) is
+    ListElim A
+      (fn (w : List A) is
+         Eq (List C) (map B C g (map A B f w)) (map A C (fn (z : A) is g (f z) end) w) end)
+      (refl (nil C))
+      (fn (x : A) (rest : List A)
+          (ih : Eq (List C) (map B C g (map A B f rest)) (map A C (fn (z : A) is g (f z) end) rest)) is
+         congCons C (g (f x))
+           (map B C g (map A B f rest))
+           (map A C (fn (z : A) is g (f z) end) rest)
+           ih end)
+      xs
+  end
+end

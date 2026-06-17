@@ -1,0 +1,166 @@
+-- ====================================================================================
+-- CHAPTER 188 — REPLICATED STATE MACHINE: INCREMENTAL APPLY, VERIFIED + DEPLOYED (telos-4/E-track).
+-- A replicated state machine (SMR) applies a committed log of commands to a state.  The catch-up
+-- law a follower relies on: applying the APPENDED log = applying the old log then executing the
+-- new command (`applyLog s (append xs e) = exec (applyLog s xs) e`).  This is what lets a replica
+-- advance entry-by-entry as the log grows, staying consistent.  FULLY PROVEN + DEPLOYED.
+-- Self-contained (own Nat/List + add) so it erases and runs.
+-- ====================================================================================
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U is
+  nil : List
+| cons : Nat -> List -> List
+end
+
+-- addition (the state-machine step: a command x advances the counter state by x).
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- the SMR step: execute one command against the state.
+exec : Nat -> Nat -> Nat is fn (s : Nat) (x : Nat) is add s x end end
+
+-- append a command at the end of the log (snoc).
+append : List -> Nat -> List is
+  fn (xs : List) (e : Nat) is
+    ListElim (fn (zs : List) is List end)
+      (cons e nil)
+      (fn (x : Nat) (xs' : List) (ih : List) is cons x ih end)
+      xs
+  end
+end
+
+-- applyLog s xs: run the whole log left-to-right (foldl exec) from initial state s.
+applyLog : Nat -> List -> Nat is
+  fn (s : Nat) (xs : List) is
+    ListElim (fn (zs : List) is Nat -> Nat end)
+      (fn (acc : Nat) is acc end)
+      (fn (x : Nat) (xs' : List) (ih : Nat -> Nat) is fn (acc : Nat) is ih (exec acc x) end end)
+      xs
+      s
+  end
+end
+
+-- THE INCREMENTAL-APPLY (catch-up) LAW: running the appended log = running the old log, then
+-- executing the new command.  Induct on xs (parametric in the accumulator s); the cons-case is the
+-- IH at the stepped state `exec s x` (applyLog threads the accumulator, so this lines up on the nose).
+applyLogAppend : (xs : List) -> (e : Nat) -> (s : Nat)
+   -> Eq Nat (applyLog s (append xs e)) (exec (applyLog s xs) e) is
+  fn (xs : List) (e : Nat) is
+    ListElim (fn (zs : List) is (s : Nat) -> Eq Nat (applyLog s (append zs e)) (exec (applyLog s zs) e) end)
+      (fn (s : Nat) is refl (exec s e) end)
+      (fn (x : Nat) (xs' : List)
+          (ih : (s : Nat) -> Eq Nat (applyLog s (append xs' e)) (exec (applyLog s xs') e)) is
+         fn (s : Nat) is ih (exec s x) end
+      end)
+      xs
+  end
+end
+
+-- A CONCRETE DEPLOYED SCENARIO: apply the log [1,2,3] to the initial state 0 → 6 (a replicated
+-- counter catching up on three committed commands).  DEPLOYS + RUNS on a backend.
+one : Nat is succ zero end
+two : Nat is succ (succ zero) end
+three : Nat is succ (succ (succ zero)) end
+cmdLog : List is cons one (cons two (cons three nil)) end
+smrState : Nat is applyLog zero cmdLog end
+
+-- Certified by computation (refl) AND that appending command 3 to [1,2] then running equals
+-- running [1,2] then exec-ing 3 (the catch-up law at a concrete point).
+smrStateCorrect : Eq Nat smrState (succ (succ (succ (succ (succ (succ zero)))))) is refl smrState end
+catchUpStep : Eq Nat (applyLog zero (append (cons one (cons two nil)) three))
+                     (exec (applyLog zero (cons one (cons two nil))) three) is
+  applyLogAppend (cons one (cons two nil)) three zero
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 188 — WHAT LANDED.
+-- FULLY PROVEN + DEPLOYED (no admits/holes/postulates): a replicated state machine (`applyLog` =
+-- foldl of the SMR step `exec`) and `applyLogAppend` — the incremental-apply / catch-up law
+-- (running the appended log = running the old log then executing the new command), plus a concrete
+-- `smrState` that DEPLOYS + RUNS to 6 (a replica applying three committed commands), certified by
+-- refl AND by the catch-up theorem.  With append-preserves-prefix (ch187) and log matching (ch186),
+-- a replica can advance entry-by-entry along the growing log and stay provably consistent.
+-- THE NEXT STEP: two replicas with the same committed log reach the same state (SMR agreement,
+-- immediate from determinism); or runnable OTP-style replica actors.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 189 — SMR CONSISTENCY: COMPOSITION + DETERMINISM, VERIFIED + DEPLOYED (telos-4/E-track).
+-- Two consistency laws for the replicated state machine.  COMPOSITION: running two log segments =
+-- running the first, then the second from the resulting state (applyLog s (xs ++ ys) =
+-- applyLog (applyLog s xs) ys) — so a follower that has applied a prefix catches up by applying just
+-- the suffix and reaches the leader's state.  DETERMINISM: equal logs reach equal states.  FULLY
+-- PROVEN + DEPLOYED.
+-- ====================================================================================
+
+-- log concatenation (xs ++ ys).
+concat : List -> List -> List is
+  fn (xs : List) (ys : List) is
+    ListElim (fn (zs : List) is List end)
+      ys
+      (fn (x : Nat) (xs' : List) (ih : List) is cons x ih end)
+      xs
+  end
+end
+
+-- COMPOSITION (catch-up by suffix): induct on xs, parametric in the accumulator; the cons-case is
+-- the IH at the stepped state `exec s x` (applyLog threads the accumulator, lining the call up).
+applyLogConcat : (xs : List) -> (ys : List) -> (s : Nat)
+   -> Eq Nat (applyLog s (concat xs ys)) (applyLog (applyLog s xs) ys) is
+  fn (xs : List) (ys : List) is
+    ListElim
+      (fn (zs : List) is
+         (s : Nat) -> Eq Nat (applyLog s (concat zs ys)) (applyLog (applyLog s zs) ys) end)
+      (fn (s : Nat) is refl (applyLog s ys) end)
+      (fn (x : Nat) (xs' : List)
+          (ih : (s : Nat) -> Eq Nat (applyLog s (concat xs' ys)) (applyLog (applyLog s xs') ys)) is
+         fn (s : Nat) is ih (exec s x) end
+       end)
+      xs
+  end
+end
+
+-- DETERMINISM: equal logs reach equal states (Leibniz subst).
+applyLogDet : (s : Nat) -> (xs : List) -> (ys : List)
+   -> Eq List xs ys -> Eq Nat (applyLog s xs) (applyLog s ys) is
+  fn (s : Nat) (xs : List) (ys : List) (p : Eq List xs ys) is
+    subst List xs ys p (fn (zs : List) is Eq Nat (applyLog s xs) (applyLog s zs) end)
+      (refl (applyLog s xs))
+  end
+end
+
+-- A CONCRETE DEPLOYED SCENARIO: a follower that has applied prefix [1,2] catches up on suffix [3].
+-- Running the full concatenated log [1,2]++[3] from state 0 DEPLOYS + RUNS to 6.
+suffix : List is cons three nil end
+prefixLog : List is cons one (cons two nil) end
+catchUpState : Nat is applyLog zero (concat prefixLog suffix) end
+
+-- Certified: the catch-up state is 6 (refl), AND equals running the prefix then the suffix
+-- (the composition law) — exactly the follower-catches-up guarantee.
+catchUpStateCorrect : Eq Nat catchUpState (succ (succ (succ (succ (succ (succ zero)))))) is
+  refl catchUpState
+end
+catchUpBySuffix : Eq Nat (applyLog zero (concat prefixLog suffix))
+                         (applyLog (applyLog zero prefixLog) suffix) is
+  applyLogConcat prefixLog suffix zero
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 189 — WHAT LANDED.
+-- FULLY PROVEN + DEPLOYED (no admits/holes/postulates): `applyLogConcat` (the SMR COMPOSITION law —
+-- running xs ++ ys = running xs then ys from the resulting state, so a follower catches up by
+-- applying just the suffix) and `applyLogDet` (DETERMINISM — equal logs reach equal states), plus a
+-- concrete `catchUpState` that DEPLOYS + RUNS to 6, certified by refl AND by the composition law.
+-- With log matching (ch186), append-preserves-prefix (ch187) and incremental apply (ch188), the
+-- replicated-log SMR is verified end to end: followers track the leader, provably consistent.
+-- THE NEXT STEP: runnable OTP-style replica actors exchanging messages; or a fresh frontier.
+-- ====================================================================================

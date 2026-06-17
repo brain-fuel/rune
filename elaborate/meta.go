@@ -132,6 +132,20 @@ func (e *Elaborator) Zonk(lvl int, t core.Tm) core.Tm {
 			Body: core.Scope{Name: tm.Body.Name, Body: e.Zonk(lvl+1, tm.Body.Body)}}
 	case core.Ann:
 		return core.Ann{Term: e.Zonk(lvl, tm.Term), Ty: e.Zonk(lvl, tm.Ty)}
+	case core.Sig:
+		return core.Sig{Qty: tm.Qty, Dom: e.Zonk(lvl, tm.Dom),
+			Cod: core.Scope{Name: tm.Cod.Name, Body: e.Zonk(lvl+1, tm.Cod.Body)}}
+	case core.Pair:
+		return core.Pair{Dom: e.Zonk(lvl, tm.Dom),
+			Cod: core.Scope{Name: tm.Cod.Name, Body: e.Zonk(lvl+1, tm.Cod.Body)},
+			A:   e.Zonk(lvl, tm.A), B: e.Zonk(lvl, tm.B)}
+	case core.Fst:
+		return core.Fst{P: e.Zonk(lvl, tm.P)}
+	case core.Snd:
+		return core.Snd{P: e.Zonk(lvl, tm.P)}
+	case core.NatLit:
+		// A compressed numeral carries no subterms and no metas: it is its own zonk.
+		return tm
 	default:
 		panic(fmt.Sprintf("zonk: unknown core term %T", t))
 	}
@@ -189,6 +203,17 @@ func MetaFree(t core.Tm) bool {
 		return (tm.Ty == nil || MetaFree(tm.Ty)) && MetaFree(tm.Val) && MetaFree(tm.Body.Body)
 	case core.Ann:
 		return MetaFree(tm.Term) && MetaFree(tm.Ty)
+	case core.Sig:
+		return MetaFree(tm.Dom) && MetaFree(tm.Cod.Body)
+	case core.Pair:
+		return MetaFree(tm.Dom) && MetaFree(tm.Cod.Body) && MetaFree(tm.A) && MetaFree(tm.B)
+	case core.Fst:
+		return MetaFree(tm.P)
+	case core.Snd:
+		return MetaFree(tm.P)
+	case core.NatLit:
+		// A compressed numeral mentions no metavariable.
+		return true
 	default:
 		return false
 	}

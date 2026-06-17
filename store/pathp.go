@@ -1,0 +1,158 @@
+package store
+
+import "goforge.dev/rune/v3/core"
+
+// The DEPENDENT cubical path builtin group (§F / R-HIT / A9 prerequisite): paths
+// whose endpoints live in DIFFERENT fibers along a type-line `A : I -> UF`. Where
+// `pathF A x y` (store/path.go) is the non-dependent identity (A fixed), `pathP`
+// is the dependent one — `El (pathP A x y)` is a function `(i:I) -> El (A i)`
+// pinned at `x : El (A i0)` and `y : El (A i1)`. It is what a dependent HIT
+// eliminator's path-constructor method requires (the method over `loop` is a
+// `pathP (λi. P (loop@i))`), and the natural home of heterogeneous transport.
+// Shipped as a builtin group on its own hash space (tag R/r), built against the
+// fibrant + interval groups, so their hashes stay fixed.
+//
+//	pathP : (A : I -> UF) -> El (A i0) -> El (A i1) -> UF        the dependent path code
+//	pabsP : (A : I -> UF) -> (f : (i:I) -> El (A i))
+//	          -> El (pathP A (f i0) (f i1))                       dependent path abstraction
+//	pappP : (A : I -> UF) -> (x : El (A i0)) -> (y : El (A i1))
+//	          -> El (pathP A x y) -> (i : I) -> El (A i)          application
+//
+// pathP/pabsP are permanently-neutral heads (a fibrant former and a canonical
+// intro). pappP COMPUTES (core.PathPInfo / tryPathPIota):
+//
+//	pappP A x y (pabsP A' f) i  ~>  f i      β
+//	pappP A x y p            i0 ~>  x        boundary (any p)
+//	pappP A x y p            i1 ~>  y        boundary (any p)
+//
+// generalising the pathF rules to the dependent line. No hash-format bump.
+
+var pathPNames = [3]string{"pathP", "pabsP", "pappP"}
+
+type pathPEntry struct {
+	hashes [3]core.Hash
+}
+
+// AddPathP registers the dependent-path builtin group against the registered
+// fibrant and interval groups, binding its names and returning the member hashes.
+func (s *Store) AddPathP(fib [10]core.Hash, iv [6]core.Hash) [3]core.Hash {
+	tys := pathPTypes(fib, iv)
+
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'R'})
+	for _, ty := range tys {
+		th := core.HashTerm(ty)
+		g.Write(th[:])
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	var hs [3]core.Hash
+	for i := range hs {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, 'r'})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		copy(hs[i][:], h.Sum(nil))
+	}
+	subst := func(t core.Tm) core.Tm {
+		for i := range hs {
+			t = replaceRef(t, Placeholder(i), hs[i])
+		}
+		return t
+	}
+	for i, ty := range tys {
+		s.defs[hs[i]] = Def{Type: subst(ty)}
+		s.names[pathPNames[i]] = hs[i]
+	}
+	s.pp = &pathPEntry{hashes: hs}
+	return hs
+}
+
+// PathPRoleOf implements core.PathPInfo.
+func (s *Store) PathPRoleOf(h core.Hash) core.PathPRole {
+	if s.pp == nil {
+		return core.PPRoleNone
+	}
+	switch h {
+	case s.pp.hashes[0]:
+		return core.PPRolePathP
+	case s.pp.hashes[1]:
+		return core.PPRoleAbs
+	case s.pp.hashes[2]:
+		return core.PPRoleApp
+	}
+	return core.PPRoleNone
+}
+
+// PathPHash implements core.PathPInfo: the reverse lookup, for ι-rules (the
+// dependent HIT eliminators) to CONSTRUCT pappP sub-terms.
+func (s *Store) PathPHash(role core.PathPRole) (core.Hash, bool) {
+	if s.pp == nil {
+		return core.Hash{}, false
+	}
+	switch role {
+	case core.PPRolePathP:
+		return s.pp.hashes[0], true
+	case core.PPRoleAbs:
+		return s.pp.hashes[1], true
+	case core.PPRoleApp:
+		return s.pp.hashes[2], true
+	}
+	return core.Hash{}, false
+}
+
+// PathPHashes returns the registered group's hashes (and whether it exists).
+func (s *Store) PathPHashes() ([3]core.Hash, bool) {
+	if s.pp == nil {
+		return [3]core.Hash{}, false
+	}
+	return s.pp.hashes, true
+}
+
+// PathPNames returns the surface names of the group members, in hash order.
+func PathPNames() [3]string { return pathPNames }
+
+func pathPTypes(fib [10]core.Hash, iv [6]core.Hash) [3]core.Tm {
+	v := func(i int) core.Tm { return core.Var{Idx: i} }
+	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
+		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
+	}
+	app := func(f core.Tm, xs ...core.Tm) core.Tm {
+		for _, x := range xs {
+			f = core.App{Fn: f, Arg: x, Icit: core.Expl}
+		}
+		return f
+	}
+	uf := core.Tm(core.Ref{Hash: fib[0]})
+	el := func(x core.Tm) core.Tm { return app(core.Ref{Hash: fib[1]}, x) }
+	ivTy := core.Tm(core.Ref{Hash: iv[0]})
+	i0 := core.Tm(core.Ref{Hash: iv[1]})
+	i1 := core.Tm(core.Ref{Hash: iv[2]})
+	lineTy := pi("i", ivTy, uf) // A : I -> UF
+	pathP := func(a, x, y core.Tm) core.Tm { return app(core.Ref{Hash: Placeholder(0)}, a, x, y) }
+
+	// pathP : (A : I -> UF) -> El (A i0) -> El (A i1) -> UF
+	//   [A]; x: A=v(0); [x,A] y: A=v(1); [y,x,A] result UF.
+	pathPTy := pi("A", lineTy,
+		pi("x", el(app(v(0), i0)),
+			pi("y", el(app(v(1), i1)),
+				uf)))
+	// pabsP : (A : I -> UF) -> (f : (i:I) -> El (A i)) -> El (pathP A (f i0) (f i1))
+	//   f : under [i,A]: A=v(1),i=v(0); result under [f,A]: A=v(1),f=v(0).
+	pabsPTy := pi("A", lineTy,
+		pi("f", pi("i", ivTy, el(app(v(1), v(0)))),
+			el(pathP(v(1), app(v(0), i0), app(v(0), i1)))))
+	// pappP : (A : I -> UF) -> (x : El (A i0)) -> (y : El (A i1))
+	//           -> El (pathP A x y) -> (i : I) -> El (A i)
+	//   [A]; x:A=v(0); [x,A] y:A=v(1); [y,x,A] p: A=v(2),x=v(1),y=v(0);
+	//   [p,y,x,A] i:I; [i,p,y,x,A] result El (A i): A=v(4),i=v(0).
+	pappPTy := pi("A", lineTy,
+		pi("x", el(app(v(0), i0)),
+			pi("y", el(app(v(1), i1)),
+				pi("p", el(pathP(v(2), v(1), v(0))),
+					pi("i", ivTy,
+						el(app(v(4), v(0))))))))
+
+	return [3]core.Tm{pathPTy, pabsPTy, pappPTy}
+}

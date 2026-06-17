@@ -1,0 +1,262 @@
+package store
+
+import "goforge.dev/rune/v3/core"
+
+// The GUARDED-RECURSION modality builtin group (R-COIND / C5b), now CLOCK-EXPLICIT
+// (CLOCKS-DESIGN): the "later" modality of guarded/ticked cubical type theory plus
+// the clock layer that turns guarded (productivity-by-typing) recursion into genuine
+// coinduction. Its own hash space (like coind/path/kan/…), registered against the
+// fibrant group.
+//
+//	Clock : U                                  a pretype of clocks (no eliminator, like I)
+//	k0    : Clock                              a clock constant (∀κ is inhabited)
+//	Later : Clock -> UF -> UF                  ▹κ ("later" w.r.t. a NAMED clock)
+//	next  : (k : Clock) -> (A : UF) -> El A -> El (Later k A)
+//	dfix  : (k : Clock) -> (A : UF) -> (El (Later k A) -> El A) -> El A   guarded fixpoint
+//	lmap  : (k : Clock) -> (A B : UF) -> (El A -> El B) -> El (Later k A) -> El (Later k B)
+//	lap   : (k : Clock) -> (A B : UF) -> El (Later k (piF A (λ_. B))) -> El (Later k A) -> El (Later k B)
+//	force : (A : UF) -> ((k : Clock) -> El (Later k A)) -> ((k : Clock) -> El A)
+//	gfix  : (k : Clock) -> (UF -> UF) -> UF     the GUARDED-RECURSIVE TYPE fixpoint
+//
+// `gfix k F` is the guarded fixpoint of a type operator `F : UF -> UF` whose recursive
+// occurrence is guarded by `Later k` — e.g. the guarded stream `Str^g κ A = gfix κ
+// (λX. sigmaF A (λ_. Later κ X))`, satisfying `El (Str^g κ A) ≃ A × ▹κ (Str^g κ A)`.
+// `dfix` is the VALUE-level guarded fixpoint (for a fixed code A); `gfix` is its
+// TYPE-level dual (for a self-referential code), the primitive the bisimilar ⟹ path
+// converse needs to even STATE the guarded stream / bisimilarity. Its head is
+// permanently neutral in eval; the defining equation `gfix k F ≡ F (gfix k F)` is a
+// bounded CONVERSION (core/conv.go convGfix) with a PROGRESS guard so it terminates
+// for every F (it never re-unfolds a fixpoint whose operator made no head progress).
+//
+// Clock is MORALLY a pretype (no transport, no eliminator — you cannot case on a
+// clock, exactly like the interval `I`), so `∀κ. A` is just an ordinary Pi over
+// `Clock` (no new former). The guard `Later` is indexed by a NAMED clock so that
+// `force`'s type is honest: `force : (∀κ. ▹κ A) -> ∀κ. A` is the SOLE elimination of
+// ▹, and it is sound precisely BECAUSE the value is parametric in the clock. The
+// naked `force : ▹A -> A` is never added — clock-indexing the Later is what blocks the
+// inconsistent `Later A -> A` (a `λκ. la` for a free `la : El(Later κ' A)` cannot have
+// type `(κ : Clock) -> El(Later κ A)` — the Later sits on the wrong clock).
+//
+// The Clock / next / dfix heads are PERMANENTLY NEUTRAL in evaluation — there is no
+// spontaneous ι-rule for dfix, so the normalizer cannot diverge (the C4 firewall
+// discipline). The defining guarded-fixpoint equation
+//
+//	dfix k A f  ≡  f (next k A (dfix k A f))        (unfolds ONCE)
+//
+// is a bounded CONVERSION rule (core/conv.go convDfix), per clock. `lmap`/`lap`
+// COMPUTE by eval ι-rules (tryGuardIota / tryGuardLapIota), reusing the clock:
+//
+//	lmap k A B g (next k A x)         ~>  next k B (g x)
+//	lap  k A B (next k _ f) (next k A x) ~>  next k B (f x)
+//
+// `force` COMPUTES by ι (tryForceIota) on a clock-abstracted `next` intro — the
+// keystone clock-β / force-next coherence:
+//
+//	force A (λκ. next κ A x)  ~>  λκ. x             (the later collapses under ∀κ)
+//
+// firing only when the delayed value is a `next` on the BOUND clock and `x` is
+// clock-closed (so the result is genuinely independent of the clock). On any other
+// argument it stays neutral, so the normalizer still cannot loop. No hash-format bump
+// (no new core constructor); all members are inner-tainted (check, don't deploy).
+
+var guardNames = [13]string{"Clock", "k0", "Later", "next", "dfix", "lmap", "lap", "force", "gfix", "forceD", "gfixF", "laterApp", "lapD"}
+
+type guardEntry struct {
+	hashes [13]core.Hash
+}
+
+// AddGuard registers the guarded-recursion group against the already-registered
+// fibrant group, binding its names and returning the member hashes in guardNames
+// order.
+func (s *Store) AddGuard(fib [10]core.Hash) [13]core.Hash {
+	tys := guardTypes(fib)
+
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'M'})
+	for _, ty := range tys {
+		th := core.HashTerm(ty)
+		g.Write(th[:])
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	var hs [13]core.Hash
+	for i := range hs {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, 'm'})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		copy(hs[i][:], h.Sum(nil))
+	}
+	subst := func(t core.Tm) core.Tm {
+		for i := range hs {
+			t = replaceRef(t, Placeholder(i), hs[i])
+		}
+		return t
+	}
+	for i, ty := range tys {
+		s.defs[hs[i]] = Def{Type: subst(ty)}
+		s.names[guardNames[i]] = hs[i]
+	}
+	s.gd = &guardEntry{hashes: hs}
+	return hs
+}
+
+// GuardRoleOf implements core.GuardInfo.
+func (s *Store) GuardRoleOf(h core.Hash) core.GuardRole {
+	if s.gd == nil {
+		return core.LRoleNone
+	}
+	roles := [13]core.GuardRole{
+		core.LRoleClock, core.LRoleK0, core.LRoleLater, core.LRoleNext,
+		core.LRoleDfix, core.LRoleLmap, core.LRoleLap, core.LRoleForce, core.LRoleGfix,
+		core.LRoleForceD, core.LRoleGfixF, core.LRoleLaterApp, core.LRoleLapD,
+	}
+	for i, fh := range s.gd.hashes {
+		if fh == h {
+			return roles[i]
+		}
+	}
+	return core.LRoleNone
+}
+
+// GuardHash implements core.GuardInfo: the reverse lookup, for convDfix to rebuild
+// the `next k A (dfix k A f)` sub-term of the one-step unfolding and for the ι-rules
+// to reconstruct `next`/`Later`.
+func (s *Store) GuardHash(role core.GuardRole) (core.Hash, bool) {
+	if s.gd == nil {
+		return core.Hash{}, false
+	}
+	idx := map[core.GuardRole]int{
+		core.LRoleClock: 0, core.LRoleK0: 1, core.LRoleLater: 2, core.LRoleNext: 3,
+		core.LRoleDfix: 4, core.LRoleLmap: 5, core.LRoleLap: 6, core.LRoleForce: 7,
+		core.LRoleGfix: 8, core.LRoleForceD: 9, core.LRoleGfixF: 10, core.LRoleLaterApp: 11,
+		core.LRoleLapD: 12,
+	}
+	i, ok := idx[role]
+	if !ok {
+		return core.Hash{}, false
+	}
+	return s.gd.hashes[i], true
+}
+
+// GuardHashes returns the registered group's hashes (and whether it exists).
+func (s *Store) GuardHashes() ([13]core.Hash, bool) {
+	if s.gd == nil {
+		return [13]core.Hash{}, false
+	}
+	return s.gd.hashes, true
+}
+
+// GuardNames returns the surface names of the group members, in hash order.
+func GuardNames() [13]string { return guardNames }
+
+// guardTypes builds the eight member types, referencing UF = fib[0], El = fib[1],
+// piF = fib[3], `Clock` as Placeholder(0) and `Later` as Placeholder(2).
+func guardTypes(fib [10]core.Hash) [13]core.Tm {
+	v := func(i int) core.Tm { return core.Var{Idx: i} }
+	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
+		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
+	}
+	app := func(f core.Tm, xs ...core.Tm) core.Tm {
+		for _, x := range xs {
+			f = core.App{Fn: f, Arg: x, Icit: core.Expl}
+		}
+		return f
+	}
+	uf := core.Tm(core.Ref{Hash: fib[0]})
+	el := func(x core.Tm) core.Tm { return app(core.Ref{Hash: fib[1]}, x) }
+	piFH := core.Tm(core.Ref{Hash: fib[3]})
+	clk := core.Tm(core.Ref{Hash: Placeholder(0)}) // Clock
+	laterH := core.Ref{Hash: Placeholder(2)}       // Later
+
+	// 0. Clock : U
+	clockTy := core.Tm(core.Univ{})
+
+	// 1. k0 : Clock
+	k0Ty := clk
+
+	// 2. Later : Clock -> UF -> UF
+	laterTy := pi("k", clk, pi("A", uf, uf))
+
+	// 3. next : (k : Clock) -> (A : UF) -> El A -> El (Later k A)
+	nextTy := pi("k", clk,
+		pi("A", uf, // [A,k]: A=0, k=1
+			pi("x", el(v(0)), // dom El A, [A,k] A=0
+				el(app(laterH, v(2), v(1)))))) // [x,A,k]: k=2, A=1 → Later k A
+
+	// 4. dfix : (k : Clock) -> (A : UF) -> (El (Later k A) -> El A) -> El A
+	dfixTy := pi("k", clk,
+		pi("A", uf, // [A,k]: A=0, k=1
+			pi("f", pi("_", el(app(laterH, v(1), v(0))), el(v(1))), // El(Later k A)->El A
+				el(v(1))))) // [f,A,k]: A=1 → El A
+
+	// 5. lmap : (k)(A)(B) -> (El A -> El B) -> El (Later k A) -> El (Later k B)
+	lmapTy := pi("k", clk,
+		pi("A", uf,
+			pi("B", uf, // [B,A,k]: B=0, A=1, k=2
+				pi("g", pi("_", el(v(1)), el(v(1))), // El A -> El B
+					pi("l", el(app(laterH, v(3), v(2))), // [g,B,A,k]: k=3, A=2 → Later k A
+						el(app(laterH, v(4), v(2)))))))) // [l,g,B,A,k]: k=4, B=2 → Later k B
+
+	// 6. lap : (k)(A)(B) -> El (Later k (piF A (λ_. B))) -> El (Later k A) -> El (Later k B)
+	// piF A (λ_. B): under [B,A,k] A=v(1); inside the family lambda (binds _) B=v(1).
+	piFAB := app(piFH, v(1), core.Lam{Body: core.Scope{Name: "_", Body: v(1)}})
+	lapTy := pi("k", clk,
+		pi("A", uf,
+			pi("B", uf, // [B,A,k]
+				pi("lf", el(app(laterH, v(2), piFAB)), // [B,A,k]: k=2 → Later k (piF A (λ_.B))
+					pi("lx", el(app(laterH, v(3), v(2))), // [lf,B,A,k]: k=3, A=2 → Later k A
+						el(app(laterH, v(4), v(2)))))))) // [lx,lf,B,A,k]: k=4, B=2 → Later k B
+
+	// 7. force : (A : UF) -> ((k : Clock) -> El (Later k A)) -> ((k : Clock) -> El A)
+	forceTy := pi("A", uf,
+		pi("g", pi("k", clk, el(app(laterH, v(0), v(1)))), // [A]: inside k → [k,A] k=0,A=1 → Later k A
+			pi("k", clk, el(v(2))))) // result: inside k → [k,g,A] A=2 → El A
+
+	// 8. gfix : (k : Clock) -> (UF -> UF) -> UF  (guarded-recursive type fixpoint)
+	gfixTy := pi("k", clk, pi("F", pi("_", uf, uf), uf))
+
+	// 9. forceD : (A : Clock -> UF) -> ((k : Clock) -> El (Later k (A k)))
+	//                                -> ((k : Clock) -> El (A k))   (the DEPENDENT force)
+	clkToUF := pi("_", clk, uf)
+	forceDTy := pi("A", clkToUF,
+		pi("g", pi("k", clk, el(app(laterH, v(0), app(v(1), v(0))))), // [A] inside k → [k,A]: k=0,A=1 → Later k (A k)
+			pi("k", clk, el(app(v(2), v(0)))))) // result: inside k → [k,g,A]: A=2 → El (A k)
+
+	// 10. gfixF : (k : Clock) -> (D : UF) -> ((El D -> UF) -> (El D -> UF)) -> (El D -> UF)
+	// the INDEXED guarded-recursive type fixpoint (the `Bisim` former): the recursive
+	// occurrence may sit at a DIFFERENT index. `predD(d)` is `(r : El D) -> UF` with D at
+	// de Bruijn index d (its codomain UF is closed, so no inner shift).
+	predD := func(d int) core.Tm { return pi("r", el(v(d)), uf) }
+	gfixFTy := pi("k", clk,
+		pi("D", uf, // [D,k]: D=0
+			pi("Phi", pi("_p", predD(0), predD(1)), // dom uses D=0; cod (under _p) uses D=1
+				predD(1)))) // result: [Phi,D,k] D=1
+
+	// 11. laterApp : (k : Clock) -> (A : UF) -> (El A -> UF) -> El (Later k A) -> UF
+	// the universe-level ▹κ application: lift a TYPE-FAMILY through a delayed value,
+	// `laterApp k A f (next k A x) ~> Later k (f x)` (the companion to lmap, for putting a
+	// UF-valued — e.g. bisimilarity — recursive occurrence under ▹κ).
+	laterAppTy := pi("k", clk,
+		pi("A", uf, // [A,k]: A=0
+			pi("f", pi("_", el(v(0)), uf), // El A -> UF, A=0
+				pi("la", el(app(laterH, v(2), v(1))), // [f,A,k]: k=2,A=1 → Later k A
+					uf)))) // result UF
+
+	// 12. lapD : (k : Clock) -> (A : UF) -> (B : El A -> UF)
+	//            -> El (Later k (piF A B)) -> (la : El (Later k A)) -> El (laterApp k A B la)
+	// the DEPENDENT guarded application: apply a delayed dependent function to a delayed
+	// argument, `lapD k A B (next k (piF A B) f) (next k A x) ~> next k (B x) (f x)`. Its
+	// result type is given by `laterApp` (that is why laterApp comes first); the piece the
+	// converse's path-assembly recursion needs to apply the delayed recursive path-builder.
+	laterAppH := core.Ref{Hash: Placeholder(11)}
+	lapDTy := pi("k", clk,
+		pi("A", uf, // [A,k]: A=0
+			pi("B", pi("_", el(v(0)), uf), // El A -> UF, A=0
+				pi("lf", el(app(laterH, v(2), app(piFH, v(1), v(0)))), // [B,A,k]: k=2,A=1,B=0 → Later k (piF A B)
+					pi("la", el(app(laterH, v(3), v(2))), // [lf,B,A,k]: k=3,A=2 → Later k A
+						el(app(laterAppH, v(4), v(3), v(2), v(0)))))))) // [la,lf,B,A,k]: k=4,A=3,B=2,la=0
+
+	return [13]core.Tm{clockTy, k0Ty, laterTy, nextTy, dfixTy, lmapTy, lapTy, forceTy, gfixTy, forceDTy, gfixFTy, laterAppTy, lapDTy}
+}

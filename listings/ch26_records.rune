@@ -1,0 +1,39 @@
+-- Chapter 26 — Dependent pairs Σ in the surface (C1 / R-SUM).
+-- The outer core gains `Sig`/`Pair`/`Fst`/`Snd` with definitional η. Surface
+-- syntax (collision-free, capitalised keyword forms; the family is a function):
+--
+--   Sig A (fn (x : A) is B x end)        the Σ type  Σ (x : A), B x
+--   Pair A (fn (x : A) is B x end) a b   the pair    (a , b)
+--   Fst p          Snd p                 the projections
+--
+-- Records of any arity are right-nested Σ (sugar is a later increment); this
+-- chapter pins the kernel laws the typeclass/algebra/module layers stand on.
+
+-- First projection of a pair is its first component (β).
+fstBeta : (A : U) -> (B : A -> U) -> (a : A) -> (b : B a) ->
+    Eq A (Fst (Pair A (fn (x : A) is B x end) a b)) a is
+  fn (A : U) (B : A -> U) (a : A) (b : B a) is refl a end
+end
+
+-- Second projection of a pair is its second component (β); the DEPENDENT type
+-- lines up because Fst (Pair a b) ~> a definitionally.
+sndBeta : (A : U) -> (B : A -> U) -> (a : A) -> (b : B a) ->
+    Eq (B a) (Snd (Pair A (fn (x : A) is B x end) a b)) b is
+  fn (A : U) (B : A -> U) (a : A) (b : B a) is refl b end
+end
+
+-- A neutral pair is definitionally equal to the pairing of its projections —
+-- this checks ONLY with definitional η for Σ (the metatheory-review event).
+etaPair : (A : U) -> (B : A -> U) -> (p : Sig A (fn (x : A) is B x end)) ->
+    Eq (Sig A (fn (x : A) is B x end)) p
+       (Pair A (fn (x : A) is B x end) (Fst p) (Snd p)) is
+  fn (A : U) (B : A -> U) (p : Sig A (fn (x : A) is B x end)) is refl p end
+end
+
+-- A non-dependent product is the special case where the family ignores x — the
+-- shape a record of two fields desugars to. swap is its own inverse pointwise.
+swap : (A : U) -> (B : U) -> Sig A (fn (x : A) is B end) -> Sig B (fn (y : B) is A end) is
+  fn (A : U) (B : U) (p : Sig A (fn (x : A) is B end)) is
+    Pair B (fn (y : B) is A end) (Snd p) (Fst p)
+  end
+end

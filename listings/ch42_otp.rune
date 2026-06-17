@@ -1,0 +1,30 @@
+-- Chapter 42 — OTP-style concurrency, the typed interface (D5 over R-FFI + C3).
+-- Actors as a TYPED layer: process identities and the spawn/send/self
+-- primitives are foreign axioms whose effects are sequenced in the IO monad
+-- (C3). Actor programs type-check end-to-end against this interface — the
+-- verified shape of an OTP gen_server's glue. The BEAM runtime that gives these
+-- primitives meaning (and the supervision-tree behavioural proofs over the
+-- process calculus, E1) are the R-OTP follow-up; here IO is inner (checks, does
+-- not yet run).
+
+data Unit : U is
+  unit : Unit
+end
+
+foreign Pid  : U end
+foreign self : IO Pid end
+foreign spawn : (Unit -> IO Unit) -> IO Pid end
+foreign send : (A : U) -> Pid -> A -> IO Unit end
+
+-- send a unit message to a peer (a typed effectful action).
+ping : Pid -> IO Unit is
+  fn (p : Pid) is send Unit p unit end
+end
+
+-- spawn a child actor, then message it — bindIO (C3) sequences the two effects,
+-- the foreign primitives supply the actor operations. Type-checked Kleisli glue.
+spawnAndPing : (Unit -> IO Unit) -> IO Unit is
+  fn (body : Unit -> IO Unit) is
+    bindIO Pid Unit (spawn body) (fn (p : Pid) is ping p end)
+  end
+end

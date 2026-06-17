@@ -1,0 +1,900 @@
+-- Chapter 118 — THE REMAINING OTP RESTART STRATEGIES over the ch115 supervision tree (M6 /
+-- telos-3, D-track, D5 OTP-class concurrency). ch115 built the verified `supervisor` behaviour
+-- and proved the SIMPLEST restart strategy, `one_for_one` (a fault restarts ONLY the faulted
+-- child). This chapter advances the D-track by ONE concrete increment: the other two standard OTP
+-- restart strategies, each verified over the SAME child-table model.
+--
+--   one_for_all  — a fault restarts EVERY child: `restartAll sup` re-initializes all children to
+--                  their templates. Theorem `oneForAllReinitsAll`: childAt j (restartAll sup) =
+--                  initOf j sup for ALL j — after a one_for_all restart every position is back to
+--                  its init template. (OTP `:one_for_all`: when any child dies, terminate and
+--                  restart the WHOLE set — the children share fate.)
+--   rest_for_one — a fault at i restarts child i AND every child started after it (position >= i),
+--                  leaving the earlier children (position < i) untouched. `restartRest i sup`
+--                  rebuilds exactly the entries whose key k satisfies `lte i k = true`. Theorem
+--                  `restRestForOnePreservesEarlier`: lte i j = false (i.e. j < i) -> childAt j
+--                  (restartRest i sup) = childAt j sup — the children STRICTLY BEFORE the faulted
+--                  one are preserved (the rest_for_one isolation property), and
+--                  `restForOneReinitsAtAndAfter`: lte i j = true (j >= i) -> childAt j (restartRest
+--                  i sup) = initOf j sup — every child at or after i is re-initialized. (OTP
+--                  `:rest_for_one`: the children after the faulted one DEPEND on it, so they are
+--                  restarted with it; the ones before are independent and survive.)
+--
+-- MODEL (REUSED VERBATIM from ch115). Children are indexed by Nat position; a `Child` pairs the
+-- current server with its init template; a `Supervisor` is the ch75/ch99 finite Map (position ->
+-- Child). `childAt`/`initOf` observe the current/template slots. The two new strategies are
+-- variations on ch115's `restart` MapElim+BoolElim skeleton: one_for_all drops the guard (rebuild
+-- EVERY entry); rest_for_one swaps the eqNat guard for an `lte` comparison (rebuild k >= i).
+--
+-- Per the self-contained-listings convention, the ch114 gen_server core and the ch75/ch99 Map core
+-- are redeclared BYTE-IDENTICAL, plus ch115's Child/Supervisor/spawn/childAt/initOf and ch65's
+-- `lte`. The new material is restartAll/restartRest and their three theorems + a concrete 3-child
+-- scenario per strategy (refl-certified, closed numerals compute).
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Unit : U is
+  tt : Unit
+end
+
+-- ============================================================================
+-- ch114 GEN_SERVER core (REUSED VERBATIM).
+-- ============================================================================
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+length : (A : U) -> List A -> Nat is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Nat end)
+      zero
+      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+enqueueS : (A : U) -> A -> List A -> List A is
+  fn (A : U) (x : A) (q : List A) is append A q (cons A x (nil A)) end
+end
+
+-- Server S Msg = (state : S, mailbox : List Msg). A non-dependent Sig (the OTP loop state).
+Server : U -> U -> U is
+  fn (S : U) (Msg : U) is Sig S (fn (s : S) is List Msg end) end
+end
+
+mkServer : (S : U) -> (Msg : U) -> S -> List Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (s : S) (q : List Msg) is
+    Pair S (fn (s2 : S) is List Msg end) s q
+  end
+end
+
+finalState : (S : U) -> (Msg : U) -> Server S Msg -> S is
+  fn (S : U) (Msg : U) (srv : Server S Msg) is Fst srv end
+end
+
+mailbox : (S : U) -> (Msg : U) -> Server S Msg -> List Msg is
+  fn (S : U) (Msg : U) (srv : Server S Msg) is Snd srv end
+end
+
+post : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Msg -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (m : Msg) (srv : Server S Msg) is
+    mkServer S Msg (finalState S Msg srv) (enqueueS Msg m (mailbox S Msg srv))
+  end
+end
+
+step : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    ListElim Msg (fn (w : List Msg) is Server S Msg end)
+      (mkServer S Msg (finalState S Msg srv) (nil Msg))
+      (fn (m : Msg) (rest : List Msg) (ih : Server S Msg) is
+         mkServer S Msg (handle (finalState S Msg srv) m) rest end)
+      (mailbox S Msg srv)
+  end
+end
+
+runN : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Nat -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (n : Nat) (srv : Server S Msg) is
+    NatElim (fn (x : Nat) is Server S Msg -> Server S Msg end)
+      (fn (sv : Server S Msg) is sv end)
+      (fn (k : Nat) (ih : Server S Msg -> Server S Msg) is
+         fn (sv : Server S Msg) is ih (step S Msg handle sv) end end)
+      n
+      srv
+  end
+end
+
+run : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    runN S Msg handle (length Msg (mailbox S Msg srv)) srv
+  end
+end
+
+-- the counter callback: every message increments the state (handle ignores the payload).
+inc : Nat -> Unit -> Nat is
+  fn (s : Nat) (m : Unit) is succ s end
+end
+
+-- ============================================================================
+-- ch75/ch99 finite Map over Nat keys (REUSED VERBATIM).
+-- ============================================================================
+
+data Entry : U -> U is
+  mkE : (V : U) -> Nat -> V -> Entry V
+end
+
+data Map : U -> U is
+  empty : (V : U) -> Map V
+| put   : (V : U) -> Entry V -> Map V -> Map V
+end
+
+-- DECIDABLE Nat equality: zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+insert : (V : U) -> Nat -> V -> Map V -> Map V is
+  fn (V : U) (k : Nat) (v : V) (m : Map V) is put V (mkE V k v) m end
+end
+
+-- lookup: walk the entries; the first whose key equals `k` (by eqNat) wins.
+lookup : (V : U) -> Nat -> Map V -> Option V is
+  fn (V : U) (k : Nat) (m : Map V) is
+    MapElim V (fn (w : Map V) is Option V end)
+      (none V)
+      (fn (e : Entry V) (rest : Map V) (ih : Option V) is
+         EntryElim V (fn (w : Entry V) is Option V end)
+           (fn (k2 : Nat) (v2 : V) is
+              BoolElim (fn (b : Bool) is Option V end)
+                (some V v2)
+                ih
+                (eqNat k k2)
+            end)
+           e
+       end)
+      m
+  end
+end
+
+-- lookup of a freshly inserted key returns its value (verbatim ch75 lookupInsertSame).
+lookupInsertSame : (V : U) -> (k : Nat) -> (v : V) -> (m : Map V)
+   -> Eq (Option V) (lookup V k (insert V k v m)) (some V v) is
+  fn (V : U) (k : Nat) (v : V) (m : Map V) is
+    subst Bool true (eqNat k k) (symBool (eqNat k k) true (eqNatRefl k))
+      (fn (b : Bool) is
+         Eq (Option V)
+           (BoolElim (fn (w : Bool) is Option V end) (some V v) (lookup V k m) b)
+           (some V v) end)
+      (refl (some V v))
+  end
+end
+
+-- eqNat is SOUND (verbatim ch99): eqNat x y = true -> x = y.
+eqNatSound : (x : Nat) -> (y : Nat) -> Eq Bool (eqNat x y) true -> Eq Nat x y is
+  fn (x : Nat) is
+    NatElim
+      (fn (w : Nat) is (y : Nat) -> Eq Bool (eqNat w y) true -> Eq Nat w y end)
+      (fn (y : Nat) is
+         NatElim
+           (fn (u : Nat) is Eq Bool (eqNat zero u) true -> Eq Nat zero u end)
+           (fn (h : Eq Bool true true) is refl zero end)
+           (fn (m : Nat) (ihm : Eq Bool (eqNat zero m) true -> Eq Nat zero m) is
+              fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat zero (succ m)
+                     | false -> Eq Nat zero zero
+                     end
+                   end)
+                  (refl zero) end
+            end)
+           y end)
+      (fn (k : Nat) (ih : (y : Nat) -> Eq Bool (eqNat k y) true -> Eq Nat k y) is
+         fn (y : Nat) is
+           NatElim
+             (fn (u : Nat) is Eq Bool (eqNat (succ k) u) true -> Eq Nat (succ k) u end)
+             (fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat (succ k) zero
+                     | false -> Eq Nat (succ k) (succ k)
+                     end
+                   end)
+                  (refl (succ k)) end)
+             (fn (m : Nat) (ihm : Eq Bool (eqNat (succ k) m) true -> Eq Nat (succ k) m) is
+                fn (h : Eq Bool (eqNat k m) true) is
+                  subst Nat k m (ih m h)
+                    (fn (z : Nat) is Eq Nat (succ k) (succ z) end)
+                    (refl (succ k)) end
+              end)
+             y end
+       end)
+      x
+  end
+end
+
+-- eqNat is SYMMETRIC, false-preserving (verbatim ch99): eqNat m n = false -> eqNat n m = false.
+eqNatSymFalse : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) false -> Eq Bool (eqNat n m) false is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) false -> Eq Bool (eqNat n x) false end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) false -> Eq Bool (eqNat y zero) false end)
+           (fn (h : Eq Bool true false) is h end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) false -> Eq Bool (eqNat j zero) false) is
+              fn (h : Eq Bool false false) is refl false end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) false -> Eq Bool (eqNat n k) false) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) false -> Eq Bool (eqNat y (succ k)) false end)
+             (fn (h : Eq Bool false false) is refl false end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) false -> Eq Bool (eqNat j (succ k)) false) is
+                fn (h : Eq Bool (eqNat k j) false) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- ============================================================================
+-- ch65 decidable order `lte` (REUSED VERBATIM): a <= b. zero is below everything; succ k <= zero
+-- is false; succ k <= succ m recurses to k <= m. rest_for_one's restart guard is `lte i k` over
+-- positions (restart child k iff k >= i).
+-- ============================================================================
+
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- ============================================================================
+-- ch115 SUPERVISION TREE (REUSED VERBATIM): Child/Supervisor/spawn + the childAt/initOf observers.
+-- ============================================================================
+
+Child : U -> U -> U is
+  fn (S : U) (Msg : U) is Sig (Server S Msg) (fn (c : Server S Msg) is Server S Msg end) end
+end
+
+mkChild : (S : U) -> (Msg : U) -> Server S Msg -> Server S Msg -> Child S Msg is
+  fn (S : U) (Msg : U) (cur : Server S Msg) (tmpl : Server S Msg) is
+    Pair (Server S Msg) (fn (c : Server S Msg) is Server S Msg end) cur tmpl
+  end
+end
+
+curOf : (S : U) -> (Msg : U) -> Child S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (ch : Child S Msg) is Fst ch end
+end
+
+tmplOf : (S : U) -> (Msg : U) -> Child S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (ch : Child S Msg) is Snd ch end
+end
+
+Supervisor : U -> U -> U is
+  fn (S : U) (Msg : U) is Map (Child S Msg) end
+end
+
+spawn : (S : U) -> (Msg : U) -> Nat -> Server S Msg -> Server S Msg
+   -> Supervisor S Msg -> Supervisor S Msg is
+  fn (S : U) (Msg : U) (i : Nat) (cur : Server S Msg) (tmpl : Server S Msg) (sup : Supervisor S Msg) is
+    insert (Child S Msg) i (mkChild S Msg cur tmpl) sup
+  end
+end
+
+childAt : (S : U) -> (Msg : U) -> Nat -> Supervisor S Msg -> Option (Server S Msg) is
+  fn (S : U) (Msg : U) (i : Nat) (sup : Supervisor S Msg) is
+    OptionElim (Child S Msg) (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+      (none (Server S Msg))
+      (fn (ch : Child S Msg) is some (Server S Msg) (curOf S Msg ch) end)
+      (lookup (Child S Msg) i sup)
+  end
+end
+
+initOf : (S : U) -> (Msg : U) -> Nat -> Supervisor S Msg -> Option (Server S Msg) is
+  fn (S : U) (Msg : U) (i : Nat) (sup : Supervisor S Msg) is
+    OptionElim (Child S Msg) (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+      (none (Server S Msg))
+      (fn (ch : Child S Msg) is some (Server S Msg) (tmplOf S Msg ch) end)
+      (lookup (Child S Msg) i sup)
+  end
+end
+
+-- ============================================================================
+-- ONE_FOR_ALL. `restartAll sup` walks the WHOLE child table and re-initializes EVERY entry: each
+-- child becomes (template, template). No guard — every position is rebuilt. This is ch115's
+-- `restart` skeleton with the BoolElim dropped (the unconditional rebuild). A fault under
+-- one_for_all takes down all the children and brings them all back to their init templates.
+-- ============================================================================
+
+restartAll : (S : U) -> (Msg : U) -> Supervisor S Msg -> Supervisor S Msg is
+  fn (S : U) (Msg : U) (sup : Supervisor S Msg) is
+    MapElim (Child S Msg) (fn (w : Map (Child S Msg)) is Map (Child S Msg) end)
+      (empty (Child S Msg))
+      (fn (e : Entry (Child S Msg)) (rest : Map (Child S Msg)) (ih : Map (Child S Msg)) is
+         EntryElim (Child S Msg) (fn (w : Entry (Child S Msg)) is Map (Child S Msg) end)
+           (fn (k2 : Nat) (ch : Child S Msg) is
+              put (Child S Msg)
+                (mkE (Child S Msg) k2 (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                ih
+            end)
+           e
+       end)
+      sup
+  end
+end
+
+-- ============================================================================
+-- THEOREM 1 — oneForAllReinitsAll. After a one_for_all restart, EVERY position j is back to its
+-- init template: `childAt j (restartAll sup) = initOf j sup`. (Note initOf is the unchanged
+-- template; restartAll preserves every template, so the post-restart CURRENT equals the template
+-- everywhere lookup succeeds, and equals none everywhere it fails.) Induction on the child Map,
+-- branching on the lookup guard `eqNat j k2` (restartAll rebuilds with the SAME key k2, so both
+-- LHS and RHS lookups lead with eqNat j k2):
+--
+--   empty: childAt j (restartAll empty) ~> none = initOf j empty. refl.
+--   put (mkE k2 ch) rest: the rebuilt head carries key k2 and child (tmpl,tmpl). LHS childAt j
+--        leads with eqNat j k2 over (curOf (tmpl,tmpl)) = tmpl; RHS initOf j leads with eqNat j k2
+--        over (tmplOf ch) = tmpl. Branch on eqNat j k2: true -> both ~> some (tmplOf ch), refl;
+--        false -> both skip to tail — childAt j (restartAll rest) vs initOf j rest = ih.
+-- ============================================================================
+
+oneForAllReinitsAll : (S : U) -> (Msg : U) -> (j : Nat) -> (sup : Supervisor S Msg)
+   -> Eq (Option (Server S Msg))
+        (childAt S Msg j (restartAll S Msg sup))
+        (initOf S Msg j sup) is
+  fn (S : U) (Msg : U) (j : Nat) (sup : Supervisor S Msg) is
+    MapElim (Child S Msg)
+      (fn (w : Map (Child S Msg)) is
+         Eq (Option (Server S Msg))
+           (childAt S Msg j (restartAll S Msg w))
+           (initOf S Msg j w) end)
+      -- empty: both ~> none.
+      (refl (none (Server S Msg)))
+      (fn (e : Entry (Child S Msg)) (rest : Map (Child S Msg))
+          (ih : Eq (Option (Server S Msg))
+             (childAt S Msg j (restartAll S Msg rest))
+             (initOf S Msg j rest)) is
+         EntryElim (Child S Msg)
+           (fn (w : Entry (Child S Msg)) is
+              Eq (Option (Server S Msg))
+                (childAt S Msg j (restartAll S Msg (put (Child S Msg) w rest)))
+                (initOf S Msg j (put (Child S Msg) w rest)) end)
+           (fn (k2 : Nat) (ch : Child S Msg) is
+              -- both lookups lead with the head guard eqNat j k2 (rebuilt head keeps key k2).
+              BoolElim
+                (fn (gj : Bool) is
+                   Eq Bool (eqNat j k2) gj
+                     -> Eq (Option (Server S Msg))
+                          (OptionElim (Child S Msg)
+                             (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                             (none (Server S Msg))
+                             (fn (c : Child S Msg) is some (Server S Msg) (curOf S Msg c) end)
+                             (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                (some (Child S Msg)
+                                   (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                                (lookup (Child S Msg) j (restartAll S Msg rest))
+                                gj))
+                          (OptionElim (Child S Msg)
+                             (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                             (none (Server S Msg))
+                             (fn (c : Child S Msg) is some (Server S Msg) (tmplOf S Msg c) end)
+                             (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                (some (Child S Msg) ch)
+                                (lookup (Child S Msg) j rest)
+                                gj)) end)
+                -- eqNat j k2 = true: LHS reads curOf (tmpl,tmpl) = tmpl; RHS reads tmplOf ch =
+                -- tmpl. Both ~> some (tmplOf ch). refl.
+                (fn (hgj : Eq Bool (eqNat j k2) true) is
+                   refl (some (Server S Msg) (tmplOf S Msg ch)) end)
+                -- eqNat j k2 = false: both skip the head to the tail — ih.
+                (fn (hgj : Eq Bool (eqNat j k2) false) is ih end)
+                (eqNat j k2)
+                (refl (eqNat j k2)) end)
+           e
+       end)
+      sup
+  end
+end
+
+-- ============================================================================
+-- REST_FOR_ONE. `restartRest i sup` walks the child table and, at each entry with key k2,
+-- re-initializes it (current := template) IFF `lte i k2 = true` (i.e. k2 >= i — the faulted child
+-- and every sibling started after it), and keeps it verbatim otherwise (k2 < i — the earlier,
+-- independent children). This is ch115's `restart` skeleton with the per-entry guard switched from
+-- the equality `eqNat i k2` to the comparison `lte i k2`.
+-- ============================================================================
+
+restartRest : (S : U) -> (Msg : U) -> Nat -> Supervisor S Msg -> Supervisor S Msg is
+  fn (S : U) (Msg : U) (i : Nat) (sup : Supervisor S Msg) is
+    MapElim (Child S Msg) (fn (w : Map (Child S Msg)) is Map (Child S Msg) end)
+      (empty (Child S Msg))
+      (fn (e : Entry (Child S Msg)) (rest : Map (Child S Msg)) (ih : Map (Child S Msg)) is
+         EntryElim (Child S Msg) (fn (w : Entry (Child S Msg)) is Map (Child S Msg) end)
+           (fn (k2 : Nat) (ch : Child S Msg) is
+              BoolElim (fn (b : Bool) is Map (Child S Msg) end)
+                -- lte i k2 = true: k2 >= i — re-initialize: current := template.
+                (put (Child S Msg)
+                   (mkE (Child S Msg) k2 (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                   ih)
+                -- lte i k2 = false: k2 < i — an earlier child, keep it verbatim.
+                (put (Child S Msg) (mkE (Child S Msg) k2 ch) ih)
+                (lte i k2)
+            end)
+           e
+       end)
+      sup
+  end
+end
+
+-- ============================================================================
+-- THEOREM 2 — restRestForOnePreservesEarlier (the rest_for_one ISOLATION property). A child
+-- strictly BEFORE the faulted one (position j with `lte i j = false`, i.e. j < i) is untouched:
+-- `childAt j (restartRest i sup) = childAt j sup`. As in ch115 it suffices to show the lookup-
+-- level law (then map `curOf` through). Induction on the child Map, branching on the restart guard
+-- `lte i k2` and on the lookup guard `eqNat j k2`:
+--
+--   empty: both ~> none. refl.
+--   put (mkE k2 ch) rest: branch on `lte i k2`.
+--     lte i k2 = true: restartRest REBUILDS the head (same key k2). Both lookups lead with
+--          eqNat j k2; branch on it. If eqNat j k2 = false, both skip to the tail (ih). If eqNat j
+--          k2 = true then j = k2 (eqNatSound), so lte i k2 = lte i j = false (hypothesis) CONTRADICTS
+--          the branch lte i k2 = true: an Eq Bool true false absurdity, discharged by subst into any
+--          motive. (The faulted/after region NEVER contains an earlier key j, so this case is vacuous.)
+--     lte i k2 = false: restartRest KEEPS the head verbatim. Both lookups lead with the SAME head
+--          eqNat j k2; branch — true => both ~> some ch (refl); false => both skip to tail (ih).
+-- ============================================================================
+
+-- the lookup-level lemma — restartRest preserves lookup of any earlier key j (lte i j = false).
+restartRestPreservesLookup : (S : U) -> (Msg : U) -> (i : Nat) -> (j : Nat) -> (sup : Supervisor S Msg)
+   -> Eq Bool (lte i j) false
+   -> Eq (Option (Child S Msg))
+        (lookup (Child S Msg) j (restartRest S Msg i sup))
+        (lookup (Child S Msg) j sup) is
+  fn (S : U) (Msg : U) (i : Nat) (j : Nat) (sup : Supervisor S Msg)
+     (hij : Eq Bool (lte i j) false) is
+    MapElim (Child S Msg)
+      (fn (w : Map (Child S Msg)) is
+         Eq (Option (Child S Msg))
+           (lookup (Child S Msg) j (restartRest S Msg i w))
+           (lookup (Child S Msg) j w) end)
+      -- empty: both ~> none.
+      (refl (none (Child S Msg)))
+      (fn (e : Entry (Child S Msg)) (rest : Map (Child S Msg))
+          (ih : Eq (Option (Child S Msg))
+             (lookup (Child S Msg) j (restartRest S Msg i rest))
+             (lookup (Child S Msg) j rest)) is
+         EntryElim (Child S Msg)
+           (fn (w : Entry (Child S Msg)) is
+              Eq (Option (Child S Msg))
+                (lookup (Child S Msg) j (restartRest S Msg i (put (Child S Msg) w rest)))
+                (lookup (Child S Msg) j (put (Child S Msg) w rest)) end)
+           (fn (k2 : Nat) (ch : Child S Msg) is
+              -- abstract the restart guard lte i k2; on the LHS the rebuilt/kept head carries the
+              -- same key k2 so its lookup leads with eqNat j k2, as does the RHS lookup.
+              BoolElim
+                (fn (gi : Bool) is
+                   Eq Bool (lte i k2) gi
+                     -> Eq (Option (Child S Msg))
+                          (lookup (Child S Msg) j
+                             (BoolElim (fn (b : Bool) is Map (Child S Msg) end)
+                                (put (Child S Msg)
+                                   (mkE (Child S Msg) k2
+                                      (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                                   (restartRest S Msg i rest))
+                                (put (Child S Msg) (mkE (Child S Msg) k2 ch) (restartRest S Msg i rest))
+                                gi))
+                          (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                             (some (Child S Msg) ch)
+                             (lookup (Child S Msg) j rest)
+                             (eqNat j k2)) end)
+                -- lte i k2 = true: restartRest REBUILDS the head (same key k2). The LHS lookup
+                -- leads with eqNat j k2; branch on it. eqNat j k2 = true is VACUOUS (j = k2 forces
+                -- lte i j = true, contradicting hij); eqNat j k2 = false skips both to the tail (ih).
+                (fn (hgi : Eq Bool (lte i k2) true) is
+                   BoolElim
+                     (fn (gj : Bool) is
+                        Eq Bool (eqNat j k2) gj
+                          -> Eq (Option (Child S Msg))
+                               (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                  (some (Child S Msg)
+                                     (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                                  (lookup (Child S Msg) j (restartRest S Msg i rest))
+                                  gj)
+                               (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                  (some (Child S Msg) ch)
+                                  (lookup (Child S Msg) j rest)
+                                  gj) end)
+                     -- eqNat j k2 = true: vacuous. j = k2 (eqNatSound), so lte i k2 = lte i j; but
+                     -- hgi says lte i k2 = true and hij says lte i j = false. subst k2 -> j in hgi
+                     -- yields lte i j = true; chase to Eq Bool true false and discharge into any goal.
+                     (fn (hgj : Eq Bool (eqNat j k2) true) is
+                        subst Bool true false
+                          (subst Bool (lte i k2) true hgi
+                             (fn (z : Bool) is Eq Bool z false end)
+                             (subst Nat j k2 (eqNatSound j k2 hgj)
+                                (fn (z : Nat) is Eq Bool (lte i z) false end)
+                                hij))
+                          (fn (z : Bool) is
+                             case z of
+                             | true  -> Eq Bool true true
+                             | false -> Eq (Option (Child S Msg))
+                                          (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                             (some (Child S Msg)
+                                                (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                                             (lookup (Child S Msg) j (restartRest S Msg i rest))
+                                             true)
+                                          (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                             (some (Child S Msg) ch)
+                                             (lookup (Child S Msg) j rest)
+                                             true)
+                             end
+                           end)
+                          (refl true) end)
+                     -- eqNat j k2 = false: both skip the head to the tail — ih.
+                     (fn (hgj : Eq Bool (eqNat j k2) false) is ih end)
+                     (eqNat j k2)
+                     (refl (eqNat j k2)) end)
+                -- lte i k2 = false: restartRest KEEPS the head verbatim. Both lead with eqNat j k2.
+                (fn (hgi : Eq Bool (lte i k2) false) is
+                   BoolElim
+                     (fn (gj : Bool) is
+                        Eq Bool (eqNat j k2) gj
+                          -> Eq (Option (Child S Msg))
+                               (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                  (some (Child S Msg) ch)
+                                  (lookup (Child S Msg) j (restartRest S Msg i rest))
+                                  gj)
+                               (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                  (some (Child S Msg) ch)
+                                  (lookup (Child S Msg) j rest)
+                                  gj) end)
+                     (fn (hgj : Eq Bool (eqNat j k2) true) is refl (some (Child S Msg) ch) end)
+                     (fn (hgj : Eq Bool (eqNat j k2) false) is ih end)
+                     (eqNat j k2)
+                     (refl (eqNat j k2)) end)
+                (lte i k2)
+                (refl (lte i k2)) end)
+           e
+       end)
+      sup
+  end
+end
+
+-- THE ISOLATION THEOREM: childAt j (restartRest i sup) = childAt j sup for j < i (lte i j = false).
+-- Map `curOf` (under OptionElim) through restartRestPreservesLookup by subst on the lookup result.
+restRestForOnePreservesEarlier : (S : U) -> (Msg : U) -> (i : Nat) -> (j : Nat) -> (sup : Supervisor S Msg)
+   -> Eq Bool (lte i j) false
+   -> Eq (Option (Server S Msg))
+        (childAt S Msg j (restartRest S Msg i sup))
+        (childAt S Msg j sup) is
+  fn (S : U) (Msg : U) (i : Nat) (j : Nat) (sup : Supervisor S Msg)
+     (hij : Eq Bool (lte i j) false) is
+    subst (Option (Child S Msg))
+      (lookup (Child S Msg) j (restartRest S Msg i sup))
+      (lookup (Child S Msg) j sup)
+      (restartRestPreservesLookup S Msg i j sup hij)
+      (fn (o : Option (Child S Msg)) is
+         Eq (Option (Server S Msg))
+           (OptionElim (Child S Msg)
+              (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+              (none (Server S Msg))
+              (fn (ch : Child S Msg) is some (Server S Msg) (curOf S Msg ch) end)
+              (lookup (Child S Msg) j (restartRest S Msg i sup)))
+           (OptionElim (Child S Msg)
+              (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+              (none (Server S Msg))
+              (fn (ch : Child S Msg) is some (Server S Msg) (curOf S Msg ch) end)
+              o) end)
+      (refl (childAt S Msg j (restartRest S Msg i sup)))
+  end
+end
+
+-- ============================================================================
+-- THEOREM 3 — restForOneReinitsAtAndAfter. A child AT or AFTER the faulted one (position j with
+-- `lte i j = true`, i.e. j >= i) is re-initialized to its template: `childAt j (restartRest i sup)
+-- = initOf j sup`. This is restartRest's rebuild fired AT key j. Induction on the child Map,
+-- branching on the restart guard `lte i k2` and the lookup guard `eqNat j k2`:
+--
+--   empty: childAt j (restartRest i empty) ~> none = initOf j empty. refl.
+--   put (mkE k2 ch) rest: branch on `lte i k2`.
+--     lte i k2 = true: restartRest REBUILDS the head (current := template, same key k2). The LHS
+--          childAt and RHS initOf both lead with eqNat j k2 — true => LHS reads curOf (tmpl,tmpl)
+--          = tmpl, RHS reads tmplOf ch = tmpl, both some (tmplOf ch), refl; false => both skip to
+--          the tail (ih).
+--     lte i k2 = false: restartRest KEEPS the head. Branch on eqNat j k2 — true is VACUOUS (j = k2
+--          forces lte i k2 = lte i j = true, contradicting the branch lte i k2 = false); false =>
+--          both skip to the tail (ih).
+-- ============================================================================
+
+restForOneReinitsAtAndAfter : (S : U) -> (Msg : U) -> (i : Nat) -> (j : Nat) -> (sup : Supervisor S Msg)
+   -> Eq Bool (lte i j) true
+   -> Eq (Option (Server S Msg))
+        (childAt S Msg j (restartRest S Msg i sup))
+        (initOf S Msg j sup) is
+  fn (S : U) (Msg : U) (i : Nat) (j : Nat) (sup : Supervisor S Msg)
+     (hij : Eq Bool (lte i j) true) is
+    MapElim (Child S Msg)
+      (fn (w : Map (Child S Msg)) is
+         Eq (Option (Server S Msg))
+           (childAt S Msg j (restartRest S Msg i w))
+           (initOf S Msg j w) end)
+      -- empty: both ~> none.
+      (refl (none (Server S Msg)))
+      (fn (e : Entry (Child S Msg)) (rest : Map (Child S Msg))
+          (ih : Eq (Option (Server S Msg))
+             (childAt S Msg j (restartRest S Msg i rest))
+             (initOf S Msg j rest)) is
+         EntryElim (Child S Msg)
+           (fn (w : Entry (Child S Msg)) is
+              Eq (Option (Server S Msg))
+                (childAt S Msg j (restartRest S Msg i (put (Child S Msg) w rest)))
+                (initOf S Msg j (put (Child S Msg) w rest)) end)
+           (fn (k2 : Nat) (ch : Child S Msg) is
+              -- abstract the restart guard lte i k2; the rebuilt/kept head keeps key k2.
+              BoolElim
+                (fn (gi : Bool) is
+                   Eq Bool (lte i k2) gi
+                     -> Eq (Option (Server S Msg))
+                          (OptionElim (Child S Msg)
+                             (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                             (none (Server S Msg))
+                             (fn (c : Child S Msg) is some (Server S Msg) (curOf S Msg c) end)
+                             (lookup (Child S Msg) j
+                                (BoolElim (fn (b : Bool) is Map (Child S Msg) end)
+                                   (put (Child S Msg)
+                                      (mkE (Child S Msg) k2
+                                         (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                                      (restartRest S Msg i rest))
+                                   (put (Child S Msg) (mkE (Child S Msg) k2 ch) (restartRest S Msg i rest))
+                                   gi)))
+                          (OptionElim (Child S Msg)
+                             (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                             (none (Server S Msg))
+                             (fn (c : Child S Msg) is some (Server S Msg) (tmplOf S Msg c) end)
+                             (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                (some (Child S Msg) ch)
+                                (lookup (Child S Msg) j rest)
+                                (eqNat j k2))) end)
+                -- lte i k2 = true: REBUILT head. Branch on the head lookup guard eqNat j k2.
+                (fn (hgi : Eq Bool (lte i k2) true) is
+                   BoolElim
+                     (fn (gj : Bool) is
+                        Eq Bool (eqNat j k2) gj
+                          -> Eq (Option (Server S Msg))
+                               (OptionElim (Child S Msg)
+                                  (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                                  (none (Server S Msg))
+                                  (fn (c : Child S Msg) is some (Server S Msg) (curOf S Msg c) end)
+                                  (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                     (some (Child S Msg)
+                                        (mkChild S Msg (tmplOf S Msg ch) (tmplOf S Msg ch)))
+                                     (lookup (Child S Msg) j (restartRest S Msg i rest))
+                                     gj))
+                               (OptionElim (Child S Msg)
+                                  (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                                  (none (Server S Msg))
+                                  (fn (c : Child S Msg) is some (Server S Msg) (tmplOf S Msg c) end)
+                                  (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                     (some (Child S Msg) ch)
+                                     (lookup (Child S Msg) j rest)
+                                     gj)) end)
+                     -- eqNat j k2 = true: LHS reads curOf (tmpl,tmpl) = tmpl, RHS reads tmplOf ch
+                     -- = tmpl; both some (tmplOf ch). refl.
+                     (fn (hgj : Eq Bool (eqNat j k2) true) is
+                        refl (some (Server S Msg) (tmplOf S Msg ch)) end)
+                     -- eqNat j k2 = false: both skip to the tail — ih.
+                     (fn (hgj : Eq Bool (eqNat j k2) false) is ih end)
+                     (eqNat j k2)
+                     (refl (eqNat j k2)) end)
+                -- lte i k2 = false: KEPT head. Branch on eqNat j k2.
+                (fn (hgi : Eq Bool (lte i k2) false) is
+                   BoolElim
+                     (fn (gj : Bool) is
+                        Eq Bool (eqNat j k2) gj
+                          -> Eq (Option (Server S Msg))
+                               (OptionElim (Child S Msg)
+                                  (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                                  (none (Server S Msg))
+                                  (fn (c : Child S Msg) is some (Server S Msg) (curOf S Msg c) end)
+                                  (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                     (some (Child S Msg) ch)
+                                     (lookup (Child S Msg) j (restartRest S Msg i rest))
+                                     gj))
+                               (OptionElim (Child S Msg)
+                                  (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                                  (none (Server S Msg))
+                                  (fn (c : Child S Msg) is some (Server S Msg) (tmplOf S Msg c) end)
+                                  (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                     (some (Child S Msg) ch)
+                                     (lookup (Child S Msg) j rest)
+                                     gj)) end)
+                     -- eqNat j k2 = true: VACUOUS. j = k2 (eqNatSound), so lte i k2 = lte i j =
+                     -- true (hij), contradicting the branch lte i k2 = false. subst k2 -> j into
+                     -- hij, chase to Eq Bool false true, discharge into the goal.
+                     (fn (hgj : Eq Bool (eqNat j k2) true) is
+                        subst Bool true false
+                          (subst Bool (lte i k2) true
+                             (subst Nat j k2 (eqNatSound j k2 hgj)
+                                (fn (z : Nat) is Eq Bool (lte i z) true end)
+                                hij)
+                             (fn (z : Bool) is Eq Bool z false end)
+                             hgi)
+                          (fn (z : Bool) is
+                             case z of
+                             | true  -> Eq Bool true true
+                             | false -> Eq (Option (Server S Msg))
+                                          (OptionElim (Child S Msg)
+                                             (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                                             (none (Server S Msg))
+                                             (fn (c : Child S Msg) is some (Server S Msg) (curOf S Msg c) end)
+                                             (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                                (some (Child S Msg) ch)
+                                                (lookup (Child S Msg) j (restartRest S Msg i rest))
+                                                true))
+                                          (OptionElim (Child S Msg)
+                                             (fn (w : Option (Child S Msg)) is Option (Server S Msg) end)
+                                             (none (Server S Msg))
+                                             (fn (c : Child S Msg) is some (Server S Msg) (tmplOf S Msg c) end)
+                                             (BoolElim (fn (b : Bool) is Option (Child S Msg) end)
+                                                (some (Child S Msg) ch)
+                                                (lookup (Child S Msg) j rest)
+                                                true))
+                             end
+                           end)
+                          (refl true) end)
+                     -- eqNat j k2 = false: both skip to the tail — ih.
+                     (fn (hgj : Eq Bool (eqNat j k2) false) is ih end)
+                     (eqNat j k2)
+                     (refl (eqNat j k2)) end)
+                (lte i k2)
+                (refl (lte i k2)) end)
+           e
+       end)
+      sup
+  end
+end
+
+-- ============================================================================
+-- CONCRETE SCENARIOS. A 3-child supervisor of counter gen_servers (ch114):
+--   position 0 — current counter at 2, template = a fresh counter at 0.
+--   position 1 — current counter at 5, template = a fresh counter at 0.
+--   position 2 — current counter at 9, template = a fresh counter at 0.
+-- We apply each strategy and read off, refl-certified (closed numerals compute), the expected
+-- re-init / preservation per OTP semantics.
+-- ============================================================================
+
+counterAt : Nat -> Server Nat Unit is
+  fn (n : Nat) is mkServer Nat Unit n (nil Unit) end
+end
+
+-- the 3-child supervisor: 0 -> (2,0), 1 -> (5,0), 2 -> (9,0).
+threeSup : Supervisor Nat Unit is
+  spawn Nat Unit zero (counterAt (succ (succ zero))) (counterAt zero)
+    (spawn Nat Unit (succ zero) (counterAt (succ (succ (succ (succ (succ zero)))))) (counterAt zero)
+       (spawn Nat Unit (succ (succ zero))
+          (counterAt (succ (succ (succ (succ (succ (succ (succ (succ (succ zero)))))))))) (counterAt zero)
+          (empty (Child Nat Unit))))
+end
+
+-- ---- one_for_all: a fault restarts EVERY child to its template (counter at 0). ----
+
+oneForAllChild0 : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit zero (restartAll Nat Unit threeSup))
+   (some (Server Nat Unit) (counterAt zero)) is
+  refl (childAt Nat Unit zero (restartAll Nat Unit threeSup))
+end
+
+oneForAllChild1 : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit (succ zero) (restartAll Nat Unit threeSup))
+   (some (Server Nat Unit) (counterAt zero)) is
+  refl (childAt Nat Unit (succ zero) (restartAll Nat Unit threeSup))
+end
+
+oneForAllChild2 : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit (succ (succ zero)) (restartAll Nat Unit threeSup))
+   (some (Server Nat Unit) (counterAt zero)) is
+  refl (childAt Nat Unit (succ (succ zero)) (restartAll Nat Unit threeSup))
+end
+
+-- ---- rest_for_one at i = 1: child 0 PRESERVED (state 2 kept), children 1 and 2 RE-INITIALIZED. ----
+
+-- child 0 is BEFORE the fault (0 < 1): untouched, keeps its state 2.
+restForOnePreserves0 : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit zero (restartRest Nat Unit (succ zero) threeSup))
+   (some (Server Nat Unit) (counterAt (succ (succ zero)))) is
+  refl (childAt Nat Unit zero (restartRest Nat Unit (succ zero) threeSup))
+end
+
+-- child 1 is the faulted one (1 >= 1): re-initialized to its template (counter at 0).
+restForOneReinits1 : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit (succ zero) (restartRest Nat Unit (succ zero) threeSup))
+   (some (Server Nat Unit) (counterAt zero)) is
+  refl (childAt Nat Unit (succ zero) (restartRest Nat Unit (succ zero) threeSup))
+end
+
+-- child 2 was started AFTER the fault (2 >= 1): also re-initialized to its template.
+restForOneReinits2 : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit (succ (succ zero)) (restartRest Nat Unit (succ zero) threeSup))
+   (some (Server Nat Unit) (counterAt zero)) is
+  refl (childAt Nat Unit (succ (succ zero)) (restartRest Nat Unit (succ zero) threeSup))
+end
+
+-- and the headline observations read off the general theorems, instantiated at threeSup (compute):
+-- child 0 preserved equals the original childAt 0 (the isolation theorem's conclusion).
+restForOneEarlierEqOriginal : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit zero (restartRest Nat Unit (succ zero) threeSup))
+   (childAt Nat Unit zero threeSup) is
+  refl (childAt Nat Unit zero (restartRest Nat Unit (succ zero) threeSup))
+end
+
+-- child 2 re-initialized equals child 2's init template (the at-and-after theorem's conclusion).
+restForOneAfterEqInit : Eq (Option (Server Nat Unit))
+   (childAt Nat Unit (succ (succ zero)) (restartRest Nat Unit (succ zero) threeSup))
+   (initOf Nat Unit (succ (succ zero)) threeSup) is
+  refl (childAt Nat Unit (succ (succ zero)) (restartRest Nat Unit (succ zero) threeSup))
+end

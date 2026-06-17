@@ -48,7 +48,8 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
 - **Identifier:** `(letter | "_") (letter | digit | "_" | "'")*`. Case-sensitive.
 - **Numeral:** `digit+`, one token. In binder-quantity position (`(0 x : A)`, `{1 x : A}`) the
   numerals `0` and `1` are usage annotations — position disambiguates, never the lexer. In
-  expression position a numeral is a literal of the `builtin nat`-bound type (§5.5).
+  expression position a numeral is a literal lowered to a compressed core numeral against the
+  `builtin nat` binding (§5.5).
 - **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
   equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4),
   `builtin` (ergonomics rung 2), `case`, `of`, `with` (rung 4), and `calc`, `by` (rung 5). The bare underscore `_` is
@@ -80,7 +81,8 @@ Program   ::= (Definition | DataDecl | BuiltinDecl)*
 Definition ::= DefName ":" Expr "is" Expr "end"
 DefName   ::= Ident | Op
 
-BuiltinDecl ::= "builtin" "nat" Ident Ident Ident   -- type, zero, succ (§5.5)
+BuiltinDecl ::= "builtin" "nat" Ident Ident Ident                       -- type, zero, succ (§5.5)
+             |  "builtin" "bin" Ident Ident Ident Ident Ident Ident Ident -- BN, bn0, bnP, Pos, pH, pO, pI (§5.5)
 
 DataDecl  ::= "data" Ident ":" Expr "is" ["|"] Ctor ("|" Ctor)* "end"   -- Phase 4
 Ctor      ::= Ident ":" Expr
@@ -108,7 +110,7 @@ Arg       ::= Atom                        -- explicit argument
            |  "{" Expr "}"                -- implicit argument, given explicitly (Phase 2)
 
 Atom      ::= Ident
-           |  Num                         -- a numeral; requires a builtin nat in scope (§5.5)
+           |  Num                         -- a numeral; lowered by expected type, nat or bin (§5.5)
            |  "(" Op ")"                  -- an operator, prefix/first-class: (+) x y
            |  Case                        -- case expression (§5.6)
            |  Calc                        -- equational ladder (§5.7)
@@ -231,25 +233,39 @@ separators:
 builtin nat Nat zero succ
 ```
 
-registers what numerals mean: a type, its zero, and its successor, by name. From
-the declaration to the end of the file (and in REPL expressions once a loaded file declared it),
-a numeral `n` in expression position parses as the n-fold application of the successor to the
-zero — pure parser sugar; downstream the names resolve to ordinary content-hash references, and
-the declaration itself leaves no trace in the core or the store.
+registers what numerals mean. A numeral does NOT expand at parse time — a parser
+cannot know which type it inhabits — so it survives as an unexpanded literal and
+is lowered during elaboration against the `builtin nat` binding:
 
-- **No binding in scope → a numeral is a parse error** ("no `builtin nat` declared").
-- The session validates the declaration by TYPE, not by shape (the numeric-tower amendment,
-  rung C4): zero must check against the named type `T` and succ against `T -> T` — any bound
-  definitions qualify, so a later library can re-bind numerals to mean an integer or a
-  rational. The data-constructor binding remains the common case, and is the only shape the
-  BigInt codegen shadow compiles to machine integers; a generalized binding computes through
-  its successor term.
-- The LAST `builtin nat` in scope binds digits (one binding at a time, no overloading).
-- A literal is nothing but its unary succ-chain, so numerals **cap at 4096**; a compressed core
-  numeral (and the Machine's superlinear deep-chain evaluation, see PARKING-LOT) is parked until
-  a listing embeds a constant that big.
-- `0` and `1` in binder-quantity position are usage annotations, not literals (§2); position
-  decides, so `(0 x : Nat)` annotates while `f 0` applies `f` to the literal.
+- A numeral lowers to a **compressed core numeral** `NatLit` (definitionally
+  `succ^n zero`, one node of any size; C7 / R-NUM). The same lowering applies in
+  infer position (a bare numeral with no expected type) and in the untyped
+  resolver. A genuine type mismatch (a numeral where a non-nat type is expected)
+  is still reported, by unifying the `builtin nat` type against the expectation.
+
+The declaration is surface state only; downstream the names resolve to ordinary
+content-hash references, and it leaves no trace of its own in the core or store.
+
+- **No `builtin nat` in scope → an elaboration error** ("no `builtin nat`
+  declared"). It is not a *parse* error: the literal parses, and the binding is
+  consulted when the type is known.
+- The session validates a `builtin nat` declaration by TYPE, not by shape (the
+  numeric-tower amendment, rung C4): zero must check against `T` and succ against
+  `T -> T`. Any bound definitions qualify, so a later library can re-bind numerals
+  to mean an integer or a rational. The data-constructor `nat` binding remains the
+  common case, and is the only shape the BigInt codegen shadow compiles to machine
+  integers.
+- The LAST `builtin nat` binding in scope governs (one at a time, no overloading).
+- There is **NO cap**: a `NatLit` is a single node carrying a `big.Int`, so a bare
+  numeral of any size elaborates and computes (the old 4096 unary cap is gone).
+  Kernel arithmetic on closed literals is accelerated via the `builtin natAdd`/
+  `natMul`/`natMonus` op table (C7 / R-NUM, Decision 1). The earlier `builtin bin`
+  binary-numeral binding — which lowered a numeral checked at a `Pos`/`BN` type to
+  an O(log n) bit-spine — is RETIRED (Decision 5): NatLit subsumes it (no cap, O(1)
+  literals, accelerated arithmetic). A hand-written `Pos`/`BN` datatype is still an
+  ordinary data declaration; populate it explicitly or via a `fromNat`.
+- `0` and `1` in binder-quantity position are usage annotations, not literals (§2);
+  position decides, so `(0 x : Nat)` annotates while `f 0` applies `f` to the literal.
 
 ### 5.6 `case … of … end`
 

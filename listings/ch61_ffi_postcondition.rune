@@ -1,0 +1,39 @@
+-- Chapter 61 — Verified FFI contracts, the GUARANTEE (postcondition) tier, and
+-- COMPOSITION (R-FFI / B4). A `foreign` axiom can RETURN a refined value: a Σ pairing
+-- the result with a PROOF the host guarantees about it. The caller may then USE that
+-- guarantee — here it exactly discharges the PRECONDITION of a second foreign
+-- (ch60's guarded call). So two verified foreigns COMPOSE: one's host-promised
+-- postcondition satisfies the other's required precondition, checked at compile time,
+-- with BOTH proofs erased at runtime (the result threads through; the proofs cost
+-- nothing). This is the assume/guarantee handshake the FFI contract design is built
+-- around, realized on Σ (C1) + dependent foreigns + QTT — no new machinery.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+isZero : Nat -> Bool is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n
+  end
+end
+
+-- A host that GUARANTEES (postcondition) its result is nonzero: it returns the value
+-- paired with the evidence `isZero r = false`.
+foreign trustedNonzero : (n : Nat) -> Sig Nat (fn (r : Nat) is Eq Bool (isZero r) false end) end
+
+-- A host that REQUIRES (precondition) its argument is nonzero (ch60's guarded foreign).
+foreign guardedNat : (d : Nat) -> (0 pf : Eq Bool (isZero d) false) -> Nat end
+
+-- Composition: the guarantee of the first foreign discharges the requirement of the
+-- second. `Fst` is the trusted nonzero value; `Snd` is its nonzero proof, which is
+-- exactly `guardedNat`'s precondition. Both proofs erase; the value runs through.
+chained : Nat is
+  guardedNat (Fst (trustedNonzero (succ zero))) (Snd (trustedNonzero (succ zero)))
+end

@@ -1,0 +1,19 @@
+-- Chapter 59 — side-effecting IO runs PORTABLY (R-EFFECT host op × R-FFI × the
+-- multi-backend story). The pure IO monad (ch43) sequences effects; a `foreign`
+-- IO axiom (ch44, now via the uniform IForeign accessor) supplies a real HOST
+-- effect. Composed, they give actual observable IO that deploys and runs the same
+-- on every backend: `emitNat n` performs a host effect (here: print a marker) and
+-- returns `n`; `main` sequences it before `pureIO (succ n)`. Forcing the IO main
+-- runs the effect, then shows the result. This is the named R-EFFECT residue — the
+-- initial host-op vocabulary — landed across js/py/go/rust at once.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+foreign emitNat : Nat -> IO Nat end
+
+main : IO Nat is
+  bindIO Nat Nat (emitNat (succ zero)) (fn (n : Nat) is pureIO Nat (succ n) end)
+end

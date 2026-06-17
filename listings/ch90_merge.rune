@@ -1,0 +1,751 @@
+-- Chapter 90 — A CERTIFIED MERGE, assembled from the PERMUTATION ALGEBRA (ch87/ch88/ch89).
+-- ch84–ch86 certified INSERTION SORT (sorted + permutation); ch87 extracted `Permutation` as a
+-- first-class equivalence relation; ch88/ch89 grew the reusable PERMUTATION ALGEBRA — the
+-- cons-congruence `permCons`, the head transposition `permSwap`, the append homomorphism
+-- `appendCount`, and the append congruence `permAppCong`/`permAppL`. Here we cash that algebra
+-- on the MERGING STEP OF MERGESORT and deliver a SECOND certified sort.
+--
+-- ENCODING NOTE (why merge-by-insertion). The classic `merge` recurses on TWO arguments
+-- (`merge (cons x xs) (cons y ys)` branches on `lte x y` and recurses on the SMALLER tail).
+-- Rune's eliminators are STRUCTURAL ON ONE SCRUTINEE — totality is by construction, there is no
+-- termination checker — so a recursion that descends on whichever of two lists is smaller is not
+-- expressible as a single `ListElim`. We therefore use the GENUINELY STRUCTURAL encoding the
+-- proof notes prescribe: MERGE-BY-REPEATED-INSERTION,
+--   mergeI xs ys = foldr insert ys xs        (ch84's ordered `insert`, folded over xs)
+-- i.e. `mergeI nil ys ~> ys`, `mergeI (cons x rest) ys ~> insert x (mergeI rest ys)`. This is a
+-- bona fide `ListElim` on xs, total by construction, and `sort' xs = mergeI xs nil` is a second
+-- certified sort. We prove the two halves of its correctness through the named relations:
+--   (1) mergeIPerm   : (xs ys : List Nat) -> Permutation (mergeI xs ys) (append xs ys)
+--       — merge is a permutation of the concatenation, ASSEMBLED FROM THE ALGEBRA (permCons,
+--       permTrans, insertPerm), not by recomputing counts inline. By induction on xs. nil:
+--       `mergeI nil ys ~> ys` and `append nil ys ~> ys`, so `permRefl ys`. cons x rest:
+--       `mergeI (cons x rest) ys ~> insert x (mergeI rest ys)`; `insertPerm` slides the `insert`
+--       to a `cons` head, `permCons` threads the IH `Permutation (mergeI rest ys) (append rest
+--       ys)` under that head, and `cons x (append rest ys) ~> append (cons x rest) ys` lines the
+--       endpoint up — chained by `permTrans`.
+--   (2) mergeISorted : (xs ys : List Nat) -> Sorted ys -> Sorted (mergeI xs ys)
+--       — merge preserves sortedness. By induction on xs via ch84/ch86's `insertSorted` (each
+--       fold step inserts into an already-sorted accumulator).
+-- and bundle them: mergeICorrect : the merge of two lists is sorted-relative AND a permutation
+-- of their concatenation; sortByMerge xs := mergeI xs nil is a SECOND certified sort.
+--
+-- The bridge lemma is `insertPerm : Permutation (insert x xs) (cons Nat x xs)` — which is EXACTLY
+-- ch85's `insertCount` read through the named predicate: `count k (insert x xs) = count k (cons x
+-- xs)` for every k, so `insertPerm x xs = fn k. insertCount k x xs`.
+--
+-- Per the self-contained-listings convention, `Bool`, `Nat`, `List`, `lte`, `and`, `or`, the
+-- ordering reflection lemmas, `Sorted`, `insert`, `insertSorted` (ch84/ch86), `eqNat`, `count`,
+-- `bump`, `bumpSwap`, `insertCount` (ch85), `Permutation`/`permRefl`/`permSym`/`permTrans`
+-- (ch87), `permCons` (ch88), and `append` (ch73, polymorphic) are redeclared VERBATIM. No
+-- admits, holes, or postulates.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- lte a b = (a <= b), verbatim from ch84/ch65.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- Boolean conjunction / disjunction, verbatim from ch86.
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- DECIDABLE Nat equality (verbatim from ch75/ch85).
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- append, IDENTICAL to ch73 (polymorphic; left-unit `append A nil ys ~> ys` is definitional).
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- ABSURDITY / ORDERING REFLECTION (ch80/ch83/ch86), verbatim
+-- ====================================================================================
+
+lteAbsurd : (a : Nat) -> (c : Nat) -> Eq Bool false true -> Eq Bool (lte a c) true is
+  fn (a : Nat) (c : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+lteTotal : (a : Nat) -> (b : Nat)
+   -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN-CONJUNCTION REFLECTION (ch86), verbatim
+-- ====================================================================================
+
+andTrueL : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool x true end)
+      (fn (h : Eq Bool b true) is refl true end)
+      (fn (h : Eq Bool false true) is h end)
+      a
+  end
+end
+
+andTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool b true) is h end)
+      (fn (h : Eq Bool false true) is
+         subst Bool false true h
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool b true
+              | false -> Eq Bool true true
+              end
+            end)
+           (refl true) end)
+      a
+  end
+end
+
+andIntro : (a : Bool) -> (b : Bool)
+   -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool x true -> Eq Bool b true -> Eq Bool (and x b) true end)
+      (fn (ha : Eq Bool true true) (hb : Eq Bool b true) is hb end)
+      (fn (ha : Eq Bool false true) (hb : Eq Bool b true) is
+         subst Bool false true ha
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool (and false b) true
+              | false -> Eq Bool (and false b) (and false b)
+              end
+            end)
+           (refl (and false b)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- SORTEDNESS (ch86), verbatim
+-- ====================================================================================
+
+allLte : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (y : Nat) (rest : List Nat) (ih : Bool) is and (lte x y) ih end)
+      xs
+  end
+end
+
+sortedb : List Nat -> Bool is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (x : Nat) (rest : List Nat) (ih : Bool) is and (allLte x rest) ih end)
+      xs
+  end
+end
+
+lteAll : Nat -> List Nat -> U is
+  fn (x : Nat) (xs : List Nat) is Eq Bool (allLte x xs) true end
+end
+
+Sorted : List Nat -> U is
+  fn (xs : List Nat) is Eq Bool (sortedb xs) true end
+end
+
+-- ordered insertion, IDENTICAL to ch84.
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (cons Nat x (nil Nat))
+      (fn (y : Nat) (ys : List Nat) (rest : List Nat) is
+         BoolElim (fn (b : Bool) is List Nat end)
+           (cons Nat x (cons Nat y ys))
+           (cons Nat y rest)
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- SORTEDNESS PRESERVATION (ch86), verbatim
+-- ====================================================================================
+
+lteAllTrans : (a : Nat) -> (b : Nat) -> (xs : List Nat)
+   -> Eq Bool (lte a b) true -> lteAll b xs -> lteAll a xs is
+  fn (a : Nat) (b : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (lte a b) true -> lteAll b w -> lteAll a w end)
+      (fn (hab : Eq Bool (lte a b) true) (hall : lteAll b (nil Nat)) is refl true end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Bool (lte a b) true -> lteAll b ys -> lteAll a ys) is
+         fn (hab : Eq Bool (lte a b) true) (hall : lteAll b (cons Nat y ys)) is
+           andIntro (lte a y) (allLte a ys)
+             (lteTrans a b y hab (andTrueL (lte b y) (allLte b ys) hall))
+             (ih hab (andTrueR (lte b y) (allLte b ys) hall))
+         end
+       end)
+      xs
+  end
+end
+
+insertAll : (x : Nat) -> (b : Nat) -> (xs : List Nat)
+   -> Eq Bool (lte b x) true -> lteAll b xs -> lteAll b (insert x xs) is
+  fn (x : Nat) (b : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (lte b x) true -> lteAll b w -> lteAll b (insert x w) end)
+      (fn (hbx : Eq Bool (lte b x) true) (hall : lteAll b (nil Nat)) is
+         andIntro (lte b x) true hbx (refl true) end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Bool (lte b x) true -> lteAll b ys -> lteAll b (insert x ys)) is
+         fn (hbx : Eq Bool (lte b x) true) (hall : lteAll b (cons Nat y ys)) is
+           BoolElim
+             (fn (bb : Bool) is
+                lteAll b
+                  (BoolElim (fn (c : Bool) is List Nat end)
+                     (cons Nat x (cons Nat y ys))
+                     (cons Nat y (insert x ys))
+                     bb) end)
+             (andIntro (lte b x) (allLte b (cons Nat y ys)) hbx hall)
+             (andIntro (lte b y) (allLte b (insert x ys))
+                (andTrueL (lte b y) (allLte b ys) hall)
+                (ih hbx (andTrueR (lte b y) (allLte b ys) hall)))
+             (lte x y)
+         end
+       end)
+      xs
+  end
+end
+
+yLeX : (x : Nat) -> (y : Nat)
+   -> Eq Bool (lte x y) false -> Eq Bool (lte y x) true is
+  fn (x : Nat) (y : Nat) (heq : Eq Bool (lte x y) false) is
+    subst Bool (lte x y) false heq
+      (fn (z : Bool) is Eq Bool (or z (lte y x)) true end)
+      (lteTotal x y)
+  end
+end
+
+insertSorted : (x : Nat) -> (xs : List Nat) -> Sorted xs -> Sorted (insert x xs) is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Sorted w -> Sorted (insert x w) end)
+      (fn (s : Sorted (nil Nat)) is refl true end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Sorted ys -> Sorted (insert x ys)) is
+         fn (s : Sorted (cons Nat y ys)) is
+           BoolElim
+             (fn (bb : Bool) is
+                Eq Bool (lte x y) bb
+                  -> Sorted
+                       (BoolElim (fn (c : Bool) is List Nat end)
+                          (cons Nat x (cons Nat y ys))
+                          (cons Nat y (insert x ys))
+                          bb) end)
+             (fn (heq : Eq Bool (lte x y) true) is
+                andIntro (allLte x (cons Nat y ys)) (sortedb (cons Nat y ys))
+                  (andIntro (lte x y) (allLte x ys)
+                     heq
+                     (lteAllTrans x y ys heq
+                        (andTrueL (allLte y ys) (sortedb ys) s)))
+                  s end)
+             (fn (heq : Eq Bool (lte x y) false) is
+                andIntro (allLte y (insert x ys)) (sortedb (insert x ys))
+                  (insertAll x y ys
+                     (yLeX x y heq)
+                     (andTrueL (allLte y ys) (sortedb ys) s))
+                  (ih (andTrueR (allLte y ys) (sortedb ys) s)) end)
+             (lte x y)
+             (refl (lte x y))
+         end
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- OCCURRENCE COUNT + insertCount (ch85), verbatim
+-- ====================================================================================
+
+count : Nat -> List Nat -> Nat is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (y : Nat) (ys : List Nat) (ih : Nat) is
+         BoolElim (fn (b : Bool) is Nat end) (succ ih) ih (eqNat k y)
+       end)
+      xs
+  end
+end
+
+bump : Bool -> Nat -> Nat is
+  fn (c : Bool) (n : Nat) is BoolElim (fn (b : Bool) is Nat end) (succ n) n c end
+end
+
+bumpSwap : (cx : Bool) -> (cy : Bool) -> (n : Nat)
+   -> Eq Nat (bump cy (bump cx n)) (bump cx (bump cy n)) is
+  fn (cx : Bool) (cy : Bool) (n : Nat) is
+    BoolElim
+      (fn (cyv : Bool) is Eq Nat (bump cyv (bump cx n)) (bump cx (bump cyv n)) end)
+      (BoolElim
+         (fn (bx : Bool) is Eq Nat (succ (bump bx n)) (bump bx (succ n)) end)
+         (refl (succ (succ n)))
+         (refl (succ n))
+         cx)
+      (refl (bump cx n))
+      cy
+  end
+end
+
+insertCount : (k : Nat) -> (x : Nat) -> (xs : List Nat)
+   -> Eq Nat (count k (insert x xs)) (count k (cons Nat x xs)) is
+  fn (k : Nat) (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Nat (count k (insert x w)) (count k (cons Nat x w)) end)
+      (refl (count k (cons Nat x (nil Nat))))
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Nat (count k (insert x ys)) (count k (cons Nat x ys))) is
+         BoolElim
+           (fn (bb : Bool) is
+              Eq Nat
+                (count k
+                   (BoolElim (fn (c : Bool) is List Nat end)
+                      (cons Nat x (cons Nat y ys))
+                      (cons Nat y (insert x ys))
+                      bb))
+                (count k (cons Nat x (cons Nat y ys))) end)
+           (refl (count k (cons Nat x (cons Nat y ys))))
+           (subst Nat (count k (cons Nat x ys)) (count k (insert x ys))
+              (subst Nat (count k (insert x ys)) (count k (cons Nat x ys)) ih
+                 (fn (z : Nat) is Eq Nat z (count k (insert x ys)) end)
+                 (refl (count k (insert x ys))))
+              (fn (z : Nat) is
+                 Eq Nat
+                   (bump (eqNat k y) z)
+                   (count k (cons Nat x (cons Nat y ys))) end)
+              (bumpSwap (eqNat k x) (eqNat k y) (count k ys)))
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- PERMUTATION as a NAMED PREDICATE + its equivalence laws (ch87/ch88), verbatim
+-- ====================================================================================
+
+-- symmetry / transitivity of the ambient Eq, by Leibniz transport (ch03 idiom).
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+Permutation : List Nat -> List Nat -> U is
+  fn (xs : List Nat) (ys : List Nat) is
+    (k : Nat) -> Eq Nat (count k xs) (count k ys)
+  end
+end
+
+permRefl : (xs : List Nat) -> Permutation xs xs is
+  fn (xs : List Nat) is
+    fn (k : Nat) is refl (count k xs) end
+  end
+end
+
+permSym : (xs : List Nat) -> (ys : List Nat)
+   -> Permutation xs ys -> Permutation ys xs is
+  fn (xs : List Nat) (ys : List Nat) (p : Permutation xs ys) is
+    fn (k : Nat) is
+      sym Nat (count k xs) (count k ys) (p k)
+    end
+  end
+end
+
+permTrans : (xs : List Nat) -> (ys : List Nat) -> (zs : List Nat)
+   -> Permutation xs ys -> Permutation ys zs -> Permutation xs zs is
+  fn (xs : List Nat) (ys : List Nat) (zs : List Nat)
+     (p : Permutation xs ys) (q : Permutation ys zs) is
+    fn (k : Nat) is
+      trans Nat (count k xs) (count k ys) (count k zs) (p k) (q k)
+    end
+  end
+end
+
+-- permCons: prepending the SAME head to two permuted lists keeps them permuted (ch88), verbatim.
+permCons : (x : Nat) -> (xs : List Nat) -> (ys : List Nat)
+   -> Permutation xs ys -> Permutation (cons Nat x xs) (cons Nat x ys) is
+  fn (x : Nat) (xs : List Nat) (ys : List Nat) (p : Permutation xs ys) is
+    fn (k : Nat) is
+      subst Nat (count k xs) (count k ys) (p k)
+        (fn (n : Nat) is
+           Eq Nat (bump (eqNat k x) (count k xs)) (bump (eqNat k x) n) end)
+        (refl (bump (eqNat k x) (count k xs)))
+    end
+  end
+end
+
+-- ====================================================================================
+-- THE BRIDGE: insertion is a permutation of consing the head
+-- ====================================================================================
+
+-- insertPerm: `insert x xs` is a permutation of `cons x xs` — ordered insertion only MOVES the
+-- new head into position, it neither drops nor duplicates. This is EXACTLY ch85's `insertCount`
+-- read through the named predicate: at each key k, `count k (insert x xs) = count k (cons x xs)`
+-- is `insertCount k x xs`, and `Permutation (insert x xs) (cons x xs)` IS that family quantified
+-- over k. So the proof is `fn k. insertCount k x xs`, on the nose — the algebra's input.
+insertPerm : (x : Nat) -> (xs : List Nat)
+   -> Permutation (insert x xs) (cons Nat x xs) is
+  fn (x : Nat) (xs : List Nat) is
+    fn (k : Nat) is insertCount k x xs end
+  end
+end
+
+-- ====================================================================================
+-- MERGE BY REPEATED INSERTION (structural on the first list)
+-- ====================================================================================
+
+-- mergeI xs ys = foldr insert ys xs: fold ch84's ordered `insert` over xs into the accumulator
+-- ys. `mergeI nil ys ~> ys`, `mergeI (cons x rest) ys ~> insert x (mergeI rest ys)` — a genuine
+-- `ListElim` on xs, TOTAL BY CONSTRUCTION. If ys is sorted, `mergeI xs ys` merges xs into it in
+-- order; `sortByMerge xs = mergeI xs nil` is a second certified sort.
+mergeI : List Nat -> List Nat -> List Nat is
+  fn (xs : List Nat) (ys : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      ys
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is insert x ih end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- (1) mergeIPerm — MERGE IS A PERMUTATION OF THE CONCATENATION, FROM THE ALGEBRA
+-- ====================================================================================
+
+-- mergeIPerm: `Permutation (mergeI xs ys) (append xs ys)`. By induction on xs.
+--   nil:  `mergeI nil ys ~> ys` and `append nil ys ~> ys` (both definitional), so `permRefl ys`.
+--   cons x rest:  `mergeI (cons x rest) ys ~> insert x (mergeI rest ys)`, and
+--                 `append (cons x rest) ys ~> cons x (append rest ys)`. The chain:
+--     insert x (mergeI rest ys)
+--       ~ cons x (mergeI rest ys)     [insertPerm x (mergeI rest ys)]
+--       ~ cons x (append rest ys)     [permCons x … (ih : Permutation (mergeI rest ys)
+--                                       (append rest ys))]
+--       = append (cons x rest) ys     [definitional]
+--   threaded by permTrans. Pure algebra assembly — no inline count recomputation.
+mergeIPerm : (xs : List Nat) -> (ys : List Nat)
+   -> Permutation (mergeI xs ys) (append Nat xs ys) is
+  fn (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         (ys : List Nat) -> Permutation (mergeI w ys) (append Nat w ys) end)
+      (fn (ys : List Nat) is permRefl ys end)
+      (fn (x : Nat) (rest : List Nat)
+          (ih : (ys : List Nat)
+                  -> Permutation (mergeI rest ys) (append Nat rest ys)) is
+         fn (ys : List Nat) is
+           permTrans
+             (insert x (mergeI rest ys))
+             (cons Nat x (mergeI rest ys))
+             (cons Nat x (append Nat rest ys))
+             (insertPerm x (mergeI rest ys))
+             (permCons x (mergeI rest ys) (append Nat rest ys) (ih ys))
+         end
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- (2) mergeISorted — MERGE PRESERVES SORTEDNESS
+-- ====================================================================================
+
+-- mergeISorted: if ys is sorted, so is `mergeI xs ys`. By induction on xs: each fold step
+-- `insert x (mergeI rest ys)` preserves sortedness by ch84/ch86's `insertSorted`, given the IH
+-- that `mergeI rest ys` is sorted. The base `mergeI nil ys ~> ys` is sorted by hypothesis.
+mergeISorted : (xs : List Nat) -> (ys : List Nat)
+   -> Sorted ys -> Sorted (mergeI xs ys) is
+  fn (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         (ys : List Nat) -> Sorted ys -> Sorted (mergeI w ys) end)
+      (fn (ys : List Nat) (s : Sorted ys) is s end)
+      (fn (x : Nat) (rest : List Nat)
+          (ih : (ys : List Nat) -> Sorted ys -> Sorted (mergeI rest ys)) is
+         fn (ys : List Nat) (s : Sorted ys) is
+           insertSorted x (mergeI rest ys) (ih ys s)
+         end
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- BUNDLED: the certified merge, and a SECOND certified sort
+-- ====================================================================================
+
+And : U -> U -> U is
+  fn (P : U) (Q : U) is Sig P (fn (p : P) is Q end) end
+end
+
+andI : (P : U) -> (Q : U) -> P -> Q -> And P Q is
+  fn (P : U) (Q : U) (p : P) (q : Q) is
+    Pair P (fn (w : P) is Q end) p q
+  end
+end
+
+-- mergeICorrect: merging two lists yields a list that (given a sorted second argument) is SORTED
+-- and is a PERMUTATION of their concatenation — both halves through the named relations.
+mergeICorrect : (xs : List Nat) -> (ys : List Nat) -> Sorted ys
+   -> And (Sorted (mergeI xs ys)) (Permutation (mergeI xs ys) (append Nat xs ys)) is
+  fn (xs : List Nat) (ys : List Nat) (s : Sorted ys) is
+    andI (Sorted (mergeI xs ys)) (Permutation (mergeI xs ys) (append Nat xs ys))
+      (mergeISorted xs ys s)
+      (mergeIPerm xs ys)
+  end
+end
+
+-- sortByMerge xs = mergeI xs nil — a SECOND certified sort (merge into the empty list). It is
+-- sorted (mergeISorted with the empty list trivially sorted) and a permutation of xs
+-- (mergeIPerm, since `append xs nil ~> xs`... not definitionally — see sortByMergePermutes).
+sortByMerge : List Nat -> List Nat is
+  fn (xs : List Nat) is mergeI xs (nil Nat) end
+end
+
+-- sortByMergeSorts: the second sort produces a sorted list. `mergeI xs nil` is sorted because
+-- the empty accumulator is sorted (`refl true`).
+sortByMergeSorts : (xs : List Nat) -> Sorted (sortByMerge xs) is
+  fn (xs : List Nat) is
+    mergeISorted xs (nil Nat) (refl true)
+  end
+end
+
+-- sortByMergePermutes: the second sort is a permutation of its input. `mergeIPerm xs nil` gives
+-- `Permutation (mergeI xs nil) (append xs nil)`; we still owe `append xs nil ~ xs`. Rather than
+-- prove `appendNilR` here (a separate induction), we observe both lists have the SAME COUNTS:
+-- `count k (append xs nil) = add (count k xs) (count k nil) = add (count k xs) zero`... — but the
+-- cleanest route within the named predicate is to note `Permutation (append xs nil) xs` IS the
+-- length-style fact, which we obtain by induction directly: appendNilPerm.
+appendNilPerm : (xs : List Nat) -> Permutation (append Nat xs (nil Nat)) xs is
+  fn (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Permutation (append Nat w (nil Nat)) w end)
+      (permRefl (nil Nat))
+      (fn (x : Nat) (rest : List Nat)
+          (ih : Permutation (append Nat rest (nil Nat)) rest) is
+         permCons x (append Nat rest (nil Nat)) rest ih
+       end)
+      xs
+  end
+end
+
+sortByMergePermutes : (xs : List Nat) -> Permutation (sortByMerge xs) xs is
+  fn (xs : List Nat) is
+    permTrans
+      (mergeI xs (nil Nat))
+      (append Nat xs (nil Nat))
+      xs
+      (mergeIPerm xs (nil Nat))
+      (appendNilPerm xs)
+  end
+end
+
+-- The FULL bundled certificate for the second sort: an output that is Sorted AND a Permutation.
+sortByMergeCorrect : (xs : List Nat)
+   -> Sig (List Nat) (fn (ys : List Nat) is And (Sorted ys) (Permutation ys xs) end) is
+  fn (xs : List Nat) is
+    Pair (List Nat)
+      (fn (ys : List Nat) is And (Sorted ys) (Permutation ys xs) end)
+      (sortByMerge xs)
+      (andI (Sorted (sortByMerge xs)) (Permutation (sortByMerge xs) xs)
+            (sortByMergeSorts xs)
+            (sortByMergePermutes xs))
+  end
+end
+
+-- ====================================================================================
+-- SANITY: the certified merge, concretely
+-- ====================================================================================
+
+threeOneTwo : List Nat is
+  cons Nat (succ (succ (succ zero)))
+    (cons Nat (succ zero)
+      (cons Nat (succ (succ zero)) (nil Nat)))
+end
+
+fourFive : List Nat is
+  cons Nat (succ (succ (succ (succ zero))))
+    (cons Nat (succ (succ (succ (succ (succ zero))))) (nil Nat))
+end
+
+-- merging [3,1,2] into the already-sorted [4,5] is a permutation of [3,1,2] ++ [4,5].
+mergeIPermExample : Permutation
+   (mergeI threeOneTwo fourFive)
+   (append Nat threeOneTwo fourFive) is
+  mergeIPerm threeOneTwo fourFive
+end
+
+-- merging [3,1,2] into the sorted [4,5] stays sorted.
+mergeISortedExample : Sorted (mergeI threeOneTwo fourFive) is
+  mergeISorted threeOneTwo fourFive
+    (andIntro (lte (succ (succ (succ (succ zero)))) (succ (succ (succ (succ (succ zero))))))
+       true
+       (refl true) (refl true))
+end
+
+-- the SECOND certified sort on [3,1,2]: a sorted permutation of the input.
+sortByMergeCorrectExample : Sig (List Nat) (fn (ys : List Nat) is
+     And (Sorted ys) (Permutation ys threeOneTwo) end) is
+  sortByMergeCorrect threeOneTwo
+end
+
+-- project the SORTEDNESS half ...
+witnessSortedMerge : Sorted sortByMergeCorrectExample.1 is sortByMergeCorrectExample.2.1 end
+
+-- ... and the PERMUTATION half.
+witnessPermMerge : Permutation sortByMergeCorrectExample.1 threeOneTwo is
+  sortByMergeCorrectExample.2.2
+end

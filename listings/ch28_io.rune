@@ -1,0 +1,23 @@
+-- Chapter 28 — IO and effects (R-EFFECT / C3), the typed interface.
+-- The core stays pure; effects are a contained monadic-IO group: IO A is a
+-- computation yielding A, sequenced with pureIO/bindIO. This chapter shows IO
+-- programs ELABORATE AND TYPE-CHECK (the monad interface is usable); the runtime
+-- (a codegen IForeign lowering that threads the World so IO programs RUN) is the
+-- labelled C3 follow-up — pureIO/bindIO are inner-tainted until then.
+
+-- Lifting a pure value into IO.
+ret : (A : U) -> A -> IO A is
+  fn (A : U) (a : A) is pureIO A a end
+end
+
+-- Sequencing: run m, feed its result to k. (Kleisli composition is bindIO.)
+andThen : (A : U) -> (B : U) -> IO A -> (A -> IO B) -> IO B is
+  fn (A : U) (B : U) (m : IO A) (k : A -> IO B) is bindIO A B m k end
+end
+
+-- A two-step IO program type-checks: produce a value, then map it on.
+prog : (A : U) -> (B : U) -> A -> (A -> B) -> IO B is
+  fn (A : U) (B : U) (a : A) (f : A -> B) is
+    bindIO A B (pureIO A a) (fn (x : A) is pureIO B (f x) end)
+  end
+end

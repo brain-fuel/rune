@@ -1,0 +1,138 @@
+-- Chapter 63 — The verified numeric tower (D1, the proven tier): associativity and
+-- commutativity of Nat addition, PROVEN by induction (not assumed). These are the
+-- laws a CommutativeMonoid instance for (Nat, +, 0) must discharge — the algebraic
+-- substrate D2 (sorting, balanced Map/Set) and the typeclass layer (C2) ride on.
+-- Every step rewrites the induction hypothesis through `succ` with `subst` (Leibniz
+-- transport), exactly as ch35's `addZeroR`/`addSuccR` — extended here to the binary
+-- laws. `add` recurses on its FIRST argument, so `add zero y` and `add (succ k) y`
+-- reduce definitionally; the proofs only bridge what computation leaves open.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- Helpers (ch35): the right-identity and the successor-shift, needed by commutativity.
+addZeroR : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+         subst Nat (add k zero) k ih
+           (fn (z : Nat) is Eq Nat (add (succ k) zero) (succ z) end)
+           (refl (add (succ k) zero))
+       end)
+      n
+  end
+end
+
+addSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (add n (succ m)) (succ (add n m)) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ m)) (succ (add x m)) end)
+      (refl (succ m))
+      (fn (k : Nat) (ih : Eq Nat (add k (succ m)) (succ (add k m))) is
+         subst Nat (add k (succ m)) (succ (add k m)) ih
+           (fn (z : Nat) is Eq Nat (add (succ k) (succ m)) (succ z) end)
+           (refl (add (succ k) (succ m)))
+       end)
+      n
+  end
+end
+
+-- ASSOCIATIVITY: add (add a b) c = add a (add b c), by induction on a. The base is
+-- refl (both sides reduce to add b c); the succ step transports the IH through succ.
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (add (add a b) c) (add a (add b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add (add x b) c) (add x (add b c)) end)
+      (refl (add b c))
+      (fn (k : Nat) (ih : Eq Nat (add (add k b) c) (add k (add b c))) is
+         subst Nat (add (add k b) c) (add k (add b c)) ih
+           (fn (z : Nat) is Eq Nat (succ (add (add k b) c)) (succ z) end)
+           (refl (succ (add (add k b) c)))
+       end)
+      a
+  end
+end
+
+-- COMMUTATIVITY: add n m = add m n, by induction on n. Base flips addZeroR; the
+-- succ step chains cong-succ of the IH with addSuccR (the successor-shift law).
+addComm : (n : Nat) -> (m : Nat) -> Eq Nat (add n m) (add m n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x m) (add m x) end)
+      (subst Nat (add m zero) m (addZeroR m)
+         (fn (z : Nat) is Eq Nat z (add m zero) end)
+         (refl (add m zero)))
+      (fn (k : Nat) (ih : Eq Nat (add k m) (add m k)) is
+         subst Nat (succ (add m k)) (add m (succ k))
+           (subst Nat (add m (succ k)) (succ (add m k)) (addSuccR m k)
+              (fn (z : Nat) is Eq Nat z (add m (succ k)) end)
+              (refl (add m (succ k))))
+           (fn (z : Nat) is Eq Nat (succ (add k m)) z end)
+           (subst Nat (add k m) (add m k) ih
+              (fn (z : Nat) is Eq Nat (succ (add k m)) (succ z) end)
+              (refl (succ (add k m))))
+       end)
+      n
+  end
+end
+
+-- MULTIPLICATION — the second binary operation, recursing on the first argument:
+-- mul zero n = zero, mul (succ k) n = add n (mul k n). With (add, 0) a commutative
+-- monoid (above) and (mul, 1) a monoid, distributivity below makes (Nat, +, *, 0, 1)
+-- a commutative SEMIRING — the algebra D2's polynomial/matrix code and the typeclass
+-- Ring instance ride on. `add` reduces on its first arg, so `add zero x ~> x`, which
+-- the base cases exploit.
+mul : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add n ih end) m
+  end
+end
+
+-- mul n zero = zero, by induction on n. Base mul zero zero ~> zero (refl). Step:
+-- mul (succ k) zero = add zero (mul k zero) ~> mul k zero (add reduces on its first
+-- arg), and the goal collapses DEFINITIONALLY to the IH — no subst needed.
+mulZeroR : (n : Nat) -> Eq Nat (mul n zero) zero is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul x zero) zero end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k zero) zero) is ih end)
+      n
+  end
+end
+
+-- RIGHT DISTRIBUTIVITY: mul (add a b) c = add (mul a c) (mul b c), by induction on a.
+-- Base: mul (add zero b) c ~> mul b c, and add (mul zero c) (mul b c) ~> mul b c
+-- (both reduce, refl). Step: LHS reduces to add c (mul (add k b) c); rewrite the inner
+-- mul through the IH to add c (add (mul k c) (mul b c)); reassociate with addAssoc
+-- (ch63) to add (add c (mul k c)) (mul b c) = add (mul (succ k) c) (mul b c) = RHS. The
+-- distributive law that, with the monoid laws, certifies the semiring.
+mulDistR : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (mul (add a b) c) (add (mul a c) (mul b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul (add x b) c) (add (mul x c) (mul b c)) end)
+      (refl (mul b c))
+      (fn (k : Nat) (ih : Eq Nat (mul (add k b) c) (add (mul k c) (mul b c))) is
+         subst Nat
+           (add c (add (mul k c) (mul b c)))
+           (add (add c (mul k c)) (mul b c))
+           (subst Nat
+              (add (add c (mul k c)) (mul b c))
+              (add c (add (mul k c) (mul b c)))
+              (addAssoc c (mul k c) (mul b c))
+              (fn (z : Nat) is Eq Nat z (add (add c (mul k c)) (mul b c)) end)
+              (refl (add (add c (mul k c)) (mul b c))))
+           (fn (z : Nat) is Eq Nat (add c (mul (add k b) c)) z end)
+           (subst Nat (mul (add k b) c) (add (mul k c) (mul b c)) ih
+              (fn (z : Nat) is Eq Nat (add c (mul (add k b) c)) (add c z) end)
+              (refl (add c (mul (add k b) c))))
+       end)
+      a
+  end
+end

@@ -1,0 +1,211 @@
+package store
+
+import "goforge.dev/rune/v3/core"
+
+// The inner Glue builtin group (§F / R-GLUE / A6): Glue types on the cubical
+// fibrant substrate — the construct that turns an equivalence into a transporting
+// path, the engine of computational univalence. A separate builtin group on its
+// own hash space (like sigma/equiv/path/kan), built against the fibrant, face,
+// system, and equivalence groups, so their hashes — and ch09–ch24 — stay stable.
+//
+//	Glue   : (A : UF) -> (φ : F) -> (T : holds φ -> UF)
+//	           -> (e : (h : holds φ) -> El (Equiv (T h) A)) -> UF
+//	glue   : (A : UF) -> (φ : F) -> (T : holds φ -> UF)
+//	           -> (e : (h : holds φ) -> El (Equiv (T h) A))
+//	           -> (t : (h : holds φ) -> El (T h)) -> (a : El A)
+//	           -> El (Glue A φ T e)
+//	unglue : (A : UF) -> (φ : F) -> (T : holds φ -> UF)
+//	           -> (e : (h : holds φ) -> El (Equiv (T h) A))
+//	           -> El (Glue A φ T e) -> El A
+//
+// Glue is a fibrant former whose El DECODES on a total face — El (Glue A ⊤ T e) ~>
+// El (T htop) — and stays neutral on a proper/neutral φ (a genuinely new fibrant
+// type). glue is a canonical, permanently-neutral intro (like pairF/pabs). unglue
+// COMPUTES by ι (core.GlueInfo / the evaluator's tryGlueIota): β on a glue intro
+// (~> the A-component a), and the ⊤ boundary (~> equivFun (e htop) g). The member
+// types reference Equiv by its builtin hash (the equiv group is registered first),
+// so no library hash leaks into the kernel.
+//
+// Kan over Glue (transp/hcomp/comp) is the A6-fixup remainder — blocked on R-BOX
+// (proper-face hcomp) + the ∀i.φ cofibration — and is NOT shipped here; this group
+// delivers the former, the intro, the computing unglue, and both boundaries. No
+// hash-format bump (no new core constructor). See ref_docs/wootz/GLUE-DESIGN.md.
+
+var glueNames = [4]string{"Glue", "glue", "unglue", "unglueT"}
+
+type glueEntry struct {
+	hashes     [4]core.Hash
+	equivFun   core.Hash // the equiv group's forward-map accessor, for the ⊤ boundary
+	equivProof core.Hash // the equiv group's contractible-fibre accessor, for G1
+}
+
+// AddGlue registers the Glue group against the already-registered fibrant, face,
+// system, and equivalence groups, binding its names and returning the member
+// hashes in glueNames order.
+func (s *Store) AddGlue(fib [10]core.Hash, face [7]core.Hash, sys [5]core.Hash, equiv [6]core.Hash) [4]core.Hash {
+	tys := glueTypes(fib, face, sys, equiv)
+
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'U'})
+	for _, ty := range tys {
+		th := core.HashTerm(ty)
+		g.Write(th[:])
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	var hs [4]core.Hash
+	for i := range hs {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, 'u'})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		copy(hs[i][:], h.Sum(nil))
+	}
+	subst := func(t core.Tm) core.Tm {
+		for i := range hs {
+			t = replaceRef(t, Placeholder(i), hs[i])
+		}
+		return t
+	}
+	for i, ty := range tys {
+		s.defs[hs[i]] = Def{Type: subst(ty)}
+		s.names[glueNames[i]] = hs[i]
+	}
+	s.gl = &glueEntry{hashes: hs, equivFun: equiv[4], equivProof: equiv[5]}
+	return hs
+}
+
+// GlueRoleOf implements core.GlueInfo.
+func (s *Store) GlueRoleOf(h core.Hash) core.GlueRole {
+	if s.gl == nil {
+		return core.URoleNone
+	}
+	switch h {
+	case s.gl.hashes[0]:
+		return core.URoleGlue
+	case s.gl.hashes[1]:
+		return core.URoleGlueIn
+	case s.gl.hashes[2]:
+		return core.URoleUnglue
+	case s.gl.hashes[3]:
+		return core.URoleUnglueT
+	}
+	return core.URoleNone
+}
+
+// GlueHash implements core.GlueInfo: the reverse lookup.
+func (s *Store) GlueHash(role core.GlueRole) (core.Hash, bool) {
+	if s.gl == nil {
+		return core.Hash{}, false
+	}
+	idx := map[core.GlueRole]int{
+		core.URoleGlue: 0, core.URoleGlueIn: 1, core.URoleUnglue: 2, core.URoleUnglueT: 3,
+	}
+	i, ok := idx[role]
+	if !ok {
+		return core.Hash{}, false
+	}
+	return s.gl.hashes[i], true
+}
+
+// EquivFunHash implements core.GlueInfo: the equiv group's forward-map accessor,
+// which the unglue ⊤ boundary rule builds its reduct from.
+func (s *Store) EquivFunHash() (core.Hash, bool) {
+	if s.gl == nil {
+		return core.Hash{}, false
+	}
+	return s.gl.equivFun, true
+}
+
+// EquivProofHash implements core.GlueInfo: the equiv group's contractible-fibre
+// accessor (equivProof), which the general transp-over-Glue arm (G1) consumes to
+// recover the T-component at an endpoint-total face as the centre of contraction.
+func (s *Store) EquivProofHash() (core.Hash, bool) {
+	if s.gl == nil {
+		return core.Hash{}, false
+	}
+	return s.gl.equivProof, true
+}
+
+// GlueHashes returns the registered group's hashes (and whether it exists).
+func (s *Store) GlueHashes() ([4]core.Hash, bool) {
+	if s.gl == nil {
+		return [4]core.Hash{}, false
+	}
+	return s.gl.hashes, true
+}
+
+// GlueNames returns the surface names of the group members, in hash order.
+func GlueNames() [4]string { return glueNames }
+
+// glueTypes builds the three member types, referencing the fibrant group
+// (UF = fib[0], El = fib[1]), the face former (F = face[0]), holds (sys[0]), and
+// Equiv (equiv[0]). The Glue former self-references via Placeholder(0).
+func glueTypes(fib [10]core.Hash, face [7]core.Hash, sys [5]core.Hash, equiv [6]core.Hash) [4]core.Tm {
+	v := func(i int) core.Tm { return core.Var{Idx: i} }
+	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
+		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
+	}
+	app := func(f core.Tm, xs ...core.Tm) core.Tm {
+		for _, x := range xs {
+			f = core.App{Fn: f, Arg: x, Icit: core.Expl}
+		}
+		return f
+	}
+	uf := core.Tm(core.Ref{Hash: fib[0]})
+	el := func(x core.Tm) core.Tm { return app(core.Ref{Hash: fib[1]}, x) }
+	fTy := core.Tm(core.Ref{Hash: face[0]})                                        // F : U
+	holds := func(phi core.Tm) core.Tm { return app(core.Ref{Hash: sys[0]}, phi) } // holds φ
+	equivC := func(x, y core.Tm) core.Tm { return app(core.Ref{Hash: equiv[3]}, x, y) }
+	glueH := core.Ref{Hash: Placeholder(0)}
+
+	// T : holds φ -> UF, where φ lives at de Bruijn index phiIdx (in the ctx the
+	// binder is introduced).
+	tFam := func(phiIdx int) core.Tm { return pi("_", holds(v(phiIdx)), uf) }
+	// e : (h : holds φ) -> El (Equiv (T h) A), with φ at phiIdx, T at tIdx, A at
+	// aIdx in the ctx BEFORE the h binder (each shifts +1 under h).
+	eFam := func(phiIdx, tIdx, aIdx int) core.Tm {
+		return pi("h", holds(v(phiIdx)),
+			el(equivC(app(v(tIdx+1), v(0)), v(aIdx+1)))) // T h, A under h
+	}
+
+	// Glue : (A : UF) -> (φ : F) -> (T : holds φ -> UF)
+	//          -> (e : (h : holds φ) -> El (Equiv (T h) A)) -> UF
+	glueTy := pi("A", uf, //                                     [A]: A=0
+		pi("φ", fTy, //                                          [φ,A]: φ=0,A=1
+			pi("T", tFam(0), //                                  [T,φ,A]: T=0,φ=1,A=2
+				pi("e", eFam(1, 0, 2), //                        [e,T,φ,A]: e=0,T=1,φ=2,A=3
+					uf))))
+
+	// glue : … -> (t : (h : holds φ) -> El (T h)) -> (a : El A) -> El (Glue A φ T e)
+	tComp := func(phiIdx, tIdx int) core.Tm { //                t component type
+		return pi("h", holds(v(phiIdx)), el(app(v(tIdx+1), v(0))))
+	}
+	glueIntroTy := pi("A", uf, //                               [A]
+		pi("φ", fTy, //                                         [φ,A]
+			pi("T", tFam(0), //                                [T,φ,A]
+				pi("e", eFam(1, 0, 2), //                      [e,T,φ,A]
+					pi("t", tComp(2, 1), //                    [t,e,T,φ,A]: t=0,e=1,T=2,φ=3,A=4
+						pi("a", el(v(4)), //                   [a,t,e,T,φ,A]: a=0,…,A=5
+							el(app(glueH, v(5), v(4), v(3), v(2))))))))) // El (Glue A φ T e)
+
+	// unglue : … -> (e : …) -> El (Glue A φ T e) -> El A
+	unglueTy := pi("A", uf, //                                  [A]
+		pi("φ", fTy, //                                         [φ,A]
+			pi("T", tFam(0), //                                [T,φ,A]
+				pi("e", eFam(1, 0, 2), //                      [e,T,φ,A]: e=0,T=1,φ=2,A=3
+					pi("g", el(app(glueH, v(3), v(2), v(1), v(0))), // [g,e,T,φ,A]: g=0,…,A=4
+						el(v(4))))))) // El A
+
+	// unglueT : … -> (e : …) -> El (Glue A φ T e) -> (h : holds φ) -> El (T h)
+	unglueTTy := pi("A", uf, //                                 [A]
+		pi("φ", fTy, //                                         [φ,A]
+			pi("T", tFam(0), //                                [T,φ,A]
+				pi("e", eFam(1, 0, 2), //                      [e,T,φ,A]: e=0,T=1,φ=2,A=3
+					pi("g", el(app(glueH, v(3), v(2), v(1), v(0))), // [g,e,T,φ,A]: g=0,e=1,T=2,φ=3,A=4
+						pi("h", holds(v(3)), //                // φ at index 3 in [g,e,T,φ,A]
+							el(app(v(3), v(0))))))))) // [h,g,e,T,φ,A]: T=3,h=0 → El (T h)
+
+	return [4]core.Tm{glueTy, glueIntroTy, unglueTy, unglueTTy}
+}

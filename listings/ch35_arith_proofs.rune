@@ -1,0 +1,45 @@
+-- Chapter 35 — Verified arithmetic: induction proofs (D1, the proven tier).
+-- The stdlib's foundational laws are proven, not assumed. Here `add n zero = n`
+-- by induction on n — the succ step rewrites with the induction hypothesis via
+-- subst (Leibniz transport). This is the "proven" tier of the numeric tower.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- add recurses on its first argument: add zero n = n, add (succ k) n = succ ….
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- add n zero = n. (add zero zero is zero by computation; the succ step transports
+-- the IH through succ.)
+addZeroR : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+         subst Nat (add k zero) k ih
+           (fn (z : Nat) is Eq Nat (add (succ k) zero) (succ z) end)
+           (refl (add (succ k) zero))
+       end)
+      n
+  end
+end
+
+-- add n (succ m) = succ (add n m), by the same induction shape.
+addSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (add n (succ m)) (succ (add n m)) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ m)) (succ (add x m)) end)
+      (refl (succ m))
+      (fn (k : Nat) (ih : Eq Nat (add k (succ m)) (succ (add k m))) is
+         subst Nat (add k (succ m)) (succ (add k m)) ih
+           (fn (z : Nat) is Eq Nat (add (succ k) (succ m)) (succ z) end)
+           (refl (add (succ k) (succ m)))
+       end)
+      n
+  end
+end

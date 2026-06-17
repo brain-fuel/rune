@@ -1,0 +1,101 @@
+-- Chapter 62 — Guarded recursion (R-COIND / C5b): the ▹ ("later") modality, now
+-- CLOCK-EXPLICIT (CLOCKS-DESIGN). The substrate the distributed track (E2) needs — it
+-- is what makes bisimilarity COMPUTE as a path (Møgelberg–Veltri), gated on M2 (paths
+-- carrying computational content), which has landed. A contained group on its own hash
+-- space (guard.go), now eight members:
+--
+--   Clock : U                                  a pretype of clocks (no eliminator, like I)
+--   k0    : Clock                              a clock constant (∀κ is inhabited)
+--   Later : Clock -> UF -> UF                  ▹κ ("later" w.r.t. a NAMED clock)
+--   next  : (k : Clock) -> (A : UF) -> El A -> El (Later k A)   a value NOW is LATER
+--   dfix  : (k : Clock) -> (A : UF) -> (El (Later k A) -> El A) -> El A   guarded fixpoint
+--   lmap / lap                                 the ▹ functor map / applicative ⊛, per clock
+--
+-- The heads are permanently NEUTRAL in evaluation, so the normalizer cannot diverge.
+-- The guarded-fixpoint equation `dfix k A f = f (next k A (dfix k A f))` is a BOUNDED
+-- conversion (it unfolds ONCE; the inner dfix that reappears is matched by spine
+-- comparison, never re-unfolded). Productivity is by TYPING: `f` receives its argument
+-- under a `Later`, so it can only USE the recursive call guardedly — no syntactic
+-- productivity checker, no sizes. The clock `k` is threaded so that `force` (ch68) has
+-- an honest type: clock-indexing the Later is what blocks the inconsistent `Later A -> A`.
+
+-- `next` carries a value into the later modality on a clock (type-checks; rigid).
+delayUnit : (k : Clock) -> (A : UF) -> (x : El A) -> El (Later k A) is
+  fn (k : Clock) (A : UF) (x : El A) is next k A x end
+end
+
+-- THE GUARDED-FIXPOINT EQUATION, by `refl`: dfix unfolds exactly once. This is the
+-- defining computational content of guarded recursion — `dfix k A f` is definitionally
+-- its own one-step unfolding `f (next k A (dfix k A f))`. refl proves it because the
+-- unfolding is a kernel conversion (convDfix), bounded so it terminates.
+dfixUnfold : (k : Clock) -> (A : UF) -> (f : El (Later k A) -> El A)
+   -> Eq (El A) (dfix k A f) (f (next k A (dfix k A f))) is
+  fn (k : Clock) (A : UF) (f : El (Later k A) -> El A) is refl end
+end
+
+-- A guarded fixpoint whose step IGNORES the later argument is just the value — the
+-- guard makes the recursion vacuous, and it reduces (no divergence): the kernel
+-- unfolds `dfix k A (λ_. a)` once to `(λ_. a) (next …) = a`.
+dfixConst : (k : Clock) -> (A : UF) -> (a : El A)
+   -> Eq (El A) (dfix k A (fn (l : El (Later k A)) is a end)) a is
+  fn (k : Clock) (A : UF) (a : El A) is refl end
+end
+
+-- The guard composes with `next`: applying the step of a `dfix` to a freshly delayed
+-- value is the same one-step unfolding read from the other direction (refl, via the
+-- bounded conversion). Demonstrates `next`/`dfix` interlock without divergence.
+dfixNextCoheres : (k : Clock) -> (A : UF) -> (f : El (Later k A) -> El A)
+   -> Eq (El A) (f (next k A (dfix k A f))) (dfix k A f) is
+  fn (k : Clock) (A : UF) (f : El (Later k A) -> El A) is refl end
+end
+
+-- ▹ is a FUNCTOR: `lmap` lifts a function across a delayed value, computing on a
+-- `next` intro — `lmap k A B g (next k A x) = next k B (g x)`, by refl (the ι-rule).
+-- This is the substrate guarded corecursion needs to map under the later modality.
+lmapNext : (k : Clock) -> (A : UF) -> (B : UF) -> (g : El A -> El B) -> (x : El A)
+   -> Eq (El (Later k B)) (lmap k A B g (next k A x)) (next k B (g x)) is
+  fn (k : Clock) (A : UF) (B : UF) (g : El A -> El B) (x : El A) is refl end
+end
+
+-- The functor IDENTITY law on a delayed value: mapping the identity is the identity
+-- (`lmap k A A id (next k A x) = next k A x`), by refl — `id x` reduces to `x`.
+lmapId : (k : Clock) -> (A : UF) -> (x : El A)
+   -> Eq (El (Later k A)) (lmap k A A (fn (y : El A) is y end) (next k A x)) (next k A x) is
+  fn (k : Clock) (A : UF) (x : El A) is refl end
+end
+
+-- ▹ is APPLICATIVE: `lap` (⊛) applies a delayed function to a delayed argument,
+-- computing on two `next` intros — `lap k A B (next k _ f) (next k A x) = next k B
+-- (f x)`, by refl (the ι-rule). With `next` (pure) and `lap`, ▹ is an applicative
+-- functor — the API guarded corecursion uses to combine multiple delayed values.
+lapNext : (k : Clock) -> (A : UF) -> (B : UF) -> (f : El A -> El B) -> (x : El A)
+   -> Eq (El (Later k B))
+        (lap k A B (next k (piF A (fn (z : El A) is B end)) f) (next k A x)) (next k B (f x)) is
+  fn (k : Clock) (A : UF) (B : UF) (f : El A -> El B) (x : El A) is refl end
+end
+
+-- ▹ is a LAWFUL applicative — `lmap` factors through `lap`: mapping a function is the
+-- same as applying a PURE (next-wrapped) function. `lmap g = lap (next g)`, by refl on
+-- a `next` intro: both sides fire to `next k B (g x)`. This is the coherence between the
+-- functor map and the applicative ⊛ that any lawful applicative must satisfy.
+lmapAsLap : (k : Clock) -> (A : UF) -> (B : UF) -> (g : El A -> El B) -> (x : El A)
+   -> Eq (El (Later k B))
+        (lmap k A B g (next k A x))
+        (lap k A B (next k (piF A (fn (z : El A) is B end)) g) (next k A x)) is
+  fn (k : Clock) (A : UF) (B : UF) (g : El A -> El B) (x : El A) is refl end
+end
+
+-- The applicative INTERCHANGE law: applying a delayed function to a PURE argument
+-- equals applying the pure evaluator-at-x to the delayed function. Here on `u = next k g`
+-- both sides compute — LHS `lap k (next k g) (next k x) ~> next k (g x)`; RHS evaluates
+-- `(λf. f x) g ~> g x` under the later, also `next k (g x)`. refl. With homomorphism
+-- (`lapNext`) and `lmapAsLap`, ▹ is a verified applicative functor.
+lapInterchange : (k : Clock) -> (A : UF) -> (B : UF) -> (g : El A -> El B) -> (x : El A)
+   -> Eq (El (Later k B))
+        (lap k A B (next k (piF A (fn (z : El A) is B end)) g) (next k A x))
+        (lap k (piF A (fn (z : El A) is B end)) B
+           (next k (piF (piF A (fn (z : El A) is B end)) (fn (f : El (piF A (fn (z : El A) is B end))) is B end))
+              (fn (f : El (piF A (fn (z : El A) is B end))) is f x end))
+           (next k (piF A (fn (z : El A) is B end)) g)) is
+  fn (k : Clock) (A : UF) (B : UF) (g : El A -> El B) (x : El A) is refl end
+end

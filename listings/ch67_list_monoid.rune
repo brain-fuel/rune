@@ -1,0 +1,53 @@
+-- Chapter 67 — Lists form a MONOID (D-track, the proven tier): the unit and
+-- associativity laws of `append`, proven by induction (ch36 proves the length
+-- homomorphism; here the algebraic structure of `++` itself). `append` recurses on
+-- its first argument, so `append nil ys` and the cons step reduce definitionally;
+-- the proofs bridge what computation leaves open, exactly as the numeric tower (ch63).
+
+data List : U -> U is
+  nil : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (z : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+-- RIGHT UNIT: append xs nil = xs, by induction on xs. Base append nil nil = nil; the
+-- cons step transports the IH through `cons A x`.
+appendNil : (A : U) -> (xs : List A) -> Eq (List A) (append A xs (nil A)) xs is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (z : List A) is Eq (List A) (append A z (nil A)) z end)
+      (refl (nil A))
+      (fn (x : A) (rest : List A) (ih : Eq (List A) (append A rest (nil A)) rest) is
+         subst (List A) (append A rest (nil A)) rest ih
+           (fn (w : List A) is Eq (List A) (append A (cons A x rest) (nil A)) (cons A x w) end)
+           (refl (append A (cons A x rest) (nil A)))
+       end)
+      xs
+  end
+end
+
+-- ASSOCIATIVITY: append (append xs ys) zs = append xs (append ys zs), induction on
+-- xs. Base is refl (both reduce to append ys zs); the cons step transports the IH.
+appendAssoc : (A : U) -> (xs : List A) -> (ys : List A) -> (zs : List A)
+   -> Eq (List A) (append A (append A xs ys) zs) (append A xs (append A ys zs)) is
+  fn (A : U) (xs : List A) (ys : List A) (zs : List A) is
+    ListElim A (fn (z : List A) is
+                  Eq (List A) (append A (append A z ys) zs) (append A z (append A ys zs)) end)
+      (refl (append A ys zs))
+      (fn (x : A) (rest : List A)
+          (ih : Eq (List A) (append A (append A rest ys) zs) (append A rest (append A ys zs))) is
+         subst (List A) (append A (append A rest ys) zs) (append A rest (append A ys zs)) ih
+           (fn (w : List A) is
+              Eq (List A) (append A (append A (cons A x rest) ys) zs) (cons A x w) end)
+           (refl (append A (append A (cons A x rest) ys) zs))
+       end)
+      xs
+  end
+end

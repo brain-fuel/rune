@@ -1,0 +1,45 @@
+-- Chapter 19 — The face lattice (§F phase 3a).
+-- Kan operations fill a box defined on PART of the cube; a cofibration says
+-- which part. The face lattice is that algebra of cofibrations, ambient like the
+-- interval and paths:
+--
+--   F     : U              a cofibration (face formula)
+--   ieq0  : I -> F         the constraint (i = 0)
+--   ieq1  : I -> F         the constraint (i = 1)
+--   fand  : F -> F -> F    ∧ (meet)
+--   for   : F -> F -> F    ∨ (join)
+--   ftop  : F              ⊤, the whole cube
+--   fbot  : F              ⊥, the empty face
+--
+-- The atomic constraints decide on the endpoints, and the connectives
+-- unit/absorb on ⊤/⊥ — a distributive lattice, computing by ι-rule. (Holding —
+-- when a face is TRUE — is phase 3b; here it is the formula algebra.)
+
+-- Atomic constraints at the corners.
+i0is0 : Eq F (ieq0 i0) ftop is refl ftop end
+i0is1 : Eq F (ieq0 i1) fbot is refl fbot end
+i1is0 : Eq F (ieq1 i0) fbot is refl fbot end
+i1is1 : Eq F (ieq1 i1) ftop is refl ftop end
+
+-- ∧ has unit ⊤ and absorbing ⊥ (either side).
+andUnitL : (p : F) -> Eq F (fand ftop p) p is fn (p : F) is refl p end end
+andUnitR : (p : F) -> Eq F (fand p ftop) p is fn (p : F) is refl p end end
+andAbsL  : (p : F) -> Eq F (fand fbot p) fbot is fn (p : F) is refl fbot end end
+andAbsR  : (p : F) -> Eq F (fand p fbot) fbot is fn (p : F) is refl fbot end end
+
+-- ∨ has unit ⊥ and absorbing ⊤ (either side).
+orUnitL : (p : F) -> Eq F (for fbot p) p is fn (p : F) is refl p end end
+orUnitR : (p : F) -> Eq F (for p fbot) p is fn (p : F) is refl p end end
+orAbsL  : (p : F) -> Eq F (for ftop p) ftop is fn (p : F) is refl ftop end end
+orAbsR  : (p : F) -> Eq F (for p ftop) ftop is fn (p : F) is refl ftop end end
+
+-- The disjunction (i=0) ∨ (i=1) — the cube's two endpoints, the face a path's
+-- boundary lives on — collapses to ⊤ at each endpoint and is a genuine face in
+-- the middle.
+endpointsAt0 : Eq F (for (ieq0 i0) (ieq1 i0)) ftop is refl ftop end
+endpointsAt1 : Eq F (for (ieq0 i1) (ieq1 i1)) ftop is refl ftop end
+
+-- A worked corner of a square: ((i=0) ∧ (j=1)) at i = i0 is just (j = 1).
+squareCorner : (j : I) -> Eq F (fand (ieq0 i0) (ieq1 j)) (ieq1 j) is
+  fn (j : I) is refl (ieq1 j) end
+end

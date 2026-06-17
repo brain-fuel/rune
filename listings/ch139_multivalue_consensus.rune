@@ -1,0 +1,114 @@
+-- Chapter 139 — E4 SCALED: a MULTI-VALUE, parameterized consensus decision (telos-4).
+-- ch138 deployed a boolean majority.  Real consensus decides over an arbitrary VALUE TYPE.
+-- This chapter generalizes the 3-replica majority to ANY type V with a decidable equality
+-- `eqV : V -> V -> Bool`, proves the "majority decides" theorem PARAMETRICALLY (for all V),
+-- and DEPLOYS a concrete ℕ-valued decision that RUNS on a backend.  FULLY PROVEN + DEPLOYED.
+--
+-- Self-contained (minimal Bool/Nat prelude) so it erases and runs.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- symmetry of Bool equality (the only equality lemma we need locally).
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- The 3-replica majority over an arbitrary value type with decidable equality:
+-- if a=b take a; else if a=c take a; else if b=c take b; else (all distinct) default a.
+-- Whenever two of the three votes agree, that value is returned.
+maj3Gen : (V : U) -> (V -> V -> Bool) -> V -> V -> V -> V is
+  fn (V : U) (eqV : V -> V -> Bool) (a : V) (b : V) (c : V) is
+    BoolElim (fn (x : Bool) is V end)
+      a
+      (BoolElim (fn (x : Bool) is V end)
+         a
+         (BoolElim (fn (x : Bool) is V end) b a (eqV b c))
+         (eqV a c))
+      (eqV a b)
+  end
+end
+
+-- MAJORITY DECIDES, PARAMETRICALLY: for ANY V with a REFLEXIVE decidable equality, if
+-- replicas 0 and 1 both voted a, the decision is a — regardless of replica 2.  eqV a a ~> true
+-- (eqVRefl) selects the first branch, which is a; subst rewrites the guard to true.
+maj3GenTwoAgree : (V : U) -> (eqV : V -> V -> Bool)
+   -> ((x : V) -> Eq Bool (eqV x x) true)
+   -> (a : V) -> (c : V) -> Eq V (maj3Gen V eqV a a c) a is
+  fn (V : U) (eqV : V -> V -> Bool) (eqVRefl : (x : V) -> Eq Bool (eqV x x) true)
+     (a : V) (c : V) is
+    subst Bool true (eqV a a) (symBool (eqV a a) true (eqVRefl a))
+      (fn (z : Bool) is
+         Eq V (BoolElim (fn (x : Bool) is V end)
+                 a
+                 (BoolElim (fn (x : Bool) is V end)
+                    a
+                    (BoolElim (fn (x : Bool) is V end) a a (eqV a c))
+                    (eqV a c))
+                 z) a end)
+      (refl a)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- A CONCRETE ℕ INSTANCE.  Decidable equality on ℕ + its reflexivity.
+-- ----------------------------------------------------------------------------
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+-- Three replicas vote 2, 2, 1 (replicas 0,1 the majority on 2; replica 2 dissents with 1).
+nvote0 : Nat is succ (succ zero) end
+nvote1 : Nat is succ (succ zero) end
+nvote2 : Nat is succ zero end
+
+-- THE ℕ DECISION — a computable value that DEPLOYS and RUNS (emit-and-execute, node):
+-- maj3Gen Nat eqNat 2 2 1 ~> 2 (eqNat 2 2 ~> true selects the first branch).
+ndecision : Nat is maj3Gen Nat eqNat nvote0 nvote1 nvote2 end
+
+-- Certified by computation (refl) AND by the parametric theorem at V := Nat.
+ndecisionCorrect : Eq Nat ndecision (succ (succ zero)) is refl (succ (succ zero)) end
+ndecisionIsMajorityValue : Eq Nat ndecision nvote0 is
+  maj3GenTwoAgree Nat eqNat eqNatRefl nvote0 nvote2
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 139 — WHAT LANDED.
+-- FULLY PROVEN + DEPLOYED (no admits/holes/postulates): maj3Gen (the 3-replica majority over
+-- ANY value type with decidable equality), maj3GenTwoAgree (the agreement property PROVEN
+-- PARAMETRICALLY for all such V), and a concrete ℕ instance whose `ndecision` DEPLOYS and RUNS
+-- on a backend to 2 (harness emit-and-execute), certified by refl AND by the parametric
+-- theorem at V := Nat.  E4 scaled from one bit to an arbitrary value type, still provably
+-- correct AND deployed from the same verified source.
+-- THE NEXT STEP: project the decision to runnable OTP-style actors (one per replica, votes
+-- exchanged as messages) + a log-PREFIX matching property; the full infra-as-code surface.
+-- ====================================================================================

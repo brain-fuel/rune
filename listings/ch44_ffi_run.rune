@@ -1,0 +1,14 @@
+-- Chapter 44 — Foreign functions RUN when linked (R-FFI runtime / D-track).
+-- A `foreign` axiom's meaning is supplied by the host at link time. Here the
+-- program calls a foreign hostId; linked against a host implementation it
+-- executes — closing the loop from typed contract (ch40) to running interop.
+-- (The harness links the impl; in deployment the backend's FFI provides it.)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+foreign hostId : Nat -> Nat end
+
+answer : Nat is hostId (succ (succ zero)) end

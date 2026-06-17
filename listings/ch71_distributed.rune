@@ -1,0 +1,115 @@
+-- Chapter 71 — A DEPLOYED distributed protocol (M0 vertical slice / E-track). The process
+-- calculus (ch33/ch38, E1) gave rendezvous as a total small step; ch69/ch70 gave its
+-- bisimulation theory (E2/E3). This chapter is the SPIRIT GATE made concrete: a real, small,
+-- honest distributed program — a sender ‖ receiver rendezvous run to completion — that
+-- type-checks, CARRIES ITS CERTIFICATE (the runs below are `refl`), and DEPLOYS + RUNS on a real
+-- backend (gated in harness/listings_test.go's emit-and-execute suite, executed under node).
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- A process: termination, an OUTPUT prefix, an INPUT prefix, parallel composition (ch38).
+data Proc : U is
+  halt : Proc
+| out  : Proc -> Proc
+| inp  : Proc -> Proc
+| par  : Proc -> Proc -> Proc
+end
+
+-- The continuation behind an output / input prefix, if any (ch38).
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (q : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      x
+  end
+end
+
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (q : Proc) (ih : Option Proc) is some Proc q end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      x
+  end
+end
+
+-- Interleaving fallback: step the left branch if it can, else the right (ch38).
+interleave : Option Proc -> Option Proc -> Proc -> Proc -> Option Proc is
+  fn (ra : Option Proc) (rb : Option Proc) (a : Proc) (b : Proc) is
+    OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+         (none Proc)
+         (fn (b2 : Proc) is some Proc (par a b2) end)
+         rb)
+      (fn (a2 : Proc) is some Proc (par a2 b) end)
+      ra
+  end
+end
+
+-- One small step: a prefix alone is stuck; a parallel composition rendezvouses (out|inp -> the
+-- two continuations in parallel), else interleaves (ch38).
+reduce : Proc -> Option Proc is
+  fn (q : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (r : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+           (interleave iha ihb a b)
+           (fn (p : Proc) is
+              OptionElim Proc (fn (w : Option Proc) is Option Proc end)
+                (interleave iha ihb a b)
+                (fn (qc : Proc) is some Proc (par p qc) end)
+                (inpCont b)
+            end)
+           (outCont a)
+       end)
+      q
+  end
+end
+
+-- THE PROTOCOL: a sender (`out halt`) running in parallel with a receiver (`inp halt`) — the
+-- smallest honest distributed program, two peers that must communicate to make progress.
+protocol : Proc is par (out halt) (inp halt) end
+
+-- ONE RENDEZVOUS, the deployed result: the two peers synchronise, both continuing as `halt`.
+-- `answer = reduce protocol` runs the step; it DEPLOYS (emit + node) and computes to
+-- `some (par halt halt)`. The certificate rides along — `answerCorrect` is `refl`.
+answer : Option Proc is reduce protocol end
+
+answerCorrect : Eq (Option Proc) answer (some Proc (par halt halt)) is
+  refl (some Proc (par halt halt))
+end
+
+-- RUN TO COMPLETION: step once or stay put when stuck, iterated. `stepOr` advances one small
+-- step (or idles on `none`); `run3` applies it three times. The protocol synchronises on the
+-- first step (`par halt halt`) then idles — a TERMINATING distributed run, deployable.
+stepOr : Proc -> Proc is
+  fn (p : Proc) is
+    OptionElim Proc (fn (w : Option Proc) is Proc end)
+      p
+      (fn (p2 : Proc) is p2 end)
+      (reduce p)
+  end
+end
+
+run3 : Proc -> Proc is
+  fn (p : Proc) is stepOr (stepOr (stepOr p)) end
+end
+
+-- The protocol's FINAL state after running: `par halt halt` (synchronised, then quiescent).
+-- `final` DEPLOYS + RUNS on a backend, printing `par halt halt`; the certificate is `refl`.
+final : Proc is run3 protocol end
+
+finalCorrect : Eq Proc final (par halt halt) is
+  refl (par halt halt)
+end

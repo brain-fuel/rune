@@ -6,11 +6,16 @@
 -- equations, not cases: the flip of (a − b)/s is (s(a∸b) − s(b∸a))/Δ²,
 -- which is s/(a−b) when a ≠ b and 0 when a = b, with x / 0 = 0 falling
 -- out rather than being decreed.
--- `//` and `%` at ℚ are specified by the tower doc but land with the
--- course-of-values chapter: a flooring quotient is well-defined on the
--- quotient only by Euclidean uniqueness, the same theorem the fuel-style
--- ch11 honestly deferred. The respect proofs here need no such thing —
--- one cancellation, one absurdity-from-zero, and semiring algebra.
+-- `//` and `%` at ℚ are specified by the tower doc and DELIVERED below. The
+-- proof problem they raised — a flooring quotient is well-defined on the
+-- quotient only by Euclidean uniqueness, the theorem the fuel-style ch11
+-- honestly deferred — is discharged here (and in ch16): a structural division
+-- algorithm with uniqueness (divLaw + remBound + divUnique), then a floor on
+-- the signed representative whose qlift respect proof (floorUnique) IS that
+-- uniqueness. The sign analysis is erased by a single trick: -b is d*b modulo
+-- d+1, so the floor numerator is (a + d*b) // (d+1) - b with no case on signs.
+-- The respect proofs for + - * / need none of this — one cancellation, one
+-- absurdity-from-zero, and semiring algebra.
 
 data Nat : U is
   zero : Nat
@@ -1199,10 +1204,504 @@ end
 -- The glyphs arrive at ℚ. Exact division exists for the first time in the
 -- tower: a / b is a · flip b, and a / 0 = 0 because flip 0 = 0.
 
+-- ============================================================================
+-- The flooring quotient and remainder at Rat (numeric-tower §2). The proof
+-- problem — a floor is well-defined on a class only by Euclidean uniqueness — is
+-- discharged below: a structural division algorithm, its uniqueness, then a
+-- floor on the signed representative whose qlift respect proof IS that
+-- uniqueness. (The theorem also stands alone in ch16; here it is specialised to
+-- ch13's arithmetic conventions and put to work.)
+-- ============================================================================
+
+data Bool : U is true : Bool | false : Bool end
+
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is case n of | zero -> true | succ j -> false end end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+
+eqNatSound : (m : Nat) -> (n : Nat) -> Eq Bool (eqNat m n) true -> m = n is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is
+        case n of
+        | zero -> fn (h : Eq Bool true true) is refl 0 end
+        | succ j -> fn (h : Eq Bool false true) is
+            subst Bool false true h (fn (z : Bool) is case z of | true -> Eq Nat 0 (succ j) | false -> Eq Nat 0 0 end end) (refl 0)
+          end
+        end
+      end
+    | succ k with ih -> fn (n : Nat) is
+        case n of
+        | zero -> fn (h : Eq Bool false true) is
+            subst Bool false true h (fn (z : Bool) is case z of | true -> Eq Nat (succ k) 0 | false -> Eq Nat (succ k) (succ k) end end) (refl (succ k))
+          end
+        | succ j -> fn (h : Eq Bool (eqNat k j) true) is cong succ (ih j h) end
+        end
+      end
+    end
+  end
+end
+
+trueNotFalse : {P : U} -> Eq Bool true false -> P is
+  fn {P : U} (h : Eq Bool true false) is
+    subst Bool true false h (fn (z : Bool) is case z of | true -> (P -> P) | false -> P end end) (fn (x : P) is x end)
+  end
+end
+falseNotTrue : {P : U} -> Eq Bool false true -> P is
+  fn {P : U} (h : Eq Bool false true) is
+    subst Bool false true h (fn (z : Bool) is case z of | true -> P | false -> (P -> P) end end) (fn (x : P) is x end)
+  end
+end
+
+boolCase : {P : U} -> (x : Bool) -> (Eq Bool x true -> P) -> (Eq Bool x false -> P) -> P is
+  fn {P : U} (x : Bool) (ft : Eq Bool x true -> P) (ff : Eq Bool x false -> P) is
+    BoolElim (fn (z : Bool) is Eq Bool x z -> P end) ft ff x (refl x)
+  end
+end
+
+data DM : U is dm : Nat -> Nat -> DM end
+dmQ : DM -> Nat is fn (x : DM) is case x of | dm q r -> q end end end
+dmR : DM -> Nat is fn (x : DM) is case x of | dm q r -> r end end end
+
+stepByBool : Bool -> Nat -> Nat -> DM is
+  fn (t : Bool) (q : Nat) (r : Nat) is
+    case t of | true -> dm (succ q) 0 | false -> dm q (succ r) end
+  end
+end
+divStep : DM -> Nat -> DM is
+  fn (x : DM) (b : Nat) is case x of | dm q r -> stepByBool (eqNat (succ r) b) q r end end
+end
+divmod : Nat -> Nat -> DM is
+  fn (a : Nat) is
+    case a of
+    | zero -> fn (b : Nat) is dm 0 0 end
+    | succ a2 with ih -> fn (b : Nat) is divStep (ih b) b end
+    end
+  end
+end
+quotient : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is dmQ (divmod a b) end end
+remainder : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is dmR (divmod a b) end end
+
+dmEta : (x : DM) -> x = dm (dmQ x) (dmR x) is
+  fn (x : DM) is case x of | dm q r -> refl (dm q r) end end
+end
+
+addCancelL : (c : Nat) -> (x : Nat) -> (y : Nat) -> c + x = c + y -> x = y is
+  fn (c : Nat) is
+    case c of
+    | zero -> fn (x : Nat) (y : Nat) (h : Eq Nat x y) is h end
+    | succ k with ih -> fn (x : Nat) (y : Nat) (h : Eq Nat (succ (k + x)) (succ (k + y))) is
+        ih x y (succInj h)
+      end
+    end
+  end
+end
+
+stepLaw : (b : Nat) -> (q : Nat) -> (r : Nat) -> (a2 : Nat) -> a2 = q * b + r ->
+    Eq Nat (succ a2) (dmQ (divStep (dm q r) b) * b + dmR (divStep (dm q r) b)) is
+  fn (b : Nat) (q : Nat) (r : Nat) (a2 : Nat) (p : Eq Nat a2 (q * b + r)) is
+    boolCase (eqNat (succ r) b)
+      (fn (h : Eq Bool (eqNat (succ r) b) true) is
+         subst Bool true (eqNat (succ r) b) (sym h)
+           (fn (t : Bool) is Eq Nat (succ a2) (dmQ (stepByBool t q r) * b + dmR (stepByBool t q r)) end)
+           (trans (cong succ p)
+             (trans (sym (addSucc (q * b) r))
+               (trans (cong (fn (w : Nat) is q * b + w end) (eqNatSound (succ r) b h))
+                 (sym (addZeroRight (q * b + b))))))
+       end)
+      (fn (h : Eq Bool (eqNat (succ r) b) false) is
+         subst Bool false (eqNat (succ r) b) (sym h)
+           (fn (t : Bool) is Eq Nat (succ a2) (dmQ (stepByBool t q r) * b + dmR (stepByBool t q r)) end)
+           (trans (cong succ p) (sym (addSucc (q * b) r)))
+       end)
+  end
+end
+
+divLaw : (b : Nat) -> (a : Nat) -> Eq Nat a (quotient a b * b + remainder a b) is
+  fn (b : Nat) (a : Nat) is
+    case a of
+    | zero -> refl 0
+    | succ a2 with ih ->
+        subst DM (divStep (dm (quotient a2 b) (remainder a2 b)) b) (divStep (divmod a2 b) b)
+          (sym (cong (fn (w : DM) is divStep w b end) (dmEta (divmod a2 b))))
+          (fn (s : DM) is Eq Nat (succ a2) (dmQ s * b + dmR s) end)
+          (stepLaw b (quotient a2 b) (remainder a2 b) a2 ih)
+    end
+  end
+end
+
+ltb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is case n of | zero -> false | succ j -> true end end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+ltbZero : (r : Nat) -> Eq Bool (ltb r 0) false is
+  fn (r : Nat) is case r of | zero -> refl false | succ k -> refl false end end
+end
+Lt : Nat -> Nat -> Prop is fn (a : Nat) (b : Nat) is Eq Bool (ltb a b) true end end
+
+ltStep : (r : Nat) -> (b0 : Nat) -> Eq Bool (ltb r (succ b0)) true -> Eq Bool (eqNat r b0) false -> Eq Bool (ltb r b0) true is
+  fn (r : Nat) is
+    case r of
+    | zero -> fn (b0 : Nat) is
+        case b0 of
+        | zero -> fn (h1 : Eq Bool true true) (h2 : Eq Bool true false) is trueNotFalse h2 end
+        | succ c -> fn (h1 : Eq Bool true true) (h2 : Eq Bool false false) is refl true end
+        end
+      end
+    | succ r2 with ih -> fn (b0 : Nat) is
+        case b0 of
+        | zero -> fn (h1 : Eq Bool (ltb r2 0) true) (h2 : Eq Bool (eqNat (succ r2) 0) false) is
+            falseNotTrue (trans (sym (ltbZero r2)) h1)
+          end
+        | succ c -> fn (h1 : Eq Bool (ltb r2 (succ c)) true) (h2 : Eq Bool (eqNat r2 c) false) is ih c h1 h2 end
+        end
+      end
+    end
+  end
+end
+
+remBound : (b0 : Nat) -> (a : Nat) -> Lt (remainder a (succ b0)) (succ b0) is
+  fn (b0 : Nat) (a : Nat) is
+    case a of
+    | zero -> refl true
+    | succ a2 with ih ->
+        subst DM (divStep (dm (quotient a2 (succ b0)) (remainder a2 (succ b0))) (succ b0)) (divStep (divmod a2 (succ b0)) (succ b0))
+          (sym (cong (fn (w : DM) is divStep w (succ b0) end) (dmEta (divmod a2 (succ b0)))))
+          (fn (s : DM) is Lt (dmR s) (succ b0) end)
+          (boolCase (eqNat (succ (remainder a2 (succ b0))) (succ b0))
+            (fn (h : Eq Bool (eqNat (succ (remainder a2 (succ b0))) (succ b0)) true) is
+               subst Bool true (eqNat (succ (remainder a2 (succ b0))) (succ b0)) (sym h)
+                 (fn (t : Bool) is Lt (dmR (stepByBool t (quotient a2 (succ b0)) (remainder a2 (succ b0)))) (succ b0) end)
+                 (refl true)
+             end)
+            (fn (h : Eq Bool (eqNat (succ (remainder a2 (succ b0))) (succ b0)) false) is
+               subst Bool false (eqNat (succ (remainder a2 (succ b0))) (succ b0)) (sym h)
+                 (fn (t : Bool) is Lt (dmR (stepByBool t (quotient a2 (succ b0)) (remainder a2 (succ b0)))) (succ b0) end)
+                 (ltStep (remainder a2 (succ b0)) b0 ih h)
+             end))
+    end
+  end
+end
+
+-- (x + b) + y is never < b, and (X + b) + r regroups to (X + r) + b.
+notLtMidB : (x : Nat) -> (b : Nat) -> (y : Nat) -> Eq Bool (ltb ((x + b) + y) b) false is
+  fn (x : Nat) (b : Nat) is
+    case b of
+    | zero -> fn (y : Nat) is ltbZero ((x + 0) + y) end
+    | succ b2 with ih -> fn (y : Nat) is
+        subst Nat (succ ((x + b2) + y)) ((x + succ b2) + y)
+          (sym (trans (cong (fn (w : Nat) is w + y end) (addSucc x b2)) (refl (succ ((x + b2) + y)))))
+          (fn (z : Nat) is Eq Bool (ltb z (succ b2)) false end)
+          (ih y)
+      end
+    end
+  end
+end
+midComm : (xx : Nat) -> (b : Nat) -> (r : Nat) -> (xx + b) + r = (xx + r) + b is
+  fn (xx : Nat) (b : Nat) (r : Nat) is
+    trans (addAssoc xx b r) (trans (cong (fn (w : Nat) is xx + w end) (addComm b r)) (sym (addAssoc xx r b)))
+  end
+end
+
+divUnique : (b : Nat) -> (q1 : Nat) -> (q2 : Nat) -> (r1 : Nat) -> (r2 : Nat) ->
+    Lt r1 b -> Lt r2 b -> q1 * b + r1 = q2 * b + r2 -> q1 = q2 is
+  fn (b : Nat) (q1 : Nat) is
+    case q1 of
+    | zero -> fn (q2 : Nat) is
+        case q2 of
+        | zero -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b) (h : Eq Nat r1 r2) is refl 0 end
+        | succ q2b -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Nat r1 ((q2b * b + b) + r2)) is
+            trueNotFalse (trans (sym b1)
+              (trans (cong (fn (z : Nat) is ltb z b end) h) (notLtMidB (q2b * b) b r2)))
+          end
+        end
+      end
+    | succ q1b with ih -> fn (q2 : Nat) is
+        case q2 of
+        | zero -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Nat ((q1b * b + b) + r1) r2) is
+            trueNotFalse (trans (sym b2)
+              (trans (cong (fn (z : Nat) is ltb z b end) (sym h)) (notLtMidB (q1b * b) b r1)))
+          end
+        | succ q2b -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Nat ((q1b * b + b) + r1) ((q2b * b + b) + r2)) is
+            cong succ (ih q2b r1 r2 b1 b2
+              (addCancelR b (q1b * b + r1) (q2b * b + r2)
+                (trans (sym (midComm (q1b * b) b r1)) (trans h (midComm (q2b * b) b r2)))))
+          end
+        end
+      end
+    end
+  end
+end
+
+remUnique : (b : Nat) -> (q1 : Nat) -> (q2 : Nat) -> (r1 : Nat) -> (r2 : Nat) ->
+    Lt r1 b -> Lt r2 b -> q1 * b + r1 = q2 * b + r2 -> r1 = r2 is
+  fn (b : Nat) (q1 : Nat) (q2 : Nat) (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+     (h : Eq Nat (q1 * b + r1) (q2 * b + r2)) is
+    addCancelL (q2 * b) r1 r2
+      (subst Nat q1 q2 (divUnique b q1 q2 r1 r2 b1 b2 h)
+        (fn (z : Nat) is Eq Nat (z * b + r1) (q2 * b + r2) end) h)
+  end
+end
+
+-- Order helpers for the scaling lemma the floor's respect proof needs.
+leb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is true end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+ltLeSucc : (a : Nat) -> (s : Nat) -> Eq Bool (ltb a s) (leb (succ a) s) is
+  fn (a : Nat) is
+    case a of
+    | zero -> fn (s : Nat) is case s of | zero -> refl false | succ s2 -> refl true end end
+    | succ a2 with ih -> fn (s : Nat) is case s of | zero -> refl false | succ s2 -> ih s2 end end
+    end
+  end
+end
+leAdd : (m : Nat) -> (s : Nat) -> Eq Bool (leb m s) true -> Eq Nat (m + (s - m)) s is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (s : Nat) (h : Eq Bool true true) is refl s end
+    | succ k with ih -> fn (s : Nat) is
+        case s of
+        | zero -> fn (h : Eq Bool false true) is falseNotTrue h end
+        | succ s2 -> fn (h : Eq Bool (leb k s2) true) is
+            cong succ (trans (cong (fn (w : Nat) is k + w end) (monusSuccSucc k s2)) (ih s2 h))
+          end
+        end
+      end
+    end
+  end
+end
+ltbAddSucc : (x : Nat) -> (m : Nat) -> Eq Bool (ltb x (x + succ m)) true is
+  fn (x : Nat) is
+    case x of
+    | zero -> fn (m : Nat) is refl true end
+    | succ x2 with ih -> fn (m : Nat) is ih m end
+    end
+  end
+end
+posGap : (a : Nat) -> (s : Nat) -> Lt a s -> Eq Nat s (succ a + (s - succ a)) is
+  fn (a : Nat) (s : Nat) (lt : Lt a s) is
+    sym (leAdd (succ a) s
+      (subst Bool (ltb a s) (leb (succ a) s) (ltLeSucc a s) (fn (z : Bool) is Eq Bool z true end) lt))
+  end
+end
+scaleEq : (a : Nat) -> (w : Nat) -> (t : Nat) ->
+    Eq Nat ((succ a + w) * succ t) (a * succ t + succ (t + w * succ t)) is
+  fn (a : Nat) (w : Nat) (t : Nat) is
+    trans (distribR (succ a) w (succ t)) (addAssoc (a * succ t) (succ t) (w * succ t))
+  end
+end
+scaleLt : (a : Nat) -> (s : Nat) -> (t : Nat) -> Lt a s -> Lt (a * succ t) (s * succ t) is
+  fn (a : Nat) (s : Nat) (t : Nat) (lt : Lt a s) is
+    subst Nat (succ a + (s - succ a)) s (sym (posGap a s lt))
+      (fn (z : Nat) is Lt (a * succ t) (z * succ t) end)
+      (subst Nat (a * succ t + succ (t + (s - succ a) * succ t)) ((succ a + (s - succ a)) * succ t)
+        (sym (scaleEq a (s - succ a) t))
+        (fn (z : Nat) is Lt (a * succ t) z end)
+        (ltbAddSucc (a * succ t) (t + (s - succ a) * succ t)))
+  end
+end
+
+-- floorRP: the floor of (a-b)/(d+1) as an integer (denom 0). The trick that
+-- erases the sign analysis: -b is d*b modulo s = d+1, so the floor numerator is
+-- Q - b for Q = (a + d*b) // s, with NO case on the remainders. The floor
+-- remainder is then just (a + d*b) % s, so its bound is remBound on the nose.
+floorNum : RPair -> Nat is
+  fn (p : RPair) is quotient (posR p + denR p * negR p) (succ (denR p)) end
+end
+floorRem : RPair -> Nat is
+  fn (p : RPair) is remainder (posR p + denR p * negR p) (succ (denR p)) end
+end
+floorRP : RPair -> RPair is
+  fn (p : RPair) is rp (floorNum p) (negR p) 0 end
+end
+
+-- The floor remainder is bounded — directly remBound.
+charLt : (p : RPair) -> Lt (floorRem p) (succ (denR p)) is
+  fn (p : RPair) is remBound (denR p) (posR p + denR p * negR p) end
+end
+
+-- The characterization: a + b*s = (b + Q*s) + rem, where Q = floorNum,
+-- rem = floorRem, s = d+1. Pure semiring algebra over divLaw.
+charEq : (p : RPair) ->
+    Eq Nat (posR p + negR p * succ (denR p))
+           ((negR p + floorNum p * succ (denR p)) + floorRem p) is
+  fn (p : RPair) is
+    trans (cong (fn (w : Nat) is posR p + w end)
+             (trans (mulSuccRight (negR p) (denR p)) (cong (fn (w : Nat) is w + negR p end) (mulComm (negR p) (denR p)))))
+      (trans (sym (addAssoc (posR p) (denR p * negR p) (negR p)))
+        (trans (cong (fn (w : Nat) is w + negR p end) (divLaw (succ (denR p)) (posR p + denR p * negR p)))
+          (trans (addAssoc (floorNum p * succ (denR p)) (floorRem p) (negR p))
+            (trans (cong (fn (w : Nat) is floorNum p * succ (denR p) + w end) (addComm (floorRem p) (negR p)))
+              (trans (sym (addAssoc (floorNum p * succ (denR p)) (negR p) (floorRem p)))
+                (cong (fn (w : Nat) is w + floorRem p end) (addComm (floorNum p * succ (denR p)) (negR p))))))))
+  end
+end
+
+-- Multiply a characterization a + b*s = (b + P*s) + r by k, normalised so the
+-- divisor appears as the single factor s*k.
+mulChar : (a : Nat) -> (b : Nat) -> (s : Nat) -> (pp : Nat) -> (r : Nat) -> (k : Nat) ->
+    Eq Nat (a + b * s) ((b + pp * s) + r) ->
+    Eq Nat (a * k + b * (s * k)) ((b * k + pp * (s * k)) + r * k) is
+  fn (a : Nat) (b : Nat) (s : Nat) (pp : Nat) (r : Nat) (k : Nat) (h : Eq Nat (a + b * s) ((b + pp * s) + r)) is
+    trans (sym (trans (distribR a (b * s) k) (cong (fn (w : Nat) is a * k + w end) (mulAssoc b s k))))
+      (trans (cong (fn (w : Nat) is w * k end) h)
+        (trans (distribR (b + pp * s) r k)
+          (cong (fn (w : Nat) is w + r * k end)
+            (trans (distribR b (pp * s) k) (cong (fn (w : Nat) is b * k + w end) (mulAssoc pp s k))))))
+  end
+end
+
+-- combLeft: cancel b*t against the cross-relation to reach R1'.
+combLeft : (a : Nat) -> (b : Nat) -> (c : Nat) -> (e : Nat) -> (s : Nat) -> (t : Nat) -> (p1 : Nat) -> (r1 : Nat) ->
+    Eq Nat (a * t + b * (s * t)) ((b * t + p1 * (s * t)) + r1 * t) ->
+    Eq Nat (a * t + e * s) (c * s + b * t) ->
+    Eq Nat (c * s + b * (s * t)) ((p1 * (s * t) + r1 * t) + e * s) is
+  fn (a : Nat) (b : Nat) (c : Nat) (e : Nat) (s : Nat) (t : Nat) (p1 : Nat) (r1 : Nat)
+     (ept : Eq Nat (a * t + b * (s * t)) ((b * t + p1 * (s * t)) + r1 * t))
+     (rel : Eq Nat (a * t + e * s) (c * s + b * t)) is
+    addCancelL (b * t) (c * s + b * (s * t)) ((p1 * (s * t) + r1 * t) + e * s)
+      (calc b * t + (c * s + b * (s * t))
+        = (b * t + c * s) + b * (s * t)         by sym (addAssoc (b * t) (c * s) (b * (s * t)))
+        = (c * s + b * t) + b * (s * t)         by cong (fn (w : Nat) is w + b * (s * t) end) (addComm (b * t) (c * s))
+        = (a * t + e * s) + b * (s * t)         by cong (fn (w : Nat) is w + b * (s * t) end) (sym rel)
+        = a * t + (e * s + b * (s * t))         by addAssoc (a * t) (e * s) (b * (s * t))
+        = a * t + (b * (s * t) + e * s)         by cong (fn (w : Nat) is a * t + w end) (addComm (e * s) (b * (s * t)))
+        = (a * t + b * (s * t)) + e * s         by sym (addAssoc (a * t) (b * (s * t)) (e * s))
+        = ((b * t + p1 * (s * t)) + r1 * t) + e * s   by cong (fn (w : Nat) is w + e * s end) ept
+        = (b * t + p1 * (s * t)) + (r1 * t + e * s)   by addAssoc (b * t + p1 * (s * t)) (r1 * t) (e * s)
+        = b * t + (p1 * (s * t) + (r1 * t + e * s))   by addAssoc (b * t) (p1 * (s * t)) (r1 * t + e * s)
+        = b * t + ((p1 * (s * t) + r1 * t) + e * s)   by cong (fn (w : Nat) is b * t + w end) (sym (addAssoc (p1 * (s * t)) (r1 * t) (e * s)))
+      end)
+  end
+end
+
+-- combRight: combine R1' with the multiplied E_q and cancel e*s to reach KEY'.
+combRight : (b : Nat) -> (c : Nat) -> (e : Nat) -> (s : Nat) -> (t : Nat) -> (p1 : Nat) -> (p2 : Nat) -> (r1 : Nat) -> (r2 : Nat) ->
+    Eq Nat (c * s + b * (s * t)) ((p1 * (s * t) + r1 * t) + e * s) ->
+    Eq Nat (c * s + e * (s * t)) ((e * s + p2 * (s * t)) + r2 * s) ->
+    Eq Nat ((p1 + e) * (s * t) + r1 * t) ((p2 + b) * (s * t) + r2 * s) is
+  fn (b : Nat) (c : Nat) (e : Nat) (s : Nat) (t : Nat) (p1 : Nat) (p2 : Nat) (r1 : Nat) (r2 : Nat)
+     (r1eq : Eq Nat (c * s + b * (s * t)) ((p1 * (s * t) + r1 * t) + e * s))
+     (eqs : Eq Nat (c * s + e * (s * t)) ((e * s + p2 * (s * t)) + r2 * s)) is
+    let mid : Eq Nat (((e * s + p2 * (s * t)) + r2 * s) + b * (s * t)) (((p1 * (s * t) + r1 * t) + e * s) + e * (s * t)) =
+      calc ((e * s + p2 * (s * t)) + r2 * s) + b * (s * t)
+        = (c * s + e * (s * t)) + b * (s * t)            by cong (fn (w : Nat) is w + b * (s * t) end) (sym eqs)
+        = c * s + (e * (s * t) + b * (s * t))            by addAssoc (c * s) (e * (s * t)) (b * (s * t))
+        = c * s + (b * (s * t) + e * (s * t))            by cong (fn (w : Nat) is c * s + w end) (addComm (e * (s * t)) (b * (s * t)))
+        = (c * s + b * (s * t)) + e * (s * t)            by sym (addAssoc (c * s) (b * (s * t)) (e * (s * t)))
+        = ((p1 * (s * t) + r1 * t) + e * s) + e * (s * t) by cong (fn (w : Nat) is w + e * (s * t) end) r1eq
+      end in
+    let midL : Eq Nat (((e * s + p2 * (s * t)) + r2 * s) + b * (s * t)) (e * s + ((p2 + b) * (s * t) + r2 * s)) =
+      calc ((e * s + p2 * (s * t)) + r2 * s) + b * (s * t)
+        = (e * s + p2 * (s * t)) + (r2 * s + b * (s * t)) by addAssoc (e * s + p2 * (s * t)) (r2 * s) (b * (s * t))
+        = e * s + (p2 * (s * t) + (r2 * s + b * (s * t))) by addAssoc (e * s) (p2 * (s * t)) (r2 * s + b * (s * t))
+        = e * s + (p2 * (s * t) + (b * (s * t) + r2 * s)) by cong (fn (w : Nat) is e * s + (p2 * (s * t) + w) end) (addComm (r2 * s) (b * (s * t)))
+        = e * s + ((p2 * (s * t) + b * (s * t)) + r2 * s) by cong (fn (w : Nat) is e * s + w end) (sym (addAssoc (p2 * (s * t)) (b * (s * t)) (r2 * s)))
+        = e * s + ((p2 + b) * (s * t) + r2 * s)          by cong (fn (w : Nat) is e * s + (w + r2 * s) end) (sym (distribR p2 b (s * t)))
+      end in
+    let midR : Eq Nat (((p1 * (s * t) + r1 * t) + e * s) + e * (s * t)) (e * s + ((p1 + e) * (s * t) + r1 * t)) =
+      calc ((p1 * (s * t) + r1 * t) + e * s) + e * (s * t)
+        = (p1 * (s * t) + r1 * t) + (e * s + e * (s * t)) by addAssoc (p1 * (s * t) + r1 * t) (e * s) (e * (s * t))
+        = (p1 * (s * t) + r1 * t) + (e * (s * t) + e * s) by cong (fn (w : Nat) is (p1 * (s * t) + r1 * t) + w end) (addComm (e * s) (e * (s * t)))
+        = ((p1 * (s * t) + r1 * t) + e * (s * t)) + e * s by sym (addAssoc (p1 * (s * t) + r1 * t) (e * (s * t)) (e * s))
+        = e * s + ((p1 * (s * t) + r1 * t) + e * (s * t)) by addComm ((p1 * (s * t) + r1 * t) + e * (s * t)) (e * s)
+        = e * s + ((p1 * (s * t) + e * (s * t)) + r1 * t) by cong (fn (w : Nat) is e * s + w end) (midComm (p1 * (s * t)) (r1 * t) (e * (s * t)))
+        = e * s + ((p1 + e) * (s * t) + r1 * t)          by cong (fn (w : Nat) is e * s + (w + r1 * t) end) (sym (distribR p1 e (s * t)))
+      end in
+    addCancelL (e * s) ((p1 + e) * (s * t) + r1 * t) ((p2 + b) * (s * t) + r2 * s)
+      (trans (sym midR) (trans (sym mid) midL))
+  end
+end
+
+-- keyComb: assemble the two characterizations + cross-multiplication into the
+-- division-uniqueness equation for the floor numerators.
+keyComb : (a : Nat) -> (b : Nat) -> (c : Nat) -> (e : Nat) -> (s : Nat) -> (t : Nat) ->
+    (p1 : Nat) -> (p2 : Nat) -> (r1 : Nat) -> (r2 : Nat) ->
+    Eq Nat (a + b * s) ((b + p1 * s) + r1) ->
+    Eq Nat (c + e * t) ((e + p2 * t) + r2) ->
+    Eq Nat (a * t + e * s) (c * s + b * t) ->
+    Eq Nat ((p1 + e) * (s * t) + r1 * t) ((p2 + b) * (s * t) + r2 * s) is
+  fn (a : Nat) (b : Nat) (c : Nat) (e : Nat) (s : Nat) (t : Nat)
+     (p1 : Nat) (p2 : Nat) (r1 : Nat) (r2 : Nat)
+     (ep : Eq Nat (a + b * s) ((b + p1 * s) + r1))
+     (eq : Eq Nat (c + e * t) ((e + p2 * t) + r2))
+     (rel : Eq Nat (a * t + e * s) (c * s + b * t)) is
+    let eqs : Eq Nat (c * s + e * (s * t)) ((e * s + p2 * (s * t)) + r2 * s) =
+      subst Nat (t * s) (s * t) (mulComm t s)
+        (fn (z : Nat) is Eq Nat (c * s + e * z) ((e * s + p2 * z) + r2 * s) end)
+        (mulChar c e t p2 r2 s eq) in
+    combRight b c e s t p1 p2 r1 r2
+      (combLeft a b c e s t p1 r1 (mulChar a b s p1 r1 t ep) rel)
+      eqs
+  end
+end
+
+-- x * 1 = x.
+mulOneR : (x : Nat) -> Eq Nat (x * succ 0) x is
+  fn (x : Nat) is trans (mulSuccRight x 0) (cong (fn (w : Nat) is w + x end) (mulZeroRight x)) end
+end
+
+-- floorUnique: the floor numerators agree on equivalent representatives — the
+-- Euclidean-uniqueness payoff. divUnique closes it; the remainders are bounded
+-- by scaleLt over charLt.
+floorUnique : (p : RPair) -> (q : RPair) -> QRel p q ->
+    Eq Nat (floorNum p + negR q) (floorNum q + negR p) is
+  fn (p : RPair) (q : RPair) (rel : QRel p q) is
+    divUnique (succ (denR p) * succ (denR q))
+      (floorNum p + negR q) (floorNum q + negR p)
+      (floorRem p * succ (denR q)) (floorRem q * succ (denR p))
+      (scaleLt (floorRem p) (succ (denR p)) (denR q) (charLt p))
+      (subst Nat (succ (denR q) * succ (denR p)) (succ (denR p) * succ (denR q))
+        (mulComm (succ (denR q)) (succ (denR p)))
+        (fn (z : Nat) is Lt (floorRem q * succ (denR p)) z end)
+        (scaleLt (floorRem q) (succ (denR q)) (denR p) (charLt q)))
+      (keyComb (posR p) (negR p) (posR q) (negR q) (succ (denR p)) (succ (denR q))
+        (floorNum p) (floorNum q) (floorRem p) (floorRem q)
+        (charEq p) (charEq q) rel)
+  end
+end
+
+-- floorQ : the floor of a rational, well-defined ON THE QUOTIENT by floorUnique.
+floorQ : Rat -> Rat is
+  qlift RPair QRel Rat
+    (fn (p : RPair) is qin RPair QRel (floorRP p) end)
+    (fn (p : RPair) (q : RPair) is
+      fn (r : QRel p q) is
+        qsound RPair QRel (floorRP p) (floorRP q)
+          (trans (cong2 (fn (u : Nat) (v : Nat) is u + v end) (mulOneR (floorNum p)) (mulOneR (negR q)))
+            (trans (floorUnique p q r)
+              (sym (cong2 (fn (u : Nat) (v : Nat) is u + v end) (mulOneR (floorNum q)) (mulOneR (negR p))))))
+      end
+    end)
+end
+
 + : Rat -> Rat -> Rat is addQ end
 - : Rat -> Rat -> Rat is fn (x : Rat) (y : Rat) is addQ x (negQ y) end end
 * : Rat -> Rat -> Rat is mulQ end
 / : Rat -> Rat -> Rat is fn (x : Rat) (y : Rat) is mulQ x (flipQ y) end end
+
+-- THE FLOORING QUOTIENT AND REMAINDER AT Rat. Floor of the exact quotient, and
+-- the matched remainder a - (a // b) * b — both total, both respecting the
+-- quotient because floorQ does (floorUnique). The proof problem is closed.
+// : Rat -> Rat -> Rat is fn (x : Rat) (y : Rat) is floorQ (x / y) end end
+% : Rat -> Rat -> Rat is fn (x : Rat) (y : Rat) is x - floorQ (x / y) * y end end
 
 -- Certificates: conversion computes through the quotient; each refl is a
 -- machine-checked fact about rational arithmetic. Where two representatives
@@ -1246,6 +1745,26 @@ end
 -- And zero divided by anything is zero.
 zeroDiv : zeroQ / qin RPair QRel (rp 3 0 4) = zeroQ is
   qsound RPair QRel (rp 0 0 8) (rp 0 0 0) (refl 0)
+end
+
+-- THE FLOOR PAIR, certified. The flooring quotient rounds toward -infinity (the
+-- F-convention), so a negative quotient rounds DOWN, and the remainder is the
+-- fractional part. Each is well-defined on the quotient by floorUnique, so the
+-- certificate is a machine-checked fact about the rational, not a representative.
+
+-- 7/2 // 1 = 3 (floor of a positive).
+floorPos : (qin RPair QRel (rp 7 0 0)) // (qin RPair QRel (rp 2 0 0)) = qin RPair QRel (rp 3 0 0) is
+  refl (qin RPair QRel (rp 3 0 0))
+end
+
+-- (-5)/2 // 1 = -3, NOT -2: the floor rounds toward minus infinity.
+floorNeg : (qin RPair QRel (rp 0 5 0)) // (qin RPair QRel (rp 2 0 0)) = qin RPair QRel (rp 0 3 0) is
+  qsound RPair QRel (rp 7 10 0) (rp 0 3 0) (refl 10)
+end
+
+-- 7/2 % 1 = 1/2: the remainder is the fractional part.
+fracHalf : (qin RPair QRel (rp 7 0 1)) % (qin RPair QRel (rp 1 0 0)) = qin RPair QRel (rp 1 0 1) is
+  qsound RPair QRel (rp 7 6 1) (rp 1 0 1) (refl 14)
 end
 
 -- The gate's runnable answer: the numerator representative of

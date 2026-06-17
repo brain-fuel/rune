@@ -1,0 +1,419 @@
+-- Chapter 58 — Inner-path algebra and singleton contractibility (toward A7).
+-- The reusable cubical lemmas the univalence retirement (ua-as-Glue) needs, all
+-- proven against the kernel (no postulates). `singContr` is `gradLemma` for the
+-- identity equivalence: the fibre of `id` at y is the based path space, which is
+-- contractible by a connection (imin/imax/ineg) — no Kan composition required.
+--
+-- `gradLemma` for a GENERAL iso (`isoToEquiv`, below) is ALSO proven here, with NO
+-- axiom: its one coherence step (`triangleCoh`) is a square built by a comp over a
+-- PROPER face. Proper-face Kan works because a square only needs its BOUNDARY to be
+-- definitional — each edge is the face system's branch that becomes ⊤ when that
+-- interval endpoint is substituted — while the interior stays a canonical comp.
+
+-- Reverse a path (walk the interval backwards).
+symP : (A : UF) -> (a : El A) -> (b : El A) -> El (pathF A a b) -> El (pathF A b a) is
+  fn (A : UF) (a : El A) (b : El A) (p : El (pathF A a b)) is
+    pabs A (fn (i : I) is papp A a b p (ineg i) end)
+  end
+end
+
+-- Functoriality: a function carries a path to a path.
+apP : (A : UF) -> (B : UF) -> (h : El A -> El B) -> (a : El A) -> (b : El A)
+   -> El (pathF A a b) -> El (pathF B (h a) (h b)) is
+  fn (A : UF) (B : UF) (h : El A -> El B) (a : El A) (b : El A) (p : El (pathF A a b)) is
+    pabs B (fn (i : I) is h (papp A a b p i) end)
+  end
+end
+
+-- Path composition, by a comp over the constant line with a two-branch endpoint
+-- system (face-split). a -> b -> c gives a -> c; endpoints are definitional.
+pathTrans : (A : UF) -> (a : El A) -> (b : El A) -> (c : El A)
+   -> El (pathF A a b) -> El (pathF A b c) -> El (pathF A a c) is
+  fn (A : UF) (a : El A) (b : El A) (c : El A)
+     (p : El (pathF A a b)) (q : El (pathF A b c)) is
+    pabs A (fn (i : I) is
+      comp (fn (j : I) is A end)
+           (for (ieq0 i) (ieq1 i))
+           (fn (j : I) (h : holds (for (ieq0 i) (ieq1 i))) is
+              fsplit A (ieq0 i) (ieq1 i)
+                     (fn (h0 : holds (ieq0 i)) is a end)
+                     (fn (h1 : holds (ieq1 i)) is papp A b c q j end)
+                     h end)
+           (papp A a b p i)
+    end)
+  end
+end
+
+-- Singleton contractibility = gradLemma for the IDENTITY. isContr of (x:B)*(x=y):
+-- centre (y, refl); the contraction of (x,p) is the connection square
+-- <i> (p@(-..i), <j> p@(i|j)). Connection-only — no Kan fill — so it computes.
+singContr : (B : UF) -> (y : El B)
+   -> El (isContr (sigmaF B (fn (x : El B) is pathF B x y end))) is
+  fn (B : UF) (y : El B) is
+    pairF (sigmaF B (fn (x : El B) is pathF B x y end))
+          (fn (c : El (sigmaF B (fn (x : El B) is pathF B x y end))) is
+             piF (sigmaF B (fn (x : El B) is pathF B x y end))
+                 (fn (w : El (sigmaF B (fn (x : El B) is pathF B x y end))) is
+                    pathF (sigmaF B (fn (x : El B) is pathF B x y end)) c w end) end)
+          (pairF B (fn (x : El B) is pathF B x y end) y (preflF B y))
+          (fn (w : El (sigmaF B (fn (x : El B) is pathF B x y end))) is
+             pabs (sigmaF B (fn (x : El B) is pathF B x y end))
+               (fn (i : I) is
+                  pairF B (fn (x : El B) is pathF B x y end)
+                    (papp B y (fstF B (fn (x : El B) is pathF B x y end) w)
+                          (pabs B (fn (k : I) is
+                             papp B (fstF B (fn (x : El B) is pathF B x y end) w) y
+                                  (sndF B (fn (x : El B) is pathF B x y end) w) (ineg k) end))
+                          i)
+                    (pabs B (fn (j : I) is
+                       papp B (fstF B (fn (x : El B) is pathF B x y end) w) y
+                            (sndF B (fn (x : El B) is pathF B x y end) w)
+                            (imax (ineg i) j) end)) end) end)
+  end
+end
+
+-- The univalence line's type-level T-component, CHECKED via the A8 UF-valued face
+-- split `sysU`: on the (i=0) face it is the domain A, on the (i=1) face the base B.
+-- A plain `holds φ -> UF` cannot dispatch on the face (no `holds` eliminator); the
+-- element-valued `fsplit` cannot return a TYPE. `sysU` is exactly this primitive,
+-- so the T-component of a postulate-free ua-from-Glue line is now expressible and
+-- well-typed (it reduces to A at i0 and B at i1 — see ch58 structural pins).
+uaTSystem : (A : UF) -> (B : UF) -> (i : I)
+   -> holds (for (ieq0 i) (ieq1 i)) -> UF is
+  fn (A : UF) (B : UF) (i : I) (h : holds (for (ieq0 i) (ieq1 i))) is
+    sysU (ieq0 i) (ieq1 i) (fn (h0 : holds (ieq0 i)) is A end)
+         (fn (h1 : holds (ieq1 i)) is B end) h
+  end
+end
+
+-- A face-conditional equivalence, selected by `fsplitD` (the A8 DEPENDENT face
+-- split). Here the motive is the constant `Equiv B B`; the genuinely dependent
+-- motive — `El (Equiv (T h) B)`, the e-component of a univalence Glue line, whose
+-- type varies per face — checks in the ambient `uaGlue` via proof-directed
+-- dispatch (`sysU … (horl … h) ~> A` lines the branch type up). `fsplitD` is the
+-- primitive dispatch is built on; `sysU` (above) is its type-level partner.
+pickEquiv : (B : UF) -> (phi : F) -> (psi : F)
+   -> holds (for phi psi) -> El (Equiv B B) is
+  fn (B : UF) (phi : F) (psi : F) (h : holds (for phi psi)) is
+    fsplitD phi psi (fn (hc : holds (for phi psi)) is Equiv B B end)
+            (fn (hp : holds phi) is idEquivF B end)
+            (fn (hq : holds psi) is idEquivF B end) h
+  end
+end
+
+-- The DERIVED univalence COMPUTES, provably: the strict outer Eq states — and proves
+-- by `refl` — that transport along `uaGlue` of the identity iso is the identity.
+-- ch10's `flipped`/`transportIsNot` go through this `uaGlue` (since `ua := uaGlue`
+-- is now itself derived): univalence usable in proofs, no postulate consulted.
+uaBetaId : (B : UF) -> (x : El B)
+   -> Eq (El B) (castU B B (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                                  (fn (y : El B) is refl end) (fn (y : El B) is refl end)) x) x is
+  fn (B : UF) (x : El B) is refl end
+end
+
+-- ch10's `transportIsNot`, derived. `castU` along `uaGlue` of a NON-IDENTITY iso
+-- (Bool's `not`) reduces to the forward map `not`: `uaGlue` is a real Glue line,
+-- `castU` along it transports, and the transp-over-Glue arm reconstructs `not`.
+-- This is the general case of `uaBetaId` above (identity), and exactly what ch10's
+-- `transportIsNot` proves now that `ua` is itself derived (ambient `ua := uaGlue`).
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+notNotB : (b : Bool) -> Eq Bool (notB (notB b)) b is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (notB (notB x)) x end) refl refl b
+  end
+end
+
+boolFD : UF is fib Bool end
+
+transportIsNotDerived : (b : Bool)
+   -> Eq Bool (castU boolFD boolFD
+                (uaGlue boolFD boolFD notB notB notNotB notNotB) b) (notB b) is
+  fn (b : Bool) is refl end
+end
+
+-- The functorial action of a fibrant type family on an inner type-path: `apU` lifts
+-- a `pathU A B` to `pathU (P A) (P B)` by applying P pointwise along the path (read
+-- by `pappU`, the type-level path application). The endpoints line up because
+-- `pappU A B p i0 ~> A` and `… i1 ~> B`, so `pabsU (λi. P (pappU A B p i))` genuinely
+-- inhabits `pathU (P A) (P B)`.
+apU : (P : UF -> UF) -> (A : UF) -> (B : UF) -> pathU A B -> pathU (P A) (P B) is
+  fn (P : UF -> UF) (A : UF) (B : UF) (p : pathU A B) is
+    pabsU (fn (i : I) is P (pappU A B p i) end)
+  end
+end
+
+-- Univalence in DEPENDENT families: transport an element of P A to P B along a
+-- `pathU A B` — `castU` over `apU`. This is the operation that lifts univalence from
+-- bare type transport to transport inside an arbitrary fibrant family P, the form
+-- proofs actually use. (`castU` is the P = λX.X special case.)
+transportF : (P : UF -> UF) -> (A : UF) -> (B : UF)
+   -> pathU A B -> El (P A) -> El (P B) is
+  fn (P : UF -> UF) (A : UF) (B : UF) (p : pathU A B) (x : El (P A)) is
+    castU (P A) (P B) (apU P A B p) x
+  end
+end
+
+-- Type-path ALGEBRA, enabled by pappU (the pathU analogue of ch58's point-path
+-- `symP`): reverse an inner type-path by walking the interval backwards. The
+-- endpoints swap because `pappU A B p (ineg i0) ~> pappU A B p i1 ~> B` and dually at
+-- i1 — so `pabsU (λi. pappU A B p (ineg i))` genuinely inhabits `pathU B A`.
+symU : (A : UF) -> (B : UF) -> pathU A B -> pathU B A is
+  fn (A : UF) (B : UF) (p : pathU A B) is
+    pabsU (fn (i : I) is pappU A B p (ineg i) end)
+  end
+end
+
+-- Transport in ANY family along REFLEXIVITY is the identity — a coherence law of the
+-- derived machinery, proven by `refl`: apU sends ureflU to a constant type-line, and
+-- transport over a constant line is the identity (regularity).
+transportFRefl : (P : UF -> UF) -> (A : UF) -> (x : El (P A))
+   -> Eq (El (P A)) (transportF P A A (ureflU A) x) x is
+  fn (P : UF -> UF) (A : UF) (x : El (P A)) is refl end
+end
+
+-- Univalence in a NON-TRIVIAL dependent family, proven by `refl`: transport a PAIR
+-- along the identity-iso ua in the pair family `λX. (X * X)` is the identity. This
+-- exercises the full chain — apU/pappU build the family line, castU transports it,
+-- and the inner-Σ Kan rule (transpSigma) carries each component through the Glue
+-- line — so it is a genuine end-to-end check that univalence computes inside an
+-- arbitrary fibrant family, not only for the identity family.
+transportFSigmaUa : (B : UF) -> (p : El (sigmaF B (fn (z : El B) is B end)))
+   -> Eq (El (sigmaF B (fn (z : El B) is B end)))
+        (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end)) p) p is
+  fn (B : UF) (p : El (sigmaF B (fn (z : El B) is B end))) is refl end
+end
+
+-- Univalence in a FUNCTION-SPACE family, proven by `refl`: transport an endo-function
+-- along the identity-iso ua in the family `λX. (X -> X)` is the identity. Where the
+-- Σ family above stresses the inner-Σ Kan rule, this stresses the VARYING-DOMAIN piF
+-- transport rule (A1/R-FILL): transport over a function type coerces the argument
+-- BACKWARD through the domain line and the result FORWARD through the codomain line.
+-- For the identity ua-line both coercions reduce to the identity (the Glue endpoint
+-- rule, both ways), so the transported function is `λx. f x ≡ f` by funext-η — a
+-- genuine check that univalence computes contravariantly, on function spaces.
+transportFPiUa : (B : UF) -> (f : El (piF B (fn (z : El B) is B end)))
+   -> Eq (El (piF B (fn (z : El B) is B end)))
+        (transportF (fn (X : UF) is piF X (fn (z : El X) is X end) end) B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end)) f) f is
+  fn (B : UF) (f : El (piF B (fn (z : El B) is B end))) is
+    fn (x : El B) is refl end
+  end
+end
+
+-- Univalence in a NESTED family that crosses BOTH Kan rules at once: `λX. X -> (X * X)`,
+-- a function returning a pair. Transporting such a function along the identity-iso ua
+-- threads ONE Glue line through the varying-domain piF rule (the argument, contravariant)
+-- AND the inner-Σ Kan rule (the result pair, covariant) in a single `castU`. Proven by
+-- `refl` pointwise (funext peels the function; Eq-of-Σ on the result takes bare refl) —
+-- the strongest single end-to-end check that univalence computes through composed
+-- fibrant structure, not just one former at a time.
+transportFPiSigmaUa : (B : UF)
+   -> (g : El (piF B (fn (x : El B) is sigmaF B (fn (w : El B) is B end) end)))
+   -> Eq (El (piF B (fn (x : El B) is sigmaF B (fn (w : El B) is B end) end)))
+        (transportF
+           (fn (X : UF) is piF X (fn (x : El X) is sigmaF X (fn (w : El X) is X end) end) end)
+           B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end)) g) g is
+  fn (B : UF) (g : El (piF B (fn (x : El B) is sigmaF B (fn (w : El B) is B end) end))) is
+    fn (x : El B) is refl end
+  end
+end
+
+-- Univalence transport is INVERTIBLE in a non-trivial family, proven by `refl`:
+-- transporting a pair FORWARD along a ua-line and then BACK along its reverse
+-- (`symU`) returns the original pair, in the family `λX. (X * X)`. This is the
+-- coherence that makes `transportF` an EQUIVALENCE in families, not merely a
+-- computing map — the forward leg reduces to the identity through the inner-Σ Kan
+-- rule over the Glue line, and the backward leg reduces likewise over the REVERSED
+-- Glue line (symU), so the round trip is definitionally the identity. Exercises
+-- apU + symU + castU + transpSigma composed in one term — the strongest derived-
+-- univalence coherence in the toolkit. (An ABSTRACT family P would leave the forward
+-- transport stuck — transp over a neutral type-line P(Q i) has no head former — so
+-- invertibility, like the family nodes, is stated over a concrete fibrant family.)
+transportFInvSigmaUa : (B : UF) -> (p : El (sigmaF B (fn (z : El B) is B end)))
+   -> Eq (El (sigmaF B (fn (z : El B) is B end)))
+        (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+           (symU B B (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                                  (fn (y : El B) is refl end) (fn (y : El B) is refl end)))
+           (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+              (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                          (fn (y : El B) is refl end) (fn (y : El B) is refl end)) p))
+        p is
+  fn (B : UF) (p : El (sigmaF B (fn (z : El B) is B end))) is refl end
+end
+
+-- Transport in a CONSTANT family is the identity for ANY type-path, proven by `refl`
+-- — strictly stronger than the family nodes above, which need the IDENTITY ua-line.
+-- The family `λX. C` ignores its argument, so `apU` sends EVERY `pathU A B` (identity
+-- or not) to the constant type-line `λi. C`, and `castU` over a constant line is the
+-- identity by regularity. This is the univalence-side analogue of the classic
+-- "transport in a constant family is trivial" coherence, and the only ch58 fact that
+-- holds over an arbitrary (even non-identity) path p.
+transportFConst : (C : UF) -> (A : UF) -> (B : UF) -> (p : pathU A B) -> (x : El C)
+   -> Eq (El C) (transportF (fn (X : UF) is C end) A B p x) x is
+  fn (C : UF) (A : UF) (B : UF) (p : pathU A B) (x : El C) is refl end
+end
+
+-- The OTHER round trip, completing invertibility BOTH ways: transporting a pair
+-- BACKWARD along the reverse ua-line (symU) and then FORWARD along the original
+-- returns the original pair, in `λX. (X * X)`. Together with transportFInvSigmaUa
+-- (forward-then-back) this is the full statement that `transportF` along a ua-line is
+-- a two-sided inverse to transport along its reverse — an EQUIVALENCE, both retraction
+-- and section. Proven by `refl`: each leg reduces to the identity through the inner-Σ
+-- Kan rule over the Glue line and its reverse.
+transportFInvSigmaUaRev : (B : UF) -> (p : El (sigmaF B (fn (z : El B) is B end)))
+   -> Eq (El (sigmaF B (fn (z : El B) is B end)))
+        (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end))
+           (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+              (symU B B (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                                     (fn (y : El B) is refl end) (fn (y : El B) is refl end))) p))
+        p is
+  fn (B : UF) (p : El (sigmaF B (fn (z : El B) is B end))) is refl end
+end
+
+-- Transport is NATURAL over the inner-Σ first projection, proven by `refl`: projecting
+-- the first component of a transported pair equals transporting the first component —
+-- `fstF (transportF (λX. X*X) p ab) ≡ transportF (λX. X) p (fstF ab)`. A different shape
+-- of coherence than the family/invertibility nodes: it relates Σ-FAMILY transport to
+-- BASE-family (λX.X) transport through the projection, witnessing that `transportF`
+-- commutes with the structure maps of the family (a naturality square). Both sides
+-- reduce — transpSigma carries the pair componentwise, so its projection is the
+-- component transport — so the square holds definitionally.
+transportFProjUa : (B : UF) -> (ab : El (sigmaF B (fn (z : El B) is B end)))
+   -> Eq (El B)
+        (fstF B (fn (z : El B) is B end)
+           (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+              (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                          (fn (y : El B) is refl end) (fn (y : El B) is refl end)) ab))
+        (transportF (fn (X : UF) is X end) B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end))
+           (fstF B (fn (z : El B) is B end) ab)) is
+  fn (B : UF) (ab : El (sigmaF B (fn (z : El B) is B end))) is refl end
+end
+
+-- Transport DISTRIBUTES over the inner-Σ pair constructor, proven by `refl` — the
+-- covariant (introduction-form) naturality dual to transportFProjUa's projection
+-- (elimination-form) square: transporting a CONSTRUCTED pair equals constructing the
+-- pair of transported components. `transportF (λX. X*X) p (pairF a b)
+-- ≡ pairF (transportF (λX.X) p a) (transportF (λX.X) p b)`. Both reduce because
+-- transpSigma carries a pair componentwise — so transport commutes with pairF.
+transportFPairUa : (B : UF) -> (a : El B) -> (b : El B)
+   -> Eq (El (sigmaF B (fn (z : El B) is B end)))
+        (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end))
+           (pairF B (fn (z : El B) is B end) a b))
+        (pairF B (fn (z : El B) is B end)
+           (transportF (fn (X : UF) is X end) B B
+              (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                          (fn (y : El B) is refl end) (fn (y : El B) is refl end)) a)
+           (transportF (fn (X : UF) is X end) B B
+              (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                          (fn (y : El B) is refl end) (fn (y : El B) is refl end)) b)) is
+  fn (B : UF) (a : El B) (b : El B) is refl end
+end
+
+-- Transport is NATURAL over the inner-Σ SECOND projection too, proven by `refl` —
+-- completing the elimination-form pair with transportFProjUa (first projection):
+-- `sndF (transportF (λX. X*X) p ab) ≡ transportF (λX. X) p (sndF ab)`. With
+-- transportFPairUa (the constructor) this is the full naturality of `transportF`
+-- over the inner-Σ structure maps, in both directions. transpSigma carries the pair
+-- componentwise, so the second projection of a transported pair is the transported
+-- second component.
+transportFSndProjUa : (B : UF) -> (ab : El (sigmaF B (fn (z : El B) is B end)))
+   -> Eq (El B)
+        (sndF B (fn (z : El B) is B end)
+           (transportF (fn (X : UF) is sigmaF X (fn (z : El X) is X end) end) B B
+              (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                          (fn (y : El B) is refl end) (fn (y : El B) is refl end)) ab))
+        (transportF (fn (X : UF) is X end) B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end))
+           (sndF B (fn (z : El B) is B end) ab)) is
+  fn (B : UF) (ab : El (sigmaF B (fn (z : El B) is B end))) is refl end
+end
+
+-- Pure CONTRAVARIANCE, isolated: transport in a function-into-CONSTANT family
+-- `λX. X -> C` (codomain C fixed) along the identity-iso ua is the identity, proven
+-- by `refl`. Where transportFPiUa (X -> X) exercises the varying-domain piF rule with
+-- BOTH ends moving, here only the DOMAIN varies — the codomain transport is identity
+-- by regularity (constant C-line), so this cleanly isolates the contravariant
+-- argument coercion: `λg. λx. g (transport⁻¹ x)` collapses to g for the identity line.
+transportFPiConstCodUa : (B : UF) -> (C : UF) -> (f : El (piF B (fn (x : El B) is C end)))
+   -> Eq (El (piF B (fn (x : El B) is C end)))
+        (transportF (fn (X : UF) is piF X (fn (x : El X) is C end) end) B B
+           (uaGlue B B (fn (y : El B) is y end) (fn (y : El B) is y end)
+                       (fn (y : El B) is refl end) (fn (y : El B) is refl end)) f) f is
+  fn (B : UF) (C : UF) (f : El (piF B (fn (x : El B) is C end))) is
+    fn (x : El B) is refl end
+  end
+end
+
+-- transportF in the IDENTITY family `λX. X` is EXACTLY castU — refl, now that castU
+-- IS transport over the decoded pathU line (R-UA Decision 2) and pathU carries η.
+-- `transportF (λX.X) A B p = castU A B (apU (λX.X) A B p)`, `apU (λX.X) p = pabsU
+-- (λi. pappU p i)`, and BOTH castU's reduce to `transp (λi. pappU A B p i) ⊥ x` —
+-- the identity-family transport and plain transport along p converge by `refl`.
+transportFId : (A : UF) -> (B : UF) -> (p : pathU A B) -> (x : El A)
+   -> Eq (El B) (transportF (fn (X : UF) is X end) A B p x) (castU A B p x) is
+  fn (A : UF) (B : UF) (p : pathU A B) (x : El A) is refl end
+end
+
+-- PATH INDUCTION OVER A ua-PATH (pathUJ) — the dependent eliminator for `pathU`,
+-- the type-level analogue of `pathJ`. It is DERIVED (no new builtin, no postulate):
+-- "transport the motive along the path", exactly the CCHM J-via-comp formulation
+--
+--   pathUJ A P d B p  :=  transpG (λi. P (pappU A B p i)
+--                                        (pabsU (λj. pappU A B p (i∧j)))) ⊥ d
+--
+-- The two endpoint coherences are TYPE-PATH η (convPathUEta): at i0 the contracting
+-- line `pabsU (λj. pappU A B p (i0∧j)) = pabsU (λ_. A) ≡ ureflU A`, so the line lands
+-- on `P A (ureflU A)` — the type of `d`; at i1 it is `pabsU (λj. pappU A B p j) ≡ p`,
+-- so the line lands on `P B p` — the result. On `ureflU` the whole line is constant
+-- and `transpG` collapses to `d` by regularity (the β/refl rule below); on a genuine
+-- ua-path it transports the motive ALONG the Glue line and computes.
+pathUJ : (A : UF) -> (P : (B : UF) -> pathU A B -> UF)
+   -> (d : El (P A (ureflU A)))
+   -> (B : UF) -> (p : pathU A B) -> El (P B p) is
+  fn (A : UF) (P : (B : UF) -> pathU A B -> UF) (d : El (P A (ureflU A)))
+     (B : UF) (p : pathU A B) is
+    transpG (fn (i : I) is
+               P (pappU A B p i)
+                 (pabsU (fn (j : I) is pappU A B p (imin i j) end))
+             end)
+            fbot d
+  end
+end
+
+-- β/refl: path induction on reflexivity is the base datum (the line is constant in i,
+-- so transpG is the identity by regularity). The J computation rule, derived.
+pathUJRefl : (A : UF) -> (P : (B : UF) -> pathU A B -> UF) -> (d : El (P A (ureflU A)))
+   -> Eq (El (P A (ureflU A))) (pathUJ A P d A (ureflU A)) d is
+  fn (A : UF) (P : (B : UF) -> pathU A B -> UF) (d : El (P A (ureflU A))) is refl end
+end
+
+-- Path induction over a GENUINE ua-path COMPUTES to a value. With the motive
+-- `λB' q. B'` (read the endpoint type), pathUJ over Bool's `not` univalence path
+-- transports `true` along the Glue line — `not true = false` — by `refl`. This is
+-- the §F frontier discharged: induction over a univalence path reduces, derived from
+-- transport + the type-path η, with no ua-specific rule and no postulate.
+pathUJOverUaComputes :
+   Eq Bool (pathUJ boolFD (fn (B : UF) (q : pathU boolFD B) is B end) true boolFD
+              (uaGlue boolFD boolFD notB notB notNotB notNotB)) false is
+  refl
+end

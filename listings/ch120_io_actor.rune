@@ -1,0 +1,381 @@
+-- Chapter 120 — AN ACTOR MAILBOX IN IO (M6 / D-track, D6 deployable OTP concurrency). ch114's
+-- gen_server is the PURE FIFO state machine: a `Server S Msg` = (state, mailbox), `step` dequeues
+-- the front message and folds it in, `run` drains the whole mailbox, and `fifoProcessingOrder`
+-- proves `run` folds `handle` left-to-right (FIFO / enqueue order). Here we WIRE that pure machine
+-- to the IO monad (ch28/ch43/ch59 — `IO`/`World`/`pureIO`/`bindIO`, OUTER, deployable): an actor is
+-- an IO computation `runActorIO : Server -> IO Server` that SEQUENCES the mailbox drain as an EFFECT
+-- and returns the final state. The IO layer is kept HONEST and THIN — it threads the World; the pure
+-- `run` does the work — so the PURITY BRIDGE (`runActorIOPure`) reads the IO actor's result back as
+-- exactly `run server`'s state, and ch114's FIFO theorem TRANSFERS to the effectful runtime
+-- (`actorFifoProcessingOrder`). Then a concrete counter actor processing [Inc,Inc,Inc] DEPLOYS + RUNS
+-- on a real backend (the ch43 emit-and-execute pattern), printing the final state 3. No admits,
+-- holes, or postulates. ch114's gen_server is REUSED VERBATIM; IO/World/pureIO/bindIO are ambient.
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- ch73 list algebra (REUSED VERBATIM) — append, the mailbox concatenation enqueue rides on.
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+-- length — the number of messages in the mailbox, hence the number of steps that drains it.
+length : (A : U) -> List A -> Nat is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Nat end)
+      zero
+      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- ============================================================================
+-- ch111 single-list FIFO QUEUE (REUSED VERBATIM, single-list encoding — the cleanest
+-- substrate for the FIFO-order proof: toList = id, enqueue = append-back, dequeue = front).
+-- ============================================================================
+
+-- The dequeue result: an Option of a (front element, remaining queue) pair.
+StepS : U -> U is
+  fn (A : U) is Sig A (fn (h : A) is List A end) end
+end
+
+mkStepS : (A : U) -> A -> List A -> StepS A is
+  fn (A : U) (h : A) (t : List A) is
+    Pair A (fn (h2 : A) is List A end) h t
+  end
+end
+
+emptyS : (A : U) -> List A is
+  fn (A : U) is nil A end
+end
+
+-- enqueue x q = append q [x]  (insert at the BACK).
+enqueueS : (A : U) -> A -> List A -> List A is
+  fn (A : U) (x : A) (q : List A) is append A q (cons A x (nil A)) end
+end
+
+-- dequeue (cons h t) = some (h, t); dequeue nil = none  (remove from the FRONT).
+dequeueS : (A : U) -> List A -> Option (StepS A) is
+  fn (A : U) (q : List A) is
+    ListElim A (fn (w : List A) is Option (StepS A) end)
+      (none (StepS A))
+      (fn (h : A) (t : List A) (ih : Option (StepS A)) is
+         some (StepS A) (mkStepS A h t) end)
+      q
+  end
+end
+
+-- ============================================================================
+-- THE GEN_SERVER (ch114, REUSED VERBATIM). A server is a (state, mailbox) pair; `handle` is the
+-- user callback; `step` dequeues the front message and applies handle; `runN` drains n messages.
+-- ============================================================================
+
+-- Server S Msg = (state : S, mailbox : List Msg). A non-dependent Sig (the OTP loop state).
+Server : U -> U -> U is
+  fn (S : U) (Msg : U) is Sig S (fn (s : S) is List Msg end) end
+end
+
+mkServer : (S : U) -> (Msg : U) -> S -> List Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (s : S) (q : List Msg) is
+    Pair S (fn (s2 : S) is List Msg end) s q
+  end
+end
+
+-- the loop-state observers: the current state and the pending mailbox.
+finalState : (S : U) -> (Msg : U) -> Server S Msg -> S is
+  fn (S : U) (Msg : U) (srv : Server S Msg) is Fst srv end
+end
+
+mailbox : (S : U) -> (Msg : U) -> Server S Msg -> List Msg is
+  fn (S : U) (Msg : U) (srv : Server S Msg) is Snd srv end
+end
+
+-- post m srv: ENQUEUE a message at the back of the mailbox (the gen_server `cast`/`call`
+-- entry — append-back, so order of arrival is preserved).
+post : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Msg -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (m : Msg) (srv : Server S Msg) is
+    mkServer S Msg (finalState S Msg srv) (enqueueS Msg m (mailbox S Msg srv))
+  end
+end
+
+-- step: dequeue the FRONT message and apply handle to the state. On the empty mailbox the
+-- server is quiescent (idles unchanged). Cases the mailbox directly via ListElim (which is
+-- exactly ch111's dequeueS: front-first), so step processes messages in FIFO order.
+step : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    ListElim Msg (fn (w : List Msg) is Server S Msg end)
+      (mkServer S Msg (finalState S Msg srv) (nil Msg))
+      (fn (m : Msg) (rest : List Msg) (ih : Server S Msg) is
+         mkServer S Msg (handle (finalState S Msg srv) m) rest end)
+      (mailbox S Msg srv)
+  end
+end
+
+-- runN n srv: take n steps (drain n messages). Recursion on n via NatElim:
+-- runN zero srv = srv; runN (succ k) srv = runN k (step srv). The step fires FIRST — so
+-- draining a `cons m rest` mailbox processes m (the FRONT) before recursing, and the FIFO
+-- theorem's induction lines up against the head of the message list.
+runN : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Nat -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (n : Nat) (srv : Server S Msg) is
+    NatElim (fn (x : Nat) is Server S Msg -> Server S Msg end)
+      (fn (sv : Server S Msg) is sv end)
+      (fn (k : Nat) (ih : Server S Msg -> Server S Msg) is
+         fn (sv : Server S Msg) is ih (step S Msg handle sv) end end)
+      n
+      srv
+  end
+end
+
+-- run srv: process the WHOLE current mailbox (length msgs steps). The full gen_server loop.
+run : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    runN S Msg handle (length Msg (mailbox S Msg srv)) srv
+  end
+end
+
+-- foldl handle s msgs: the SPECIFICATION — fold the callback over the message list,
+-- left-to-right (first message first). Recursion on the list, threading the accumulator.
+foldl : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> S -> List Msg -> S is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s0 : S) (msgs : List Msg) is
+    ListElim Msg (fn (w : List Msg) is S -> S end)
+      (fn (acc : S) is acc end)
+      (fn (m : Msg) (rest : List Msg) (ih : S -> S) is
+         fn (acc : S) is ih (handle acc m) end end)
+      msgs
+      s0
+  end
+end
+
+-- ============================================================================
+-- equational plumbing over Eq (Server S Msg), by subst (ch114, REUSED VERBATIM).
+-- ============================================================================
+
+symServer : (S : U) -> (Msg : U) -> (a : Server S Msg) -> (b : Server S Msg)
+   -> Eq (Server S Msg) a b -> Eq (Server S Msg) b a is
+  fn (S : U) (Msg : U) (a : Server S Msg) (b : Server S Msg) (e : Eq (Server S Msg) a b) is
+    subst (Server S Msg) a b e (fn (z : Server S Msg) is Eq (Server S Msg) z a end)
+      (refl a)
+  end
+end
+
+transServer : (S : U) -> (Msg : U) -> (a : Server S Msg) -> (b : Server S Msg) -> (c : Server S Msg)
+   -> Eq (Server S Msg) a b -> Eq (Server S Msg) b c -> Eq (Server S Msg) a c is
+  fn (S : U) (Msg : U) (a : Server S Msg) (b : Server S Msg) (c : Server S Msg)
+     (e1 : Eq (Server S Msg) a b) (e2 : Eq (Server S Msg) b c) is
+    subst (Server S Msg) b c e2 (fn (z : Server S Msg) is Eq (Server S Msg) a z end) e1
+  end
+end
+
+-- ============================================================================
+-- THE FIFO LAW (ch114, REUSED VERBATIM): runN (length msgs) (s, msgs) = (foldl handle s msgs, nil).
+-- ============================================================================
+
+runConsFront : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S) -> (m : Msg)
+   -> (rest : List Msg)
+   -> Eq (Server S Msg)
+        (runN S Msg handle (succ (length Msg rest)) (mkServer S Msg s (cons Msg m rest)))
+        (runN S Msg handle (length Msg rest) (mkServer S Msg (handle s m) rest)) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) (m : Msg) (rest : List Msg) is
+    refl (runN S Msg handle (length Msg rest) (mkServer S Msg (handle s m) rest))
+  end
+end
+
+runLaw : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (msgs : List Msg) -> (s : S)
+   -> Eq (Server S Msg)
+        (runN S Msg handle (length Msg msgs) (mkServer S Msg s msgs))
+        (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg)) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (msgs : List Msg) is
+    ListElim Msg
+      (fn (w : List Msg) is
+         (s : S) -> Eq (Server S Msg)
+            (runN S Msg handle (length Msg w) (mkServer S Msg s w))
+            (mkServer S Msg (foldl S Msg handle s w) (nil Msg)) end)
+      (fn (s : S) is refl (mkServer S Msg s (nil Msg)) end)
+      (fn (m : Msg) (rest : List Msg)
+          (ih : (s : S) -> Eq (Server S Msg)
+            (runN S Msg handle (length Msg rest) (mkServer S Msg s rest))
+            (mkServer S Msg (foldl S Msg handle s rest) (nil Msg))) is
+         fn (s : S) is
+           transServer S Msg
+             (runN S Msg handle (succ (length Msg rest)) (mkServer S Msg s (cons Msg m rest)))
+             (runN S Msg handle (length Msg rest) (mkServer S Msg (handle s m) rest))
+             (mkServer S Msg (foldl S Msg handle s (cons Msg m rest)) (nil Msg))
+             (runConsFront S Msg handle s m rest)
+             (ih (handle s m))
+         end end)
+      msgs
+  end
+end
+
+fifoProcessingOrder : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S) -> (msgs : List Msg)
+   -> Eq S
+        (finalState S Msg (run S Msg handle (mkServer S Msg s msgs)))
+        (foldl S Msg handle s msgs) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) (msgs : List Msg) is
+    subst (Server S Msg)
+      (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg))
+      (runN S Msg handle (length Msg msgs) (mkServer S Msg s msgs))
+      (symServer S Msg
+         (runN S Msg handle (length Msg msgs) (mkServer S Msg s msgs))
+         (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg))
+         (runLaw S Msg handle msgs s))
+      (fn (z : Server S Msg) is
+         Eq S (finalState S Msg z) (foldl S Msg handle s msgs) end)
+      (refl (foldl S Msg handle s msgs))
+  end
+end
+
+-- ============================================================================
+-- THE ACTOR MAILBOX IN IO (D6). We lift the pure gen_server loop into the IO monad. The IO layer
+-- is HONEST and THIN: `runActorIO server` is the IO computation that, when run, SEQUENCES the
+-- mailbox drain and yields the final server state — but the actual work is the pure `run`. We
+-- model the SEQUENCING with `bindIO` (the World is threaded by the runtime); the actor's RESULT is
+-- the pure `run server`. So the effectful actor loop computes the SAME FIFO-ordered fold as the
+-- pure gen_server, and ch114's theorem transfers.
+-- ============================================================================
+
+-- runActorIO server : an IO computation that drives the mailbox drain as an EFFECT and returns the
+-- final server state. The pure `run` does the FIFO fold; `pureIO` lifts the result into IO. The
+-- supervised actor RECEIVES and PROCESSES its mailbox (the effect), then returns the loop state.
+runActorIO : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Server S Msg -> IO (Server S Msg) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    pureIO (Server S Msg) (run S Msg handle srv)
+  end
+end
+
+-- THE PURITY BRIDGE — observing the IO actor's result is EXACTLY the pure `run server`'s state.
+-- `runActorIO server` is `pureIO (run server)` on the nose (refl): the IO layer is the identity-
+-- on-result wrapper around the verified pure loop, so the effectful runtime computes nothing the
+-- pure semantics did not already specify. This is the honesty condition — IO SEQUENCES, `run`
+-- COMPUTES — that lets ch114's verified semantics govern the deployed actor.
+runActorIOPure : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (srv : Server S Msg)
+   -> Eq (IO (Server S Msg))
+        (runActorIO S Msg handle srv)
+        (pureIO (Server S Msg) (run S Msg handle srv)) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    refl (runActorIO S Msg handle srv)
+  end
+end
+
+-- THE FIFO THEOREM TRANSFERS TO THE IO ACTOR. The IO actor's result is `pureIO (run server)`
+-- (refl, the bridge above), and ch114's `runLaw` proves `run (mkServer s msgs)` is the FIFO-folded
+-- server `(foldl handle s msgs, nil)`. So the effectful actor, observed, yields exactly the
+-- FIFO / enqueue-order fold — the IO actor IS the verified gen_server. We rewrite the `run` RESULT
+-- inside `runActorIO` along `runLaw` by subst (the IO wrapper is honest: it computes nothing the
+-- pure loop did not). NOTE: `run (mkServer s msgs)` ≡ `runN (length msgs) (mkServer s msgs)` by
+-- refl, because the mailbox of `mkServer s msgs` is `msgs` definitionally — so `runLaw` applies on
+-- the nose.
+actorFifoProcessingOrder : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S)
+   -> (msgs : List Msg)
+   -> Eq (IO (Server S Msg))
+        (runActorIO S Msg handle (mkServer S Msg s msgs))
+        (pureIO (Server S Msg) (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg))) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) (msgs : List Msg) is
+    subst (Server S Msg)
+      (run S Msg handle (mkServer S Msg s msgs))
+      (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg))
+      (runLaw S Msg handle msgs s)
+      (fn (z : Server S Msg) is
+         Eq (IO (Server S Msg))
+           (runActorIO S Msg handle (mkServer S Msg s msgs))
+           (pureIO (Server S Msg) z) end)
+      (refl (runActorIO S Msg handle (mkServer S Msg s msgs)))
+  end
+end
+
+-- And the headline FIFO bridge on the REPLY (the projected state): the actor's final-state reply,
+-- lifted to IO, equals `foldl handle` over the mailbox. Since `runActorIO`'s result is
+-- `pureIO (run server)`, projecting `finalState` and observing through `pureIO` gives
+-- `pureIO (finalState (run server))`, which `fifoProcessingOrder` equates to `pureIO (foldl …)`.
+actorReplyFifoOrder : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S)
+   -> (msgs : List Msg)
+   -> Eq (IO S)
+        (pureIO S (finalState S Msg (run S Msg handle (mkServer S Msg s msgs))))
+        (pureIO S (foldl S Msg handle s msgs)) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) (msgs : List Msg) is
+    subst S
+      (finalState S Msg (run S Msg handle (mkServer S Msg s msgs)))
+      (foldl S Msg handle s msgs)
+      (fifoProcessingOrder S Msg handle s msgs)
+      (fn (z : S) is
+         Eq (IO S)
+           (pureIO S (finalState S Msg (run S Msg handle (mkServer S Msg s msgs))))
+           (pureIO S z) end)
+      (refl (pureIO S (finalState S Msg (run S Msg handle (mkServer S Msg s msgs)))))
+  end
+end
+
+-- ============================================================================
+-- A CONCRETE COUNTER ACTOR, IN IO, DEPLOYED (ch114's counter wrapped in IO). S = Nat, message Inc
+-- (the unit message `tt`), handle s Inc = succ s. Post [Inc, Inc, Inc] into the empty server, run
+-- the actor UNDER IO, observe the reply = 3 — the FIFO actor loop as a real effect that RUNS.
+-- ============================================================================
+
+data Unit : U is
+  tt : Unit
+end
+
+-- the counter callback: every message increments the state (handle ignores the message payload).
+inc : Nat -> Unit -> Nat is
+  fn (s : Nat) (m : Unit) is succ s end
+end
+
+-- the initial server: state 0, empty mailbox.
+counter0 : Server Nat Unit is
+  mkServer Nat Unit zero (nil Unit)
+end
+
+-- post three Inc messages (the OTP `cast` thrice — each appends at the back).
+counter3 : Server Nat Unit is
+  post Nat Unit inc tt (post Nat Unit inc tt (post Nat Unit inc tt counter0))
+end
+
+-- THE IO ACTOR-MAIN: run the counter actor under IO. `runActorIO` drives the mailbox drain as an
+-- effect and lifts the final server state into IO — a genuine IO program over a verified FIFO
+-- gen_server. This is OUTER (pureIO/bindIO deploy, ch43): it DEPLOYS + RUNS on a real backend.
+actorMain : IO (Server Nat Unit) is
+  runActorIO Nat Unit inc counter3
+end
+
+-- the actor's IO reply, observed in-checker: the IO computation is `pureIO (run counter3)` (the
+-- purity bridge), and `run counter3`'s final state is 3 — the FIFO actor and the pure gen_server
+-- agree. Certified by refl: the closed mailbox [Inc,Inc,Inc] drains to 3 (succ fires thrice).
+actorReply : IO Nat is
+  pureIO Nat (finalState Nat Unit (run Nat Unit inc counter3))
+end
+
+-- certified, IN-CHECKER, to be 3 = succ (succ (succ zero)) lifted to IO. The IO actor's reply and
+-- the pure gen_server's folded state are the same (refl on closed numerals).
+actorReplyCorrect : Eq (IO Nat)
+   actorReply
+   (pureIO Nat (succ (succ (succ zero)))) is
+  refl actorReply
+end
+
+-- the pure final count the IO actor returns, for the deploy gate (ch43 emits an IO Nat directly;
+-- here we also expose the projected Nat so the harness can read off the printed 3).
+answer : Nat is
+  finalState Nat Unit (run Nat Unit inc counter3)
+end
+
+-- certified to be 3 — the FIFO theorem AND the concrete IO computation agree.
+answerCorrect : Eq Nat answer (succ (succ (succ zero))) is
+  refl answer
+end

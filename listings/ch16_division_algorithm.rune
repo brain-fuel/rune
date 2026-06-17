@@ -1,0 +1,375 @@
+-- Chapter 16 — The division algorithm: existence and uniqueness, earned.
+-- Chapters 11–13 deferred one theorem to "the course-of-values chapter": that
+-- flooring division has a UNIQUE quotient and remainder, the law
+--   a = (a // b) * b + a % b        with   b > 0  →  0 <= a % b < b.
+-- Fuel-style division (ch11) computes it; the rationals (ch13) need it to know
+-- a floor is well-defined on a class, not just a representative. Here it is a
+-- theorem. The quotient/remainder are built by STRUCTURAL recursion on the
+-- dividend — counting up, resetting the remainder and bumping the quotient when
+-- the remainder would reach the divisor — so totality is by construction and
+-- the law proves by one induction.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
+data Bool : U is true : Bool | false : Bool end
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of | zero -> n | succ k with ih -> succ ih end
+  end
+end
+
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of | zero -> 0 | succ k with ih -> n + ih end
+  end
+end
+
+-- eqNat: decidable equality, the divmod step's test.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is case n of | zero -> true | succ j -> false end end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+
+-- The quotient-remainder pair, built together by recursion on the dividend.
+data DM : U is dm : Nat -> Nat -> DM end
+dmQ : DM -> Nat is fn (x : DM) is case x of | dm q r -> q end end end
+dmR : DM -> Nat is fn (x : DM) is case x of | dm q r -> r end end end
+
+-- stepByBool: one count, branching on whether the remainder just reached the
+-- divisor (true -> bump quotient, reset remainder; false -> bump remainder).
+stepByBool : Bool -> Nat -> Nat -> DM is
+  fn (t : Bool) (q : Nat) (r : Nat) is
+    case t of | true -> dm (succ q) 0 | false -> dm q (succ r) end
+  end
+end
+
+-- divStep applies one count to a running (q, r) against divisor b.
+divStep : DM -> Nat -> DM is
+  fn (x : DM) (b : Nat) is
+    case x of | dm q r -> stepByBool (eqNat (succ r) b) q r end
+  end
+end
+
+-- divmod a b: count from 0 to a, resetting the remainder (and bumping the
+-- quotient) exactly when the next remainder would hit b. With b = 0 the test
+-- never fires, so the result is (0, a) and the law a = 0*0 + a still holds.
+divmod : Nat -> Nat -> DM is
+  fn (a : Nat) is
+    case a of
+    | zero -> fn (b : Nat) is dm 0 0 end
+    | succ a2 with ih -> fn (b : Nat) is divStep (ih b) b end
+    end
+  end
+end
+
+quot : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is dmQ (divmod a b) end end
+rem  : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is dmR (divmod a b) end end
+
+
+-- The equality toolkit.
+sym : {A : U} -> {x : A} -> {y : A} -> x = y -> y = x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is z = x end) (refl x)
+  end
+end
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> x = y -> y = z -> x = z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is x = w end) p
+  end
+end
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> x = y -> f x = f y is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is f x = f z end) (refl (f x))
+  end
+end
+
+-- Addition facts the law needs.
+addSucc : (m : Nat) -> (n : Nat) -> m + succ n = succ (m + n) is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> refl (succ n)
+    | succ k with ih -> cong succ ih
+    end
+  end
+end
+addZeroRight : (n : Nat) -> n + 0 = n is
+  fn (n : Nat) is case n of | zero -> refl 0 | succ k with ih -> cong succ ih end end
+end
+addComm : (m : Nat) -> (n : Nat) -> m + n = n + m is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is sym (addZeroRight n) end
+    | succ k with ih -> fn (n : Nat) is trans (cong succ (ih n)) (sym (addSucc n k)) end
+    end
+  end
+end
+
+-- Surjective pairing for DM (provable by case; the eliminator gives it).
+dmEta : (x : DM) -> x = dm (dmQ x) (dmR x) is
+  fn (x : DM) is case x of | dm q r -> refl (dm q r) end end
+end
+
+-- eqNat soundness: a true test is a genuine equality.
+eqNatSound : (m : Nat) -> (n : Nat) -> Eq Bool (eqNat m n) true -> m = n is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is
+        case n of
+        | zero -> fn (h : Eq Bool true true) is refl 0 end
+        | succ j -> fn (h : Eq Bool false true) is
+            -- false = true is absurd; derive any equality by subst.
+            subst Bool false true h (fn (z : Bool) is case z of | true -> Eq Nat 0 (succ j) | false -> Eq Nat 0 0 end end) (refl 0)
+          end
+        end
+      end
+    | succ k with ih -> fn (n : Nat) is
+        case n of
+        | zero -> fn (h : Eq Bool false true) is
+            subst Bool false true h (fn (z : Bool) is case z of | true -> Eq Nat (succ k) 0 | false -> Eq Nat (succ k) (succ k) end end) (refl (succ k))
+          end
+        | succ j -> fn (h : Eq Bool (eqNat k j) true) is cong succ (ih j h) end
+        end
+      end
+    end
+  end
+end
+
+-- A Bool view that yields the deciding equation in each branch.
+boolCase : {P : U} -> (x : Bool) -> (Eq Bool x true -> P) -> (Eq Bool x false -> P) -> P is
+  fn {P : U} (x : Bool) (ft : Eq Bool x true -> P) (ff : Eq Bool x false -> P) is
+    BoolElim (fn (z : Bool) is Eq Bool x z -> P end) ft ff x (refl x)
+  end
+end
+
+-- stepLaw isolates one count: given the law for the running pair (q, r) at a2,
+-- the law holds for succ a2 through divStep. boolCase reads the deciding
+-- equation; subst pushes it into stepByBool so the projection reduces.
+stepLaw : (b : Nat) -> (q : Nat) -> (r : Nat) -> (a2 : Nat) -> a2 = q * b + r ->
+    Eq Nat (succ a2) (dmQ (divStep (dm q r) b) * b + dmR (divStep (dm q r) b)) is
+  fn (b : Nat) (q : Nat) (r : Nat) (a2 : Nat) (p : Eq Nat a2 (q * b + r)) is
+    boolCase (eqNat (succ r) b)
+      (fn (h : Eq Bool (eqNat (succ r) b) true) is
+         subst Bool true (eqNat (succ r) b) (sym h)
+           (fn (t : Bool) is Eq Nat (succ a2) (dmQ (stepByBool t q r) * b + dmR (stepByBool t q r)) end)
+           (trans (cong succ p)
+             (trans (sym (addSucc (q * b) r))
+               (trans (cong (fn (w : Nat) is q * b + w end) (eqNatSound (succ r) b h))
+                 (trans (addComm (q * b) b)
+                   (sym (addZeroRight (b + q * b)))))))
+       end)
+      (fn (h : Eq Bool (eqNat (succ r) b) false) is
+         subst Bool false (eqNat (succ r) b) (sym h)
+           (fn (t : Bool) is Eq Nat (succ a2) (dmQ (stepByBool t q r) * b + dmR (stepByBool t q r)) end)
+           (trans (cong succ p) (sym (addSucc (q * b) r)))
+       end)
+  end
+end
+
+-- The division law, existence half: a = (a // b) * b + a % b for ALL a, b
+-- (at b = 0 it reads a = 0*b + a). This is the "general division-algorithm"
+-- result chapters 11–13 deferred. Induction on the dividend; the step rewrites
+-- the stuck running pair through dmEta and defers the arithmetic to stepLaw.
+divLaw : (b : Nat) -> (a : Nat) -> Eq Nat a (quot a b * b + rem a b) is
+  fn (b : Nat) (a : Nat) is
+    case a of
+    | zero -> refl 0
+    | succ a2 with ih ->
+        subst DM (divStep (dm (quot a2 b) (rem a2 b)) b) (divStep (divmod a2 b) b)
+          (sym (cong (fn (w : DM) is divStep w b end) (dmEta (divmod a2 b))))
+          (fn (s : DM) is Eq Nat (succ a2) (dmQ s * b + dmR s) end)
+          (stepLaw b (quot a2 b) (rem a2 b) a2 ih)
+    end
+  end
+end
+
+-- A false boolean equation proves anything (both orientations).
+trueNotFalse : {P : U} -> Eq Bool true false -> P is
+  fn {P : U} (h : Eq Bool true false) is
+    subst Bool true false h (fn (z : Bool) is case z of | true -> (P -> P) | false -> P end end) (fn (x : P) is x end)
+  end
+end
+falseNotTrue : {P : U} -> Eq Bool false true -> P is
+  fn {P : U} (h : Eq Bool false true) is
+    subst Bool false true h (fn (z : Bool) is case z of | true -> P | false -> (P -> P) end end) (fn (x : P) is x end)
+  end
+end
+
+-- Strict order, as a boolean with its proposition.
+ltb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is case n of | zero -> false | succ j -> true end end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+Lt : Nat -> Nat -> Prop is fn (a : Nat) (b : Nat) is Eq Bool (ltb a b) true end end
+
+-- ltb r 0 is always false (no Nat is below zero).
+ltbZero : (r : Nat) -> Eq Bool (ltb r 0) false is
+  fn (r : Nat) is case r of | zero -> refl false | succ k -> refl false end end
+end
+
+-- r < b+1 and r != b force r < b: the bound's step lemma. Recursion on r.
+ltStep : (r : Nat) -> (b0 : Nat) -> Eq Bool (ltb r (succ b0)) true -> Eq Bool (eqNat r b0) false -> Eq Bool (ltb r b0) true is
+  fn (r : Nat) is
+    case r of
+    | zero -> fn (b0 : Nat) is
+        case b0 of
+        | zero -> fn (h1 : Eq Bool true true) (h2 : Eq Bool true false) is trueNotFalse h2 end
+        | succ c -> fn (h1 : Eq Bool true true) (h2 : Eq Bool false false) is refl true end
+        end
+      end
+    | succ r2 with ih -> fn (b0 : Nat) is
+        case b0 of
+        | zero -> fn (h1 : Eq Bool (ltb r2 0) true) (h2 : Eq Bool (eqNat (succ r2) 0) false) is
+            falseNotTrue (trans (sym (ltbZero r2)) h1)
+          end
+        | succ c -> fn (h1 : Eq Bool (ltb r2 (succ c)) true) (h2 : Eq Bool (eqNat r2 c) false) is ih c h1 h2 end
+        end
+      end
+    end
+  end
+end
+
+-- The bound: with a positive divisor, the remainder is strictly smaller. The
+-- false branch of the step uses ltStep; eqNat (succ r) (succ b0) is eqNat r b0
+-- definitionally, so the test's negation feeds ltStep directly.
+remBound : (b0 : Nat) -> (a : Nat) -> Lt (rem a (succ b0)) (succ b0) is
+  fn (b0 : Nat) (a : Nat) is
+    case a of
+    | zero -> refl true
+    | succ a2 with ih ->
+        subst DM (divStep (dm (quot a2 (succ b0)) (rem a2 (succ b0))) (succ b0)) (divStep (divmod a2 (succ b0)) (succ b0))
+          (sym (cong (fn (w : DM) is divStep w (succ b0) end) (dmEta (divmod a2 (succ b0)))))
+          (fn (s : DM) is Lt (dmR s) (succ b0) end)
+          (boolCase (eqNat (succ (rem a2 (succ b0))) (succ b0))
+            (fn (h : Eq Bool (eqNat (succ (rem a2 (succ b0))) (succ b0)) true) is
+               subst Bool true (eqNat (succ (rem a2 (succ b0))) (succ b0)) (sym h)
+                 (fn (t : Bool) is Lt (dmR (stepByBool t (quot a2 (succ b0)) (rem a2 (succ b0)))) (succ b0) end)
+                 (refl true)
+             end)
+            (fn (h : Eq Bool (eqNat (succ (rem a2 (succ b0))) (succ b0)) false) is
+               subst Bool false (eqNat (succ (rem a2 (succ b0))) (succ b0)) (sym h)
+                 (fn (t : Bool) is Lt (dmR (stepByBool t (quot a2 (succ b0)) (rem a2 (succ b0)))) (succ b0) end)
+                 (ltStep (rem a2 (succ b0)) b0 ih h)
+             end))
+    end
+  end
+end
+
+-- Arithmetic for uniqueness.
+addAssoc : (x : Nat) -> (y : Nat) -> (z : Nat) -> (x + y) + z = x + (y + z) is
+  fn (x : Nat) (y : Nat) (z : Nat) is
+    case x of | zero -> refl (y + z) | succ k with ih -> cong succ ih end
+  end
+end
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> 0 | succ k -> k end end end
+succInj : (a : Nat) -> (b : Nat) -> succ a = succ b -> a = b is
+  fn (a : Nat) (b : Nat) (h : Eq Nat (succ a) (succ b)) is cong pred h end
+end
+addCancelL : (c : Nat) -> (x : Nat) -> (y : Nat) -> c + x = c + y -> x = y is
+  fn (c : Nat) is
+    case c of
+    | zero -> fn (x : Nat) (y : Nat) (h : Eq Nat x y) is h end
+    | succ k with ih -> fn (x : Nat) (y : Nat) (h : Eq Nat (succ (k + x)) (succ (k + y))) is
+        ih x y (succInj (k + x) (k + y) h)
+      end
+    end
+  end
+end
+
+-- b + X is never strictly below b: the contradiction lever for the quotient.
+notLtSelfPlus : (b : Nat) -> (x : Nat) -> Eq Bool (ltb (b + x) b) false is
+  fn (b : Nat) is
+    case b of
+    | zero -> fn (x : Nat) is ltbZero x end
+    | succ k with ih -> fn (x : Nat) is ih x end
+    end
+  end
+end
+
+-- Quotient uniqueness: any two bounded decompositions of the same number have
+-- the same quotient. Double induction; the mismatched-quotient cases are
+-- impossible because the larger quotient forces a remainder of size >= b.
+divUnique : (b : Nat) -> (q1 : Nat) -> (q2 : Nat) -> (r1 : Nat) -> (r2 : Nat) ->
+    Lt r1 b -> Lt r2 b -> q1 * b + r1 = q2 * b + r2 -> q1 = q2 is
+  fn (b : Nat) (q1 : Nat) is
+    case q1 of
+    | zero -> fn (q2 : Nat) is
+        case q2 of
+        | zero -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b) (h : Eq Nat r1 r2) is refl 0 end
+        | succ q2b -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Nat r1 ((b + q2b * b) + r2)) is
+            trueNotFalse (trans (sym b1)
+              (trans (cong (fn (z : Nat) is ltb z b end) (trans h (addAssoc b (q2b * b) r2)))
+                (notLtSelfPlus b (q2b * b + r2))))
+          end
+        end
+      end
+    | succ q1b with ih -> fn (q2 : Nat) is
+        case q2 of
+        | zero -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Nat ((b + q1b * b) + r1) r2) is
+            trueNotFalse (trans (sym b2)
+              (trans (cong (fn (z : Nat) is ltb z b end) (trans (sym h) (addAssoc b (q1b * b) r1)))
+                (notLtSelfPlus b (q1b * b + r1))))
+          end
+        | succ q2b -> fn (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Nat ((b + q1b * b) + r1) ((b + q2b * b) + r2)) is
+            cong succ (ih q2b r1 r2 b1 b2
+              (addCancelL b (q1b * b + r1) (q2b * b + r2)
+                (trans (sym (addAssoc b (q1b * b) r1)) (trans h (addAssoc b (q2b * b) r2)))))
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Remainder uniqueness follows: equal quotients, then cancel.
+remUnique : (b : Nat) -> (q1 : Nat) -> (q2 : Nat) -> (r1 : Nat) -> (r2 : Nat) ->
+    Lt r1 b -> Lt r2 b -> q1 * b + r1 = q2 * b + r2 -> r1 = r2 is
+  fn (b : Nat) (q1 : Nat) (q2 : Nat) (r1 : Nat) (r2 : Nat) (b1 : Lt r1 b) (b2 : Lt r2 b)
+     (h : Eq Nat (q1 * b + r1) (q2 * b + r2)) is
+    addCancelL (q2 * b) r1 r2
+      (subst Nat q1 q2 (divUnique b q1 q2 r1 r2 b1 b2 h)
+        (fn (z : Nat) is Eq Nat (z * b + r1) (q2 * b + r2) end) h)
+  end
+end
+
+-- Euclidean uniqueness, the headline: with a positive divisor, ANY bounded
+-- decomposition a = q*(b+1) + r is THE flooring one. This is the theorem that
+-- makes a floor well-defined on a class (ch13's Rat //, %) rather than on a
+-- representative, and that chapters 11–13 deferred to "the course-of-values
+-- chapter". Here it is, proved.
+quotCanonical : (b0 : Nat) -> (a : Nat) -> (q : Nat) -> (r : Nat) ->
+    Lt r (succ b0) -> a = q * succ b0 + r -> q = quot a (succ b0) is
+  fn (b0 : Nat) (a : Nat) (q : Nat) (r : Nat) (lt : Lt r (succ b0)) (h : Eq Nat a (q * succ b0 + r)) is
+    divUnique (succ b0) q (quot a (succ b0)) r (rem a (succ b0)) lt (remBound b0 a)
+      (trans (sym h) (divLaw (succ b0) a))
+  end
+end
+
+remCanonical : (b0 : Nat) -> (a : Nat) -> (q : Nat) -> (r : Nat) ->
+    Lt r (succ b0) -> a = q * succ b0 + r -> r = rem a (succ b0) is
+  fn (b0 : Nat) (a : Nat) (q : Nat) (r : Nat) (lt : Lt r (succ b0)) (h : Eq Nat a (q * succ b0 + r)) is
+    remUnique (succ b0) q (quot a (succ b0)) r (rem a (succ b0)) lt (remBound b0 a)
+      (trans (sym h) (divLaw (succ b0) a))
+  end
+end
+
+-- Worked certificates: the law and the bound, live, plus a runnable readback.
+law_17_5 : Eq Nat 17 (quot 17 5 * 5 + rem 17 5) is divLaw 5 17 end
+bound_17_5 : Lt (rem 17 5) 5 is remBound 4 17 end
+answer : Nat is quot 100 7 end

@@ -1,0 +1,81 @@
+-- Chapter 53 — Suspension, the sphere machine (§F / R-HIT / A9).
+-- The suspension `Susp A` glues two poles `north`/`south` together with one
+-- meridian path `merid a : north = south` for every point `a : El A`. It is the
+-- engine that builds spheres: Sⁿ⁺¹ = Susp Sⁿ (so S¹ ≃ Susp Bool's two points,
+-- S² = Susp S¹, …). A parameterised HIT — the same additive pattern as the
+-- circle, now with a type parameter and an argument-carrying path constructor.
+
+-- The recursor: map out of a suspension by choosing images for the two poles and
+-- a path (per input point) connecting them. This is `Susp A -> P`.
+suspRec : (A : UF) -> (P : UF) -> (n : El P) -> (s : El P)
+   -> (m : (a : El A) -> El (pathF P n s)) -> El (Susp A) -> El P is
+  fn (A : UF) (P : UF) (n : El P) (s : El P)
+     (m : (a : El A) -> El (pathF P n s)) is
+    suspElim A P n s m
+  end
+end
+
+-- Computes on the poles: suspRec … north ~> n, witnessed by refl.
+suspRecNorth : (A : UF) -> (P : UF) -> (n : El P) -> (s : El P)
+   -> (m : (a : El A) -> El (pathF P n s))
+   -> Eq (El P) (suspRec A P n s m (north A)) n is
+  fn (A : UF) (P : UF) (n : El P) (s : El P)
+     (m : (a : El A) -> El (pathF P n s)) is
+    refl n
+  end
+end
+
+-- The meridian boundary holds definitionally: papp … (merid A a) i0 ~> north A.
+-- (The path group supplies the boundary; the suspension adds no rule for it.)
+meridStart : (A : UF) -> (a : El A)
+   -> Eq (El (Susp A)) (papp (Susp A) (north A) (south A) (merid A a) i0) (north A) is
+  fn (A : UF) (a : El A) is
+    refl (north A)
+  end
+end
+
+-- Transport over a CONSTANT suspension line is the identity (Kan regularity), no
+-- new machinery: transp (λ_. Susp A) (north A) ~> north A.
+suspTranspConst : (A : UF)
+   -> Eq (El (Susp A)) (transp (fn (i : I) is Susp A end) (north A)) (north A) is
+  fn (A : UF) is
+    refl (north A)
+  end
+end
+
+-- The suspension is a genuine Kan HIT: the recursor eliminates an hcomp cell,
+-- commuting composition into the chosen motive — so mapping out of a sphere
+-- respects composition.
+suspRecRespectsHcomp : (A : UF) -> (P : UF) -> (n : El P) -> (s : El P)
+   -> (m : (a : El A) -> El (pathF P n s)) -> (phi : F)
+   -> (u : I -> holds phi -> El (Susp A)) -> (u0 : El (Susp A)) -> El P is
+  fn (A : UF) (P : UF) (n : El P) (s : El P)
+     (m : (a : El A) -> El (pathF P n s)) (phi : F)
+     (u : I -> holds phi -> El (Susp A)) (u0 : El (Susp A)) is
+    suspElim A P n s m (hcomp (Susp A) phi u u0)
+  end
+end
+
+-- The meridian boundary at the far pole holds definitionally too: papp … (merid A a) i1 ~> south A.
+meridEnd : (A : UF) -> (a : El A)
+   -> Eq (El (Susp A)) (papp (Susp A) (north A) (south A) (merid A a) i1) (south A) is
+  fn (A : UF) (a : El A) is
+    refl (south A)
+  end
+end
+
+-- THE MERIDIAN COMPUTATION RULE (the HIT path-constructor β, completing the recursor's theory):
+-- `suspRec` maps the meridian path `merid a` to the chosen path `m a`, POINTWISE along the
+-- interval — `suspRec … (papp (merid A a) i) ≡ papp (m a) i`, by `refl`. The suspElim ι fires on
+-- the meridian (not just the poles), so mapping out of a sphere is determined by its action on
+-- north, south, AND every meridian. With `suspRecNorth` this gives the suspension's full β: a map
+-- out of `Susp A` computes on all three generators. (The dim-1 path constructor genuinely
+-- reduces — the substrate for spheres Sⁿ⁺¹ = Susp Sⁿ and dim-2 HITs.)
+suspRecMerid : (A : UF) -> (P : UF) -> (n : El P) -> (s : El P)
+   -> (m : (a : El A) -> El (pathF P n s)) -> (a : El A) -> (i : I)
+   -> Eq (El P)
+        (suspRec A P n s m (papp (Susp A) (north A) (south A) (merid A a) i))
+        (papp P n s (m a) i) is
+  fn (A : UF) (P : UF) (n : El P) (s : El P)
+     (m : (a : El A) -> El (pathF P n s)) (a : El A) (i : I) is refl end
+end

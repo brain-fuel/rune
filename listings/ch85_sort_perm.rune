@@ -1,0 +1,256 @@
+-- Chapter 85 — A CERTIFIED SORT, step two: the PERMUTATION half. ch84 proved insertion sort
+-- produces a SORTED list (`sortSorts`); a certified sort must ALSO show the output is a
+-- PERMUTATION of the input — same elements with the same multiplicities. The standard,
+-- eliminator-friendly way to say "permutation" without a permutation datatype: agree on the
+-- OCCURRENCE COUNT of every key. So we prove
+--   sortPerm : (k : Nat) -> (xs : List Nat) -> Eq Nat (count k (sort xs)) (count k xs)
+-- — `sort` preserves the count of every key, i.e. it is a permutation. Together with ch84's
+-- `sortSorts` this is the full specification: `sort xs` is sorted AND a permutation of `xs`.
+--
+-- The keystone is `insertCount`: ordered insertion `insert x xs` has the SAME counts as the
+-- naive cons `cons x xs` — inserting x bumps `count x` by exactly one and leaves every other
+-- count fixed, identical to consing x. We branch on `lte x y` to match ch84's `insert` on the
+-- nose; the hard (sink-past-y) arm reduces to a small Boolean-arithmetic identity (`bumpSwap`):
+-- adding one to the count for "k = x" and one for "k = y" commutes — the order in which the two
+-- guards fire doesn't change the total. `sortPerm` then inducts on xs, rewriting through
+-- `insertCount` and the induction hypothesis.
+--
+-- Per the self-contained-listings convention, `Bool`, `Nat`, `List`, `lte`, `eqNat`, and ch84's
+-- `insert`/`sort` are redeclared VERBATIM (insert/sort identical to ch84, eqNat identical to
+-- ch75). The arithmetic reuses plain succ-congruence (subst), the ch63 idiom.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- lte a b = (a <= b), verbatim from ch84/ch65: zero is below everything; succ k <= zero is
+-- false; succ k <= succ m recurses to k <= m. `insert` branches on it.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- DECIDABLE Nat equality (verbatim from ch75): zero=zero, succ=succ recurse, mixed = false.
+-- `count` tests each list element against the key with it.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- ordered insertion, IDENTICAL to ch84: drop x in front of the first element it does not
+-- exceed. The inner BoolElim on `lte x y` chooses `cons x (cons y ys)` (x belongs here) or
+-- `cons y rest` (x is larger; keep looking; `rest` is the already-inserted tail).
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (cons Nat x (nil Nat))
+      (fn (y : Nat) (ys : List Nat) (rest : List Nat) is
+         BoolElim (fn (b : Bool) is List Nat end)
+           (cons Nat x (cons Nat y ys))
+           (cons Nat y rest)
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+-- insertion sort, IDENTICAL to ch84: fold `insert` over the list.
+sort : List Nat -> List Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is insert x ih end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- OCCURRENCE COUNT
+-- ====================================================================================
+
+-- count k xs : how many times the key k occurs in xs (a Nat). nil ~> zero; cons y ys ~>
+-- (if eqNat k y then succ else id) (count k ys). Small elimination into Nat, with a BoolElim
+-- guard on `eqNat k y` choosing whether the head contributes. This is the multiplicity of k.
+count : Nat -> List Nat -> Nat is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (y : Nat) (ys : List Nat) (ih : Nat) is
+         BoolElim (fn (b : Bool) is Nat end) (succ ih) ih (eqNat k y)
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- THE KEYSTONE ARITHMETIC: two independent "+1 if guard" bumps commute
+-- ====================================================================================
+
+-- A "conditional successor": `bump c n = if c then succ n else n`. count's head step IS a bump
+-- of the tail count guarded by `eqNat k head`.
+bump : Bool -> Nat -> Nat is
+  fn (c : Bool) (n : Nat) is BoolElim (fn (b : Bool) is Nat end) (succ n) n c end
+end
+
+-- BUMP-SWAP: applying a cx-bump then a cy-bump gives the same Nat as cy-bump then cx-bump —
+-- two independent conditional increments commute. Double BoolElim on (cy, cx): all four arms
+-- compute to identical succ-towers, so each is `refl`. This is the heart of why ordered
+-- insertion is a permutation: whether the key matches x, or y, or both, contributes the same
+-- total however the two guards are nested.
+bumpSwap : (cx : Bool) -> (cy : Bool) -> (n : Nat)
+   -> Eq Nat (bump cy (bump cx n)) (bump cx (bump cy n)) is
+  fn (cx : Bool) (cy : Bool) (n : Nat) is
+    BoolElim
+      (fn (cyv : Bool) is Eq Nat (bump cyv (bump cx n)) (bump cx (bump cyv n)) end)
+      -- cy = true: goal `succ (bump cx n) = bump cx (succ n)`, by BoolElim on cx
+      -- (cx=true: succ(succ n)=succ(succ n); cx=false: succ n = succ n).
+      (BoolElim
+         (fn (bx : Bool) is Eq Nat (succ (bump bx n)) (bump bx (succ n)) end)
+         (refl (succ (succ n)))
+         (refl (succ n))
+         cx)
+      -- cy = false: goal `bump cx n = bump cx n`, refl regardless of cx.
+      (refl (bump cx n))
+      cy
+  end
+end
+
+-- ====================================================================================
+-- INSERT PRESERVES ALL COUNTS  (the permutation keystone)
+-- ====================================================================================
+
+-- insertCount: ordered insertion has the SAME counts as the naive cons. Induction on xs.
+--   nil:  insert x nil ~> cons x nil = cons x nil — both sides identical, refl.
+--   cons y ys: branch on `lte x y` with a motive that abstracts insert's BoolElim, so the two
+--     arms line up definitionally.
+--     - lte x y = true:  insert ~> cons x (cons y ys), which IS the RHS `cons x (cons y ys)` —
+--       both `count k`s are literally the same term, refl.
+--     - lte x y = false: insert ~> cons y (insert x ys). LHS count =
+--         bump (eqNat k y) (count k (insert x ys))
+--       and by the IH `count k (insert x ys) = count k (cons x ys) = bump (eqNat k x) (count k
+--       ys)`, so LHS = bump cy (bump cx (count k ys)). The RHS `count k (cons x (cons y ys))` =
+--       bump cx (bump cy (count k ys)). These differ only by the order of the two bumps —
+--       `bumpSwap` closes it, after rewriting the inner count through the IH with subst.
+insertCount : (k : Nat) -> (x : Nat) -> (xs : List Nat)
+   -> Eq Nat (count k (insert x xs)) (count k (cons Nat x xs)) is
+  fn (k : Nat) (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Nat (count k (insert x w)) (count k (cons Nat x w)) end)
+      -- xs = nil: insert x nil ~> cons x nil = cons x nil, so both counts are the same term.
+      (refl (count k (cons Nat x (nil Nat))))
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Nat (count k (insert x ys)) (count k (cons Nat x ys))) is
+         BoolElim
+           (fn (bb : Bool) is
+              Eq Nat
+                (count k
+                   (BoolElim (fn (c : Bool) is List Nat end)
+                      (cons Nat x (cons Nat y ys))
+                      (cons Nat y (insert x ys))
+                      bb))
+                (count k (cons Nat x (cons Nat y ys))) end)
+           -- TRUE arm: insert ~> cons x (cons y ys); identical to the RHS list.
+           (refl (count k (cons Nat x (cons Nat y ys))))
+           -- FALSE arm: insert ~> cons y (insert x ys).
+           --   count k (cons y (insert x ys)) ~> bump (eqNat k y) (count k (insert x ys)).
+           -- Rewrite the inner count via the IH to bump (eqNat k y) (bump (eqNat k x) (count k
+           -- ys)) = bump cy (bump cx N), then bumpSwap to bump cx (bump cy N) =
+           -- count k (cons x (cons y ys)).
+           (subst Nat (count k (cons Nat x ys)) (count k (insert x ys))
+              (subst Nat (count k (insert x ys)) (count k (cons Nat x ys)) ih
+                 (fn (z : Nat) is Eq Nat z (count k (insert x ys)) end)
+                 (refl (count k (insert x ys))))
+              (fn (z : Nat) is
+                 Eq Nat
+                   (bump (eqNat k y) z)
+                   (count k (cons Nat x (cons Nat y ys))) end)
+              (bumpSwap (eqNat k x) (eqNat k y) (count k ys)))
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- INSERTION SORT IS A PERMUTATION
+-- ====================================================================================
+
+-- sortPerm: sort preserves the count of EVERY key — it is a permutation. Induction on xs.
+--   nil:  count k (sort nil) ~> count k nil ~> zero = zero, refl.
+--   cons x rest: count k (sort (cons x rest)) ~> count k (insert x (sort rest)). By insertCount
+--     this equals count k (cons x (sort rest)) = bump (eqNat k x) (count k (sort rest)); by the
+--     IH `count k (sort rest) = count k rest`, so bump (eqNat k x) (count k rest) =
+--     count k (cons x rest). subst threads insertCount then the IH.
+sortPerm : (k : Nat) -> (xs : List Nat)
+   -> Eq Nat (count k (sort xs)) (count k xs) is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Nat (count k (sort w)) (count k w) end)
+      (refl zero)
+      (fn (x : Nat) (rest : List Nat)
+          (ih : Eq Nat (count k (sort rest)) (count k rest)) is
+         -- count k (sort (cons x rest)) ~> count k (insert x (sort rest)).
+         -- Step 1: insertCount rewrites it to count k (cons x (sort rest)) =
+         --   bump (eqNat k x) (count k (sort rest)).
+         -- Step 2: the IH rewrites the inner count to count k rest, giving
+         --   bump (eqNat k x) (count k rest) = count k (cons x rest), the goal.
+         subst Nat (count k (sort rest)) (count k rest) ih
+           (fn (z : Nat) is
+              Eq Nat (count k (insert x (sort rest))) (bump (eqNat k x) z) end)
+           (insertCount k x (sort rest))
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- THE CERTIFIED SORT, ASSEMBLED
+-- ====================================================================================
+
+-- SANITY: count the key 2 in sort [3,1,2]. The output [1,2,3] contains 2 exactly once, and
+-- `sortPerm` certifies it equals the count of 2 in the original [3,1,2] — also one.
+threeOneTwo : List Nat is
+  cons Nat (succ (succ (succ zero)))
+    (cons Nat (succ zero)
+      (cons Nat (succ (succ zero)) (nil Nat)))
+end
+
+-- count of key 2 in the SORTED list equals count of key 2 in the ORIGINAL — a permutation.
+permExample : Eq Nat
+   (count (succ (succ zero)) (sort threeOneTwo))
+   (count (succ (succ zero)) threeOneTwo) is
+  sortPerm (succ (succ zero)) threeOneTwo
+end

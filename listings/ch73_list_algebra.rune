@@ -1,0 +1,130 @@
+-- Chapter 73 — A verified list algebra (M6 / D-track stdlib): append is a monoid and reverse is
+-- an involutive anti-homomorphism. Extends ch36 (length distributes over append) with the
+-- classic equational theory every verified list library needs: append associativity + unit,
+-- `reverse (append xs ys) = append (reverse ys) (reverse xs)`, and `reverse (reverse xs) = xs`.
+-- All by induction over the ambient observational `Eq`/`refl`/`subst`.
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+-- reverse via append: reverse (cons x xs) = reverse xs ++ [x].
+reverse : (A : U) -> List A -> List A is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      (nil A)
+      (fn (x : A) (rest : List A) (ih : List A) is append A ih (cons A x (nil A)) end)
+      xs
+  end
+end
+
+-- equational plumbing over Eq (List A), by subst.
+symList : (A : U) -> (xs : List A) -> (ys : List A)
+   -> Eq (List A) xs ys -> Eq (List A) ys xs is
+  fn (A : U) (xs : List A) (ys : List A) (e : Eq (List A) xs ys) is
+    subst (List A) xs ys e (fn (z : List A) is Eq (List A) z xs end) (refl xs)
+  end
+end
+
+transList : (A : U) -> (xs : List A) -> (ys : List A) -> (zs : List A)
+   -> Eq (List A) xs ys -> Eq (List A) ys zs -> Eq (List A) xs zs is
+  fn (A : U) (xs : List A) (ys : List A) (zs : List A)
+     (e1 : Eq (List A) xs ys) (e2 : Eq (List A) ys zs) is
+    subst (List A) ys zs e2 (fn (z : List A) is Eq (List A) xs z end) e1
+  end
+end
+
+congCons : (A : U) -> (x : A) -> (xs : List A) -> (ys : List A)
+   -> Eq (List A) xs ys -> Eq (List A) (cons A x xs) (cons A x ys) is
+  fn (A : U) (x : A) (xs : List A) (ys : List A) (e : Eq (List A) xs ys) is
+    subst (List A) xs ys e (fn (z : List A) is Eq (List A) (cons A x xs) (cons A x z) end)
+      (refl (cons A x xs))
+  end
+end
+
+congAppend1 : (A : U) -> (xs : List A) -> (xs2 : List A) -> (ys : List A)
+   -> Eq (List A) xs xs2 -> Eq (List A) (append A xs ys) (append A xs2 ys) is
+  fn (A : U) (xs : List A) (xs2 : List A) (ys : List A) (e : Eq (List A) xs xs2) is
+    subst (List A) xs xs2 e
+      (fn (z : List A) is Eq (List A) (append A xs ys) (append A z ys) end)
+      (refl (append A xs ys))
+  end
+end
+
+-- RIGHT UNIT: append xs nil = xs (left unit is definitional: append nil ys ~> ys).
+appendNilR : (A : U) -> (xs : List A) -> Eq (List A) (append A xs (nil A)) xs is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Eq (List A) (append A w (nil A)) w end)
+      (refl (nil A))
+      (fn (x : A) (rest : List A) (ih : Eq (List A) (append A rest (nil A)) rest) is
+         congCons A x (append A rest (nil A)) rest ih end)
+      xs
+  end
+end
+
+-- ASSOCIATIVITY: append (append xs ys) zs = append xs (append ys zs). So (List A, append, nil)
+-- is a MONOID.
+appendAssoc : (A : U) -> (xs : List A) -> (ys : List A) -> (zs : List A)
+   -> Eq (List A) (append A (append A xs ys) zs) (append A xs (append A ys zs)) is
+  fn (A : U) (xs : List A) (ys : List A) (zs : List A) is
+    ListElim A
+      (fn (w : List A) is
+         Eq (List A) (append A (append A w ys) zs) (append A w (append A ys zs)) end)
+      (refl (append A ys zs))
+      (fn (x : A) (rest : List A)
+          (ih : Eq (List A) (append A (append A rest ys) zs) (append A rest (append A ys zs))) is
+         congCons A x (append A (append A rest ys) zs) (append A rest (append A ys zs)) ih end)
+      xs
+  end
+end
+
+-- REVERSE IS AN ANTI-HOMOMORPHISM: reverse (append xs ys) = append (reverse ys) (reverse xs).
+revAppend : (A : U) -> (xs : List A) -> (ys : List A)
+   -> Eq (List A) (reverse A (append A xs ys)) (append A (reverse A ys) (reverse A xs)) is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A
+      (fn (w : List A) is
+         Eq (List A) (reverse A (append A w ys)) (append A (reverse A ys) (reverse A w)) end)
+      (symList A (append A (reverse A ys) (nil A)) (reverse A ys) (appendNilR A (reverse A ys)))
+      (fn (x : A) (rest : List A)
+          (ih : Eq (List A) (reverse A (append A rest ys)) (append A (reverse A ys) (reverse A rest))) is
+         transList A
+           (append A (reverse A (append A rest ys)) (cons A x (nil A)))
+           (append A (append A (reverse A ys) (reverse A rest)) (cons A x (nil A)))
+           (append A (reverse A ys) (append A (reverse A rest) (cons A x (nil A))))
+           (congAppend1 A (reverse A (append A rest ys)) (append A (reverse A ys) (reverse A rest))
+              (cons A x (nil A)) ih)
+           (appendAssoc A (reverse A ys) (reverse A rest) (cons A x (nil A)))
+       end)
+      xs
+  end
+end
+
+-- INVOLUTION: reverse (reverse xs) = xs. By revAppend + the IH, the cons case threads
+-- reverse (reverse (cons x rest)) = reverse (reverse rest ++ [x]) = [x] ++ reverse (reverse rest)
+-- = cons x (reverse (reverse rest)) = cons x rest.
+revInvol : (A : U) -> (xs : List A) -> Eq (List A) (reverse A (reverse A xs)) xs is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Eq (List A) (reverse A (reverse A w)) w end)
+      (refl (nil A))
+      (fn (x : A) (rest : List A) (ih : Eq (List A) (reverse A (reverse A rest)) rest) is
+         transList A
+           (reverse A (reverse A (cons A x rest)))
+           (append A (cons A x (nil A)) (reverse A (reverse A rest)))
+           (cons A x rest)
+           (revAppend A (reverse A rest) (cons A x (nil A)))
+           (congCons A x (reverse A (reverse A rest)) rest ih)
+       end)
+      xs
+  end
+end

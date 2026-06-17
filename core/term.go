@@ -12,6 +12,8 @@
 // Phase 1 and MUST NOT appear here.
 package core
 
+import "math/big"
+
 // Tm is an elaborated core term. It is a sealed interface: the unexported marker
 // method isTm makes the constructor set closed, so every consumer matches by type
 // switch and the compiler flags an unhandled case. This is the one AST encoding
@@ -162,6 +164,57 @@ type Ann struct {
 	Ty   Tm
 }
 
+// Sig is the dependent pair (Σ) type Σ (x : Dom), Cod (C1 / R-SUM). Cod is a
+// Scope binding the first component, reachable as Var{0}. This is the NEGATIVE
+// (η-style) Sigma: Fst/Snd are the primitives and conversion has definitional η
+// (p ≡ Pair (Fst p) (Snd p)). Records of arbitrary arity are right-nested Sig in
+// the surface; no n-ary record constructor enters the core.
+type Sig struct {
+	Qty Qty
+	Dom Tm
+	Cod Scope
+}
+
+// Pair is the pair (A, B) : Σ Dom Cod. It carries Dom and Cod (like pabs/pairF
+// carry their codes) so quote is total and the type is recoverable; conversion
+// ignores them (they are inferable from the components).
+type Pair struct {
+	Dom Tm
+	Cod Scope
+	A   Tm
+	B   Tm
+}
+
+// Fst is the first projection p.1.
+type Fst struct {
+	P Tm
+}
+
+// Snd is the second projection p.2.
+type Snd struct {
+	P Tm
+}
+
+// NatLit is a COMPRESSED core numeral (C7 / R-NUM): a single node carrying an
+// arbitrary-precision natural number N, definitionally the unary succ-chain
+// `succ^N zero` of THIS session's `builtin nat` binding. Zero and Succ are the
+// content hashes of that binding's zero and succ constructors — a literal is
+// always relative to a particular nat, so they are part of its identity (hashed).
+//
+// It is NOT an opaque atom: it INTER-CONVERTS with the unary form. Eval builds a
+// glued value that peels one succ layer on demand (zero ≡ NatLit 0,
+// succ x ≡ NatLit (k+1)), so every eliminator (NatElim/induction) and every
+// conversion that works on the succ-chain works verbatim on a NatLit — the
+// soundness crux that lets induction proofs transfer. The payload merely lets the
+// kernel store, hash, and (with the accel table) compute on the number in one
+// bigint step instead of materialising the chain.
+//
+// N must be non-negative (Nat has no negatives); the resolver/elaborator enforce it.
+type NatLit struct {
+	N          *big.Int
+	Zero, Succ Hash
+}
+
 // Scope is the body of a binder. Under locally-nameless representation a Scope is
 // just a term with one additional bound variable in scope (reachable as Var{0}).
 //
@@ -173,17 +226,22 @@ type Scope struct {
 	Body Tm
 }
 
-func (Var) isTm()   {}
-func (Meta) isTm()  {}
-func (Prop) isTm()  {}
-func (Eq) isTm()    {}
-func (Refl) isTm()  {}
-func (Cast) isTm()  {}
-func (Subst) isTm() {}
-func (Ref) isTm()   {}
-func (Univ) isTm()  {}
-func (Pi) isTm()    {}
-func (Lam) isTm()   {}
-func (App) isTm()   {}
-func (Let) isTm()   {}
-func (Ann) isTm()   {}
+func (Var) isTm()    {}
+func (Meta) isTm()   {}
+func (Prop) isTm()   {}
+func (Eq) isTm()     {}
+func (Refl) isTm()   {}
+func (Cast) isTm()   {}
+func (Subst) isTm()  {}
+func (Ref) isTm()    {}
+func (Univ) isTm()   {}
+func (Pi) isTm()     {}
+func (Lam) isTm()    {}
+func (App) isTm()    {}
+func (Let) isTm()    {}
+func (Ann) isTm()    {}
+func (Sig) isTm()    {}
+func (Pair) isTm()   {}
+func (Fst) isTm()    {}
+func (Snd) isTm()    {}
+func (NatLit) isTm() {}

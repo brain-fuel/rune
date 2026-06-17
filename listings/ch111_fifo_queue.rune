@@ -1,0 +1,379 @@
+-- Chapter 111 — A verified FIFO QUEUE (M6 / D-track, D5 OTP-class concurrency primitive). The
+-- mailbox every actor / gen_server is built on: enqueue at the back, dequeue from the front, and
+-- the FIFO ordering law — the FIRST enqueued is the FIRST dequeued. Two encodings, both proven:
+--   (1) the SIMPLE single-list queue (Queue A = List A; enqueue = append [x]; dequeue = cons), and
+--   (2) the AMORTIZED two-list queue (Queue A = (front, back); the classic verified-queue
+--       invariant `toList (f,b) = append f (reverse b)`, preserved by enqueue and dequeue).
+-- All by computation / induction over the ambient observational `Eq`, reusing the ch73 list
+-- algebra (append monoid + reverse anti-homomorphism). No admits, holes, or postulates.
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- ch73 list algebra (REUSED VERBATIM — append monoid + reverse anti-homomorphism).
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+reverse : (A : U) -> List A -> List A is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      (nil A)
+      (fn (x : A) (rest : List A) (ih : List A) is append A ih (cons A x (nil A)) end)
+      xs
+  end
+end
+
+symList : (A : U) -> (xs : List A) -> (ys : List A)
+   -> Eq (List A) xs ys -> Eq (List A) ys xs is
+  fn (A : U) (xs : List A) (ys : List A) (e : Eq (List A) xs ys) is
+    subst (List A) xs ys e (fn (z : List A) is Eq (List A) z xs end) (refl xs)
+  end
+end
+
+transList : (A : U) -> (xs : List A) -> (ys : List A) -> (zs : List A)
+   -> Eq (List A) xs ys -> Eq (List A) ys zs -> Eq (List A) xs zs is
+  fn (A : U) (xs : List A) (ys : List A) (zs : List A)
+     (e1 : Eq (List A) xs ys) (e2 : Eq (List A) ys zs) is
+    subst (List A) ys zs e2 (fn (z : List A) is Eq (List A) xs z end) e1
+  end
+end
+
+congCons : (A : U) -> (x : A) -> (xs : List A) -> (ys : List A)
+   -> Eq (List A) xs ys -> Eq (List A) (cons A x xs) (cons A x ys) is
+  fn (A : U) (x : A) (xs : List A) (ys : List A) (e : Eq (List A) xs ys) is
+    subst (List A) xs ys e (fn (z : List A) is Eq (List A) (cons A x xs) (cons A x z) end)
+      (refl (cons A x xs))
+  end
+end
+
+congAppend1 : (A : U) -> (xs : List A) -> (xs2 : List A) -> (ys : List A)
+   -> Eq (List A) xs xs2 -> Eq (List A) (append A xs ys) (append A xs2 ys) is
+  fn (A : U) (xs : List A) (xs2 : List A) (ys : List A) (e : Eq (List A) xs xs2) is
+    subst (List A) xs xs2 e
+      (fn (z : List A) is Eq (List A) (append A xs ys) (append A z ys) end)
+      (refl (append A xs ys))
+  end
+end
+
+appendNilR : (A : U) -> (xs : List A) -> Eq (List A) (append A xs (nil A)) xs is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Eq (List A) (append A w (nil A)) w end)
+      (refl (nil A))
+      (fn (x : A) (rest : List A) (ih : Eq (List A) (append A rest (nil A)) rest) is
+         congCons A x (append A rest (nil A)) rest ih end)
+      xs
+  end
+end
+
+appendAssoc : (A : U) -> (xs : List A) -> (ys : List A) -> (zs : List A)
+   -> Eq (List A) (append A (append A xs ys) zs) (append A xs (append A ys zs)) is
+  fn (A : U) (xs : List A) (ys : List A) (zs : List A) is
+    ListElim A
+      (fn (w : List A) is
+         Eq (List A) (append A (append A w ys) zs) (append A w (append A ys zs)) end)
+      (refl (append A ys zs))
+      (fn (x : A) (rest : List A)
+          (ih : Eq (List A) (append A (append A rest ys) zs) (append A rest (append A ys zs))) is
+         congCons A x (append A (append A rest ys) zs) (append A rest (append A ys zs)) ih end)
+      xs
+  end
+end
+
+-- ============================================================================
+-- (1) THE SIMPLE SINGLE-LIST QUEUE.  Queue A = List A; the observable sequence
+-- of a queue, front-to-back, is `toList`. Stated against an ABSTRACT toList (= id
+-- here) so the FIFO laws generalise to the amortized queue below.
+-- ============================================================================
+
+-- The dequeue result: an Option of a (head, rest-queue) pair. We use a concrete
+-- non-dependent product `Step A = Sig (List A) (λ_. List A)`: front element paired
+-- with the remaining queue.
+StepS : U -> U is
+  fn (A : U) is Sig A (fn (h : A) is List A end) end
+end
+
+mkStepS : (A : U) -> A -> List A -> StepS A is
+  fn (A : U) (h : A) (t : List A) is
+    Pair A (fn (h2 : A) is List A end) h t
+  end
+end
+
+emptyS : (A : U) -> List A is
+  fn (A : U) is nil A end
+end
+
+-- enqueue x q = append q [x]  (insert at the BACK).
+enqueueS : (A : U) -> A -> List A -> List A is
+  fn (A : U) (x : A) (q : List A) is append A q (cons A x (nil A)) end
+end
+
+-- dequeue (cons h t) = some (h, t); dequeue nil = none  (remove from the FRONT).
+dequeueS : (A : U) -> List A -> Option (StepS A) is
+  fn (A : U) (q : List A) is
+    ListElim A (fn (w : List A) is Option (StepS A) end)
+      (none (StepS A))
+      (fn (h : A) (t : List A) (ih : Option (StepS A)) is
+         some (StepS A) (mkStepS A h t) end)
+      q
+  end
+end
+
+-- toList is the identity on the single-list queue (the observable sequence IS the list).
+toListS : (A : U) -> List A -> List A is
+  fn (A : U) (q : List A) is q end
+end
+
+-- LAW 1 — enqueue adds at the back:  toList (enqueue x q) = append (toList q) [x].
+-- Stated against toListS so it transfers to the amortized queue. Holds by refl
+-- (toListS = id, enqueueS = append … [x]).
+toListEnqueueS : (A : U) -> (x : A) -> (q : List A)
+   -> Eq (List A) (toListS A (enqueueS A x q)) (append A (toListS A q) (cons A x (nil A))) is
+  fn (A : U) (x : A) (q : List A) is refl (append A q (cons A x (nil A)))
+  end
+end
+
+-- LAW 3 — the KEY FIFO theorem: enqueue at the back does NOT disturb the front.
+-- On a nonempty queue `cons h t`, dequeue still returns h first, with the enqueue
+-- pushed into the tail:  dequeue (enqueue x (cons h t)) = some (h, enqueue x t).
+-- Holds by refl: append (cons h t) [x] ~> cons h (append t [x]) ~> cons h (enqueue x t),
+-- and dequeue fires the cons branch.
+fifoOrderS : (A : U) -> (x : A) -> (h : A) -> (t : List A)
+   -> Eq (Option (StepS A))
+        (dequeueS A (enqueueS A x (cons A h t)))
+        (some (StepS A) (mkStepS A h (enqueueS A x t))) is
+  fn (A : U) (x : A) (h : A) (t : List A) is
+    refl (some (StepS A) (mkStepS A h (append A t (cons A x (nil A)))))
+  end
+end
+
+-- And on the EMPTY queue: dequeue (enqueue x nil) = some (x, nil). Holds by refl.
+fifoOrderEmptyS : (A : U) -> (x : A)
+   -> Eq (Option (StepS A))
+        (dequeueS A (enqueueS A x (nil A)))
+        (some (StepS A) (mkStepS A x (nil A))) is
+  fn (A : U) (x : A) is refl (some (StepS A) (mkStepS A x (nil A)))
+  end
+end
+
+-- LAW 2 — FIFO on a batch: enqueue x0, x1, … into empty, then dequeue returns x0
+-- FIRST. enqueueAll folds enqueue left-to-right. We prove the head case directly:
+-- dequeue (enqueue x1 (enqueue x0 empty)) = some (x0, …), i.e. the FIRST in is the
+-- FIRST out — front-preservation across a second enqueue (a corollary of fifoOrderS,
+-- since enqueue x0 empty = [x0] is nonempty with front x0).
+dequeueFrontS : (A : U) -> (x0 : A) -> (x1 : A)
+   -> Eq (Option (StepS A))
+        (dequeueS A (enqueueS A x1 (enqueueS A x0 (emptyS A))))
+        (some (StepS A) (mkStepS A x0 (enqueueS A x1 (nil A)))) is
+  fn (A : U) (x0 : A) (x1 : A) is
+    fifoOrderS A x1 x0 (nil A)
+  end
+end
+
+-- ============================================================================
+-- (2) THE AMORTIZED TWO-LIST QUEUE — the real OTP mailbox.
+-- Queue A = (front : List A, back : List A). enqueue conses onto back (O(1));
+-- dequeue pops front, reversing back into a fresh front when front empties (O(1)
+-- amortized). The observable sequence is  toList (f,b) = append f (reverse b).
+-- We prove enqueue and dequeue PRESERVE that observable sequence — the classic
+-- verified-queue correctness theorem.
+-- ============================================================================
+
+QueueA : U -> U is
+  fn (A : U) is Sig (List A) (fn (f : List A) is List A end) end
+end
+
+mkQ : (A : U) -> List A -> List A -> QueueA A is
+  fn (A : U) (f : List A) (b : List A) is
+    Pair (List A) (fn (f2 : List A) is List A end) f b
+  end
+end
+
+frontOf : (A : U) -> QueueA A -> List A is
+  fn (A : U) (q : QueueA A) is Fst q end
+end
+
+backOf : (A : U) -> QueueA A -> List A is
+  fn (A : U) (q : QueueA A) is Snd q end
+end
+
+emptyA : (A : U) -> QueueA A is
+  fn (A : U) is mkQ A (nil A) (nil A) end
+end
+
+-- the observable, front-to-back sequence: front ++ reverse back.
+toListA : (A : U) -> QueueA A -> List A is
+  fn (A : U) (q : QueueA A) is append A (frontOf A q) (reverse A (backOf A q)) end
+end
+
+-- enqueue x (f,b) = (f, cons x b)  — O(1), conses to the back list.
+enqueueA : (A : U) -> A -> QueueA A -> QueueA A is
+  fn (A : U) (x : A) (q : QueueA A) is mkQ A (frontOf A q) (cons A x (backOf A q)) end
+end
+
+-- LAW 1 (amortized) — enqueue adds at the back of the OBSERVABLE sequence:
+--   toList (enqueue x q) = append (toList q) [x].
+-- Proof: toList (enqueue x (f,b)) = f ++ reverse (cons x b) = f ++ (reverse b ++ [x]),
+-- and append (toList (f,b)) [x] = (f ++ reverse b) ++ [x]; the two agree by
+-- appendAssoc. (reverse (cons x b) ~> append (reverse b) [x] by the reverse def.)
+toListEnqueueA : (A : U) -> (x : A) -> (q : QueueA A)
+   -> Eq (List A) (toListA A (enqueueA A x q)) (append A (toListA A q) (cons A x (nil A))) is
+  fn (A : U) (x : A) (q : QueueA A) is
+    symList A
+      (append A (append A (frontOf A q) (reverse A (backOf A q))) (cons A x (nil A)))
+      (append A (frontOf A q) (append A (reverse A (backOf A q)) (cons A x (nil A))))
+      (appendAssoc A (frontOf A q) (reverse A (backOf A q)) (cons A x (nil A)))
+  end
+end
+
+-- The amortized dequeue result: (front element, remaining two-list queue).
+StepA : U -> U is
+  fn (A : U) is Sig A (fn (h : A) is QueueA A end) end
+end
+
+mkStepA : (A : U) -> A -> QueueA A -> StepA A is
+  fn (A : U) (h : A) (q : QueueA A) is
+    Pair A (fn (h2 : A) is QueueA A end) h q
+  end
+end
+
+-- dequeue: pop the front. If front = cons h t, return (h, (t, b)) — the O(1) path.
+-- If front = nil, REVERSE the back into a fresh front (the amortization), then pop:
+-- reverse b = cons h t  ↦ (h, (t, nil));  reverse b = nil  ↦ none (queue empty).
+dequeueA : (A : U) -> QueueA A -> Option (StepA A) is
+  fn (A : U) (q : QueueA A) is
+    ListElim A (fn (w : List A) is Option (StepA A) end)
+      (ListElim A (fn (w : List A) is Option (StepA A) end)
+         (none (StepA A))
+         (fn (h : A) (t : List A) (ih : Option (StepA A)) is
+            some (StepA A) (mkStepA A h (mkQ A t (nil A))) end)
+         (reverse A (backOf A q)))
+      (fn (h : A) (t : List A) (ih : Option (StepA A)) is
+         some (StepA A) (mkStepA A h (mkQ A t (backOf A q))) end)
+      (frontOf A q)
+  end
+end
+
+-- LAW 3 (amortized) — the KEY FIFO theorem on the O(1) path: with a NONEMPTY front
+-- `cons h t`, dequeue returns h first and the remaining queue's observable sequence
+-- is the tail. Concretely  dequeue ((cons h t), b) = some (h, (t, b))  AND the
+-- observable sequences line up:  toList ((cons h t), b) = cons h (toList (t, b)).
+-- Both hold by refl: append (cons h t) (reverse b) ~> cons h (append t (reverse b)).
+dequeueConsA : (A : U) -> (h : A) -> (t : List A) -> (b : List A)
+   -> Eq (Option (StepA A))
+        (dequeueA A (mkQ A (cons A h t) b))
+        (some (StepA A) (mkStepA A h (mkQ A t b))) is
+  fn (A : U) (h : A) (t : List A) (b : List A) is
+    refl (some (StepA A) (mkStepA A h (mkQ A t b)))
+  end
+end
+
+-- FRONT-PRESERVATION (the amortized FIFO law): on a nonempty front, the observable
+-- sequence of the dequeued queue is exactly the tail of the original observable
+-- sequence —  toList ((cons h t), b) = cons h (toList (t, b)).  Holds by refl.
+toListDequeueConsA : (A : U) -> (h : A) -> (t : List A) -> (b : List A)
+   -> Eq (List A)
+        (toListA A (mkQ A (cons A h t) b))
+        (cons A h (toListA A (mkQ A t b))) is
+  fn (A : U) (h : A) (t : List A) (b : List A) is
+    refl (cons A h (append A t (reverse A b)))
+  end
+end
+
+-- ENQUEUE PRESERVES THE FRONT under the amortized representation: enqueue only
+-- touches the back list, so a nonempty front still dequeues the SAME head — the
+-- two-list analogue of fifoOrderS.  dequeue (enqueue x ((cons h t), b))
+-- = some (h, (t, cons x b)).  Holds by refl (enqueue conses to back; front untouched).
+fifoOrderA : (A : U) -> (x : A) -> (h : A) -> (t : List A) -> (b : List A)
+   -> Eq (Option (StepA A))
+        (dequeueA A (enqueueA A x (mkQ A (cons A h t) b)))
+        (some (StepA A) (mkStepA A h (mkQ A t (cons A x b)))) is
+  fn (A : U) (x : A) (h : A) (t : List A) (b : List A) is
+    refl (some (StepA A) (mkStepA A h (mkQ A t (cons A x b))))
+  end
+end
+
+-- THE FULL AMORTIZED-QUEUE INVARIANT, end to end: enqueue then dequeue on a
+-- nonempty-front queue round-trips the observable sequence —
+--   toList (front-queue after enqueue x then dequeue) = append (toList (t,b)) [x].
+-- i.e. the element enqueued at the back appears LAST in the observable sequence of
+-- what remains after the front is popped. Proof: after enqueue the queue is
+-- ((cons h t), cons x b); dequeue pops h leaving (t, cons x b), whose observable
+-- sequence is  t ++ reverse (cons x b) = t ++ (reverse b ++ [x]) = (t ++ reverse b) ++ [x]
+-- = append (toList (t,b)) [x], by appendAssoc.
+enqueueDequeueA : (A : U) -> (x : A) -> (h : A) -> (t : List A) -> (b : List A)
+   -> Eq (List A)
+        (toListA A (mkQ A t (cons A x b)))
+        (append A (toListA A (mkQ A t b)) (cons A x (nil A))) is
+  fn (A : U) (x : A) (h : A) (t : List A) (b : List A) is
+    symList A
+      (append A (append A t (reverse A b)) (cons A x (nil A)))
+      (append A t (append A (reverse A b) (cons A x (nil A))))
+      (appendAssoc A t (reverse A b) (cons A x (nil A)))
+  end
+end
+
+-- ============================================================================
+-- SANITY: enqueue 1, 2, 3 into the empty single-list queue, then dequeue thrice
+-- yields 1, 2, 3 IN ORDER — FIFO, concretely, on Nat. (1 = succ zero, 2 = succ 1,
+-- 3 = succ 2.) Each step is `refl`: enqueue/append/dequeue all compute on the
+-- closed numerals, so the three dequeued heads are 1, 2, 3 by definitional equality.
+-- ============================================================================
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- enqueue 1 then 2 then 3 into empty builds the list [1,2,3].
+q123 : List Nat is
+  enqueueS Nat (succ (succ (succ zero)))
+    (enqueueS Nat (succ (succ zero))
+      (enqueueS Nat (succ zero) (emptyS Nat)))
+end
+
+-- The built queue is literally [1,2,3], front-to-back (refl: append computes).
+buildOk : Eq (List Nat) q123
+   (cons Nat (succ zero)
+     (cons Nat (succ (succ zero))
+       (cons Nat (succ (succ (succ zero))) (nil Nat)))) is
+  refl q123
+end
+
+-- First dequeue yields 1 (the FIRST enqueued), with [2,3] remaining.
+deq1 : Eq (Option (StepS Nat))
+   (dequeueS Nat q123)
+   (some (StepS Nat) (mkStepS Nat (succ zero)
+     (cons Nat (succ (succ zero))
+       (cons Nat (succ (succ (succ zero))) (nil Nat))))) is
+  refl (dequeueS Nat q123)
+end
+
+-- Second dequeue yields 2, with [3] remaining.
+deq2 : Eq (Option (StepS Nat))
+   (dequeueS Nat (cons Nat (succ (succ zero))
+       (cons Nat (succ (succ (succ zero))) (nil Nat))))
+   (some (StepS Nat) (mkStepS Nat (succ (succ zero))
+     (cons Nat (succ (succ (succ zero))) (nil Nat)))) is
+  refl (dequeueS Nat (cons Nat (succ (succ zero))
+       (cons Nat (succ (succ (succ zero))) (nil Nat))))
+end
+
+-- Third dequeue yields 3, with the empty queue remaining. 1, 2, 3 — FIFO confirmed.
+deq3 : Eq (Option (StepS Nat))
+   (dequeueS Nat (cons Nat (succ (succ (succ zero))) (nil Nat)))
+   (some (StepS Nat) (mkStepS Nat (succ (succ (succ zero))) (nil Nat))) is
+  refl (dequeueS Nat (cons Nat (succ (succ (succ zero))) (nil Nat)))
+end

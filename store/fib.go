@@ -16,11 +16,14 @@ import "goforge.dev/rune/v3/core"
 //	pathJ  : path induction; COMPUTES on preflF (ι)
 //	pathU  : UF -> UF -> U1                         inner paths between fibrant types
 //	ureflU : (A : UF) -> pathU A A
-//	ua     : (A B : UF) -> (f : El A -> El B) -> (g : El B -> El A)
-//	         -> ((x : El A) -> Eq (El A) (g (f x)) x)
-//	         -> ((y : El B) -> Eq (El B) (f (g y)) y) -> pathU A B   POSTULATED univalence
 //	castU  : (A B : UF) -> pathU A B -> El A -> El B                 transport; COMPUTES
-//	                                                                 on ureflU AND on ua
+//	                                                                 on ureflU AND through
+//	                                                                 a derived ua-Glue line
+//
+// `ua` is NO LONGER a member here: univalence is DERIVED (see the ambient
+// `uaprelude.rune` — `ua A B f g s t := uaGlue …`, a Glue line), and `castU` along
+// it computes the forward map through the genuine transp-over-Glue arm. There is no
+// postulated `ua` head and no baked-in `castU`-over-`ua` fiat rule any more.
 //
 // The two equalities coexist without contradiction because they are never the
 // same relation: the strict Eq is a proof-irrelevant Prop and validates UIP;
@@ -38,19 +41,19 @@ import "goforge.dev/rune/v3/core"
 // (ref_docs/rune-v3-design.md), postulated here, not sold as computing.
 
 // fibNames are the surface names the group binds, in member order.
-var fibNames = [11]string{
+var fibNames = [10]string{
 	"UF", "El", "fib", "piF", "pathF", "preflF", "pathJ",
-	"pathU", "ureflU", "ua", "castU",
+	"pathU", "ureflU", "castU",
 }
 
 type fibEntry struct {
-	hashes [11]core.Hash
+	hashes [10]core.Hash
 }
 
 // AddFib registers the fibrant builtin group and binds its names, returning
 // the member hashes in fibNames order. Hashes are pure functions of the
 // (fixed) member types, so every session agrees on them.
-func (s *Store) AddFib() [11]core.Hash {
+func (s *Store) AddFib() [10]core.Hash {
 	tys := fibTypes()
 
 	g := newHasher()
@@ -62,7 +65,7 @@ func (s *Store) AddFib() [11]core.Hash {
 	var group core.Hash
 	copy(group[:], g.Sum(nil))
 
-	var hs [11]core.Hash
+	var hs [10]core.Hash
 	for i := range hs {
 		h := newHasher()
 		h.Write([]byte{defFormatVersion, 'f'})
@@ -90,10 +93,10 @@ func (s *Store) FibRoleOf(h core.Hash) core.FibRole {
 	if s.fib == nil {
 		return core.FRoleNone
 	}
-	roles := [11]core.FibRole{
+	roles := [10]core.FibRole{
 		core.FRoleUF, core.FRoleEl, core.FRoleFib, core.FRolePiF,
 		core.FRolePathF, core.FRolePrefl, core.FRoleJ,
-		core.FRolePathU, core.FRoleUrefl, core.FRoleUa, core.FRoleCastU,
+		core.FRolePathU, core.FRoleUrefl, core.FRoleCastU,
 	}
 	for i, fh := range s.fib.hashes {
 		if fh == h {
@@ -103,21 +106,39 @@ func (s *Store) FibRoleOf(h core.Hash) core.FibRole {
 	return core.FRoleNone
 }
 
+// FibHash implements core.FibInfo: the hash of the member with the given role,
+// for the structural Kan rules to construct fibrant sub-terms (El, piF, pathF).
+func (s *Store) FibHash(role core.FibRole) (core.Hash, bool) {
+	if s.fib == nil {
+		return core.Hash{}, false
+	}
+	idx := map[core.FibRole]int{
+		core.FRoleUF: 0, core.FRoleEl: 1, core.FRoleFib: 2, core.FRolePiF: 3,
+		core.FRolePathF: 4, core.FRolePrefl: 5, core.FRoleJ: 6,
+		core.FRolePathU: 7, core.FRoleUrefl: 8, core.FRoleCastU: 9,
+	}
+	i, ok := idx[role]
+	if !ok {
+		return core.Hash{}, false
+	}
+	return s.fib.hashes[i], true
+}
+
 // FibHashes returns the registered group's hashes (and whether it exists),
 // in fibNames order.
-func (s *Store) FibHashes() ([11]core.Hash, bool) {
+func (s *Store) FibHashes() ([10]core.Hash, bool) {
 	if s.fib == nil {
-		return [11]core.Hash{}, false
+		return [10]core.Hash{}, false
 	}
 	return s.fib.hashes, true
 }
 
 // FibNames returns the surface names of the group members, in hash order.
-func FibNames() [11]string { return fibNames }
+func FibNames() [10]string { return fibNames }
 
-// fibTypes builds the eleven member types as core terms, with member i as
+// fibTypes builds the ten member types as core terms, with member i as
 // Placeholder(i). Scope names are display hints only and are not hashed.
-func fibTypes() [11]core.Tm {
+func fibTypes() [10]core.Tm {
 	v := func(i int) core.Tm { return core.Var{Idx: i} }
 	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
 		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
@@ -180,28 +201,6 @@ func fibTypes() [11]core.Tm {
 	// ureflU : (A : UF) -> pathU A A
 	ureflUTy := pi("A", uf, app(pathU, v(0), v(0)))
 
-	// ua : (A : UF) -> (B : UF) -> (f : El A -> El B) -> (g : El B -> El A)
-	//      -> ((x : El A) -> Eq (El A) (g (f x)) x)
-	//      -> ((y : El B) -> Eq (El B) (f (g y)) y)
-	//      -> pathU A B
-	uaTy := pi("A", uf,
-		pi("B", uf,
-			pi("f", pi("x", el(v(1)), el(v(1))), // scope [B, A]; under x: B = 1
-				pi("g", pi("y", el(v(1)), el(v(3))), // scope [f, B, A]; under y: B = 1+1, A = 2+1
-					pi("s", pi("x", el(v(3)), // scope [g, f, B, A]: A = 3
-						core.Eq{
-							Ty: el(v(4)),                   // A under x
-							L:  app(v(1), app(v(2), v(0))), // g (f x)
-							R:  v(0),
-						}),
-						pi("t", pi("y", el(v(3)), // scope [s, g, f, B, A]: B = 3
-							core.Eq{
-								Ty: el(v(4)),                   // B under y
-								L:  app(v(3), app(v(2), v(0))), // f (g y)
-								R:  v(0),
-							}),
-							app(pathU, v(5), v(4))))))))
-
 	// castU : (A : UF) -> (B : UF) -> pathU A B -> El A -> El B
 	castUTy := pi("A", uf,
 		pi("B", uf,
@@ -209,6 +208,6 @@ func fibTypes() [11]core.Tm {
 				pi("x", el(v(2)), // A, scope [p, B, A]
 					el(v(2)))))) // B, scope [x, p, B, A]
 
-	return [11]core.Tm{ufTy, elTy, fibTy, piFTy, pathFTy, preflFTy, pathJTy,
-		pathUTy, ureflUTy, uaTy, castUTy}
+	return [10]core.Tm{ufTy, elTy, fibTy, piFTy, pathFTy, preflFTy, pathJTy,
+		pathUTy, ureflUTy, castUTy}
 }

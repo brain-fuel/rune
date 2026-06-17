@@ -1,0 +1,298 @@
+-- Chapter 95 — A VERIFIED FINITE SET over `List Nat` (M6 / telos-3 tiered-verified stdlib).
+-- A set is a `List Nat` carrying the no-duplicates invariant; the certified-collection contract
+-- is the pair of MEMBERSHIP LAWS that pin idempotent `insert` against Boolean `member`:
+--   memberInsertSame  : member x (insert x xs) = true          (what you put in, you can find)
+--   memberInsertOther : eqNat x y = false ->                     (insert disturbs nobody else)
+--                       member y (insert x xs) = member y xs
+-- Decidable Nat equality `eqNat` + its reflexivity `eqNatRefl` (verbatim from ch75) carry the
+-- first law; its SYMMETRY `eqNatSym` (false-preserving) carries the second. The bonus is the
+-- structural invariant: a decidable no-duplicates predicate `NoDup` (Boolean reflection à la
+-- ch84's `Sorted`) preserved by `insert` (`insertNoDup`).
+--
+-- DESIGN — `member` is Boolean membership by ListElim; `insert x xs` is SET insertion: add x
+-- only if absent (`if member x xs then xs else cons x xs`), so it is idempotent. The U-valued
+-- `NoDup` is the TRUTH of a Boolean `nodupb` (small elimination into Bool; a U-valued recursion
+-- over a list would be a large elimination the predicative core forbids — exactly ch84's route).
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- DECIDABLE Nat equality (verbatim from ch75): zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true (verbatim from ch75). base refl; step is the IH on the
+-- nose (eqNat (succ k) (succ k) ~> eqNat k k definitionally).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- eqNat is SYMMETRIC, false-preserving: eqNat m n = false -> eqNat n m = false. Double NatElim
+-- mirroring eqNat's own shape. zero/zero is impossible (eqNat zero zero ~> true ≠ false), so its
+-- absurd premise `true = false` discharges anything by subst; zero/succ and succ/zero already
+-- agree (both ~> false, refl); succ/succ recurses to the inner IH (eqNat (succ k)(succ j) ~>
+-- eqNat k j on both sides).
+eqNatSymFalse : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) false -> Eq Bool (eqNat n m) false is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) false -> Eq Bool (eqNat n x) false end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) false -> Eq Bool (eqNat y zero) false end)
+           (fn (h : Eq Bool true false) is h end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) false -> Eq Bool (eqNat j zero) false) is
+              fn (h : Eq Bool false false) is refl false end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) false -> Eq Bool (eqNat n k) false) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) false -> Eq Bool (eqNat y (succ k)) false end)
+             (fn (h : Eq Bool false false) is refl false end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) false -> Eq Bool (eqNat j (succ k)) false) is
+                fn (h : Eq Bool (eqNat k j) false) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- MEMBERSHIP + SET INSERTION
+-- ====================================================================================
+
+-- member x xs : x occurs in xs (a Bool). nil ~> false; cons y ys ~> if eqNat x y then true
+-- else member x ys. Small elimination into Bool.
+member : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (ys : List Nat) (ih : Bool) is
+         BoolElim (fn (b : Bool) is Bool end) true ih (eqNat x y) end)
+      xs
+  end
+end
+
+-- SET insertion: add x only if it is not already present, so insert is IDEMPOTENT.
+-- insert x xs ~> if member x xs then xs else cons x xs.
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim (fn (b : Bool) is List Nat end)
+      xs
+      (cons Nat x xs)
+      (member x xs)
+  end
+end
+
+-- ====================================================================================
+-- THE MEMBERSHIP LAWS (the certified-collection contract)
+-- ====================================================================================
+
+-- LAW 1 — what you insert, you can find: member x (insert x xs) = true. Branch on member x xs
+-- with a motive that abstracts BOTH insert's BoolElim branch AND the value member x xs takes, so
+-- each arm receives the branch equation.
+--   true arm  (hm : member x xs = true): insert ~> xs, so member x (insert x xs) = member x xs;
+--             rewrite back to true by hm.
+--   false arm (hm : member x xs = false): insert ~> cons x xs, and member x (cons x xs) ~>
+--             if eqNat x x then true else member x xs; eqNatRefl x rewrites the guard to true.
+memberInsertSame : (x : Nat) -> (xs : List Nat)
+   -> Eq Bool (member x (insert x xs)) true is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member x (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                true end)
+      -- bb = true: insert ~> xs; member x xs = true is exactly hm.
+      (fn (hm : Eq Bool (member x xs) true) is hm end)
+      -- bb = false: insert ~> cons x xs; member x (cons x xs) ~> BoolElim true (member x xs)
+      -- (eqNat x x). Rewrite the guard eqNat x x to true via eqNatRefl; the true branch is true.
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+           (fn (g : Bool) is
+              Eq Bool (BoolElim (fn (c : Bool) is Bool end) true (member x xs) g) true end)
+           (refl true) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+-- LAW 2 — insert disturbs nobody else: if x ≠ y (eqNat x y = false) then membership of y is
+-- unchanged by inserting x. Branch on member x xs (insert's guard) with a motive abstracting the
+-- branch and its value.
+--   true arm  (member x xs = true): insert ~> xs; goal is member y xs = member y xs (refl).
+--   false arm (member x xs = false): insert ~> cons x xs; member y (cons x xs) ~> if eqNat y x
+--             then true else member y xs. Need eqNat y x = false — from eqNat x y = false by
+--             symmetry (eqNatSymFalse) — to collapse the guard's false branch to member y xs.
+memberInsertOther : (x : Nat) -> (y : Nat) -> (xs : List Nat)
+   -> Eq Bool (eqNat x y) false
+   -> Eq Bool (member y (insert x xs)) (member y xs) is
+  fn (x : Nat) (y : Nat) (xs : List Nat) (hxy : Eq Bool (eqNat x y) false) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member y (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                (member y xs) end)
+      -- bb = true: insert ~> xs; both sides are member y xs.
+      (fn (hm : Eq Bool (member x xs) true) is refl (member y xs) end)
+      -- bb = false: insert ~> cons x xs; member y (cons x xs) ~> BoolElim true (member y xs)
+      -- (eqNat y x). Rewrite eqNat y x to false (eqNatSymFalse x y hxy); the false branch is
+      -- member y xs, matching the RHS.
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool false (eqNat y x) (symBool (eqNat y x) false (eqNatSymFalse x y hxy))
+           (fn (g : Bool) is
+              Eq Bool
+                (BoolElim (fn (c : Bool) is Bool end) true (member y xs) g)
+                (member y xs) end)
+           (refl (member y xs)) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+-- ====================================================================================
+-- THE NO-DUPLICATES INVARIANT (bonus structural invariant, ch84-style reflection)
+-- ====================================================================================
+
+-- not b : Boolean negation, by BoolElim.
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+-- and a b (verbatim from ch84): and true b ~> b, and false _ ~> false.
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+andIntro : (a : Bool) -> (b : Bool)
+   -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool x true -> Eq Bool b true -> Eq Bool (and x b) true end)
+      (fn (ha : Eq Bool true true) (hb : Eq Bool b true) is hb end)
+      (fn (ha : Eq Bool false true) (hb : Eq Bool b true) is
+         subst Bool false true ha
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool (and false b) true
+              | false -> Eq Bool (and false b) (and false b)
+              end
+            end)
+           (refl (and false b)) end)
+      a
+  end
+end
+
+-- nodupb xs : xs has no duplicates (a Bool). nil ~> true; cons x ys ~> the head is absent from
+-- the tail AND the tail has no duplicates. Small elimination into Bool.
+nodupb : List Nat -> Bool is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (x : Nat) (ys : List Nat) (ih : Bool) is and (not (member x ys)) ih end)
+      xs
+  end
+end
+
+-- NoDup is the TRUTH of nodupb (decidable reflection, à la ch84's Sorted).
+NoDup : List Nat -> U is
+  fn (xs : List Nat) is Eq Bool (nodupb xs) true end
+end
+
+-- notMemberTrue : if member x xs = false then not (member x xs) = true. subst rewrites member x
+-- xs to false inside `not _`; not false ~> true.
+notMemberTrue : (x : Nat) -> (xs : List Nat)
+   -> Eq Bool (member x xs) false -> Eq Bool (not (member x xs)) true is
+  fn (x : Nat) (xs : List Nat) (h : Eq Bool (member x xs) false) is
+    subst Bool false (member x xs) (symBool (member x xs) false h)
+      (fn (z : Bool) is Eq Bool (not z) true end)
+      (refl true)
+  end
+end
+
+-- INSERT PRESERVES NoDup: inserting into a duplicate-free set keeps it duplicate-free. Branch on
+-- member x xs (insert's guard) with a motive abstracting the branch.
+--   true arm  (member x xs = true): insert ~> xs, so NoDup is unchanged — return the witness s.
+--   false arm (member x xs = false): insert ~> cons x xs; nodupb (cons x xs) ~> and (not
+--             (member x xs)) (nodupb xs). x is absent (notMemberTrue) and xs is dup-free (s),
+--             so andIntro closes it.
+insertNoDup : (x : Nat) -> (xs : List Nat) -> NoDup xs -> NoDup (insert x xs) is
+  fn (x : Nat) (xs : List Nat) (s : NoDup xs) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> NoDup (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb) end)
+      (fn (hm : Eq Bool (member x xs) true) is s end)
+      (fn (hm : Eq Bool (member x xs) false) is
+         andIntro (not (member x xs)) (nodupb xs)
+           (notMemberTrue x xs hm)
+           s end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+-- ====================================================================================
+-- SANITY (representation-agnostic: assert via Eq + refl, not syntactic succ form)
+-- ====================================================================================
+
+oneTwoThree : List Nat is
+  cons Nat (succ zero)
+    (cons Nat (succ (succ zero))
+      (cons Nat (succ (succ (succ zero))) (nil Nat)))
+end
+
+-- member 2 [1,2,3] = true.
+member2Present : Eq Bool (member (succ (succ zero)) oneTwoThree) true is refl true end
+
+-- member 5 [1,2,3] = false.
+member5Absent : Eq Bool
+   (member (succ (succ (succ (succ (succ zero))))) oneTwoThree) false is refl false end
+
+-- insert 2 [1,2,3] = [1,2,3] (idempotent: 2 is already present, so the list is unchanged).
+insertIdem : Eq (List Nat) (insert (succ (succ zero)) oneTwoThree) oneTwoThree is
+  refl oneTwoThree
+end
+
+-- a freshly built set is duplicate-free, certificate canonical.
+oneTwoThreeNoDup : NoDup oneTwoThree is refl true end

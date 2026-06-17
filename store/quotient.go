@@ -1,0 +1,177 @@
+package store
+
+import "goforge.dev/rune/v3/core"
+
+// The FIBRANT quotient HIT (§F / R-HIT / A9) — the path-respecting, EFFECTIVE
+// quotient the strict `Quot` (v2, store/quot.go) cannot give. Where strict Quot
+// identifies points only up to a Prop-valued relation with qsound UIP-collapsed,
+// the fibrant quotient adds a genuine PATH between related points (qrel), so
+// transport and the eliminator respect the relation cubically. A parameterised
+// HIT on its own hash space (tag L/l), built against the fibrant group. Four
+// members:
+//
+//	Quotient : (A : UF) -> (R : El A -> El A -> UF) -> UF        former (a code)
+//	qinc     : (A : UF) -> (R : …) -> (a : El A) -> El (Quotient A R)
+//	qrel     : (A : UF) -> (R : …) -> (a b : El A) -> (r : El (R a b))
+//	             -> El (pathF (Quotient A R) (qinc A R a) (qinc A R b))   the relation path
+//	quotElim : (A : UF) -> (R : …) -> (P : UF)
+//	             -> (f : El A -> El P)
+//	             -> (rel : (a b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b)))
+//	             -> El (Quotient A R) -> El P                            the recursor
+//
+// Quotient/qinc/qrel are permanently-neutral heads. quotElim COMPUTES by the HIT
+// ι-rules (core.QuotHitInfo / tryQuotHitIota): `quotElim … (qinc a) ~> f a`,
+// along a relation path `… (papp … (qrel a b r) i) ~> papp P (f a) (f b)
+// (rel a b r) i`, and it commutes with hcomp. The qrel boundary (qinc a / qinc b)
+// is free from the path group; constant-parameter transport is free from Kan
+// regularity. No hash-format bump.
+
+var quotHitNames = [4]string{"Quotient", "qinc", "qrel", "quotElim"}
+
+type quotHitEntry struct {
+	hashes [4]core.Hash
+}
+
+// AddQuotHit registers the fibrant-quotient HIT group against the registered
+// fibrant group, binding its names and returning the member hashes.
+func (s *Store) AddQuotHit(fib [10]core.Hash) [4]core.Hash {
+	tys := quotHitTypes(fib)
+
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'L'})
+	for _, ty := range tys {
+		th := core.HashTerm(ty)
+		g.Write(th[:])
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	var hs [4]core.Hash
+	for i := range hs {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, 'l'})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		copy(hs[i][:], h.Sum(nil))
+	}
+	subst := func(t core.Tm) core.Tm {
+		for i := range hs {
+			t = replaceRef(t, Placeholder(i), hs[i])
+		}
+		return t
+	}
+	for i, ty := range tys {
+		s.defs[hs[i]] = Def{Type: subst(ty)}
+		s.names[quotHitNames[i]] = hs[i]
+	}
+	s.qh = &quotHitEntry{hashes: hs}
+	return hs
+}
+
+// QuotHitRoleOf implements core.QuotHitInfo.
+func (s *Store) QuotHitRoleOf(h core.Hash) core.QuotHitRole {
+	if s.qh == nil {
+		return core.QHRoleNone
+	}
+	roles := [4]core.QuotHitRole{
+		core.QHRoleQuot, core.QHRoleInc, core.QHRoleRel, core.QHRoleElim,
+	}
+	for i, hh := range s.qh.hashes {
+		if hh == h {
+			return roles[i]
+		}
+	}
+	return core.QHRoleNone
+}
+
+// QuotHitHash implements core.QuotHitInfo.
+func (s *Store) QuotHitHash(role core.QuotHitRole) (core.Hash, bool) {
+	if s.qh == nil {
+		return core.Hash{}, false
+	}
+	idx := map[core.QuotHitRole]int{
+		core.QHRoleQuot: 0, core.QHRoleInc: 1, core.QHRoleRel: 2, core.QHRoleElim: 3,
+	}
+	i, ok := idx[role]
+	if !ok {
+		return core.Hash{}, false
+	}
+	return s.qh.hashes[i], true
+}
+
+// QuotHitHashes returns the registered group's hashes (and whether it exists).
+func (s *Store) QuotHitHashes() ([4]core.Hash, bool) {
+	if s.qh == nil {
+		return [4]core.Hash{}, false
+	}
+	return s.qh.hashes, true
+}
+
+// QuotHitNames returns the surface names of the group members, in hash order.
+func QuotHitNames() [4]string { return quotHitNames }
+
+func quotHitTypes(fib [10]core.Hash) [4]core.Tm {
+	v := func(i int) core.Tm { return core.Var{Idx: i} }
+	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
+		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
+	}
+	app := func(f core.Tm, xs ...core.Tm) core.Tm {
+		for _, x := range xs {
+			f = core.App{Fn: f, Arg: x, Icit: core.Expl}
+		}
+		return f
+	}
+	uf := core.Tm(core.Ref{Hash: fib[0]})
+	el := func(x core.Tm) core.Tm { return app(core.Ref{Hash: fib[1]}, x) }
+	pathF := func(a, x, y core.Tm) core.Tm { return app(core.Ref{Hash: fib[4]}, a, x, y) }
+	quot := func(a, r core.Tm) core.Tm { return app(core.Ref{Hash: Placeholder(0)}, a, r) }
+	qinc := func(a, r, x core.Tm) core.Tm { return app(core.Ref{Hash: Placeholder(1)}, a, r, x) }
+	// rel : El A -> El A -> UF, where A is at the de Bruijn index aIdx in the
+	// surrounding context (built so its two El A doms shift correctly).
+	relTy := func(aIdx int) core.Tm {
+		return pi("x", el(v(aIdx)), pi("y", el(v(aIdx+1)), uf))
+	}
+
+	// Quotient : (A : UF) -> (R : El A -> El A -> UF) -> UF
+	//   R's dom under [A]: A=v(0); under [R,A] result UF.
+	quotTy := pi("A", uf, pi("R", relTy(0), uf))
+	// qinc : (A : UF) -> (R : …) -> (a : El A) -> El (Quotient A R)
+	//   stacks: [A]; [R,A]; [a,R,A] → A=v(2),R=v(1)
+	qincTy := pi("A", uf, pi("R", relTy(0),
+		pi("a", el(v(1)), // A = v(1) under [R,A]
+			el(quot(v(2), v(1))))))
+	// qrel : (A) -> (R) -> (a b : El A) -> (r : El (R a b))
+	//          -> El (pathF (Quotient A R) (qinc A R a) (qinc A R b))
+	//   stacks: [A]; [R,A]; [a,R,A]; [b,a,R,A]; [r,b,a,R,A]; result [r,b,a,R,A]
+	qrelTy := pi("A", uf, pi("R", relTy(0),
+		pi("a", el(v(1)), // A=v(1) under [R,A]
+			pi("b", el(v(2)), // A=v(2) under [a,R,A]
+				// r : El (R a b) — under [b,a,R,A]: R=v(2),a=v(1),b=v(0)
+				pi("r", el(app(v(2), v(1), v(0))),
+					// result under [r,b,a,R,A]: A=v(4),R=v(3),a=v(2),b=v(1)
+					el(pathF(quot(v(4), v(3)),
+						qinc(v(4), v(3), v(2)),
+						qinc(v(4), v(3), v(1)))))))))
+	// quotElim : (A) -> (R) -> (P : UF) -> (f : El A -> El P)
+	//              -> (rel : (a b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b)))
+	//              -> El (Quotient A R) -> El P
+	//   stacks: [A]; [R,A]; [P,R,A]; [f,P,R,A]; [rel,f,P,R,A]; [x,rel,f,P,R,A]
+	elimTy := pi("A", uf, pi("R", relTy(0),
+		pi("P", uf,
+			// f : El A -> El P — dom under [P,R,A]: A=v(2); cod under [a,P,R,A]: P=v(1)
+			pi("f", pi("a", el(v(2)), el(v(1))),
+				// rel : (a b : El A) -> (r : El (R a b)) -> El (pathF P (f a) (f b))
+				//   before rel binder: [f,P,R,A] → f=0,P=1,R=2,A=3
+				pi("rel", pi("a", el(v(3)), // A under [f,P,R,A] = v(3)
+					pi("b", el(v(4)), // A under [a,f,P,R,A] = v(4)
+						// r : El (R a b) — under [b,a,f,P,R,A]: R=v(4),a=v(1),b=v(0)
+						pi("r", el(app(v(4), v(1), v(0))),
+							// result under [r,b,a,f,P,R,A]: f=v(3),P=v(4),a=v(2),b=v(1)
+							el(pathF(v(4), app(v(3), v(2)), app(v(3), v(1))))))),
+					// x : El (Quotient A R) — under [rel,f,P,R,A]: A=v(4),R=v(3)
+					pi("x", el(quot(v(4), v(3))),
+						// result El P — under [x,rel,f,P,R,A]: P=v(3)
+						el(v(3))))))))
+
+	return [4]core.Tm{quotTy, qincTy, qrelTy, elimTy}
+}

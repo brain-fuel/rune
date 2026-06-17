@@ -1,0 +1,26 @@
+-- Chapter 197 — Multiple foreign functions, and a NON-identity one (R-FFI / B4,
+-- the C-ABI FFI deepening). ch44 linked a single identity foreign; this closes the
+-- multi-foreign / non-identity case: a program that links TWO distinct foreign
+-- symbols and calls a genuinely non-identity one across the boundary. The host
+-- supplies both at link time; every backend (8 of them) resolves both accessors and
+-- runs byte-identically.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- A unary identity foreign (as ch44) …
+foreign hostId : Nat -> Nat end
+
+-- … and a BINARY, genuinely non-identity foreign: first projection `λa b. a`. It is
+-- rep-agnostic (drops its second argument, constructs nothing), so the same host
+-- closure links uniformly on every backend — yet it is observably non-identity (it
+-- returns its FIRST argument, discarding the second), and it exercises a CURRIED
+-- foreign boundary (`hostConst a b` = apply twice across the FFI).
+foreign hostConst : Nat -> Nat -> Nat end
+
+-- Two foreign symbols, composed non-trivially: `hostId` carries `succ (succ zero)`,
+-- then `hostConst` keeps it while DISCARDING the `zero` second argument. A
+-- second-projection or a dropped link would observably differ, so this discriminates.
+answer : Nat is hostConst (hostId (succ (succ zero))) zero end

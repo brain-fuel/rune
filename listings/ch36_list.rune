@@ -1,0 +1,57 @@
+-- Chapter 36 — Verified lists: length is a monoid homomorphism (D2).
+-- append and length over polymorphic lists, with the theorem that length
+-- distributes over append — length (xs ++ ys) = length xs + length ys — proven
+-- by induction on xs (the cons step transports the hypothesis through succ via
+-- subst). A real verified-stdlib law, not a sampled refl.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+length : (A : U) -> List A -> Nat is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Nat end)
+      zero
+      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+lenAppend : (A : U) -> (xs : List A) -> (ys : List A) ->
+    Eq Nat (length A (append A xs ys)) (add (length A xs) (length A ys)) is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A
+      (fn (w : List A) is
+         Eq Nat (length A (append A w ys)) (add (length A w) (length A ys)) end)
+      (refl (length A ys))
+      (fn (x : A) (rest : List A)
+          (ih : Eq Nat (length A (append A rest ys)) (add (length A rest) (length A ys))) is
+         subst Nat (length A (append A rest ys)) (add (length A rest) (length A ys)) ih
+           (fn (z : Nat) is
+              Eq Nat (length A (append A (cons A x rest) ys)) (succ z) end)
+           (refl (length A (append A (cons A x rest) ys)))
+       end)
+      xs
+  end
+end

@@ -1,0 +1,33 @@
+-- Chapter 49 — Path induction computes: pathJ via transport (§F / A4).
+-- The eliminator for the inner path type now computes on a GENERAL (non-refl)
+-- path, not only on reflexivity. CCHM derives J by transporting the base datum
+-- along the line of contracting singletons:
+--
+--   pathJ A x P d y p  ~>  transp (λi. P (p@i) (⟨j⟩ p@(i∧j))) ⊥ d
+--
+-- At i0 the inner path ⟨j⟩ p@(0∧j) is the constant path ≡ preflF A x, so the line
+-- there is P x (preflF A x) — the type of d; at i1 it is ⟨j⟩ p@j ≡ p, so the line
+-- lands at P y p — the result type. Both coherences are the path-η law (a path is
+-- determined by its action), now in conversion. When p IS refl the line is
+-- constant and transport collapses to d by regularity.
+
+-- J on reflexivity is the base datum (the β-rule, unchanged).
+jRefl : (A : UF) -> (x : El A) -> (P : (y : El A) -> El (pathF A x y) -> UF)
+   -> (d : El (P x (preflF A x)))
+   -> Eq (El (P x (preflF A x))) (pathJ A x P d x (preflF A x)) d is
+  fn (A : UF) (x : El A) (P : (y : El A) -> El (pathF A x y) -> UF)
+     (d : El (P x (preflF A x))) is
+    refl d
+  end
+end
+
+-- J on a GENERAL path with a CONSTANT motive computes to the base datum: the
+-- J-line is constant in i, so the derived transport is the identity (regularity).
+-- This exercises the A4 reduction on a non-refl path and certifies it by refl.
+jConstMotive : (A : UF) -> (x : El A) -> (C : UF) -> (d : El C)
+   -> (y : El A) -> (p : El (pathF A x y))
+   -> Eq (El C) (pathJ A x (fn (yy : El A) (pp : El (pathF A x yy)) is C end) d y p) d is
+  fn (A : UF) (x : El A) (C : UF) (d : El C) (y : El A) (p : El (pathF A x y)) is
+    refl d
+  end
+end

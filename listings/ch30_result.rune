@@ -1,0 +1,31 @@
+-- Chapter 30 — Result, a verified two-parameter stdlib datatype (D1).
+-- Pure Wootz: a success/error sum with map over the success branch and the
+-- computation laws proven by the eliminator. Demonstrates multi-parameter
+-- datatypes carrying their own correctness.
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+-- map over the success branch; errors pass through.
+mapResult : (A : U) -> (B : U) -> (E : U) -> (A -> B) -> Result A E -> Result B E is
+  fn (A : U) (B : U) (E : U) (f : A -> B) (r : Result A E) is
+    ResultElim A E (fn (x : Result A E) is Result B E end)
+      (fn (a : A) is ok B E (f a) end)
+      (fn (e : E) is err B E e end)
+      r
+  end
+end
+
+-- map applies f under ok (ι on the ok constructor).
+mapOk : (A : U) -> (B : U) -> (E : U) -> (f : A -> B) -> (a : A) ->
+    Eq (Result B E) (mapResult A B E f (ok A E a)) (ok B E (f a)) is
+  fn (A : U) (B : U) (E : U) (f : A -> B) (a : A) is refl (ok B E (f a)) end
+end
+
+-- map leaves err untouched (ι on the err constructor).
+mapErr : (A : U) -> (B : U) -> (E : U) -> (f : A -> B) -> (e : E) ->
+    Eq (Result B E) (mapResult A B E f (err A E e)) (err B E e) is
+  fn (A : U) (B : U) (E : U) (f : A -> B) (e : E) is refl (err B E e) end
+end

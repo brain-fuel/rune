@@ -1,0 +1,529 @@
+-- Chapter 110 — A VERIFIED CONSENSUS SAFETY CORE: quorum-based AGREEMENT (telos-4 / E-track,
+-- the STRONG-consistency increment). ch72/ch104/ch106/ch109 built EVENTUAL consistency (CvRDTs:
+-- the merge of two replicas converges, gossip-order independent). This chapter takes the FIRST
+-- step from eventual to STRONG consistency: a single-decree agreement core whose SAFETY property
+-- — no two distinct values are ever both decided — is machine-checked.
+--
+-- THE PROTOCOL (single-decree, fixed finite replica set). The replicas are the three Nats
+-- {0,1,2}. Each replica casts ONE vote, recorded by a TOTAL function `voteOf : Nat -> V` (a
+-- replica votes for at most one value — votes are functional by construction). A QUORUM is a set
+-- of replicas (a `List Nat`, the verified finite set of ch95/ch104). A value v is DECIDED when
+-- some MAJORITY quorum (a quorum holding at least 2 of the 3 replicas) has every member voting v.
+--
+-- THE SAFETY THEOREM (`agreement`): if v1 is decided by quorum q1 and v2 by quorum q2, then
+-- v1 = v2. The mathematical heart is QUORUM INTERSECTION: any two majorities of {0,1,2} share a
+-- replica (two 2-of-3 subsets cannot be disjoint — by counting, 2 + 2 > 3). That shared replica
+-- r voted for BOTH v1 (it is in q1, all of whom voted v1) and v2 (it is in q2), and `voteOf r` is
+-- a single value, so v1 = voteOf r = v2.
+--
+-- SCOPE — CONCRETE n=3 (Option B). The quorum-intersection lemma is proven for the FIXED replica
+-- set {0,1,2} by exhaustive case analysis on the six membership bits (`member r qi` for r in
+-- {0,1,2}, i in {1,2}), the majority witnesses discharging the impossible-disjoint cases. This is
+-- an HONEST single-decree agreement proof — no admits, no holes, no postulates — just not yet
+-- parameterized in n. Generalizing `quorumIntersect` to arbitrary n via a cardinality/pigeonhole
+-- argument (|q1| + |q2| > n forces a shared member) is the next E-track step.
+--
+-- Per the self-contained-listings convention, `Bool`/`Nat`/`List`, `eqNat` + `eqNatRefl`,
+-- `member`, `not`/`and`/`or`, the ambient `trans`/`sym`, and `symBool`/`andIntro` are redeclared
+-- BYTE-IDENTICAL to ch95/ch104/ch03.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- DECIDABLE Nat equality (verbatim from ch95): zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true (verbatim from ch95).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- ====================================================================================
+-- THE AMBIENT EQUALITY combinators (ch03), redeclared verbatim — the agreement chain threads them.
+-- ====================================================================================
+
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (w : A) is Eq A w x end) (refl x)
+  end
+end
+
+-- ====================================================================================
+-- MEMBERSHIP (verbatim ch104) — replica r is in quorum q when `member r q = true`.
+-- ====================================================================================
+
+member : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (ys : List Nat) (ih : Bool) is
+         BoolElim (fn (b : Bool) is Bool end) true ih (eqNat x y) end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN ALGEBRA (verbatim ch104 not/and/or) + the and-introduction (verbatim ch95).
+-- ====================================================================================
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- andIntro (verbatim ch95): from a = true and b = true conclude and a b = true.
+andIntro : (a : Bool) -> (b : Bool)
+   -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool x true -> Eq Bool b true -> Eq Bool (and x b) true end)
+      (fn (ha : Eq Bool true true) (hb : Eq Bool b true) is hb end)
+      (fn (ha : Eq Bool false true) (hb : Eq Bool b true) is
+         subst Bool false true ha
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool (and false b) true
+              | false -> Eq Bool (and false b) (and false b)
+              end
+            end)
+           (refl (and false b)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- THE THREE REPLICAS {0,1,2}.
+-- ====================================================================================
+
+r0 : Nat is zero end
+r1 : Nat is succ zero end
+r2 : Nat is succ (succ zero) end
+
+-- ====================================================================================
+-- MAJORITY of the three-replica set: at least 2 of {0,1,2} are members.
+-- ====================================================================================
+
+-- atLeastTwo b0 b1 b2 : at least two of the three Booleans are true. Written as the disjunction
+-- of the three pairwise conjunctions — (b0 ∧ b1) ∨ (b0 ∧ b2) ∨ (b1 ∧ b2). Computes on canonical
+-- Bools by BoolElim, so a concrete majority is checked by refl.
+atLeastTwo : Bool -> Bool -> Bool -> Bool is
+  fn (b0 : Bool) (b1 : Bool) (b2 : Bool) is
+    or (and b0 b1) (or (and b0 b2) (and b1 b2))
+  end
+end
+
+-- isMajority q : the quorum q holds a majority of {0,1,2}. A quorum is DECISIVE exactly when it
+-- can force a value (its members all vote the same): a majority. `member r0 q`/`member r1 q`/
+-- `member r2 q` are the three membership bits; `atLeastTwo` of them is the majority test.
+isMajority : List Nat -> Bool is
+  fn (q : List Nat) is atLeastTwo (member r0 q) (member r1 q) (member r2 q) end
+end
+
+-- ====================================================================================
+-- ABSURDITY: from `false = true`, conclude ANY goal G. The impossible-disjoint and
+-- not-a-majority cases of the intersection analysis discharge through this (the ch80
+-- `lteAbsurd` idiom, generalized to an arbitrary goal type). subst transports the
+-- trivially-inhabited `false` slot (where the motive is `G -> G`, witnessed by `id`)
+-- to the `true` slot (where it is `G -> G` too), then applies it... — simplest form:
+-- transport a single inhabitant. Here we use the case-motive directly.
+falseAbsurd : (G : U) -> Eq Bool false true -> G is
+  fn (G : U) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> G
+         | false -> Eq Bool false false
+         end
+       end)
+      (refl false)
+  end
+end
+
+-- andFalseR : and b false = false, for ANY b (including a neutral membership bit). `and b false`
+-- is stuck on a neutral b (BoolElim's scrutinee), so the not-a-majority arms that hold a neutral
+-- bit in a conjunction need this to reduce the majority test to `false`. Case on b: both arms refl.
+andFalseR : (b : Bool) -> Eq Bool (and b false) false is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x false) false end) (refl false) (refl false) b
+  end
+end
+
+-- atLeastTwoBFF : atLeastTwo b false false = false. With two replicas absent, the only true
+-- conjunct could be `and b false`, killed by andFalseR; the rest reduces. (pick12's both-absent
+-- case: only the third replica could be in q2, never a majority.) subst rewrites `and b false`
+-- to false in the (otherwise-reducing) majority expression.
+atLeastTwoBFF : (b : Bool) -> Eq Bool (atLeastTwo b false false) false is
+  fn (b : Bool) is
+    subst Bool false (and b false) (symBool (and b false) false (andFalseR b))
+      (fn (z : Bool) is Eq Bool (or z (or z false)) false end)
+      (refl false)
+  end
+end
+
+-- atLeastTwoFBF : atLeastTwo false b false = false. The surviving conjunct is `and b false`
+-- (the third position), killed by andFalseR. (pick02's both-absent case.)
+atLeastTwoFBF : (b : Bool) -> Eq Bool (atLeastTwo false b false) false is
+  fn (b : Bool) is
+    subst Bool false (and b false) (symBool (and b false) false (andFalseR b))
+      (fn (z : Bool) is Eq Bool (or false (or false z)) false end)
+      (refl false)
+  end
+end
+
+-- absurdFromMajority : a `= true` proof of a majority expression KNOWN to be `false` is absurd.
+-- Compose the reduction `eFalse : expr = false` with `eTrue : expr = true` into `false = true`,
+-- then falseAbsurd. Used by the picker both-absent arms.
+absurdFromMajority : (G : U) -> (expr : Bool)
+   -> Eq Bool expr false -> Eq Bool expr true -> G is
+  fn (G : U) (expr : Bool) (eFalse : Eq Bool expr false) (eTrue : Eq Bool expr true) is
+    falseAbsurd G (trans Bool false expr true (symBool expr false eFalse) eTrue)
+  end
+end
+
+-- ====================================================================================
+-- THE QUORUM-INTERSECTION LEMMA (the mathematical heart).
+-- ====================================================================================
+
+-- A shared replica is a Nat r together with PROOFS that r is in BOTH quorums. We package it in
+-- CONTINUATION-PASSING form — for any goal G, given a handler `k` that takes the witness r and the
+-- two membership proofs, produce G. This is the eliminator-only encoding of ∃ (the
+-- impredicative-Prop encoding, ch08-style), needing no new datatype, and is exactly what
+-- `agreement` consumes (its handler closes the agreement chain).
+
+-- THE PAIR PICKERS. Given that two SPECIFIC replicas are both in q1 (a pair of q1's witnesses) and
+-- q2 is a majority, find one of the pair that is also in q2. A majority of q2 cannot miss BOTH
+-- members of any pair: if it did, q2's only possible member is the third replica, and a single
+-- replica is not a majority (atLeastTwo with two `false`s reduces to `false`, contradicting m2).
+-- One picker per pair {r1,r2}, {r0,r2}, {r0,r1}; each branches on q2's membership of the two pair
+-- members, then on the third bit to derive the contradiction in the both-absent case.
+
+-- pick12 : pair {r1, r2} in q1. Branch member r1 q2, then member r2 q2; if both false, q2's
+-- majority is atLeastTwo (member r0 q2) false false ~> false — absurd.
+pick12 : (q1 : List Nat) -> (q2 : List Nat) -> (G : U)
+   -> Eq Bool (member r1 q1) true -> Eq Bool (member r2 q1) true
+   -> Eq Bool (isMajority q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G)
+   -> G is
+  fn (q1 : List Nat) (q2 : List Nat) (G : U)
+     (h1 : Eq Bool (member r1 q1) true) (h2 : Eq Bool (member r2 q1) true)
+     (m2 : Eq Bool (isMajority q2) true)
+     (k : (r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G) is
+    BoolElim
+      (fn (c1 : Bool) is
+         Eq Bool (member r1 q2) c1
+           -> Eq Bool (atLeastTwo (member r0 q2) c1 (member r2 q2)) true -> G end)
+      (fn (e1 : Eq Bool (member r1 q2) true) (mm : Eq Bool (atLeastTwo (member r0 q2) true (member r2 q2)) true) is
+         k r1 h1 e1 end)
+      (fn (e1 : Eq Bool (member r1 q2) false) is
+         BoolElim
+           (fn (c2 : Bool) is
+              Eq Bool (member r2 q2) c2
+                -> Eq Bool (atLeastTwo (member r0 q2) false c2) true -> G end)
+           (fn (e2 : Eq Bool (member r2 q2) true) (mm : Eq Bool (atLeastTwo (member r0 q2) false true) true) is
+              k r2 h2 e2 end)
+           (fn (e2 : Eq Bool (member r2 q2) false)
+               (mm : Eq Bool (atLeastTwo (member r0 q2) false false) true) is
+              -- only r0 could be in q2 — never a majority: atLeastTwo b false false = false
+              -- (atLeastTwoBFF), contradicting mm. Absurd.
+              absurdFromMajority G (atLeastTwo (member r0 q2) false false)
+                (atLeastTwoBFF (member r0 q2)) mm end)
+           (member r2 q2)
+           (refl (member r2 q2)) end)
+      (member r1 q2)
+      (refl (member r1 q2))
+      m2
+  end
+end
+
+-- pick02 : pair {r0, r2} in q1. Branch member r0 q2, then member r2 q2; both-false leaves
+-- atLeastTwo false (member r1 q2) false ~> false — absurd.
+pick02 : (q1 : List Nat) -> (q2 : List Nat) -> (G : U)
+   -> Eq Bool (member r0 q1) true -> Eq Bool (member r2 q1) true
+   -> Eq Bool (isMajority q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G)
+   -> G is
+  fn (q1 : List Nat) (q2 : List Nat) (G : U)
+     (h0 : Eq Bool (member r0 q1) true) (h2 : Eq Bool (member r2 q1) true)
+     (m2 : Eq Bool (isMajority q2) true)
+     (k : (r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G) is
+    BoolElim
+      (fn (c0 : Bool) is
+         Eq Bool (member r0 q2) c0
+           -> Eq Bool (atLeastTwo c0 (member r1 q2) (member r2 q2)) true -> G end)
+      (fn (e0 : Eq Bool (member r0 q2) true) (mm : Eq Bool (atLeastTwo true (member r1 q2) (member r2 q2)) true) is
+         k r0 h0 e0 end)
+      (fn (e0 : Eq Bool (member r0 q2) false) is
+         BoolElim
+           (fn (c2 : Bool) is
+              Eq Bool (member r2 q2) c2
+                -> Eq Bool (atLeastTwo false (member r1 q2) c2) true -> G end)
+           (fn (e2 : Eq Bool (member r2 q2) true) (mm : Eq Bool (atLeastTwo false (member r1 q2) true) true) is
+              k r2 h2 e2 end)
+           (fn (e2 : Eq Bool (member r2 q2) false)
+               (mm : Eq Bool (atLeastTwo false (member r1 q2) false) true) is
+              -- only r1 could be in q2 — never a majority: atLeastTwo false b false = false
+              -- (atLeastTwoFBF), contradicting mm. Absurd.
+              absurdFromMajority G (atLeastTwo false (member r1 q2) false)
+                (atLeastTwoFBF (member r1 q2)) mm end)
+           (member r2 q2)
+           (refl (member r2 q2)) end)
+      (member r0 q2)
+      (refl (member r0 q2))
+      m2
+  end
+end
+
+-- pick01 : pair {r0, r1} in q1. Branch member r0 q2, then member r1 q2; both-false leaves
+-- atLeastTwo false false (member r2 q2) ~> false — absurd.
+pick01 : (q1 : List Nat) -> (q2 : List Nat) -> (G : U)
+   -> Eq Bool (member r0 q1) true -> Eq Bool (member r1 q1) true
+   -> Eq Bool (isMajority q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G)
+   -> G is
+  fn (q1 : List Nat) (q2 : List Nat) (G : U)
+     (h0 : Eq Bool (member r0 q1) true) (h1 : Eq Bool (member r1 q1) true)
+     (m2 : Eq Bool (isMajority q2) true)
+     (k : (r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G) is
+    BoolElim
+      (fn (c0 : Bool) is
+         Eq Bool (member r0 q2) c0
+           -> Eq Bool (atLeastTwo c0 (member r1 q2) (member r2 q2)) true -> G end)
+      (fn (e0 : Eq Bool (member r0 q2) true) (mm : Eq Bool (atLeastTwo true (member r1 q2) (member r2 q2)) true) is
+         k r0 h0 e0 end)
+      (fn (e0 : Eq Bool (member r0 q2) false) is
+         BoolElim
+           (fn (c1 : Bool) is
+              Eq Bool (member r1 q2) c1
+                -> Eq Bool (atLeastTwo false c1 (member r2 q2)) true -> G end)
+           (fn (e1 : Eq Bool (member r1 q2) true) (mm : Eq Bool (atLeastTwo false true (member r2 q2)) true) is
+              k r1 h1 e1 end)
+           (fn (e1 : Eq Bool (member r1 q2) false)
+               (mm : Eq Bool (atLeastTwo false false (member r2 q2)) true) is
+              -- only r2 could be in q2 — atLeastTwo false false b ~> false definitionally
+              -- (both surviving conjuncts have `false` in head position), contradicting mm.
+              absurdFromMajority G (atLeastTwo false false (member r2 q2))
+                (refl false) mm end)
+           (member r1 q2)
+           (refl (member r1 q2)) end)
+      (member r0 q2)
+      (refl (member r0 q2))
+      m2
+  end
+end
+
+-- THE KEY LEMMA. Two majorities of {0,1,2} share a replica. We branch on q1's three membership
+-- bits (member r0 q1, member r1 q1, member r2 q1), the nested motive threading the running
+-- majority test `atLeastTwo a0 a1 a2 = true` (= isMajority q1, by definition). A majority forces a
+-- specific PAIR of bits true; we hand that pair to the matching picker, which finds the shared
+-- replica in q2. The bit-combinations holding fewer than two true (e.g. only r2, only r1, …, or
+-- none) reduce `atLeastTwo` to `false`, so the threaded `m1 : … = true` is absurd. No 64-way
+-- enumeration: three nested BoolElims over q1's bits, each picker doing two over q2's.
+quorumIntersect : (q1 : List Nat) -> (q2 : List Nat) -> (G : U)
+   -> Eq Bool (isMajority q1) true
+   -> Eq Bool (isMajority q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G)
+   -> G is
+  fn (q1 : List Nat) (q2 : List Nat) (G : U)
+     (m1 : Eq Bool (isMajority q1) true)
+     (m2 : Eq Bool (isMajority q2) true)
+     (k : (r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G) is
+    BoolElim
+      (fn (a0 : Bool) is
+         Eq Bool (member r0 q1) a0
+           -> Eq Bool (atLeastTwo a0 (member r1 q1) (member r2 q1)) true -> G end)
+      -- a0 = member r0 q1 = true
+      (fn (h0 : Eq Bool (member r0 q1) true) is
+         BoolElim
+           (fn (a1 : Bool) is
+              Eq Bool (member r1 q1) a1
+                -> Eq Bool (atLeastTwo true a1 (member r2 q1)) true -> G end)
+           -- a1 = true: r0, r1 ∈ q1.
+           (fn (h1 : Eq Bool (member r1 q1) true) (mm : Eq Bool (atLeastTwo true true (member r2 q1)) true) is
+              pick01 q1 q2 G h0 h1 m2 k end)
+           -- a1 = false.
+           (fn (h1 : Eq Bool (member r1 q1) false) is
+              BoolElim
+                (fn (a2 : Bool) is
+                   Eq Bool (member r2 q1) a2
+                     -> Eq Bool (atLeastTwo true false a2) true -> G end)
+                -- a2 = true: r0, r2 ∈ q1.
+                (fn (h2 : Eq Bool (member r2 q1) true) (mm : Eq Bool (atLeastTwo true false true) true) is
+                   pick02 q1 q2 G h0 h2 m2 k end)
+                -- a2 = false: only r0 ∈ q1 — atLeastTwo true false false ~> false; absurd.
+                (fn (h2 : Eq Bool (member r2 q1) false) (mm : Eq Bool (atLeastTwo true false false) true) is
+                   falseAbsurd G mm end)
+                (member r2 q1)
+                (refl (member r2 q1)) end)
+           (member r1 q1)
+           (refl (member r1 q1)) end)
+      -- a0 = member r0 q1 = false
+      (fn (h0 : Eq Bool (member r0 q1) false) is
+         BoolElim
+           (fn (a1 : Bool) is
+              Eq Bool (member r1 q1) a1
+                -> Eq Bool (atLeastTwo false a1 (member r2 q1)) true -> G end)
+           -- a1 = true.
+           (fn (h1 : Eq Bool (member r1 q1) true) is
+              BoolElim
+                (fn (a2 : Bool) is
+                   Eq Bool (member r2 q1) a2
+                     -> Eq Bool (atLeastTwo false true a2) true -> G end)
+                -- a2 = true: r1, r2 ∈ q1.
+                (fn (h2 : Eq Bool (member r2 q1) true) (mm : Eq Bool (atLeastTwo false true true) true) is
+                   pick12 q1 q2 G h1 h2 m2 k end)
+                -- a2 = false: only r1 ∈ q1 — atLeastTwo false true false ~> false; absurd.
+                (fn (h2 : Eq Bool (member r2 q1) false) (mm : Eq Bool (atLeastTwo false true false) true) is
+                   falseAbsurd G mm end)
+                (member r2 q1)
+                (refl (member r2 q1)) end)
+           -- a1 = false: at most r2 ∈ q1.
+           (fn (h1 : Eq Bool (member r1 q1) false) is
+              BoolElim
+                (fn (a2 : Bool) is
+                   Eq Bool (member r2 q1) a2
+                     -> Eq Bool (atLeastTwo false false a2) true -> G end)
+                -- a2 = true: only r2 ∈ q1 — atLeastTwo false false true ~> false; absurd.
+                (fn (h2 : Eq Bool (member r2 q1) true) (mm : Eq Bool (atLeastTwo false false true) true) is
+                   falseAbsurd G mm end)
+                -- a2 = false: empty q1 — atLeastTwo false false false ~> false; absurd.
+                (fn (h2 : Eq Bool (member r2 q1) false) (mm : Eq Bool (atLeastTwo false false false) true) is
+                   falseAbsurd G mm end)
+                (member r2 q1)
+                (refl (member r2 q1)) end)
+           (member r1 q1)
+           (refl (member r1 q1)) end)
+      (member r0 q1)
+      (refl (member r0 q1))
+      m1
+  end
+end
+
+-- ====================================================================================
+-- THE SINGLE-DECREE AGREEMENT THEOREM (the safety property).
+-- ====================================================================================
+
+-- The decided value lives in an arbitrary type V; the votes are a TOTAL function voteOf : Nat -> V
+-- — so a replica votes for AT MOST (exactly) one value, by construction. A value v is DECIDED by a
+-- quorum q under voteOf when q is a majority AND every member of q votes v. We phrase "every member
+-- of q votes v" as: for all r, member r q = true -> voteOf r = v.
+
+-- AGREEMENT: if q1 decides v1 and q2 decides v2 (both quorums majorities, all their members voting
+-- the respective value), then v1 = v2. By quorumIntersect, q1 and q2 share a replica r; r votes v1
+-- (it is in q1) AND v2 (it is in q2); voteOf r is a single value, so v1 = voteOf r = v2. The
+-- continuation handed to quorumIntersect IS the agreement chain.
+agreement : (V : U) -> (voteOf : Nat -> V)
+   -> (q1 : List Nat) -> (q2 : List Nat)
+   -> (v1 : V) -> (v2 : V)
+   -> Eq Bool (isMajority q1) true
+   -> Eq Bool (isMajority q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq V (voteOf r) v1)
+   -> ((r : Nat) -> Eq Bool (member r q2) true -> Eq V (voteOf r) v2)
+   -> Eq V v1 v2 is
+  fn (V : U) (voteOf : Nat -> V)
+     (q1 : List Nat) (q2 : List Nat) (v1 : V) (v2 : V)
+     (m1 : Eq Bool (isMajority q1) true)
+     (m2 : Eq Bool (isMajority q2) true)
+     (vote1 : (r : Nat) -> Eq Bool (member r q1) true -> Eq V (voteOf r) v1)
+     (vote2 : (r : Nat) -> Eq Bool (member r q2) true -> Eq V (voteOf r) v2) is
+    quorumIntersect q1 q2 (Eq V v1 v2) m1 m2
+      (fn (r : Nat) (e1 : Eq Bool (member r q1) true) (e2 : Eq Bool (member r q2) true) is
+         -- r voted v1 (vote1 r e1 : voteOf r = v1) and v2 (vote2 r e2 : voteOf r = v2).
+         -- v1 = voteOf r (sym) then voteOf r = v2 (trans).
+         trans V v1 (voteOf r) v2
+           (sym V (voteOf r) v1 (vote1 r e1))
+           (vote2 r e2) end)
+  end
+end
+
+-- ====================================================================================
+-- SANITY (representation-agnostic: assert via Eq + refl, and run the theorem concretely).
+-- ====================================================================================
+
+-- Two concrete majority quorums of {0,1,2}: qA = {0,1}, qB = {1,2}. They share replica 1.
+qA : List Nat is cons Nat r0 (cons Nat r1 (nil Nat)) end
+qB : List Nat is cons Nat r1 (cons Nat r2 (nil Nat)) end
+
+-- Both are majorities (2 of 3), certified by the canonical refl.
+qAMajority : Eq Bool (isMajority qA) true is refl true end
+qBMajority : Eq Bool (isMajority qB) true is refl true end
+
+-- {2} alone is NOT a majority — only one replica. The certificate is refl false.
+qSingleton : List Nat is cons Nat r2 (nil Nat) end
+qSingletonNotMajority : Eq Bool (isMajority qSingleton) false is refl false end
+
+-- THE INTERSECTION COMPUTES: extracting the shared replica from qA and qB (asking for the
+-- Nat witness) yields replica 1 — both majorities meet at r1, certified by refl.
+sharedReplica : Nat is
+  quorumIntersect qA qB Nat qAMajority qBMajority
+    (fn (r : Nat) (e1 : Eq Bool (member r qA) true) (e2 : Eq Bool (member r qB) true) is r end)
+end
+
+sharedReplicaIsOne : Eq Nat sharedReplica r1 is refl r1 end
+
+-- AGREEMENT, run concretely. A vote assignment that decides the SAME value on both quorums (every
+-- replica votes `true`): the agreement theorem confirms v1 = v2 = true. The witnesses say each
+-- member votes true (refl true), regardless of which member the intersection produced.
+votesAllTrue : Nat -> Bool is fn (r : Nat) is true end end
+
+agreeConcrete : Eq Bool true true is
+  agreement Bool votesAllTrue qA qB true true qAMajority qBMajority
+    (fn (r : Nat) (e : Eq Bool (member r qA) true) is refl true end)
+    (fn (r : Nat) (e : Eq Bool (member r qB) true) is refl true end)
+end
+
+-- The honest content: NO assignment can have qA decide one value and qB decide a different one,
+-- because they share r1 — whatever r1 voted is BOTH values. `agreement` is that impossibility,
+-- proven once and for all over the fixed replica set {0,1,2}.

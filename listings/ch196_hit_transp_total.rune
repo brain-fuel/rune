@@ -1,0 +1,79 @@
+-- Chapter 196 — Transport is TOTAL on a higher inductive type (§F / R-HIT / A9, the last
+-- cubical filler). A parameterised HIT has three generator shapes: the point constructors,
+-- the path constructors, and the formal `hcomp` CELL (CHM's "hcomp-as-constructor" — when a
+-- box has no structural former to land on, the composite IS a canonical inhabitant). Earlier
+-- chapters made `transp` compute over the first two along a varying parameter line (ch-varyparam:
+-- poles re-index, the meridian transports its argument). This chapter closes the THIRD: `transp`
+-- over a HIT line COMMUTES with a formal hcomp cell. So every closed `El (D p)` term's transport
+-- computes — the suspension's (and the fibrant quotient's) Kan structure is total.
+
+-- WHY transport commutes with the cell, exactly (it does NOT for an i-varying system): the formal
+-- cell `hcomp (Susp (Afam i0)) φ u u0` has a system `u : I -> holds φ -> El (Susp (Afam i0))`
+-- indexed by the hcomp's OWN filling dimension, never by the transport dimension i. So no forward
+-- fill of the walls is needed — each wall slice and the cap transport along the full line
+-- independently, and the box reassembles at the i1 type:
+--
+--   transp (λi. Susp (Afam i)) (hcomp (Susp (Afam i0)) φ u u0)
+--     ≡ hcomp (Susp (Afam i1)) φ (λj h. transp (λi. Susp (Afam i)) (u j h))
+--                                 (transp (λi. Susp (Afam i)) u0)
+--
+-- It holds BY REFL — the left side reduces to the right on the nose (transpHitHcompCell).
+suspTranspCell : (Afam : I -> UF) -> (phi : F)
+   -> (u : I -> holds phi -> El (Susp (Afam i0))) -> (u0 : El (Susp (Afam i0)))
+   -> Eq (El (Susp (Afam i1)))
+        (transp (fn (i : I) is Susp (Afam i) end) (hcomp (Susp (Afam i0)) phi u u0))
+        (hcomp (Susp (Afam i1)) phi
+           (fn (j : I) (h : holds phi) is
+              transp (fn (i : I) is Susp (Afam i) end) (u j h) end)
+           (transp (fn (i : I) is Susp (Afam i) end) u0)) is
+  fn (Afam : I -> UF) (phi : F)
+     (u : I -> holds phi -> El (Susp (Afam i0))) (u0 : El (Susp (Afam i0))) is
+    refl
+  end
+end
+
+-- The fibrant QUOTIENT is the dual: a `Quotient`-as-HIT cell transports the same way, so the
+-- effective, path-respecting quotient (the one the strict `Quot` cannot give) has total transport.
+quotTranspCell : (Afam : I -> UF) -> (Rfam : (i : I) -> El (Afam i) -> El (Afam i) -> UF)
+   -> (phi : F)
+   -> (u : I -> holds phi -> El (Quotient (Afam i0) (Rfam i0)))
+   -> (u0 : El (Quotient (Afam i0) (Rfam i0)))
+   -> Eq (El (Quotient (Afam i1) (Rfam i1)))
+        (transp (fn (i : I) is Quotient (Afam i) (Rfam i) end)
+           (hcomp (Quotient (Afam i0) (Rfam i0)) phi u u0))
+        (hcomp (Quotient (Afam i1) (Rfam i1)) phi
+           (fn (j : I) (h : holds phi) is
+              transp (fn (i : I) is Quotient (Afam i) (Rfam i) end) (u j h) end)
+           (transp (fn (i : I) is Quotient (Afam i) (Rfam i) end) u0)) is
+  fn (Afam : I -> UF) (Rfam : (i : I) -> El (Afam i) -> El (Afam i) -> UF) (phi : F)
+     (u : I -> holds phi -> El (Quotient (Afam i0) (Rfam i0)))
+     (u0 : El (Quotient (Afam i0) (Rfam i0))) is
+    refl
+  end
+end
+
+-- CONFLUENCE: the transported cell is itself a canonical generator at the i1 type, so the
+-- recursor commutes with it (the hcomp branch of `suspElim`), pushing the composition into the
+-- motive `P`. Eliminating the transported cell therefore computes — the new transport rule and
+-- the eliminator agree:
+--
+--   suspElim (Afam i1) P n s m (transp (λi. Susp (Afam i)) (hcomp (Susp (Afam i0)) φ u u0))
+--     ≡ hcomp P φ (λj h. suspElim … (transp … (u j h))) (suspElim … (transp … u0))
+suspElimTranspCell : (Afam : I -> UF) -> (P : UF) -> (phi : F)
+   -> (n : El P) -> (s : El P) -> (m : (a : El (Afam i1)) -> El (pathF P n s))
+   -> (u : I -> holds phi -> El (Susp (Afam i0))) -> (u0 : El (Susp (Afam i0)))
+   -> Eq (El P)
+        (suspElim (Afam i1) P n s m
+           (transp (fn (i : I) is Susp (Afam i) end) (hcomp (Susp (Afam i0)) phi u u0)))
+        (hcomp P phi
+           (fn (j : I) (h : holds phi) is
+              suspElim (Afam i1) P n s m
+                (transp (fn (i : I) is Susp (Afam i) end) (u j h)) end)
+           (suspElim (Afam i1) P n s m
+              (transp (fn (i : I) is Susp (Afam i) end) u0))) is
+  fn (Afam : I -> UF) (P : UF) (phi : F) (n : El P) (s : El P)
+     (m : (a : El (Afam i1)) -> El (pathF P n s))
+     (u : I -> holds phi -> El (Susp (Afam i0))) (u0 : El (Susp (Afam i0))) is
+    refl
+  end
+end

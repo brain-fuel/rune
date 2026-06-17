@@ -34,6 +34,15 @@ const (
 	tRefl    // refl (the reflexivity proof)
 	tCast    // cast (transport along a type equality)
 	tSubst   // subst (Leibniz transport along an equality; Phase 4)
+	tSig     // Sig  (the dependent-pair type former; C1/R-SUM)
+	tPair    // pair (the dependent-pair intro)
+	tFst     // fst  (first projection)
+	tSnd     // snd  (second projection)
+	tProj    // .1 / .2 (postfix Σ projection; text is "1" or "2")
+	tInstance // instance (a typeclass instance declaration; C2)
+	tModule   // module (a namespace block; C6)
+	tPartial  // partial (a general-recursive definition; C4)
+	tForeign  // foreign (a typed FFI axiom; R-FFI / B4)
 	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
 	tOp      // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
 	tBuiltin // builtin (a builtin-binding declaration: builtin nat Nat zero succ)
@@ -188,6 +197,10 @@ func lex(src string) ([]token, error) {
 		case r == '-' && i+1 < len(rs) && rs[i+1] == '>':
 			toks = append(toks, token{tArrow, "->", i})
 			i += 2
+		case r == '.' && i+1 < len(rs) && (rs[i+1] == '1' || rs[i+1] == '2'):
+			// Postfix Σ projection .1 / .2 (one token; binds tighter than app).
+			toks = append(toks, token{tProj, string(rs[i+1]), i})
+			i += 2
 		case r == '/' && i+1 < len(rs) && rs[i+1] == '/':
 			// Longest match: '//' is the flooring quotient, one token
 			// (ref_docs/rune-numeric-tower.md; GRAMMAR §2).
@@ -208,6 +221,15 @@ func lex(src string) ([]token, error) {
 			start := i
 			for i < len(rs) && isIdentCont(rs[i]) {
 				i++
+			}
+			// Absorb qualified-name segments `.seg` (a dot followed by an
+			// identifier, NOT a digit — `.1`/`.2` stay postfix projections). So
+			// `Mod.fn` is one identifier resolved via the (prefixed) ref table.
+			for i+1 < len(rs) && rs[i] == '.' && isIdentStart(rs[i+1]) {
+				i++ // the dot
+				for i < len(rs) && isIdentCont(rs[i]) {
+					i++
+				}
 			}
 			toks = append(toks, keyword(string(rs[start:i]), start))
 		default:
@@ -264,6 +286,22 @@ func keyword(word string, pos int) token {
 		return token{tCast, word, pos}
 	case "subst":
 		return token{tSubst, word, pos}
+	case "Sig":
+		return token{tSig, word, pos}
+	case "Pair":
+		return token{tPair, word, pos}
+	case "Fst":
+		return token{tFst, word, pos}
+	case "Snd":
+		return token{tSnd, word, pos}
+	case "instance":
+		return token{tInstance, word, pos}
+	case "module":
+		return token{tModule, word, pos}
+	case "partial":
+		return token{tPartial, word, pos}
+	case "foreign":
+		return token{tForeign, word, pos}
 	default:
 		return token{tIdent, word, pos}
 	}

@@ -1,0 +1,66 @@
+-- Chapter 56 — Induction for the parameterised HITs (§F / R-HIT / A9).
+-- ch55 gave the circle its induction principle; here the suspension and the
+-- fibrant quotient get theirs. Each eliminates into a DEPENDENT motive
+-- P : El (HIT) -> UF, with the path constructor's method a dependent path (pathP)
+-- over the motive transported along that generator. These are the principles you
+-- prove sphere/quotient theorems with.
+
+-- Suspension induction. The meridian method pm is, per input a, a dependent path
+-- over λi. P (merid@i) from the north image to the south image.
+suspInduction : (A : UF) -> (P : El (Susp A) -> UF)
+   -> (pn : El (P (north A))) -> (ps : El (P (south A)))
+   -> (pm : (a : El A)
+         -> El (pathP (fn (i : I) is P (papp (Susp A) (north A) (south A) (merid A a) i) end) pn ps))
+   -> (x : El (Susp A)) -> El (P x) is
+  fn (A : UF) (P : El (Susp A) -> UF)
+     (pn : El (P (north A))) (ps : El (P (south A)))
+     (pm : (a : El A)
+        -> El (pathP (fn (i : I) is P (papp (Susp A) (north A) (south A) (merid A a) i) end) pn ps)) is
+    suspInd A P pn ps pm
+  end
+end
+
+-- Computes on the poles: suspInd … north ~> pn, by refl.
+suspIndNorth : (A : UF) -> (P : El (Susp A) -> UF)
+   -> (pn : El (P (north A))) -> (ps : El (P (south A)))
+   -> (pm : (a : El A)
+         -> El (pathP (fn (i : I) is P (papp (Susp A) (north A) (south A) (merid A a) i) end) pn ps))
+   -> Eq (El (P (north A))) (suspInd A P pn ps pm (north A)) pn is
+  fn (A : UF) (P : El (Susp A) -> UF)
+     (pn : El (P (north A))) (ps : El (P (south A)))
+     (pm : (a : El A)
+        -> El (pathP (fn (i : I) is P (papp (Susp A) (north A) (south A) (merid A a) i) end) pn ps)) is
+    refl pn
+  end
+end
+
+-- Fibrant-quotient induction. The relation method rel is, per witness r : R a b,
+-- a dependent path over λi. P (qrel@i) from the f-image of a to that of b — the
+-- proof that the motive respects the relation.
+quotInduction : (A : UF) -> (R : El A -> El A -> UF) -> (P : El (Quotient A R) -> UF)
+   -> (f : (a : El A) -> El (P (qinc A R a)))
+   -> (rel : (a : El A) -> (b : El A) -> (r : El (R a b))
+         -> El (pathP (fn (i : I) is P (papp (Quotient A R) (qinc A R a) (qinc A R b) (qrel A R a b r) i) end) (f a) (f b)))
+   -> (x : El (Quotient A R)) -> El (P x) is
+  fn (A : UF) (R : El A -> El A -> UF) (P : El (Quotient A R) -> UF)
+     (f : (a : El A) -> El (P (qinc A R a)))
+     (rel : (a : El A) -> (b : El A) -> (r : El (R a b))
+        -> El (pathP (fn (i : I) is P (papp (Quotient A R) (qinc A R a) (qinc A R b) (qrel A R a b r) i) end) (f a) (f b))) is
+    quotInd A R P f rel
+  end
+end
+
+-- Computes on points: quotInd … (qinc a) ~> f a, by refl.
+quotIndInc : (A : UF) -> (R : El A -> El A -> UF) -> (P : El (Quotient A R) -> UF)
+   -> (f : (a : El A) -> El (P (qinc A R a)))
+   -> (rel : (a : El A) -> (b : El A) -> (r : El (R a b))
+         -> El (pathP (fn (i : I) is P (papp (Quotient A R) (qinc A R a) (qinc A R b) (qrel A R a b r) i) end) (f a) (f b)))
+   -> (a : El A) -> Eq (El (P (qinc A R a))) (quotInd A R P f rel (qinc A R a)) (f a) is
+  fn (A : UF) (R : El A -> El A -> UF) (P : El (Quotient A R) -> UF)
+     (f : (a : El A) -> El (P (qinc A R a)))
+     (rel : (a : El A) -> (b : El A) -> (r : El (R a b))
+        -> El (pathP (fn (i : I) is P (papp (Quotient A R) (qinc A R a) (qinc A R b) (qrel A R a b r) i) end) (f a) (f b)))
+     (a : El A) is
+    refl (f a)
+  end
+end

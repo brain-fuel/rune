@@ -32,7 +32,26 @@ type Elaborator struct {
 	M        *core.Machine
 	Refs     map[string]core.Hash
 	RefNames map[core.Hash]string
-	metas    metaState // Phase 2: this run's metavariables
+	// Num lowers numeral literals (ENum) to a compressed core numeral (NatLit)
+	// against the `builtin nat` binding. The session fills it from its registered
+	// bindings; the zero value means no numerals are accepted.
+	Num   surface.NumConfig
+	metas metaState // Phase 2: this run's metavariables
+
+	// SelfHash / SelfType support a `partial` recursive definition (C4): while
+	// its body is elaborated, the definition's own name resolves to SelfHash and
+	// has type SelfType (a neutral self-reference; the real content hash replaces
+	// SelfHash after the body is hashed). Zero SelfType disables it.
+	SelfHash core.Hash
+	SelfType core.Tm
+
+	// InstanceFor resolves a typeclass dictionary by implicit search (C2): given
+	// a class type former's hash and the head hash of its last argument, it
+	// returns the registered instance's reference term. nil disables search (an
+	// implicit then always inserts a metavariable, the Phase-2 behaviour). The
+	// inserted term is type-checked by the kernel, so a wrong instance is an
+	// elaboration error, never an unsound proof.
+	InstanceFor func(class, arg core.Hash) (core.Tm, bool)
 
 	// Phase 5 usage accounting (the quantity stratum's checker): the current
 	// multiplicity (QZero inside types and proofs, QOne otherwise), and the
@@ -122,6 +141,11 @@ func (e *Elaborator) prettyTm(t core.Tm) string {
 // type is pure (no dependency logged); evaluating it can only force inside the
 // type, which is in-band.
 func (e *Elaborator) refType(h core.Hash) (core.Val, error) {
+	// A `partial` definition's self-reference (C4): its type is held on the
+	// elaborator while its body is checked, before its real hash exists.
+	if e.SelfType != nil && h == e.SelfHash {
+		return e.M.Eval(nil, e.SelfType), nil
+	}
 	ty, ok := e.M.G.TypeOf(h)
 	if !ok || ty == nil {
 		name := e.RefNames[h]

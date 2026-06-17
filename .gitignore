@@ -36,3 +36,6 @@ go.work.sum
 /dist/
 *.fail
 /harness/testdata/rapid/
+
+# Ralph-loop / Claude Code session state
+.claude/

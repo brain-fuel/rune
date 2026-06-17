@@ -51,6 +51,64 @@ type Store struct {
 	quot *quotEntry
 	// The fibrant builtin group (fib.go), once registered.
 	fib *fibEntry
+	// The interval builtin group (interval.go, §F phase 1), once registered.
+	iv *intervalEntry
+	// The cubical path builtin group (path.go, §F phase 2), once registered.
+	pa *pathEntry
+	// The face-lattice builtin group (face.go, §F phase 3a), once registered.
+	fc *faceEntry
+	// The cofibration-validity group (sys.go, §F phase 3b), once registered.
+	sy *sysEntry
+	// The Kan-operation group (kan.go, §F phase 3c+), once registered.
+	kn *kanEntry
+	// The inner Sigma group (sigma.go, §F / R-SIGMA / A5), once registered.
+	si *sigmaEntry
+	// The coinductive group (coind.go, R-COIND / C5a), once registered.
+	cn *coindEntry
+	// The IO/effects group (io.go, R-EFFECT / C3), once registered.
+	io *ioEntry
+	// The equivalence group (equiv.go, §F / R-GLUE / A6), once registered.
+	ev *equivEntry
+	// The inner Glue group (glue.go, §F / R-GLUE / A6), once registered.
+	gl *glueEntry
+	// The face-split group (fsplit.go, §F / R-BOX / A3), once registered.
+	fs *fsplitEntry
+	// The UF-valued face-split group (sysu.go, §F / R-BOX / A8), once registered.
+	syu *sysUEntry
+	// The dependent face-split group (fsplitd.go, §F / R-BOX / A8), once registered.
+	sd *splitDEntry
+	// The ∀-cofibration group (forall.go, §F / R-GLUE / A6), once registered.
+	fa *forallEntry
+	// The type-level path-abstraction group (pathu.go, §F / R-UA / A7).
+	pu *pabsUEntry
+	// The type-level path-application group (pappu.go, §F / R-UA / A7).
+	ppu *pappUEntry
+	// The guarded-recursion modality group (guard.go, R-COIND / C5b).
+	gd *guardEntry
+	// The inner-HIT kit — the circle (hit.go, §F / R-HIT / A9), once registered.
+	hi *hitEntry
+	// The suspension HIT (susp.go, §F / R-HIT / A9), once registered.
+	su *suspEntry
+	// The fibrant quotient HIT (quotient.go, §F / R-HIT / A9), once registered.
+	qh *quotHitEntry
+	// The dependent-path group (pathp.go, §F / R-HIT / A9), once registered.
+	pp *pathPEntry
+	// The set-truncation HIT (trunc.go, §F / R-HIT / A9 dim-2), once registered.
+	tr *truncEntry
+	// The circle's dependent eliminator (circind.go, §F / R-HIT / A9).
+	ci *circIndEntry
+	// The suspension's dependent eliminator (suspind.go, §F / R-HIT / A9).
+	sui *suspIndEntry
+	// The fibrant quotient's dependent eliminator (quotind.go, §F / R-HIT / A9).
+	qui *quotIndEntry
+	// partial marks general-recursive `partial` definitions (C4): their heads are
+	// permanently neutral in eval/conversion (the firewall), bodies reachable
+	// only through codegen's direct Unfold.
+	partial map[core.Hash]bool
+	// assumed marks `foreign` axioms (R-FFI / B4): bodiless typed constants whose
+	// meaning is supplied by the host. They are trusted, not proven — `rune
+	// assumptions` reports them.
+	assumed map[core.Hash]bool
 }
 
 // New returns an empty store.
@@ -63,8 +121,60 @@ func New() *Store {
 		dataByHash: map[core.Hash]dataEntry{},
 		ctorRole:   map[core.Hash]ctorRole{},
 		elimRole:   map[core.Hash]core.Hash{},
+		partial:    map[core.Hash]bool{},
+		assumed:    map[core.Hash]bool{},
 	}
 }
+
+// AddForeign stores a `foreign` axiom (R-FFI / B4): a bodiless definition whose
+// public type is its contract, bound to name and recorded as an assumption. It
+// has no body, so it is a permanently-neutral head in eval/conversion; codegen
+// emits a reference to a host-provided global of the same name.
+func (s *Store) AddForeign(name string, ty core.Tm) core.Hash {
+	// A foreign axiom is NOMINAL (its meaning is the host function `name`), so
+	// its identity is name + type — like a builtin group, not content-hashed
+	// over a (nonexistent) body.
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'F'})
+	g.Write([]byte(name))
+	th := core.HashTerm(ty)
+	g.Write(th[:])
+	var h core.Hash
+	copy(h[:], g.Sum(nil))
+	s.defs[h] = Def{Type: ty}
+	s.names[name] = h
+	s.assumed[h] = true
+	return h
+}
+
+// IsAssumed reports whether a hash is a trusted `foreign` axiom.
+func (s *Store) IsAssumed(h core.Hash) bool { return s.assumed[h] }
+
+// Assumptions returns the hashes of all registered `foreign` axioms.
+func (s *Store) Assumptions() []core.Hash {
+	out := make([]core.Hash, 0, len(s.assumed))
+	for h := range s.assumed {
+		out = append(out, h)
+	}
+	return out
+}
+
+// AddPartial stores a general-recursive `partial` definition (C4). The body is
+// elaborated with the self-reference standing at Placeholder(0); this substitutes
+// that placeholder with the definition's own content hash (computed over the
+// placeholder body, exactly as datatype groups self-reference) and marks the
+// hash partial, so the evaluator keeps its head permanently neutral.
+func (s *Store) AddPartial(name string, ty, body core.Tm) core.Hash {
+	h := HashDef(ty, body)
+	realBody := replaceRef(body, Placeholder(0), h)
+	s.defs[h] = NewDef(ty, realBody)
+	s.names[name] = h
+	s.partial[h] = true
+	return h
+}
+
+// IsPartial implements core.PartialInfo.
+func (s *Store) IsPartial(h core.Hash) bool { return s.partial[h] }
 
 // HashDef computes the content hash a definition (ty, body) would be stored
 // under, without storing it. Identity is syntax (core.HashTerm); never modulo

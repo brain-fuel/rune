@@ -1,0 +1,220 @@
+-- Chapter 81 — COMMUTATIVITY of Nat multiplication (D1, the proven tier): `mulComm`,
+-- the last commutative-semiring law not yet discharged. ch63 proved (add, 0) a
+-- commutative monoid (addAssoc/addComm), (mul, 1) the multiplicative structure
+-- (mulZeroR), and right-distributivity (mulDistR); the missing law is `mul m n =
+-- mul n m`. With it, (Nat, +, *, 0, 1) is a fully PROVEN commutative semiring — every
+-- ring/semiring law machine-checked, not assumed, so the typeclass `Ring`/`CommRing`
+-- instance and the algebra D2 (polynomials, matrices) ride on a verified substrate.
+--
+-- `mul` recurses on its FIRST argument: `mul zero n ~> zero`, `mul (succ k) n ~>
+-- add n (mul k n)`. So `mulComm` cannot be refl — the two sides recurse on different
+-- arguments — and the proof, like `addComm` (ch63), needs a successor-shift helper:
+-- `mulSuccR : mul n (succ m) = add (mul n m) n`, the multiplicative analogue of
+-- `addSuccR`. Everything is induction with `subst` (Leibniz transport), the ch63 idiom.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+mul : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add n ih end) m
+  end
+end
+
+-- The addition laws (ch63), needed to reassociate the multiplicative successor-shift
+-- and to flip the final commutator. Reproduced verbatim so the chapter is self-contained.
+
+addZeroR : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+         subst Nat (add k zero) k ih
+           (fn (z : Nat) is Eq Nat (add (succ k) zero) (succ z) end)
+           (refl (add (succ k) zero))
+       end)
+      n
+  end
+end
+
+addSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (add n (succ m)) (succ (add n m)) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ m)) (succ (add x m)) end)
+      (refl (succ m))
+      (fn (k : Nat) (ih : Eq Nat (add k (succ m)) (succ (add k m))) is
+         subst Nat (add k (succ m)) (succ (add k m)) ih
+           (fn (z : Nat) is Eq Nat (add (succ k) (succ m)) (succ z) end)
+           (refl (add (succ k) (succ m)))
+       end)
+      n
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (add (add a b) c) (add a (add b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add (add x b) c) (add x (add b c)) end)
+      (refl (add b c))
+      (fn (k : Nat) (ih : Eq Nat (add (add k b) c) (add k (add b c))) is
+         subst Nat (add (add k b) c) (add k (add b c)) ih
+           (fn (z : Nat) is Eq Nat (succ (add (add k b) c)) (succ z) end)
+           (refl (succ (add (add k b) c)))
+       end)
+      a
+  end
+end
+
+addComm : (n : Nat) -> (m : Nat) -> Eq Nat (add n m) (add m n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x m) (add m x) end)
+      (subst Nat (add m zero) m (addZeroR m)
+         (fn (z : Nat) is Eq Nat z (add m zero) end)
+         (refl (add m zero)))
+      (fn (k : Nat) (ih : Eq Nat (add k m) (add m k)) is
+         subst Nat (succ (add m k)) (add m (succ k))
+           (subst Nat (add m (succ k)) (succ (add m k)) (addSuccR m k)
+              (fn (z : Nat) is Eq Nat z (add m (succ k)) end)
+              (refl (add m (succ k))))
+           (fn (z : Nat) is Eq Nat (succ (add k m)) z end)
+           (subst Nat (add k m) (add m k) ih
+              (fn (z : Nat) is Eq Nat (succ (add k m)) (succ z) end)
+              (refl (succ (add k m))))
+       end)
+      n
+  end
+end
+
+-- mul n zero = zero (ch63), by induction on n: base reduces to zero (refl); the succ
+-- step `mul (succ k) zero = add zero (mul k zero) ~> mul k zero` collapses to the IH.
+mulZeroR : (n : Nat) -> Eq Nat (mul n zero) zero is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul x zero) zero end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k zero) zero) is ih end)
+      n
+  end
+end
+
+-- MULTIPLICATIVE SUCCESSOR-SHIFT: mul n (succ m) = add (mul n m) n, by induction on n.
+-- This is the workhorse that makes `mulComm` go through, the multiplicative analogue of
+-- `addSuccR`.
+--   n = zero : mul zero (succ m) ~> zero, and add (mul zero m) zero ~> add zero zero ~>
+--              zero — both reduce to zero, refl.
+--   n = succ k, IH: mul k (succ m) = add (mul k m) k. The LHS reduces to
+--              succ (add m (mul k (succ m))); rewriting the inner mul by the IH gives
+--              succ (add m (add (mul k m) k)). The RHS reduces (addSuccR + addAssoc) to
+--              the SAME succ (add m (add (mul k m) k)); we transport the goal there.
+mulSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (mul n (succ m)) (add (mul n m) n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul x (succ m)) (add (mul x m) x) end)
+      -- base: both sides ~> zero.
+      (refl zero)
+      -- step: assemble succ (add m (add (mul k m) k)) on both sides.
+      (fn (k : Nat) (ih : Eq Nat (mul k (succ m)) (add (mul k m) k)) is
+         -- First bring the RHS, add (add m (mul k m)) (succ k), to the normal form
+         -- succ (add m (add (mul k m) k)): addSuccR shifts the succ out, addAssoc
+         -- reassociates. We build the proof that LHS equals that normal form, then
+         -- transport across the RHS-normalisation.
+         subst Nat
+           (succ (add (add m (mul k m)) k))
+           (add (add m (mul k m)) (succ k))
+           -- succ (add (add m (mul k m)) k) = add (add m (mul k m)) (succ k), i.e.
+           -- the symmetric form of addSuccR (add m (mul k m)) k.
+           (subst Nat
+              (add (add m (mul k m)) (succ k))
+              (succ (add (add m (mul k m)) k))
+              (addSuccR (add m (mul k m)) k)
+              (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) (succ k)) end)
+              (refl (add (add m (mul k m)) (succ k))))
+           (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) z end)
+           -- Goal now: mul (succ k) (succ m) = succ (add (add m (mul k m)) k).
+           -- LHS reduces to succ (add m (mul k (succ m))); rewrite the inner mul by IH
+           -- to succ (add m (add (mul k m) k)); reassociate by addAssoc to the target.
+           (subst Nat
+              (add m (add (mul k m) k))
+              (add (add m (mul k m)) k)
+              -- add m (add (mul k m) k) = add (add m (mul k m)) k : sym of addAssoc.
+              (subst Nat
+                 (add (add m (mul k m)) k)
+                 (add m (add (mul k m) k))
+                 (addAssoc m (mul k m) k)
+                 (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) k) end)
+                 (refl (add (add m (mul k m)) k)))
+              (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ z) end)
+              -- Goal: mul (succ k) (succ m) = succ (add m (add (mul k m) k)).
+              -- LHS ~> succ (add m (mul k (succ m))); rewrite mul k (succ m) by IH.
+              (subst Nat
+                 (mul k (succ m))
+                 (add (mul k m) k)
+                 ih
+                 (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ (add m z)) end)
+                 (refl (mul (succ k) (succ m)))))
+       end)
+      n
+  end
+end
+
+-- COMMUTATIVITY: mul m n = mul n m, by induction on m. Base flips mulZeroR; the succ
+-- step rewrites by the IH and closes with mulSuccR and addComm.
+--   m = zero : mul zero n ~> zero, RHS mul n zero; need zero = mul n zero (sym mulZeroR).
+--   m = succ k, IH: mul k n = mul n k. LHS mul (succ k) n ~> add n (mul k n); rewrite the
+--              inner mul by the IH to add n (mul n k). RHS mul n (succ k) = add (mul n k) n
+--              by mulSuccR. So the goal is add n (mul n k) = add (mul n k) n — addComm.
+mulComm : (m : Nat) -> (n : Nat) -> Eq Nat (mul m n) (mul n m) is
+  fn (m : Nat) (n : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul x n) (mul n x) end)
+      -- base: mul zero n ~> zero; need zero = mul n zero, the sym of mulZeroR n.
+      (subst Nat (mul n zero) zero (mulZeroR n)
+         (fn (z : Nat) is Eq Nat z (mul n zero) end)
+         (refl (mul n zero)))
+      -- step.
+      (fn (k : Nat) (ih : Eq Nat (mul k n) (mul n k)) is
+         -- Transport the goal across mulSuccR (so the RHS becomes add (mul n k) n),
+         -- then the remaining goal add n (mul k n) = add (mul n k) n closes by
+         -- rewriting the inner mul by the IH and applying addComm.
+         subst Nat
+           (add (mul n k) n)
+           (mul n (succ k))
+           -- add (mul n k) n = mul n (succ k) : sym of mulSuccR n k.
+           (subst Nat
+              (mul n (succ k))
+              (add (mul n k) n)
+              (mulSuccR n k)
+              (fn (z : Nat) is Eq Nat z (mul n (succ k)) end)
+              (refl (mul n (succ k))))
+           (fn (z : Nat) is Eq Nat (mul (succ k) n) z end)
+           -- Goal: mul (succ k) n = add (mul n k) n. LHS ~> add n (mul k n); rewrite the
+           -- inner mul by the IH to add n (mul n k), then addComm n (mul n k). We subst
+           -- from (mul n k) to (mul k n) along the SYM of the IH, so the supplied proof
+           -- sits at (mul n k) where addComm provides it.
+           (subst Nat
+              (mul n k)
+              (mul k n)
+              -- mul n k = mul k n : sym of ih.
+              (subst Nat (mul k n) (mul n k) ih
+                 (fn (z : Nat) is Eq Nat z (mul k n) end)
+                 (refl (mul k n)))
+              (fn (z : Nat) is Eq Nat (add n z) (add (mul n k) n) end)
+              -- Goal at (mul n k): add n (mul n k) = add (mul n k) n — exactly addComm.
+              (addComm n (mul n k)))
+       end)
+      m
+  end
+end
+
+-- SANITY: 2 * 3 = 3 * 2 computes, and the certificate normalises to the canonical
+-- refl on the common value (both sides ~> six = succ^6 zero).
+twoTimesThree : Eq Nat (mul (succ (succ zero)) (succ (succ (succ zero))))
+                       (mul (succ (succ (succ zero))) (succ (succ zero))) is
+  mulComm (succ (succ zero)) (succ (succ (succ zero)))
+end

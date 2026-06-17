@@ -287,6 +287,45 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		sb.WriteString(" : ")
 		p.print(sb, x.Ty, names, precLow)
 		sb.WriteByte(')')
+	case core.Sig:
+		p.wrap(sb, prec, precApp, func() {
+			n := fresh(x.Cod.Name, names)
+			sb.WriteString("Sig ")
+			p.print(sb, x.Dom, names, precAtom)
+			sb.WriteString(" (fn (")
+			sb.WriteString(n)
+			sb.WriteString(" : U) is ")
+			p.print(sb, x.Cod.Body, prepend(n, names), precLow)
+			sb.WriteString(" end)")
+		})
+	case core.Pair:
+		p.wrap(sb, prec, precApp, func() {
+			n := fresh(x.Cod.Name, names)
+			sb.WriteString("Pair ")
+			p.print(sb, x.Dom, names, precAtom)
+			sb.WriteString(" (fn (")
+			sb.WriteString(n)
+			sb.WriteString(" : U) is ")
+			p.print(sb, x.Cod.Body, prepend(n, names), precLow)
+			sb.WriteString(" end) ")
+			p.print(sb, x.A, names, precAtom)
+			sb.WriteByte(' ')
+			p.print(sb, x.B, names, precAtom)
+		})
+	case core.Fst:
+		p.wrap(sb, prec, precApp, func() {
+			sb.WriteString("Fst ")
+			p.print(sb, x.P, names, precAtom)
+		})
+	case core.Snd:
+		p.wrap(sb, prec, precApp, func() {
+			sb.WriteString("Snd ")
+			p.print(sb, x.P, names, precAtom)
+		})
+	case core.NatLit:
+		// A compressed numeral folds back to its decimal digit on output
+		// (C7 / R-NUM, Decision 3) — inputs and outputs are both ordinary digits.
+		sb.WriteString(x.N.String())
 	default:
 		sb.WriteString("?")
 	}

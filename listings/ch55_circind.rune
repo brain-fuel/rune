@@ -1,0 +1,47 @@
+-- Chapter 55 — Dependent paths and circle INDUCTION (§F / R-HIT / A9).
+-- circElim (ch51) maps the circle into a FIXED type — recursion. To PROVE things
+-- about the circle you need INDUCTION: eliminate into a dependent motive
+-- P : El Circle -> UF, giving a point in `P base` and a loop in the fiber over
+-- the loop. Because the motive varies along the loop, the loop case is a
+-- DEPENDENT path `pathP`: a path whose two endpoints live in different fibers.
+
+-- A dependent path over a type-line A : I -> UF connects x : El (A i0) to
+-- y : El (A i1). pabsP abstracts one; pappP applies it, with β and boundary.
+pappPBeta : (A : I -> UF) -> (f : (i : I) -> El (A i)) -> (i : I)
+   -> Eq (El (A i)) (pappP A (f i0) (f i1) (pabsP A f) i) (f i) is
+  fn (A : I -> UF) (f : (i : I) -> El (A i)) (i : I) is
+    refl (f i)
+  end
+end
+
+-- The induction principle for the circle. The loop method l is a dependent path
+-- over `λi. P (loop@i)` from b to b — at i0 and i1 the line is `P base`, so both
+-- endpoints are the chosen `b : El (P base)`.
+circInduction : (P : El Circle -> UF) -> (b : El (P base))
+   -> (l : El (pathP (fn (i : I) is P (papp Circle base base loop i) end) b b))
+   -> (x : El Circle) -> El (P x) is
+  fn (P : El Circle -> UF) (b : El (P base))
+     (l : El (pathP (fn (i : I) is P (papp Circle base base loop i) end) b b)) is
+    circInd P b l
+  end
+end
+
+-- Computes on the point: circInd P b l base ~> b, witnessed by refl.
+circIndBase : (P : El Circle -> UF) -> (b : El (P base))
+   -> (l : El (pathP (fn (i : I) is P (papp Circle base base loop i) end) b b))
+   -> Eq (El (P base)) (circInd P b l base) b is
+  fn (P : El Circle -> UF) (b : El (P base))
+     (l : El (pathP (fn (i : I) is P (papp Circle base base loop i) end) b b)) is
+    refl b
+  end
+end
+
+-- A constant family recovers the recursor's behaviour: inducting with a motive
+-- that ignores its argument is mapping into a fixed type. Here every point of the
+-- circle lands in P0, the loop sent to a reflexive dependent path.
+constInduction : (P0 : UF) -> (b : El P0) -> El Circle -> El P0 is
+  fn (P0 : UF) (b : El P0) is
+    circInd (fn (z : El Circle) is P0 end) b
+      (pabsP (fn (i : I) is P0 end) (fn (i : I) is b end))
+  end
+end

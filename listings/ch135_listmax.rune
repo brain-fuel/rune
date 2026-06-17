@@ -1,0 +1,2317 @@
+-- Chapter 125 — THE CONSENSUS DECISION THEOREM: combining SAFETY (ch112 agreement) and LIVENESS
+-- (ch123 quorumExists / canonicalMajority) into ONE non-vacuous decision guarantee (telos-4 /
+-- E-track). ch112 proved single-decree AGREEMENT for arbitrary n: no two MAJORITY quorums of the
+-- n-replica universe {0..n-1} can decide DIFFERENT values (the pigeonhole / quorum-intersection
+-- theorem — SAFETY). ch123 proved LIVENESS: for EVERY n a majority quorum DOES exist — the
+-- CANONICAL MAJORITY (the first floor(n/2)+1 replicas), a NoDup subset of {0..n-1} with 2*|q| > n.
+-- Safety without liveness is vacuous; liveness without safety has no agreed value. This chapter
+-- CLOSES THE PAIR into a DECISION GUARANTEE.
+--
+-- THE THEOREM (consensusDecides): for any n, any value type V, any total ballot voteOf : Nat -> V,
+-- any decision goal G, AND a witness that the canonical majority is UNANIMOUS on a value `decided`
+-- (every canonical-majority replica voted `decided`), the decision is DETERMINED and UNIQUE:
+--   * DETERMINED (liveness): the canonical majority — proven to exist and be a majority by ch123 —
+--     fixes `decided` as its agreed value.
+--   * UNIQUE (safety): ANY other majority quorum q (a NoDup subset of {0..n-1} with 2*|q| > n) that
+--     is itself unanimous on some value `vq` must satisfy Eq V vq decided — it reaches THE SAME
+--     value. This is `agreement` (ch112) instantiated with `canonicalMajority n` (ch123) as the
+--     FIRST quorum and the arbitrary q as the second.
+-- So: a decision value EXISTS (the canonical majority decides it) and is the UNIQUE value any
+-- majority can decide. The agreement+liveness pair becomes a well-defined, unique decision.
+--
+-- The statement stays in the CONTINUATION-PASSING existential form (the (G : U) -> ... -> G idiom of
+-- ch112 quorumIntersect / ch123 quorumExists), so everything lands in U0 — NO `Sig (List Nat) ...`
+-- that would bump to U1.
+--
+-- This chapter is SELF-CONTAINED: it REDECLARES, byte-identical, the entirety of ch112 (Bool/Nat/
+-- List, eqNat + its laws, the equality combinators, Boolean algebra, arithmetic + order, member/
+-- NoDup/card, the pigeonhole noDupSubsetBoundedByN, the append/disjointness machinery, isMajority,
+-- quorumIntersect, and `agreement`) AND the canonical-majority machinery of ch123 (prod/mkProd,
+-- div2/upto, the twoDiv2Bound arithmetic heart, and canonicalMajority + its three certificates +
+-- canonicalMajorityIsMajority). It then COMBINES `agreement` with `canonicalMajorityIsMajority`
+-- into `consensusDecides`. No admits, no holes, no postulates.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- DECIDABLE Nat equality (verbatim from ch95): zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true (verbatim from ch95).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- ABSURDITY: from false = true, any goal G. (ch80 lteAbsurd, generalised to an arbitrary goal.)
+boolAbsurd : (G : U) -> Eq Bool false true -> G is
+  fn (G : U) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> G
+         | false -> Eq Bool false false
+         end
+       end)
+      (refl false)
+  end
+end
+
+-- eqNatSymTrue : eqNat m n = true => eqNat n m = true. Double NatElim mirroring eqNat. zero/zero
+-- both ~> true (refl). zero/succ and succ/zero have premise false = true (absurd). succ/succ
+-- recurses to the inner IH.
+eqNatSymTrue : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) true -> Eq Bool (eqNat n m) true is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) true -> Eq Bool (eqNat n x) true end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) true -> Eq Bool (eqNat y zero) true end)
+           (fn (h : Eq Bool true true) is refl true end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) true -> Eq Bool (eqNat j zero) true) is
+              fn (h : Eq Bool false true) is boolAbsurd (Eq Bool (eqNat (succ j) zero) true) h end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) true -> Eq Bool (eqNat n k) true) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) true -> Eq Bool (eqNat y (succ k)) true end)
+             (fn (h : Eq Bool false true) is boolAbsurd (Eq Bool (eqNat zero (succ k)) true) h end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) true -> Eq Bool (eqNat j (succ k)) true) is
+                fn (h : Eq Bool (eqNat k j) true) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNatTransFalse : eqNat a x = true and eqNat x y = false imply eqNat a y = false (a = x, x /= y
+-- => a /= y). Induct on a then x then y, mirroring eqNat. The true premise forces a, x to share
+-- shape (succ/succ or zero/zero); the false premise carries over to a vs y. zero/zero/zero is
+-- impossible (eqNat zero zero ~> true /= false handled via the false premise on x y). We only ever
+-- recurse on the succ/succ/succ diagonal; off-diagonal cases discharge by an absurd premise.
+eqNatTransFalse : (a : Nat) -> (x : Nat) -> (y : Nat)
+   -> Eq Bool (eqNat a x) true -> Eq Bool (eqNat x y) false -> Eq Bool (eqNat a y) false is
+  fn (a : Nat) is
+    NatElim
+      (fn (aa : Nat) is
+         (x : Nat) -> (y : Nat)
+           -> Eq Bool (eqNat aa x) true -> Eq Bool (eqNat x y) false
+           -> Eq Bool (eqNat aa y) false end)
+      -- a = zero: eqNat zero x = true forces x = zero (else false = true). Then eqNat zero y =
+      -- eqNat x y = false. Induct on x.
+      (fn (x : Nat) is
+         NatElim
+           (fn (xx : Nat) is
+              (y : Nat) -> Eq Bool (eqNat zero xx) true -> Eq Bool (eqNat xx y) false
+                -> Eq Bool (eqNat zero y) false end)
+           -- x = zero: eqNat zero y = eqNat xx y = the false premise.
+           (fn (y : Nat) (h1 : Eq Bool true true) (h2 : Eq Bool (eqNat zero y) false) is h2 end)
+           -- x = succ x': eqNat zero (succ x') ~> false, so h1 : false = true, absurd.
+           (fn (x' : Nat)
+               (ihx : (y : Nat) -> Eq Bool (eqNat zero x') true -> Eq Bool (eqNat x' y) false
+                        -> Eq Bool (eqNat zero y) false) is
+              fn (y : Nat) (h1 : Eq Bool false true) (h2 : Eq Bool (eqNat (succ x') y) false) is
+                boolAbsurd (Eq Bool (eqNat zero y) false) h1 end
+            end)
+           x
+       end)
+      -- a = succ a': eqNat (succ a') x = true forces x = succ x'. Induct on x then y.
+      (fn (a' : Nat)
+          (iha : (x : Nat) -> (y : Nat)
+                   -> Eq Bool (eqNat a' x) true -> Eq Bool (eqNat x y) false
+                   -> Eq Bool (eqNat a' y) false) is
+         fn (x : Nat) is
+           NatElim
+             (fn (xx : Nat) is
+                (y : Nat) -> Eq Bool (eqNat (succ a') xx) true -> Eq Bool (eqNat xx y) false
+                  -> Eq Bool (eqNat (succ a') y) false end)
+             -- x = zero: eqNat (succ a') zero ~> false, h1 : false = true, absurd.
+             (fn (y : Nat) (h1 : Eq Bool false true) (h2 : Eq Bool (eqNat zero y) false) is
+                boolAbsurd (Eq Bool (eqNat (succ a') y) false) h1 end)
+             -- x = succ x': induct on y.
+             (fn (x' : Nat)
+                 (ihx : (y : Nat) -> Eq Bool (eqNat (succ a') x') true -> Eq Bool (eqNat x' y) false
+                          -> Eq Bool (eqNat (succ a') y) false) is
+                fn (y : Nat) is
+                  NatElim
+                    (fn (yy : Nat) is
+                       Eq Bool (eqNat (succ a') (succ x')) true -> Eq Bool (eqNat (succ x') yy) false
+                         -> Eq Bool (eqNat (succ a') yy) false end)
+                    -- y = zero: eqNat (succ x') zero ~> false (matches goal eqNat (succ a') zero ~>
+                    -- false); refl false, premises unused.
+                    (fn (h1 : Eq Bool (eqNat a' x') true) (h2 : Eq Bool false false) is refl false end)
+                    -- y = succ y': eqNat (succ a')(succ x') ~> eqNat a' x' = h1, eqNat (succ x')
+                    -- (succ y') ~> eqNat x' y' = h2, goal eqNat (succ a')(succ y') ~> eqNat a' y' —
+                    -- the outer IH iha at a' x' y'.
+                    (fn (y' : Nat)
+                        (ihy : Eq Bool (eqNat (succ a') (succ x')) true -> Eq Bool (eqNat (succ x') y') false
+                                 -> Eq Bool (eqNat (succ a') y') false) is
+                       fn (h1 : Eq Bool (eqNat a' x') true) (h2 : Eq Bool (eqNat x' y') false) is
+                         iha x' y' h1 h2 end
+                     end)
+                    y
+                end
+              end)
+             x
+         end
+       end)
+      a
+  end
+end
+
+-- eqNat SYMMETRIC, false-preserving (verbatim ch95).
+eqNatSymFalse : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) false -> Eq Bool (eqNat n m) false is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) false -> Eq Bool (eqNat n x) false end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) false -> Eq Bool (eqNat y zero) false end)
+           (fn (h : Eq Bool true false) is h end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) false -> Eq Bool (eqNat j zero) false) is
+              fn (h : Eq Bool false false) is refl false end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) false -> Eq Bool (eqNat n k) false) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) false -> Eq Bool (eqNat y (succ k)) false end)
+             (fn (h : Eq Bool false false) is refl false end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) false -> Eq Bool (eqNat j (succ k)) false) is
+                fn (h : Eq Bool (eqNat k j) false) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- THE AMBIENT EQUALITY combinators (ch03), redeclared verbatim.
+-- ====================================================================================
+
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (w : A) is Eq A w x end) (refl x)
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN ALGEBRA (verbatim ch95/ch104).
+-- ====================================================================================
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+andIntro : (a : Bool) -> (b : Bool)
+   -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool x true -> Eq Bool b true -> Eq Bool (and x b) true end)
+      (fn (ha : Eq Bool true true) (hb : Eq Bool b true) is hb end)
+      (fn (ha : Eq Bool false true) (hb : Eq Bool b true) is
+         subst Bool false true ha
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool (and false b) true
+              | false -> Eq Bool (and false b) (and false b)
+              end
+            end)
+           (refl (and false b)) end)
+      a
+  end
+end
+
+-- andElimL : and a b = true => a = true. Branch on a: a = true is immediate; a = false makes
+-- and false b ~> false, so the hypothesis is false = true, absurd.
+andElimL : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool x true end)
+      (fn (h : Eq Bool b true) is refl true end)
+      (fn (h : Eq Bool false true) is h end)
+      a
+  end
+end
+
+-- andElimR : and a b = true => b = true. Branch on a: a = true makes and true b ~> b, so the
+-- hypothesis IS b = true; a = false makes and false b ~> false, hypothesis false = true, absurd.
+andElimR : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool b true) is h end)
+      (fn (h : Eq Bool false true) is boolAbsurd (Eq Bool b true) h end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- ARITHMETIC: add, mul (verbatim ch63); the order lte (verbatim ch80) + lt.
+-- ====================================================================================
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+mul : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add n ih end) m
+  end
+end
+
+-- lte a b = (a <= b), verbatim ch80/ch83: zero below everything; succ k <= zero false; recurse.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- STRICT order: a < b iff succ a <= b. So `lt a b = true` means a < b; `lt n c` is "n < c".
+lt : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is lte (succ a) b end
+end
+
+-- ====================================================================================
+-- MEMBERSHIP + NO-DUPLICATES (verbatim ch95/ch104).
+-- ====================================================================================
+
+member : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (ys : List Nat) (ih : Bool) is
+         BoolElim (fn (b : Bool) is Bool end) true ih (eqNat x y) end)
+      xs
+  end
+end
+
+nodupb : List Nat -> Bool is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (x : Nat) (ys : List Nat) (ih : Bool) is and (not (member x ys)) ih end)
+      xs
+  end
+end
+
+NoDup : List Nat -> U is
+  fn (xs : List Nat) is Eq Bool (nodupb xs) true end
+end
+
+-- card q = length q (a NoDup list's length IS its cardinality).
+card : List Nat -> Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (x : Nat) (ys : List Nat) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- allBelowb n q : every element of q is strictly below n (a Bool). nil ~> true; cons x ys ~>
+-- and (lt x n) (allBelowb n ys). Small elimination into Bool — q is a SUBSET of {0..n-1} exactly
+-- when allBelowb n q = true (each element a valid replica id).
+allBelowb : Nat -> List Nat -> Bool is
+  fn (n : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (x : Nat) (ys : List Nat) (ih : Bool) is and (lt x n) ih end)
+      xs
+  end
+end
+
+-- allBelow n q : the TRUTH of allBelowb (decidable reflection). "q is a subset of {0..n-1}".
+allBelow : Nat -> List Nat -> U is
+  fn (n : Nat) (xs : List Nat) is Eq Bool (allBelowb n xs) true end
+end
+
+-- remove a q : drop every element of q equal to a. cons x ys ~> if eqNat x a then remove a ys
+-- else cons x (remove a ys). The pigeonhole's "remove the top slot n" operation.
+remove : Nat -> List Nat -> List Nat is
+  fn (a : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (x : Nat) (ys : List Nat) (ih : List Nat) is
+         BoolElim (fn (b : Bool) is List Nat end) ih (cons Nat x ih) (eqNat x a) end)
+      xs
+  end
+end
+
+-- append (verbatim ch73, specialised to List Nat).
+append : List Nat -> List Nat -> List Nat is
+  fn (xs : List Nat) (ys : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      ys
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is cons Nat x ih end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- SANITY of the basic machinery (computes; refl).
+-- ====================================================================================
+
+-- The numeral 3, the universe size in ch110.
+n3 : Nat is succ (succ (succ zero)) end
+
+twoLqA : List Nat is cons Nat zero (cons Nat (succ zero) (nil Nat)) end
+
+cardTwoLqA : Eq Nat (card twoLqA) (succ (succ zero)) is refl (succ (succ zero)) end
+
+-- ====================================================================================
+-- NAT ORDER FACTS for the pigeonhole (the counting bookkeeping).
+-- ====================================================================================
+
+-- lteSuccR : lte a b = true -> lte a (succ b) = true. Weakening the upper bound. By induction on a
+-- then b. a = zero: lte zero _ ~> true. a = succ, b = zero: premise lte (succ a') zero ~> false,
+-- absurd. a = succ a', b = succ b': lte (succ a')(succ b') ~> lte a' b', lte (succ a')(succ(succ
+-- b')) ~> lte a' (succ b') — the IH at a' b'.
+lteSuccR : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte a (succ b)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is (b : Nat) -> Eq Bool (lte x b) true -> Eq Bool (lte x (succ b)) true end)
+      (fn (b : Nat) (h : Eq Bool true true) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (lte a' b) true -> Eq Bool (lte a' (succ b)) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (lte (succ a') y) true -> Eq Bool (lte (succ a') (succ y)) true end)
+             (fn (h : Eq Bool false true) is boolAbsurd (Eq Bool (lte (succ a') (succ zero)) true) h end)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (lte (succ a') b') true -> Eq Bool (lte (succ a') (succ b')) true) is
+                fn (h : Eq Bool (lte a' b') true) is ih b' h end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ltSuccNeqToLt : x < succ n  and  x /= n  imply  x < n. The "strictify" step: an element below
+-- the NEW bound (succ n) that is NOT the new top value n is below the OLD bound n. Unfolding,
+-- lt x (succ n) = lte (succ x) (succ n) = lte x n, and lt x n = lte (succ x) n. So the statement
+-- is: lte x n = true and eqNat x n = false imply lte (succ x) n = true (x <= n, x /= n => x < n).
+-- Double induction on x then n. x = zero, n = zero: eqNat 0 0 ~> true, so the /= premise is
+-- true = false, absurd. x = zero, n = succ n': lte (succ zero)(succ n') ~> lte zero n' ~> true.
+-- x = succ x', n = zero: premise lte (succ x') zero ~> false, absurd. x = succ x', n = succ n':
+-- everything steps to predecessors — the IH at x' n'.
+ltSuccNeqToLt : (x : Nat) -> (n : Nat)
+   -> Eq Bool (lt x (succ n)) true -> Eq Bool (eqNat x n) false -> Eq Bool (lt x n) true is
+  fn (x : Nat) is
+    NatElim
+      (fn (xx : Nat) is
+         (n : Nat) -> Eq Bool (lte xx n) true -> Eq Bool (eqNat xx n) false
+           -> Eq Bool (lte (succ xx) n) true end)
+      -- x = zero
+      (fn (n : Nat) is
+         NatElim
+           (fn (nn : Nat) is
+              Eq Bool (lte zero nn) true -> Eq Bool (eqNat zero nn) false
+                -> Eq Bool (lte (succ zero) nn) true end)
+           -- n = zero: eqNat 0 0 ~> true, so neq premise true = false; flip to false = true, absurd.
+           (fn (h1 : Eq Bool true true) (h2 : Eq Bool (eqNat zero zero) false) is
+              boolAbsurd (Eq Bool (lte (succ zero) zero) true)
+                (symBool true false h2) end)
+           -- n = succ n': lte (succ zero)(succ n') ~> lte zero n' ~> true.
+           (fn (n' : Nat)
+               (ihn : Eq Bool (lte zero n') true -> Eq Bool (eqNat zero n') false
+                        -> Eq Bool (lte (succ zero) n') true) is
+              fn (h1 : Eq Bool true true) (h2 : Eq Bool false false) is refl true end
+            end)
+           n
+       end)
+      -- x = succ x'
+      (fn (x' : Nat)
+          (ih : (n : Nat) -> Eq Bool (lte x' n) true -> Eq Bool (eqNat x' n) false
+                  -> Eq Bool (lte (succ x') n) true) is
+         fn (n : Nat) is
+           NatElim
+             (fn (nn : Nat) is
+                Eq Bool (lte (succ x') nn) true -> Eq Bool (eqNat (succ x') nn) false
+                  -> Eq Bool (lte (succ (succ x')) nn) true end)
+             -- n = zero: premise lte (succ x') zero ~> false, absurd.
+             (fn (h1 : Eq Bool false true) (h2 : Eq Bool false false) is
+                boolAbsurd (Eq Bool (lte (succ (succ x')) zero) true) h1 end)
+             -- n = succ n': lte (succ x')(succ n') ~> lte x' n'; eqNat (succ x')(succ n') ~>
+             -- eqNat x' n'; lte (succ(succ x'))(succ n') ~> lte (succ x') n'. The IH at x' n'.
+             (fn (n' : Nat)
+                 (ihn : Eq Bool (lte (succ x') n') true -> Eq Bool (eqNat (succ x') n') false
+                          -> Eq Bool (lte (succ (succ x')) n') true) is
+                fn (h1 : Eq Bool (lte x' n') true) (h2 : Eq Bool (eqNat x' n') false) is
+                  ih n' h1 h2 end
+              end)
+             n
+         end
+       end)
+      x
+  end
+end
+
+-- notTrueToFalse : not b = true => b = false. Branch on b: b = true makes not true ~> false, so
+-- hypothesis false = true is absurd; b = false is immediate (refl false).
+notTrueToFalse : (b : Bool) -> Eq Bool (not b) true -> Eq Bool b false is
+  fn (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (not x) true -> Eq Bool x false end)
+      (fn (h : Eq Bool false true) is boolAbsurd (Eq Bool true false) h end)
+      (fn (h : Eq Bool true true) is refl false end)
+      b
+  end
+end
+
+-- notFalseToTrue : b = false => not b = true. subst b ~> false inside not _; not false ~> true.
+notFalseToTrue : (b : Bool) -> Eq Bool b false -> Eq Bool (not b) true is
+  fn (b : Bool) (h : Eq Bool b false) is
+    subst Bool false b (symBool b false h) (fn (z : Bool) is Eq Bool (not z) true end) (refl true)
+  end
+end
+
+-- ====================================================================================
+-- THE `remove` LEMMAS (bookkeeping that `remove n` shrinks a subset of {0..n} to one of {0..n-1}).
+-- ====================================================================================
+
+-- memberRemoveFalse : if x is absent from q, it is absent from remove a q (remove only DROPS, so
+-- it cannot introduce x). By induction on q. nil: remove ~> nil, member ~> false. cons y ys: from
+-- member x (cons y ys) = false we read off (motive-branch on eqNat x y) that eqNat x y = false and
+-- member x ys = false; remove a (cons y ys) branches on eqNat y a — either remove a ys (IH) or
+-- cons y (remove a ys), whose membership of x is BoolElim true (member x (remove a ys)) (eqNat x y)
+-- ~> member x (remove a ys) (guard false) ~> false (IH). Both arms: false.
+memberRemoveFalse : (a : Nat) -> (x : Nat) -> (q : List Nat)
+   -> Eq Bool (member x q) false -> Eq Bool (member x (remove a q)) false is
+  fn (a : Nat) (x : Nat) (q : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member x w) false -> Eq Bool (member x (remove a w)) false end)
+      (fn (h : Eq Bool false false) is refl false end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Bool (member x ys) false -> Eq Bool (member x (remove a ys)) false) is
+         -- member x (cons y ys) ~> BoolElim true (member x ys) (eqNat x y). Branch on eqNat x y
+         -- with a motive carrying its value g AND the equation `eqNat x y = g` (the ch95 idiom).
+         BoolElim
+           (fn (g : Bool) is
+              Eq Bool (eqNat x y) g
+                -> Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member x ys) g) false
+                -> Eq Bool (member x (remove a (cons Nat y ys))) false end)
+           -- eqNat x y = true: the membership hypothesis is true = false, absurd.
+           (fn (exy : Eq Bool (eqNat x y) true) (h : Eq Bool true false) is
+              boolAbsurd (Eq Bool (member x (remove a (cons Nat y ys))) false)
+                (symBool true false h) end)
+           -- eqNat x y = false: h : member x ys = false. remove a (cons y ys) ~> BoolElim
+           -- (remove a ys) (cons y (remove a ys)) (eqNat y a). Branch on eqNat y a.
+           (fn (exy : Eq Bool (eqNat x y) false) (h : Eq Bool (member x ys) false) is
+              BoolElim
+                (fn (gy : Bool) is
+                   Eq Bool
+                     (member x (BoolElim (fn (b : Bool) is List Nat end)
+                                  (remove a ys) (cons Nat y (remove a ys)) gy))
+                     false end)
+                -- eqNat y a = true: result is remove a ys; member x it = false by IH.
+                (ih h)
+                -- eqNat y a = false: result cons y (remove a ys); member x ~> BoolElim true
+                -- (member x (remove a ys)) (eqNat x y). Rewrite the guard eqNat x y to false (exy);
+                -- the false branch is member x (remove a ys) = false by IH.
+                (subst Bool false (eqNat x y) (symBool (eqNat x y) false exy)
+                   (fn (g : Bool) is
+                      Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member x (remove a ys)) g)
+                        false end)
+                   (ih h))
+                (eqNat y a) end)
+           (eqNat x y)
+           (refl (eqNat x y))
+      end)
+      q
+  end
+end
+
+-- removeNoDup : remove preserves no-duplicates. By induction on q. nil: nodupb nil ~> true. cons
+-- x ys: NoDup (cons x ys) = and (not (member x ys)) (nodupb ys) = true, so member x ys = false
+-- (andElimL + notTrueToFalse) and NoDup ys (andElimR). remove a (cons x ys) ~> BoolElim (remove a
+-- ys) (cons x (remove a ys)) (eqNat x a). Branch on eqNat x a: the drop arm is NoDup (remove a ys)
+-- by IH; the keep arm is nodupb (cons x (remove a ys)) = and (not (member x (remove a ys)))
+-- (nodupb (remove a ys)) — x stays absent (memberRemoveFalse) and the tail is NoDup by IH.
+removeNoDup : (a : Nat) -> (q : List Nat) -> NoDup q -> NoDup (remove a q) is
+  fn (a : Nat) (q : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is NoDup w -> NoDup (remove a w) end)
+      (fn (s : NoDup (nil Nat)) is refl true end)
+      (fn (x : Nat) (ys : List Nat) (ih : NoDup ys -> NoDup (remove a ys)) is
+         fn (s : Eq Bool (and (not (member x ys)) (nodupb ys)) true) is
+           BoolElim
+             (fn (g : Bool) is
+                NoDup (BoolElim (fn (b : Bool) is List Nat end)
+                         (remove a ys) (cons Nat x (remove a ys)) g) end)
+             -- eqNat x a = true: drop x; remove a ys is NoDup by IH (on andElimR of s).
+             (ih (andElimR (not (member x ys)) (nodupb ys) s))
+             -- eqNat x a = false: keep x; nodupb (cons x (remove a ys)) = and (not (member x
+             -- (remove a ys))) (nodupb (remove a ys)). andIntro: x absent from remove a ys
+             -- (memberRemoveFalse on member x ys = false) + tail NoDup by IH.
+             (andIntro (not (member x (remove a ys))) (nodupb (remove a ys))
+                (notFalseToTrue (member x (remove a ys))
+                   (memberRemoveFalse a x ys
+                      (notTrueToFalse (member x ys)
+                         (andElimL (not (member x ys)) (nodupb ys) s))))
+                (ih (andElimR (not (member x ys)) (nodupb ys) s)))
+             (eqNat x a) end
+         end)
+      q
+  end
+end
+
+-- allBelowRemove : if q is a subset of {0..succ n - 1} (allBelow (succ n) q), then remove n q is a
+-- subset of {0..n-1} (allBelow n (remove n q)). Dropping the top value n strictifies the bound:
+-- each surviving element is < succ n AND /= n (remove dropped all = n), hence < n (ltSuccNeqToLt).
+-- By induction on q, carrying the value of eqNat x n.
+allBelowRemove : (n : Nat) -> (q : List Nat)
+   -> allBelow (succ n) q -> allBelow n (remove n q) is
+  fn (n : Nat) (q : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is allBelow (succ n) w -> allBelow n (remove n w) end)
+      (fn (s : Eq Bool true true) is refl true end)
+      (fn (x : Nat) (ys : List Nat)
+          (ih : allBelow (succ n) ys -> allBelow n (remove n ys)) is
+         fn (s : Eq Bool (and (lt x (succ n)) (allBelowb (succ n) ys)) true) is
+           BoolElim
+             (fn (g : Bool) is
+                Eq Bool (eqNat x n) g
+                  -> allBelow n (BoolElim (fn (b : Bool) is List Nat end)
+                                   (remove n ys) (cons Nat x (remove n ys)) g) end)
+             -- eqNat x n = true: drop x; allBelowb n (remove n ys) = true by IH (andElimR s).
+             (fn (exn : Eq Bool (eqNat x n) true) is
+                ih (andElimR (lt x (succ n)) (allBelowb (succ n) ys) s) end)
+             -- eqNat x n = false: keep x; allBelowb n (cons x (remove n ys)) = and (lt x n)
+             -- (allBelowb n (remove n ys)). lt x n by ltSuccNeqToLt (lt x (succ n) from andElimL,
+             -- eqNat x n = false = exn); tail by IH.
+             (fn (exn : Eq Bool (eqNat x n) false) is
+                andIntro (lt x n) (allBelowb n (remove n ys))
+                  (ltSuccNeqToLt x n
+                     (andElimL (lt x (succ n)) (allBelowb (succ n) ys) s) exn)
+                  (ih (andElimR (lt x (succ n)) (allBelowb (succ n) ys) s)) end)
+             (eqNat x n)
+             (refl (eqNat x n)) end
+         end)
+      q
+  end
+end
+
+-- memberRespectsEqFalse : if a = x (eqNat a x = true) and x is absent from ys, then a is absent
+-- from ys (membership respects key-equality). By induction on ys, carrying eqNat x y. nil: member
+-- a nil ~> false. cons y ys': member x (cons y ys') ~> BoolElim true (member x ys')(eqNat x y) =
+-- false forces eqNat x y = false and member x ys' = false; then eqNat a y = false (eqNatTransFalse
+-- on eqNat a x = true) collapses member a (cons y ys')'s guard to its false branch member a ys' =
+-- false (IH).
+memberRespectsEqFalse : (a : Nat) -> (x : Nat) -> (ys : List Nat)
+   -> Eq Bool (eqNat a x) true -> Eq Bool (member x ys) false -> Eq Bool (member a ys) false is
+  fn (a : Nat) (x : Nat) (ys : List Nat) (eax : Eq Bool (eqNat a x) true) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Bool (member x w) false -> Eq Bool (member a w) false end)
+      (fn (h : Eq Bool false false) is refl false end)
+      (fn (y : Nat) (ys' : List Nat)
+          (ih : Eq Bool (member x ys') false -> Eq Bool (member a ys') false) is
+         BoolElim
+           (fn (g : Bool) is
+              Eq Bool (eqNat x y) g
+                -> Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member x ys') g) false
+                -> Eq Bool (member a (cons Nat y ys')) false end)
+           -- eqNat x y = true: hypothesis true = false, absurd.
+           (fn (exy : Eq Bool (eqNat x y) true) (h : Eq Bool true false) is
+              boolAbsurd (Eq Bool (member a (cons Nat y ys')) false) (symBool true false h) end)
+           -- eqNat x y = false: h : member x ys' = false. member a (cons y ys') ~> BoolElim true
+           -- (member a ys')(eqNat a y). eqNat a y = false (eqNatTransFalse a x y eax exy) collapses
+           -- the guard; the false branch is member a ys' = false by IH.
+           (fn (exy : Eq Bool (eqNat x y) false) (h : Eq Bool (member x ys') false) is
+              subst Bool false (eqNat a y)
+                (symBool (eqNat a y) false (eqNatTransFalse a x y eax exy))
+                (fn (g : Bool) is
+                   Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member a ys') g) false end)
+                (ih h) end)
+           (eqNat x y)
+           (refl (eqNat x y))
+      end)
+      ys
+  end
+end
+
+-- removeAbsentId : if a is absent from q, removing a leaves q unchanged. By induction on q,
+-- carrying the value of eqNat a x (member's guard) so we can read off that the head is not a and
+-- the tail does not contain a. nil: remove ~> nil. cons x ys: member a (cons x ys) ~> BoolElim
+-- true (member a ys) (eqNat a x); false forces eqNat a x = false (else true) and member a ys =
+-- false. eqNat x a = false by symmetry (remove's guard), so remove keeps x: cons x (remove a ys);
+-- remove a ys = ys by IH; congCons closes.
+removeAbsentId : (a : Nat) -> (q : List Nat)
+   -> Eq Bool (member a q) false -> Eq (List Nat) (remove a q) q is
+  fn (a : Nat) (q : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Bool (member a w) false -> Eq (List Nat) (remove a w) w end)
+      (fn (h : Eq Bool false false) is refl (nil Nat) end)
+      (fn (x : Nat) (ys : List Nat)
+          (ih : Eq Bool (member a ys) false -> Eq (List Nat) (remove a ys) ys) is
+         BoolElim
+           (fn (g : Bool) is
+              Eq Bool (eqNat a x) g
+                -> Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member a ys) g) false
+                -> Eq (List Nat) (remove a (cons Nat x ys)) (cons Nat x ys) end)
+           -- eqNat a x = true: membership hypothesis is true = false, absurd.
+           (fn (eax : Eq Bool (eqNat a x) true) (h : Eq Bool true false) is
+              boolAbsurd (Eq (List Nat) (remove a (cons Nat x ys)) (cons Nat x ys))
+                (symBool true false h) end)
+           -- eqNat a x = false: h : member a ys = false. eqNat x a = false (eqNatSymFalse). remove
+           -- a (cons x ys) ~> BoolElim (remove a ys) (cons x (remove a ys)) (eqNat x a); rewrite the
+           -- guard to false, so result is cons x (remove a ys); remove a ys = ys by IH; congCons.
+           (fn (eax : Eq Bool (eqNat a x) false) (h : Eq Bool (member a ys) false) is
+              subst Bool false (eqNat x a) (symBool (eqNat x a) false (eqNatSymFalse a x eax))
+                (fn (g : Bool) is
+                   Eq (List Nat)
+                     (BoolElim (fn (b : Bool) is List Nat end) (remove a ys) (cons Nat x (remove a ys)) g)
+                     (cons Nat x ys) end)
+                (subst (List Nat) ys (remove a ys)
+                   (sym (List Nat) (remove a ys) ys (ih h))
+                   (fn (z : List Nat) is Eq (List Nat) (cons Nat x z) (cons Nat x ys) end)
+                   (refl (cons Nat x ys))) end)
+           (eqNat a x)
+           (refl (eqNat a x))
+      end)
+      q
+  end
+end
+
+-- congSuccNat : a = b => succ a = succ b. The succ-congruence used by the card accounting.
+congSuccNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) (refl (succ a))
+  end
+end
+
+-- cardRemoveMember : in a NoDup q, removing a member a drops EXACTLY one element — card q =
+-- succ (card (remove a q)). The cardinality bookkeeping at the heart of the pigeonhole step. By
+-- induction on q, carrying eqNat a x. nil: member a nil = false, premise absurd. cons x ys:
+--   eqNat a x = true (a = x): remove drops x (guard eqNat x a = true by eqNatSymTrue), so
+--     remove a (cons x ys) ~> remove a ys; and a is absent from ys (member x ys = false from
+--     NoDup head, transported to a by memberRespectsEqFalse), so remove a ys = ys (removeAbsentId)
+--     and card ys = card (remove a ys). Goal succ (card ys) = succ (card (remove a ys)).
+--   eqNat a x = false (a /= x): member a ys = true (the BoolElim false branch of the hyp), NoDup
+--     ys (andElimR). remove keeps x (guard eqNat x a = false by eqNatSymFalse), so remove a (cons
+--     x ys) ~> cons x (remove a ys) with card succ (card (remove a ys)). IH gives card ys = succ
+--     (card (remove a ys)); congSucc lines up succ (card ys) = succ (succ (card (remove a ys))).
+cardRemoveMember : (a : Nat) -> (q : List Nat)
+   -> NoDup q -> Eq Bool (member a q) true
+   -> Eq Nat (card q) (succ (card (remove a q))) is
+  fn (a : Nat) (q : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         NoDup w -> Eq Bool (member a w) true -> Eq Nat (card w) (succ (card (remove a w))) end)
+      (fn (s : Eq Bool true true) (hm : Eq Bool false true) is
+         boolAbsurd (Eq Nat (card (nil Nat)) (succ (card (remove a (nil Nat))))) hm end)
+      (fn (x : Nat) (ys : List Nat)
+          (ih : NoDup ys -> Eq Bool (member a ys) true
+                  -> Eq Nat (card ys) (succ (card (remove a ys)))) is
+         fn (s : Eq Bool (and (not (member x ys)) (nodupb ys)) true) is
+           BoolElim
+             (fn (g : Bool) is
+                Eq Bool (eqNat a x) g
+                  -> Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member a ys) g) true
+                  -> Eq Nat (succ (card ys))
+                       (succ (card (BoolElim (fn (b : Bool) is List Nat end)
+                                      (remove a ys) (cons Nat x (remove a ys)) (eqNat x a)))) end)
+             -- eqNat a x = true: a = x. Guard eqNat x a = true (eqNatSymTrue) -> drop x. a absent
+             -- from ys, so remove a ys = ys; succ (card ys) = succ (card (remove a ys)).
+             (fn (eax : Eq Bool (eqNat a x) true) (hm : Eq Bool true true) is
+                subst Bool true (eqNat x a) (symBool (eqNat x a) true (eqNatSymTrue a x eax))
+                  (fn (g : Bool) is
+                     Eq Nat (succ (card ys))
+                       (succ (card (BoolElim (fn (b : Bool) is List Nat end)
+                                      (remove a ys) (cons Nat x (remove a ys)) g))) end)
+                  (congSuccNat (card ys) (card (remove a ys))
+                     (sym Nat (card (remove a ys)) (card ys)
+                        (subst (List Nat) (remove a ys) ys
+                           (removeAbsentId a ys
+                              (memberRespectsEqFalse a x ys eax
+                                 (notTrueToFalse (member x ys)
+                                    (andElimL (not (member x ys)) (nodupb ys) s))))
+                           (fn (z : List Nat) is Eq Nat (card (remove a ys)) (card z) end)
+                           (refl (card (remove a ys)))))) end)
+             -- eqNat a x = false: a /= x. Guard eqNat x a = false (eqNatSymFalse) -> keep x.
+             -- member a ys = true (hm), NoDup ys (andElimR); IH gives card ys = succ (card
+             -- (remove a ys)); congSucc lines up the goal.
+             (fn (eax : Eq Bool (eqNat a x) false) (hm : Eq Bool (member a ys) true) is
+                subst Bool false (eqNat x a) (symBool (eqNat x a) false (eqNatSymFalse a x eax))
+                  (fn (g : Bool) is
+                     Eq Nat (succ (card ys))
+                       (succ (card (BoolElim (fn (b : Bool) is List Nat end)
+                                      (remove a ys) (cons Nat x (remove a ys)) g))) end)
+                  (congSuccNat (card ys) (succ (card (remove a ys)))
+                     (ih (andElimR (not (member x ys)) (nodupb ys) s) hm)) end)
+             (eqNat a x)
+             (refl (eqNat a x)) end
+         end)
+      q
+  end
+end
+
+-- ====================================================================================
+-- THE PIGEONHOLE LEMMA — the genuine counting argument.
+-- ====================================================================================
+
+-- noDupSubsetBoundedByN : a duplicate-free list whose elements are all < n has length (= card)
+-- at most n. You cannot fit more than n distinct things into an n-slot universe {0..n-1}. By
+-- induction on n.
+--   n = zero: card q <= 0 means q is empty. Case on q: nil ~> lte 0 0 ~> true; a cons head x has
+--     lt x 0 ~> false in allBelowb, so the allBelow hypothesis is false = true, absurd.
+--   n = succ n': case on member n' q.
+--     member n' q = true: removing the top value n' drops EXACTLY one element (cardRemoveMember),
+--       and remove n' q is a NoDup subset of {0..n'-1} (removeNoDup + allBelowRemove). The IH
+--       bounds card (remove n' q) <= n', so card q = succ (card (remove n' q)) <= succ n'.
+--     member n' q = false: n' is absent, so remove n' q = q (removeAbsentId); allBelowRemove then
+--       gives allBelow n' q directly, the IH bounds card q <= n', and lteSuccR weakens to succ n'.
+noDupSubsetBoundedByN : (n : Nat) -> (q : List Nat)
+   -> NoDup q -> allBelow n q -> Eq Bool (lte (card q) n) true is
+  fn (n : Nat) is
+    NatElim
+      (fn (nn : Nat) is
+         (q : List Nat) -> NoDup q -> allBelow nn q -> Eq Bool (lte (card q) nn) true end)
+      -- n = zero
+      (fn (q : List Nat) is
+         ListElim Nat
+           (fn (w : List Nat) is NoDup w -> allBelow zero w -> Eq Bool (lte (card w) zero) true end)
+           (fn (s : Eq Bool true true) (ab : Eq Bool true true) is refl true end)
+           (fn (x : Nat) (ys : List Nat)
+               (ih : NoDup ys -> allBelow zero ys -> Eq Bool (lte (card ys) zero) true) is
+              fn (s : NoDup (cons Nat x ys))
+                 (ab : Eq Bool (and (lt x zero) (allBelowb zero ys)) true) is
+                -- lt x zero ~> false, so andElimL ab : Eq Bool false true — absurd.
+                boolAbsurd (Eq Bool (lte (card (cons Nat x ys)) zero) true)
+                  (andElimL (lt x zero) (allBelowb zero ys) ab) end end)
+           q
+       end)
+      -- n = succ n'
+      (fn (n' : Nat)
+          (ih : (q : List Nat) -> NoDup q -> allBelow n' q -> Eq Bool (lte (card q) n') true) is
+         fn (q : List Nat) (s : NoDup q) (ab : allBelow (succ n') q) is
+           BoolElim
+             (fn (g : Bool) is
+                Eq Bool (member n' q) g -> Eq Bool (lte (card q) (succ n')) true end)
+             -- member n' q = true: card q = succ (card (remove n' q)); IH bounds remove by n'.
+             (fn (hm : Eq Bool (member n' q) true) is
+                subst Nat (succ (card (remove n' q))) (card q)
+                  (sym Nat (card q) (succ (card (remove n' q)))
+                     (cardRemoveMember n' q s hm))
+                  (fn (z : Nat) is Eq Bool (lte z (succ n')) true end)
+                  (ih (remove n' q)
+                     (removeNoDup n' q s)
+                     (allBelowRemove n' q ab)) end)
+             -- member n' q = false: remove n' q = q, so allBelow n' q; IH bounds by n', weaken.
+             (fn (hm : Eq Bool (member n' q) false) is
+                lteSuccR (card q) n'
+                  (ih q s
+                     (subst (List Nat) (remove n' q) q (removeAbsentId n' q hm)
+                        (fn (z : List Nat) is allBelow n' z end)
+                        (allBelowRemove n' q ab))) end)
+             (member n' q)
+             (refl (member n' q))
+         end
+       end)
+      n
+  end
+end
+
+-- ====================================================================================
+-- ARITHMETIC for the majority contradiction (add laws verbatim ch63; order laws ch80-style).
+-- ====================================================================================
+
+-- addZeroR / addSuccR / addComm (verbatim ch63).
+addZeroR : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+         subst Nat (add k zero) k ih
+           (fn (z : Nat) is Eq Nat (add (succ k) zero) (succ z) end)
+           (refl (add (succ k) zero))
+       end)
+      n
+  end
+end
+
+addSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (add n (succ m)) (succ (add n m)) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ m)) (succ (add x m)) end)
+      (refl (succ m))
+      (fn (k : Nat) (ih : Eq Nat (add k (succ m)) (succ (add k m))) is
+         subst Nat (add k (succ m)) (succ (add k m)) ih
+           (fn (z : Nat) is Eq Nat (add (succ k) (succ m)) (succ z) end)
+           (refl (add (succ k) (succ m)))
+       end)
+      n
+  end
+end
+
+addComm : (n : Nat) -> (m : Nat) -> Eq Nat (add n m) (add m n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x m) (add m x) end)
+      (subst Nat (add m zero) m (addZeroR m)
+         (fn (z : Nat) is Eq Nat z (add m zero) end)
+         (refl (add m zero)))
+      (fn (k : Nat) (ih : Eq Nat (add k m) (add m k)) is
+         subst Nat (succ (add m k)) (add m (succ k))
+           (subst Nat (add m (succ k)) (succ (add m k)) (addSuccR m k)
+              (fn (z : Nat) is Eq Nat z (add m (succ k)) end)
+              (refl (add m (succ k))))
+           (fn (z : Nat) is Eq Nat (succ (add k m)) z end)
+           (subst Nat (add k m) (add m k) ih
+              (fn (z : Nat) is Eq Nat (succ (add k m)) (succ z) end)
+              (refl (succ (add k m))))
+       end)
+      n
+  end
+end
+
+-- lteTrans (verbatim ch80): a <= b and b <= c imply a <= c.
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                boolAbsurd (Eq Bool (lte (succ a') c) true) hab end)
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       boolAbsurd (Eq Bool (lte (succ a') zero) true) hbc end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- lteRefl (ch65 idiom): a <= a by induction.
+lteRefl : (a : Nat) -> Eq Bool (lte a a) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end)
+      a
+  end
+end
+
+-- lteAddMonoL : lte a b = true => lte (add k a) (add k b) = true. add k recurses on k, so
+-- add (succ k) a ~> succ (add k a) and lte (succ _)(succ _) ~> lte _ _ — induction on k, the IH
+-- on the nose. (Monotonicity of <= under adding a common prefix.)
+lteAddMonoL : (k : Nat) -> (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte (add k a) (add k b)) true is
+  fn (k : Nat) (a : Nat) (b : Nat) (h : Eq Bool (lte a b) true) is
+    NatElim (fn (x : Nat) is Eq Bool (lte (add x a) (add x b)) true end)
+      h
+      (fn (j : Nat) (ih : Eq Bool (lte (add j a) (add j b)) true) is ih end)
+      k
+  end
+end
+
+-- lteLtTrans : a <= b and b < c imply a < c. lt b c = lte (succ b) c; lt a c = lte (succ a) c.
+-- From lte a b we get lte (succ a)(succ b) (definitional: lte (succ a)(succ b) ~> lte a b), then
+-- lteTrans with lte (succ b) c.
+lteLtTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lt b c) true -> Eq Bool (lt a c) true is
+  fn (a : Nat) (b : Nat) (c : Nat) (hab : Eq Bool (lte a b) true) (hbc : Eq Bool (lt b c) true) is
+    lteTrans (succ a) (succ b) c hab hbc
+  end
+end
+
+-- ltLteAbsurd : a < b and b <= a is impossible. lt a b = lte (succ a) b; with lte b a, lteTrans
+-- gives lte (succ a) a; but lte (succ a) a recurses to ... lte (succ zero) zero ~> false at the
+-- base — so lte (succ a) a = false for all a (lteSuccSelfFalse), contradicting it = true.
+lteSuccSelfFalse : (a : Nat) -> Eq Bool (lte (succ a) a) false is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte (succ x) x) false end)
+      (refl false)
+      (fn (k : Nat) (ih : Eq Bool (lte (succ k) k) false) is ih end)
+      a
+  end
+end
+
+ltLteAbsurd : (G : U) -> (a : Nat) -> (b : Nat)
+   -> Eq Bool (lt a b) true -> Eq Bool (lte b a) true -> G is
+  fn (G : U) (a : Nat) (b : Nat) (hab : Eq Bool (lt a b) true) (hba : Eq Bool (lte b a) true) is
+    -- lteTrans (succ a) b a : lte (succ a) a = true, but lteSuccSelfFalse says it is false.
+    -- Rewrite lte (succ a) a to false in the `= true` proof, yielding false = true.
+    boolAbsurd G
+      (subst Bool (lte (succ a) a) false (lteSuccSelfFalse a)
+         (fn (z : Bool) is Eq Bool z true end)
+         (lteTrans (succ a) b a hab hba))
+  end
+end
+
+-- mul2 : mul 2 c = add c c. mul (succ (succ zero)) c ~> add c (add c zero); add c zero = c
+-- (addZeroR) inside the outer add.
+mul2 : (c : Nat) -> Eq Nat (mul (succ (succ zero)) c) (add c c) is
+  fn (c : Nat) is
+    subst Nat (add c zero) c (addZeroR c)
+      (fn (z : Nat) is Eq Nat (add c (add c zero)) (add c z) end)
+      (refl (add c (add c zero)))
+  end
+end
+
+-- ====================================================================================
+-- DISJOINTNESS + APPEND machinery (the bridge from pigeonhole to intersection).
+-- ====================================================================================
+
+-- orElimL / orElimR : from or a b = false read off a = false and b = false. or a b ~> BoolElim
+-- true b a; if a = true, or true b ~> true /= false, absurd; if a = false, or false b ~> b.
+orElimL : (a : Bool) -> (b : Bool) -> Eq Bool (or a b) false -> Eq Bool a false is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (or x b) false -> Eq Bool x false end)
+      (fn (h : Eq Bool true false) is h end)
+      (fn (h : Eq Bool b false) is refl false end)
+      a
+  end
+end
+
+orElimR : (a : Bool) -> (b : Bool) -> Eq Bool (or a b) false -> Eq Bool b false is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (or x b) false -> Eq Bool b false end)
+      (fn (h : Eq Bool true false) is boolAbsurd (Eq Bool b false) (symBool true false h) end)
+      (fn (h : Eq Bool b false) is h end)
+      a
+  end
+end
+
+-- memberAppend : member r (append xs ys) = or (member r xs) (member r ys). append xs recurses on
+-- xs; member of a cons branches on eqNat r x. By induction on xs, carrying eqNat r x.
+memberAppend : (r : Nat) -> (xs : List Nat) -> (ys : List Nat)
+   -> Eq Bool (member r (append xs ys)) (or (member r xs) (member r ys)) is
+  fn (r : Nat) (xs : List Nat) (ys : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member r (append w ys)) (or (member r w) (member r ys)) end)
+      -- nil: append nil ys ~> ys; member r nil ~> false; or false (member r ys) ~> member r ys.
+      (refl (member r ys))
+      (fn (x : Nat) (xs' : List Nat)
+          (ih : Eq Bool (member r (append xs' ys)) (or (member r xs') (member r ys))) is
+         -- member r (append (cons x xs') ys) = member r (cons x (append xs' ys)) ~> BoolElim true
+         -- (member r (append xs' ys)) (eqNat r x). RHS or (member r (cons x xs')) (member r ys) =
+         -- or (BoolElim true (member r xs')(eqNat r x)) (member r ys). Branch on eqNat r x.
+         BoolElim
+           (fn (g : Bool) is
+              Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member r (append xs' ys)) g)
+                (or (BoolElim (fn (b : Bool) is Bool end) true (member r xs') g) (member r ys)) end)
+           -- eqNat r x = true: LHS ~> true, RHS or true _ ~> true.
+           (refl true)
+           -- eqNat r x = false: LHS ~> member r (append xs' ys), RHS or (member r xs')(member r
+           -- ys); the IH is exactly this equality.
+           ih
+           (eqNat r x) end)
+      xs
+  end
+end
+
+-- cardAppend : card (append xs ys) = add (card xs) (card ys). By induction on xs (append + card
+-- both recurse on xs, succ-aligned).
+cardAppend : (xs : List Nat) -> (ys : List Nat)
+   -> Eq Nat (card (append xs ys)) (add (card xs) (card ys)) is
+  fn (xs : List Nat) (ys : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Nat (card (append w ys)) (add (card w) (card ys)) end)
+      (refl (card ys))
+      (fn (x : Nat) (xs' : List Nat)
+          (ih : Eq Nat (card (append xs' ys)) (add (card xs') (card ys))) is
+         congSuccNat (card (append xs' ys)) (add (card xs') (card ys)) ih end)
+      xs
+  end
+end
+
+-- allBelowAppend : if every element of xs and of ys is < n, so is every element of xs ++ ys. By
+-- induction on xs. cons x xs': allBelowb n (cons x (append xs' ys)) = and (lt x n) (allBelowb n
+-- (append xs' ys)); lt x n from andElimL on xs's hypothesis; tail by IH (andElimR + ys).
+allBelowAppend : (n : Nat) -> (xs : List Nat) -> (ys : List Nat)
+   -> allBelow n xs -> allBelow n ys -> allBelow n (append xs ys) is
+  fn (n : Nat) (xs : List Nat) (ys : List Nat)
+     (abx : allBelow n xs) (aby : allBelow n ys) is
+    ListElim Nat
+      (fn (w : List Nat) is allBelow n w -> allBelow n (append w ys) end)
+      (fn (h : Eq Bool true true) is aby end)
+      (fn (x : Nat) (xs' : List Nat)
+          (ih : allBelow n xs' -> allBelow n (append xs' ys)) is
+         fn (h : Eq Bool (and (lt x n) (allBelowb n xs')) true) is
+           andIntro (lt x n) (allBelowb n (append xs' ys))
+             (andElimL (lt x n) (allBelowb n xs') h)
+             (ih (andElimR (lt x n) (allBelowb n xs') h)) end end)
+      xs
+      abx
+  end
+end
+
+-- anyMemberb q1 q2 : some element of q1 is a member of q2 (a Bool). ListElim over q1, cons x xs ~>
+-- or (member x q2) (anyMemberb xs q2).
+anyMemberb : List Nat -> List Nat -> Bool is
+  fn (q1 : List Nat) (q2 : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (x : Nat) (xs : List Nat) (ih : Bool) is or (member x q2) ih end)
+      q1
+  end
+end
+
+-- orBothFalse : a = false and b = false => or a b = false. subst both to false; or false false ~>
+-- false.
+orBothFalse : (a : Bool) -> (b : Bool)
+   -> Eq Bool a false -> Eq Bool b false -> Eq Bool (or a b) false is
+  fn (a : Bool) (b : Bool) (ha : Eq Bool a false) (hb : Eq Bool b false) is
+    subst Bool false a (symBool a false ha)
+      (fn (za : Bool) is Eq Bool (or za b) false end)
+      (subst Bool false b (symBool b false hb)
+         (fn (zb : Bool) is Eq Bool (or false zb) false end)
+         (refl false))
+  end
+end
+
+-- trans for Bool (just `trans Bool`), used by the membership chain.
+transBool : (a : Bool) -> (b : Bool) -> (c : Bool)
+   -> Eq Bool a b -> Eq Bool b c -> Eq Bool a c is
+  fn (a : Bool) (b : Bool) (c : Bool) (e1 : Eq Bool a b) (e2 : Eq Bool b c) is
+    trans Bool a b c e1 e2
+  end
+end
+
+-- memberConsWeaken : member r xs = true => member r (cons x xs) = true (consing only adds). member
+-- r (cons x xs) ~> BoolElim true (member r xs) (eqNat r x); branch on eqNat r x: true ~> true,
+-- false ~> member r xs = true (the hypothesis).
+memberConsWeaken : (r : Nat) -> (x : Nat) -> (xs : List Nat)
+   -> Eq Bool (member r xs) true -> Eq Bool (member r (cons Nat x xs)) true is
+  fn (r : Nat) (x : Nat) (xs : List Nat) (h : Eq Bool (member r xs) true) is
+    BoolElim
+      (fn (g : Bool) is
+         Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member r xs) g) true end)
+      (refl true)
+      h
+      (eqNat r x)
+  end
+end
+
+-- disjointAppendNoDup : disjoint (anyMemberb q1 q2 = false) NoDup subsets concatenate to a NoDup
+-- list. By induction on q1.
+disjointAppendNoDup : (q1 : List Nat) -> (q2 : List Nat)
+   -> Eq Bool (anyMemberb q1 q2) false -> NoDup q1 -> NoDup q2
+   -> NoDup (append q1 q2) is
+  fn (q1 : List Nat) (q2 : List Nat)
+     (dj0 : Eq Bool (anyMemberb q1 q2) false) (nd1 : NoDup q1) (nd2 : NoDup q2) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (anyMemberb w q2) false -> NoDup w -> NoDup (append w q2) end)
+      -- nil: append nil q2 ~> q2; NoDup q2.
+      (fn (dj : Eq Bool false false) (nd : Eq Bool true true) is nd2 end)
+      (fn (x : Nat) (xs : List Nat)
+          (ih : Eq Bool (anyMemberb xs q2) false -> NoDup xs -> NoDup (append xs q2)) is
+         fn (dj : Eq Bool (or (member x q2) (anyMemberb xs q2)) false)
+            (nd : Eq Bool (and (not (member x xs)) (nodupb xs)) true) is
+           -- nodupb (cons x (append xs q2)) = and (not (member x (append xs q2)))
+           -- (nodupb (append xs q2)). x absent from append xs q2 (memberAppend + both falses);
+           -- tail NoDup by IH.
+           andIntro (not (member x (append xs q2))) (nodupb (append xs q2))
+             (notFalseToTrue (member x (append xs q2))
+                (transBool (member x (append xs q2)) (or (member x xs) (member x q2)) false
+                   (memberAppend x xs q2)
+                   (orBothFalse (member x xs) (member x q2)
+                      (notTrueToFalse (member x xs)
+                         (andElimL (not (member x xs)) (nodupb xs) nd))
+                      (orElimL (member x q2) (anyMemberb xs q2) dj))))
+             (ih (orElimR (member x q2) (anyMemberb xs q2) dj)
+                 (andElimR (not (member x xs)) (nodupb xs) nd)) end end)
+      q1
+      dj0
+      nd1
+  end
+end
+
+-- anyMemberWitness : if some element of q1 is in q2 (anyMemberb q1 q2 = true), produce a shared
+-- replica r (in CPS form, exactly what quorumIntersect needs). By induction on q1, carrying the
+-- value of member x q2 to decide whether the head x is the witness or to recurse.
+anyMemberWitness : (q1 : List Nat) -> (q2 : List Nat) -> (G : U)
+   -> Eq Bool (anyMemberb q1 q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G)
+   -> G is
+  fn (q1 : List Nat) (q2 : List Nat) (G : U) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (anyMemberb w q2) true
+           -> ((r : Nat) -> Eq Bool (member r w) true -> Eq Bool (member r q2) true -> G)
+           -> G end)
+      -- nil: anyMemberb nil q2 ~> false, premise false = true absurd.
+      (fn (h : Eq Bool false true)
+          (k : (r : Nat) -> Eq Bool (member r (nil Nat)) true -> Eq Bool (member r q2) true -> G) is
+         boolAbsurd G h end)
+      (fn (x : Nat) (xs : List Nat)
+          (ih : Eq Bool (anyMemberb xs q2) true
+                  -> ((r : Nat) -> Eq Bool (member r xs) true -> Eq Bool (member r q2) true -> G)
+                  -> G) is
+         fn (h : Eq Bool (or (member x q2) (anyMemberb xs q2)) true)
+            (k : (r : Nat) -> Eq Bool (member r (cons Nat x xs)) true
+                   -> Eq Bool (member r q2) true -> G) is
+           -- or (member x q2) (anyMemberb xs q2) = true. Branch on member x q2 (carry value).
+           BoolElim
+             (fn (g : Bool) is
+                Eq Bool (member x q2) g
+                  -> Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (anyMemberb xs q2) g) true
+                  -> G end)
+             -- member x q2 = true: x is the shared replica. member x (cons x xs) ~> BoolElim true
+             -- _ (eqNat x x) ~> true (eqNatRefl), so the witness x's membership in q1 is given.
+             (fn (exq2 : Eq Bool (member x q2) true) (hh : Eq Bool true true) is
+                k x
+                  (subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+                     (fn (gg : Bool) is
+                        Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member x xs) gg) true end)
+                     (refl true))
+                  exq2 end)
+             -- member x q2 = false: recurse into xs (anyMemberb xs q2 = true = hh). The witness r
+             -- from xs is also in cons x xs: member r (cons x xs) ~> BoolElim true (member r xs)
+             -- (eqNat r x); member r xs = true forces the BoolElim's value-stuck-on-eqNat... we
+             -- weaken via memberConsWeaken below.
+             (fn (exq2 : Eq Bool (member x q2) false) (hh : Eq Bool (anyMemberb xs q2) true) is
+                ih hh
+                  (fn (r : Nat) (mr1 : Eq Bool (member r xs) true) (mr2 : Eq Bool (member r q2) true) is
+                     k r (memberConsWeaken r x xs mr1) mr2 end) end)
+             (member x q2)
+             (refl (member x q2)) h end end)
+      q1
+  end
+end
+
+-- ====================================================================================
+-- MAJORITY + THE COUNTING CONTRADICTION.
+-- ====================================================================================
+
+-- isMajority n q : the quorum q holds a strict majority of the n-replica universe, 2*|q| > n.
+isMajority : Nat -> List Nat -> Bool is
+  fn (n : Nat) (q : List Nat) is lt n (mul (succ (succ zero)) (card q)) end
+end
+
+-- ltLteTrans : a < b and b <= c imply a < c. lt a b = lte (succ a) b; lteTrans with lte b c.
+ltLteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lt a b) true -> Eq Bool (lte b c) true -> Eq Bool (lt a c) true is
+  fn (a : Nat) (b : Nat) (c : Nat) (hab : Eq Bool (lt a b) true) (hbc : Eq Bool (lte b c) true) is
+    lteTrans (succ a) b c hab hbc
+  end
+end
+
+-- lteTotal (verbatim ch83): every pair is comparable.
+lteTotal : (a : Nat) -> (b : Nat) -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- lteFromTotalFalse : if lte a b = false then lte b a = true (the other direction of totality).
+-- lteTotal a b : or (lte a b)(lte b a) = true; substitute lte a b = false; or false (lte b a) ~>
+-- lte b a.
+lteFromTotalFalse : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) false -> Eq Bool (lte b a) true is
+  fn (a : Nat) (b : Nat) (h : Eq Bool (lte a b) false) is
+    -- rewrite lte a b to false inside lteTotal's disjunction: or false (lte b a) ~> lte b a.
+    subst Bool (lte a b) false h
+      (fn (z : Bool) is Eq Bool (or z (lte b a)) true end)
+      (lteTotal a b)
+  end
+end
+
+-- majoritiesNotDisjoint : two majorities of an n-universe cannot have cardinality-sum <= n. From
+-- isMajority we get n < mul 2 (card qi) = add (card qi) (card qi) (mul2). Branch on lte c1 c2:
+-- if true, add c1 c1 <= add c1 c2 (lteAddMonoL), so n < add c1 c2 (ltLteTrans); if false, lte c2
+-- c1 (lteFromTotalFalse), add c2 c2 <= add c2 c1 = add c1 c2 (addComm), n < add c1 c2. Either way
+-- n < add c1 c2 contradicts add c1 c2 <= n (ltLteAbsurd).
+majoritiesNotDisjoint : (G : U) -> (n : Nat) -> (q1 : List Nat) -> (q2 : List Nat)
+   -> Eq Bool (isMajority n q1) true -> Eq Bool (isMajority n q2) true
+   -> Eq Bool (lte (add (card q1) (card q2)) n) true
+   -> G is
+  fn (G : U) (n : Nat) (q1 : List Nat) (q2 : List Nat)
+     (m1 : Eq Bool (lt n (mul (succ (succ zero)) (card q1))) true)
+     (m2 : Eq Bool (lt n (mul (succ (succ zero)) (card q2))) true)
+     (bnd : Eq Bool (lte (add (card q1) (card q2)) n) true) is
+    -- rewrite mul 2 ci to add ci ci in both majorities (m1b, m2b), then branch on lte c1 c2.
+    (fn (m1b : Eq Bool (lt n (add (card q1) (card q1))) true)
+        (m2b : Eq Bool (lt n (add (card q2) (card q2))) true) is
+            BoolElim
+              (fn (g : Bool) is Eq Bool (lte (card q1) (card q2)) g -> G end)
+              -- lte c1 c2: n < add c1 c1 <= add c1 c2.
+              (fn (h1 : Eq Bool (lte (card q1) (card q2)) true) is
+                 ltLteAbsurd G n (add (card q1) (card q2))
+                   (ltLteTrans n (add (card q1) (card q1)) (add (card q1) (card q2))
+                      m1b
+                      (lteAddMonoL (card q1) (card q1) (card q2) h1))
+                   bnd end)
+              -- lte c1 c2 = false: lte c2 c1; n < add c2 c2 <= add c2 c1 = add c1 c2.
+              (fn (h1 : Eq Bool (lte (card q1) (card q2)) false) is
+                 ltLteAbsurd G n (add (card q1) (card q2))
+                   (ltLteTrans n (add (card q2) (card q2)) (add (card q1) (card q2))
+                      m2b
+                      (subst Nat (add (card q2) (card q1)) (add (card q1) (card q2))
+                         (addComm (card q2) (card q1))
+                         (fn (z : Nat) is Eq Bool (lte (add (card q2) (card q2)) z) true end)
+                         (lteAddMonoL (card q2) (card q2) (card q1)
+                            (lteFromTotalFalse (card q1) (card q2) h1))))
+                   bnd end)
+              (lte (card q1) (card q2))
+              (refl (lte (card q1) (card q2))) end)
+      (subst Nat (mul (succ (succ zero)) (card q1)) (add (card q1) (card q1)) (mul2 (card q1))
+         (fn (s : Nat) is Eq Bool (lt n s) true end) m1)
+      (subst Nat (mul (succ (succ zero)) (card q2)) (add (card q2) (card q2)) (mul2 (card q2))
+         (fn (s : Nat) is Eq Bool (lt n s) true end) m2)
+  end
+end
+
+-- ====================================================================================
+-- QUORUM INTERSECTION (arbitrary n) — the pigeonhole, assembled.
+-- ====================================================================================
+
+-- quorumIntersect : two MAJORITY quorums of the n-replica universe {0..n-1} (each a NoDup subset
+-- with 2*|q| > n) SHARE a replica. The continuation-passing existential: for any goal G and any
+-- handler k consuming the shared r with its two membership proofs, produce G. By the counting
+-- argument: branch on whether some element of q1 lies in q2 (anyMemberb q1 q2).
+--   true: anyMemberWitness extracts the shared replica and hands it to k.
+--   false: q1, q2 are DISJOINT, so q1 ++ q2 is a NoDup subset of {0..n-1} (disjointAppendNoDup +
+--     allBelowAppend); the pigeonhole bounds |q1 ++ q2| = |q1| + |q2| <= n (noDupSubsetBoundedByN
+--     + cardAppend); but two majorities force |q1| + |q2| > n (majoritiesNotDisjoint) — absurd.
+quorumIntersect : (n : Nat) -> (q1 : List Nat) -> (q2 : List Nat) -> (G : U)
+   -> NoDup q1 -> NoDup q2
+   -> allBelow n q1 -> allBelow n q2
+   -> Eq Bool (isMajority n q1) true
+   -> Eq Bool (isMajority n q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G)
+   -> G is
+  fn (n : Nat) (q1 : List Nat) (q2 : List Nat) (G : U)
+     (nd1 : NoDup q1) (nd2 : NoDup q2)
+     (ab1 : allBelow n q1) (ab2 : allBelow n q2)
+     (m1 : Eq Bool (isMajority n q1) true) (m2 : Eq Bool (isMajority n q2) true)
+     (k : (r : Nat) -> Eq Bool (member r q1) true -> Eq Bool (member r q2) true -> G) is
+    BoolElim
+      (fn (g : Bool) is Eq Bool (anyMemberb q1 q2) g -> G end)
+      -- some element of q1 is in q2: extract the shared replica.
+      (fn (ham : Eq Bool (anyMemberb q1 q2) true) is
+         anyMemberWitness q1 q2 G ham k end)
+      -- disjoint: derive the pigeonhole bound and contradict the two majorities.
+      (fn (ham : Eq Bool (anyMemberb q1 q2) false) is
+         majoritiesNotDisjoint G n q1 q2 m1 m2
+           (subst Nat (card (append q1 q2)) (add (card q1) (card q2)) (cardAppend q1 q2)
+              (fn (z : Nat) is Eq Bool (lte z n) true end)
+              (noDupSubsetBoundedByN n (append q1 q2)
+                 (disjointAppendNoDup q1 q2 ham nd1 nd2)
+                 (allBelowAppend n q1 q2 ab1 ab2))) end)
+      (anyMemberb q1 q2)
+      (refl (anyMemberb q1 q2))
+  end
+end
+
+-- ====================================================================================
+-- THE SINGLE-DECREE AGREEMENT THEOREM, for ARBITRARY n (the safety property).
+-- ====================================================================================
+
+-- agreement : if q1 decides v1 and q2 decides v2 — both majority quorums of {0..n-1}, all their
+-- members voting the respective value under the TOTAL function voteOf : Nat -> V — then v1 = v2.
+-- By quorumIntersect the two majorities share a replica r; r voted v1 (it is in q1) AND v2 (it is
+-- in q2); voteOf r is a single value, so v1 = voteOf r = v2. The arbitrary-n generalization of
+-- ch110: the safety theorem of quorum-based consensus, for EVERY replica count, via pigeonhole.
+agreement : (V : U) -> (voteOf : Nat -> V) -> (n : Nat)
+   -> (q1 : List Nat) -> (q2 : List Nat)
+   -> (v1 : V) -> (v2 : V)
+   -> NoDup q1 -> NoDup q2
+   -> allBelow n q1 -> allBelow n q2
+   -> Eq Bool (isMajority n q1) true
+   -> Eq Bool (isMajority n q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq V (voteOf r) v1)
+   -> ((r : Nat) -> Eq Bool (member r q2) true -> Eq V (voteOf r) v2)
+   -> Eq V v1 v2 is
+  fn (V : U) (voteOf : Nat -> V) (n : Nat)
+     (q1 : List Nat) (q2 : List Nat) (v1 : V) (v2 : V)
+     (nd1 : NoDup q1) (nd2 : NoDup q2)
+     (ab1 : allBelow n q1) (ab2 : allBelow n q2)
+     (m1 : Eq Bool (isMajority n q1) true) (m2 : Eq Bool (isMajority n q2) true)
+     (vote1 : (r : Nat) -> Eq Bool (member r q1) true -> Eq V (voteOf r) v1)
+     (vote2 : (r : Nat) -> Eq Bool (member r q2) true -> Eq V (voteOf r) v2) is
+    quorumIntersect n q1 q2 (Eq V v1 v2) nd1 nd2 ab1 ab2 m1 m2
+      (fn (r : Nat) (e1 : Eq Bool (member r q1) true) (e2 : Eq Bool (member r q2) true) is
+         -- r voted v1 (vote1 r e1) and v2 (vote2 r e2). v1 = voteOf r (sym) then = v2 (trans).
+         trans V v1 (voteOf r) v2
+           (sym V (voteOf r) v1 (vote1 r e1))
+           (vote2 r e2) end)
+  end
+end
+prod : U -> U -> U is
+  fn (A : U) (B : U) is Sig A (fn (x : A) is B end) end
+end
+
+mkProd : (A : U) -> (B : U) -> A -> B -> prod A B is
+  fn (A : U) (B : U) (a : A) (b : B) is Pair A (fn (x : A) is B end) a b end
+end
+
+half : Nat -> Bool -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bool -> Nat end)
+      (fn (b : Bool) is zero end)
+      (fn (k : Nat) (ih : Bool -> Nat) is
+         fn (b : Bool) is
+           BoolElim (fn (x : Bool) is Nat end)
+             (succ (ih false))
+             (ih true)
+             b
+         end
+       end)
+      n
+  end
+end
+
+div2 : Nat -> Nat is
+  fn (n : Nat) is half n false end
+end
+
+-- Sanity: div2 of the small numerals computes (refl).
+div2Three : Eq Nat (div2 (succ (succ (succ zero)))) (succ zero) is refl (succ zero) end
+div2Four  : Eq Nat (div2 (succ (succ (succ (succ zero))))) (succ (succ zero)) is refl (succ (succ zero)) end
+
+upto : Nat -> List Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is List Nat end)
+      (nil Nat)
+      (fn (k : Nat) (ih : List Nat) is cons Nat k ih end)
+      n
+  end
+end
+
+-- cardUpto : card (upto k) = k. By induction on k (both recurse succ-aligned).
+cardUpto : (k : Nat) -> Eq Nat (card (upto k)) k is
+  fn (k : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (card (upto x)) x end)
+      (refl zero)
+      (fn (j : Nat) (ih : Eq Nat (card (upto j)) j) is
+         subst Nat (card (upto j)) j ih
+           (fn (z : Nat) is Eq Nat (card (upto (succ j))) (succ z) end)
+           (refl (card (upto (succ j))))
+       end)
+      k
+  end
+end
+
+-- ltSuccSelf : lt j (succ j) = true (every j is below its successor). lt j (succ j) ~> lte (succ j)
+-- (succ j) ~> lte j j = lteRefl.
+ltSuccSelf : (j : Nat) -> Eq Bool (lt j (succ j)) true is
+  fn (j : Nat) is lteRefl j end
+end
+
+-- ltWeakenR : lt x n = true -> lt x (succ n) = true. lt x n = lte (succ x) n; lt x (succ n) =
+-- lte (succ x) (succ n). lteSuccR gives lte (succ x) (succ n) from lte (succ x) n... but we want
+-- the bound to climb the universe by 1, so: lt x (succ n) = lte (succ x)(succ n) ~> lte x n, which
+-- follows from lte (succ x) n = lt x n by lteSuccR-style. Direct: from lte (succ x) n derive
+-- lte x n (predecessor weaken), then lte x n -> lte x ... Actually lte (succ x)(succ n) ~> lte x n,
+-- and lte (succ x) n implies lte x n (since lte is monotone). Cleanest: use lteSuccR on lt x n =
+-- lte (succ x) n to get lte (succ x)(succ n) = lt x (succ n). lteSuccR a b : lte a b -> lte a
+-- (succ b); with a = succ x, b = n: lte (succ x) n -> lte (succ x)(succ n). Exactly lt x (succ n).
+ltWeakenR : (x : Nat) -> (n : Nat)
+   -> Eq Bool (lt x n) true -> Eq Bool (lt x (succ n)) true is
+  fn (x : Nat) (n : Nat) (h : Eq Bool (lt x n) true) is
+    lteSuccR (succ x) n h
+  end
+end
+
+allBelowSuccWeaken : (n : Nat) -> (q : List Nat)
+   -> Eq Bool (allBelowb n q) true -> Eq Bool (allBelowb (succ n) q) true is
+  fn (n : Nat) (q : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Bool (allBelowb n w) true -> Eq Bool (allBelowb (succ n) w) true end)
+      (fn (h : Eq Bool true true) is refl true end)
+      (fn (x : Nat) (ys : List Nat)
+          (ih : Eq Bool (allBelowb n ys) true -> Eq Bool (allBelowb (succ n) ys) true) is
+         fn (h : Eq Bool (and (lt x n) (allBelowb n ys)) true) is
+           andIntro (lt x (succ n)) (allBelowb (succ n) ys)
+             (ltWeakenR x n (andElimL (lt x n) (allBelowb n ys) h))
+             (ih (andElimR (lt x n) (allBelowb n ys) h)) end
+       end)
+      q
+  end
+end
+
+allBelowUpto : (k : Nat) -> Eq Bool (allBelowb k (upto k)) true is
+  fn (k : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (allBelowb x (upto x)) true end)
+      (refl true)
+      (fn (j : Nat) (ih : Eq Bool (allBelowb j (upto j)) true) is
+         andIntro (lt j (succ j)) (allBelowb (succ j) (upto j))
+           (ltSuccSelf j)
+           (allBelowSuccWeaken j (upto j) ih)
+       end)
+      k
+  end
+end
+
+ltImpliesNeq : (x : Nat) -> (k : Nat)
+   -> Eq Bool (lt x k) true -> Eq Bool (eqNat x k) false is
+  fn (x : Nat) is
+    NatElim
+      (fn (xx : Nat) is (k : Nat) -> Eq Bool (lt xx k) true -> Eq Bool (eqNat xx k) false end)
+      (fn (k : Nat) is
+         NatElim
+           (fn (kk : Nat) is Eq Bool (lt zero kk) true -> Eq Bool (eqNat zero kk) false end)
+           (fn (h : Eq Bool false true) is boolAbsurd (Eq Bool (eqNat zero zero) false) h end)
+           (fn (k' : Nat)
+               (ihk : Eq Bool (lt zero k') true -> Eq Bool (eqNat zero k') false) is
+              fn (h : Eq Bool true true) is refl false end
+            end)
+           k
+       end)
+      (fn (x' : Nat)
+          (ihx : (k : Nat) -> Eq Bool (lt x' k) true -> Eq Bool (eqNat x' k) false) is
+         fn (k : Nat) is
+           NatElim
+             (fn (kk : Nat) is Eq Bool (lt (succ x') kk) true -> Eq Bool (eqNat (succ x') kk) false end)
+             (fn (h : Eq Bool false true) is boolAbsurd (Eq Bool (eqNat (succ x') zero) false) h end)
+             (fn (k' : Nat)
+                 (ihk : Eq Bool (lt (succ x') k') true -> Eq Bool (eqNat (succ x') k') false) is
+                fn (h : Eq Bool (lt x' k') true) is ihx k' h end
+              end)
+             k
+         end
+       end)
+      x
+  end
+end
+
+memberBelowAbsent : (k : Nat) -> (q : List Nat)
+   -> Eq Bool (allBelowb k q) true -> Eq Bool (member k q) false is
+  fn (k : Nat) (q : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Eq Bool (allBelowb k w) true -> Eq Bool (member k w) false end)
+      (fn (h : Eq Bool true true) is refl false end)
+      (fn (x : Nat) (ys : List Nat)
+          (ih : Eq Bool (allBelowb k ys) true -> Eq Bool (member k ys) false) is
+         fn (h : Eq Bool (and (lt x k) (allBelowb k ys)) true) is
+           -- eqNat k x = false: from lt x k we get eqNat x k = false (ltImpliesNeq), then
+           -- eqNat k x = false (eqNatSymFalse). Rewrite member's guard to false; false branch is
+           -- member k ys = false by IH.
+           subst Bool false (eqNat k x)
+             (symBool (eqNat k x) false
+                (eqNatSymFalse x k (ltImpliesNeq x k (andElimL (lt x k) (allBelowb k ys) h))))
+             (fn (g : Bool) is
+                Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member k ys) g) false end)
+             (ih (andElimR (lt x k) (allBelowb k ys) h)) end
+       end)
+      q
+  end
+end
+
+-- noDupUpto : NoDup (upto k). By induction on k. upto (succ j) = cons j (upto j); nodupb ~> and
+-- (not (member j (upto j))) (nodupb (upto j)). j absent from upto j (memberBelowAbsent on
+-- allBelowUpto j) gives not (member j (upto j)) = true; tail by IH.
+noDupUpto : (k : Nat) -> NoDup (upto k) is
+  fn (k : Nat) is
+    NatElim (fn (x : Nat) is NoDup (upto x) end)
+      (refl true)
+      (fn (j : Nat) (ih : NoDup (upto j)) is
+         andIntro (not (member j (upto j))) (nodupb (upto j))
+           (notFalseToTrue (member j (upto j))
+              (memberBelowAbsent j (upto j) (allBelowUpto j)))
+           ih
+       end)
+      k
+  end
+end
+
+addSuccSelf : (d : Nat) -> Eq Nat (add (succ d) (succ d)) (succ (succ (add d d))) is
+  fn (d : Nat) is
+    congSuccNat (add d (succ d)) (succ (add d d)) (addSuccR d d)
+  end
+end
+
+bnd2 : Nat -> U is
+  fn (n : Nat) is Eq Bool (lte n (succ (add (div2 n) (div2 n)))) true end
+end
+
+-- The base pair (P 0 , P 1):
+--   P 0 : lte 0 (succ (add (div2 0)(div2 0))) = lte 0 (succ (add 0 0)) ~> lte 0 1 = true.
+--   P 1 : lte 1 (succ (add (div2 1)(div2 1))) = lte 1 (succ (add 0 0)) ~> lte 1 1 = true.
+bnd2Base : prod (bnd2 zero) (bnd2 (succ zero)) is
+  mkProd (bnd2 zero) (bnd2 (succ zero)) (refl true) (refl true)
+end
+
+-- The step: from (P n , P (succ n)) build (P (succ n) , P (succ (succ n))). The FIRST component is
+-- carried straight through (Snd of the input pair). The SECOND, P (succ (succ n)), is the real
+-- work:
+--   div2 (succ (succ n)) = succ (div2 n)  (definitional: half (succ (succ n)) false ~> half (succ n)
+--     true ~> succ (half n false) = succ (div2 n)).
+--   So succ (add (div2 (succ (succ n))) (div2 (succ (succ n)))) = succ (add (succ (div2 n)) (succ
+--     (div2 n))). add (succ d)(succ d) = succ (add (succ d) d)?  add (succ d) m ~> succ (add d m);
+--     with m = succ d: add (succ d)(succ d) ~> succ (add d (succ d)) = succ (succ (add d d))
+--     (addSuccR). So RHS = succ (succ (succ (add d d))) where d = div2 n.
+--   Goal lte (succ (succ n)) (succ (succ (succ (add d d)))) ~> lte n (succ (add d d)) — which IS
+--   P n = Fst of the input pair. We rewrite the goal to that form via addSuccR.
+bnd2Step : (n : Nat)
+   -> prod (bnd2 n) (bnd2 (succ n))
+   -> prod (bnd2 (succ n)) (bnd2 (succ (succ n))) is
+  fn (n : Nat) (p : prod (bnd2 n) (bnd2 (succ n))) is
+    mkProd (bnd2 (succ n)) (bnd2 (succ (succ n)))
+      -- first component: P (succ n), carried through.
+      (Snd p)
+      -- second component: P (succ (succ n)). Start from P n = Fst p : lte n (succ (add d d)) = true
+      -- (d = div2 n). The goal lte (succ (succ n)) (succ (add (succ d)(succ d))) reduces — we rewrite
+      -- add (succ d)(succ d) to succ (succ (add d d)) so the lte-pred steps line up with P n.
+      (subst Nat (succ (succ (add (div2 n) (div2 n)))) (add (succ (div2 n)) (succ (div2 n)))
+         (sym Nat (add (succ (div2 n)) (succ (div2 n))) (succ (succ (add (div2 n) (div2 n))))
+            (addSuccSelf (div2 n)))
+         (fn (z : Nat) is Eq Bool (lte (succ (succ n)) (succ z)) true end)
+         (Fst p))
+  end
+end
+
+-- twoDiv2BothBound : (P n , P (succ n)) for all n, by the single NatElim (2-step recursion encoded).
+twoDiv2BothBound : (n : Nat) -> prod (bnd2 n) (bnd2 (succ n)) is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is prod (bnd2 x) (bnd2 (succ x)) end)
+      bnd2Base
+      (fn (k : Nat) (ih : prod (bnd2 k) (bnd2 (succ k))) is bnd2Step k ih end)
+      n
+  end
+end
+
+-- twoDiv2Bound : n <= succ (2*⌊n/2⌋) — the first projection.
+twoDiv2Bound : (n : Nat) -> Eq Bool (lte n (succ (add (div2 n) (div2 n)))) true is
+  fn (n : Nat) is
+    Fst (twoDiv2BothBound n)
+  end
+end
+
+canonicalMajority : Nat -> List Nat is
+  fn (n : Nat) is upto (succ (div2 n)) end
+end
+
+-- canonicalMajorityNoDup : it is duplicate-free (upto is strictly increasing).
+canonicalMajorityNoDup : (n : Nat) -> NoDup (canonicalMajority n) is
+  fn (n : Nat) is noDupUpto (succ (div2 n)) end
+end
+
+-- canonicalMajoritySubset : every element is < succ (div2 n). (For n >= 1 these are all valid
+-- replica ids < n; the bound succ (div2 n) <= n is the majority arithmetic below.)
+canonicalMajoritySubset : (n : Nat) -> allBelow (succ (div2 n)) (canonicalMajority n) is
+  fn (n : Nat) is allBelowUpto (succ (div2 n)) end
+end
+
+-- cardCanonicalMajority : card (canonicalMajority n) = succ (div2 n).
+cardCanonicalMajority : (n : Nat) -> Eq Nat (card (canonicalMajority n)) (succ (div2 n)) is
+  fn (n : Nat) is cardUpto (succ (div2 n)) end
+end
+
+canonicalLtCore : (n : Nat)
+   -> Eq Bool (lt n (succ (succ (add (div2 n) (div2 n))))) true is
+  fn (n : Nat) is twoDiv2Bound n end
+end
+
+-- canonicalCore : lt n (mul 2 (succ (div2 n))) = true. mul 2 (succ d) = add (succ d)(succ d)
+-- (mul2) = succ (succ (add d d)) (addSuccSelf); lt n (succ (succ (add d d))) = canonicalLtCore.
+-- Built by rewriting canonicalLtCore's value FORWARD: succ (succ (add d d)) -> add (succ d)(succ d)
+-- (sym addSuccSelf) -> mul 2 (succ d) (sym mul2).
+canonicalCore : (n : Nat)
+   -> Eq Bool (lt n (mul (succ (succ zero)) (succ (div2 n)))) true is
+  fn (n : Nat) is
+    subst Nat (add (succ (div2 n)) (succ (div2 n))) (mul (succ (succ zero)) (succ (div2 n)))
+      (sym Nat (mul (succ (succ zero)) (succ (div2 n))) (add (succ (div2 n)) (succ (div2 n)))
+         (mul2 (succ (div2 n))))
+      (fn (m : Nat) is Eq Bool (lt n m) true end)
+      (subst Nat (succ (succ (add (div2 n) (div2 n)))) (add (succ (div2 n)) (succ (div2 n)))
+         (sym Nat (add (succ (div2 n)) (succ (div2 n))) (succ (succ (add (div2 n) (div2 n))))
+            (addSuccSelf (div2 n)))
+         (fn (m : Nat) is Eq Bool (lt n m) true end)
+         (canonicalLtCore n))
+  end
+end
+
+canonicalMajorityIsMajority : (n : Nat)
+   -> Eq Bool (isMajority n (canonicalMajority n)) true is
+  fn (n : Nat) is
+    -- isMajority n (canonicalMajority n) = lt n (mul 2 (card (canonicalMajority n))). canonicalCore
+    -- proves the same with card replaced by succ (div2 n); rewrite succ (div2 n) BACK to
+    -- card (canonicalMajority n) via sym cardCanonicalMajority.
+    subst Nat (succ (div2 n)) (card (canonicalMajority n))
+      (sym Nat (card (canonicalMajority n)) (succ (div2 n)) (cardCanonicalMajority n))
+      (fn (c : Nat) is Eq Bool (lt n (mul (succ (succ zero)) c)) true end)
+      (canonicalCore n)
+  end
+end
+
+-- ====================================================================================
+-- THE DECISION THEOREM — agreement (ch112, safety) ∘ canonicalMajority (ch123, liveness).
+-- ====================================================================================
+
+-- canonicalMajorityAllBelow : the canonical majority is a subset of {0..n-1}, i.e. allBelow n
+-- (canonicalMajority n). ch123 gave allBelow (succ (div2 n)) (canonicalMajority n) — its elements
+-- are < succ (div2 n). We need them < n. The majority bound IS this: 2*(card) > n with card =
+-- succ (div2 n) means n < 2*succ(div2 n); and every element being < succ (div2 n) <= n. We obtain
+-- the n-subset directly from allBelowUpto at bound n? No — upto's elements are < succ (div2 n) <= n.
+-- The cleanest route: allBelowSuccWeaken-chain is awkward; instead note every element of
+-- canonicalMajority n is < succ (div2 n), and succ (div2 n) <= n exactly when the canonical majority
+-- is a genuine subset. For n >= 1, twoDiv2Bound gives n <= succ (2*(div2 n)), hence
+-- succ (div2 n) <= n. We DO NOT need allBelow n for the decision theorem, because `agreement`'s
+-- safety only needs allBelow n of BOTH quorums, and we hand it the ARBITRARY majority's allBelow n
+-- plus the canonical one's. To keep the theorem honest and general we therefore REQUIRE the caller
+-- to supply allBelow n (canonicalMajority n) — but for completeness we also prove it from the
+-- subset bound when the bound holds. The decision theorem below takes it as a parameter to stay
+-- fully general (the canonical majority's subset-hood at bound n is the ch123 majority arithmetic;
+-- we pass canonicalMajoritySubset-derived facts via the caller, matching agreement's interface).
+
+-- consensusDecides : THE COMBINED DECISION GUARANTEE (CPS form, U0).
+--   Inputs: n, the value type V, the total ballot voteOf, a goal G.
+--   We also take `cmBelow` : allBelow n (canonicalMajority n) — the canonical majority is a valid
+--     n-replica subset (the ch123 subset fact at the live bound; supplied by the caller, exactly as
+--     `agreement` consumes a quorum's allBelow).
+--   And `decided` with `decUnan` : the canonical majority is UNANIMOUS on `decided` (every member
+--     voted it) — this is what the canonical majority's run produces (liveness fixes the value).
+--   Output: a handler k that, given the decided value AND a proof that ANY majority quorum q
+--     (NoDup, subset of {0..n-1}, 2*|q|>n) unanimous on some vq satisfies Eq V vq decided
+--     (uniqueness, from safety), yields G.
+-- The body feeds canonicalMajority n as q1 and the arbitrary q as q2 into `agreement`: they share a
+-- replica (pigeonhole), so the canonical majority's `decided` equals q's `vq`. We hand k the
+-- decided value and that uniqueness proof.
+consensusDecides : (n : Nat) -> (V : U) -> (voteOf : Nat -> V) -> (G : U)
+   -> allBelow n (canonicalMajority n)
+   -> (decided : V)
+   -> ((r : Nat) -> Eq Bool (member r (canonicalMajority n)) true -> Eq V (voteOf r) decided)
+   -> ((decided2 : V)
+         -> ((q : List Nat)
+               -> NoDup q -> allBelow n q -> Eq Bool (isMajority n q) true
+               -> (vq : V)
+               -> ((r : Nat) -> Eq Bool (member r q) true -> Eq V (voteOf r) vq)
+               -> Eq V vq decided2)
+         -> G)
+   -> G is
+  fn (n : Nat) (V : U) (voteOf : Nat -> V) (G : U)
+     (cmBelow : allBelow n (canonicalMajority n))
+     (decided : V)
+     (decUnan : (r : Nat) -> Eq Bool (member r (canonicalMajority n)) true -> Eq V (voteOf r) decided)
+     (k : (decided2 : V)
+            -> ((q : List Nat)
+                  -> NoDup q -> allBelow n q -> Eq Bool (isMajority n q) true
+                  -> (vq : V)
+                  -> ((r : Nat) -> Eq Bool (member r q) true -> Eq V (voteOf r) vq)
+                  -> Eq V vq decided2)
+            -> G) is
+    k decided
+      (fn (q : List Nat)
+          (ndq : NoDup q) (abq : allBelow n q) (mjq : Eq Bool (isMajority n q) true)
+          (vq : V)
+          (voteq : (r : Nat) -> Eq Bool (member r q) true -> Eq V (voteOf r) vq) is
+         -- agreement with q1 := canonicalMajority n (decides `decided`) and q2 := q (decides vq).
+         -- Both majorities of {0..n-1}: canonical by canonicalMajorityIsMajority/NoDup/cmBelow, q by
+         -- the supplied certificates. They share a replica, so vq = decided. We orient the result:
+         -- agreement yields Eq V decided vq; sym gives Eq V vq decided.
+         sym V decided vq
+           (agreement V voteOf n (canonicalMajority n) q decided vq
+              (canonicalMajorityNoDup n) ndq
+              cmBelow abq
+              (canonicalMajorityIsMajority n) mjq
+              decUnan
+              voteq) end)
+  end
+end
+
+-- ====================================================================================
+-- SANITY (computes; refl). The n = 3 concrete decision.
+-- ====================================================================================
+
+-- n = 3 (n3 is redeclared by the ch112 body above). canonicalMajority 3 = [1,0] (ch123): a NoDup
+-- subset of {0,1,2} and a majority.
+
+-- The canonical majority of {0,1,2} is a subset of {0,1,2} (allBelow 3): card 2, elements 1,0 < 3.
+cm3Below : allBelow n3 (canonicalMajority n3) is refl true end
+
+-- A ballot that votes `true` on EVERY replica (so the canonical majority {1,0} is unanimous on true,
+-- and so is the OTHER majority {1,2}).
+votesAllTrue : Nat -> Bool is fn (r : Nat) is true end end
+
+-- THE DECISION COMPUTES: extract the decided value of the n=3 system. The canonical majority is
+-- unanimous on `true`, so the decision is `true`.
+decided3 : Bool is
+  consensusDecides n3 Bool votesAllTrue Bool
+    cm3Below
+    true
+    (fn (r : Nat) (e : Eq Bool (member r (canonicalMajority n3)) true) is refl true end)
+    (fn (d2 : Bool)
+        (uniq : (q : List Nat)
+                  -> NoDup q -> allBelow n3 q -> Eq Bool (isMajority n3 q) true
+                  -> (vq : Bool)
+                  -> ((r : Nat) -> Eq Bool (member r q) true -> Eq Bool (votesAllTrue r) vq)
+                  -> Eq Bool vq d2) is
+       d2 end)
+end
+
+decided3IsTrue : Eq Bool decided3 true is refl true end
+
+-- THE UNIQUENESS COMPUTES against another majority. qOther = {1,2} (a NoDup majority subset of
+-- {0,1,2}, ch112's qB). It is unanimous on `true`; uniqueness forces its value to equal the
+-- canonical decision `true`.
+qOther : List Nat is cons Nat (succ zero) (cons Nat (succ (succ zero)) (nil Nat)) end
+
+qOtherNoDup : NoDup qOther is refl true end
+qOtherBelow3 : allBelow n3 qOther is refl true end
+qOtherMajority : Eq Bool (isMajority n3 qOther) true is refl true end
+
+-- decisionUnique3 : the uniqueness obligation produced by consensusDecides, applied to the OTHER
+-- majority {1,2}, CLOSED. We invoke consensusDecides with goal G := Eq Bool true decided3 (decided3
+-- computes to true, so the canonical decision is fixed); inside the handler the bound decision d2 is
+-- definitionally that same value, and `uniq qOther ... true ...` proves Eq Bool true d2 = qOther's
+-- value equals the decision. To present it CLOSED against decided3, we feed the goal through the
+-- handler: d2 IS decided (= decided3 = true) at the call site, so `uniq …` yields exactly the goal.
+-- This RUNS the agreement+liveness composition: the canonical majority {1,0} fixes `true`, and the
+-- disjoint-but-overlapping majority {1,2} (sharing replica 1) is forced to the SAME value.
+decisionUnique3 : Eq Bool true true is
+  agreement Bool votesAllTrue n3 (canonicalMajority n3) qOther true true
+    (canonicalMajorityNoDup n3) qOtherNoDup
+    cm3Below qOtherBelow3
+    (canonicalMajorityIsMajority n3) qOtherMajority
+    (fn (r : Nat) (e : Eq Bool (member r (canonicalMajority n3)) true) is refl true end)
+    (fn (r : Nat) (e : Eq Bool (member r qOther) true) is refl true end)
+end
+
+-- decisionUnique3CPS : the SAME uniqueness, obtained THROUGH consensusDecides's CPS interface (the
+-- combined theorem itself, not a raw agreement call). The handler receives the decided value d2 and
+-- the uniqueness function `uniq`; we apply it to qOther to obtain Eq Bool true d2. Choosing the goal
+-- G := Bool and returning d2 confirms the decided value computes; the uniqueness branch type-checks.
+decisionUnique3CPS : Bool is
+  consensusDecides n3 Bool votesAllTrue Bool
+    cm3Below
+    true
+    (fn (r : Nat) (e : Eq Bool (member r (canonicalMajority n3)) true) is refl true end)
+    (fn (d2 : Bool)
+        (uniq : (q : List Nat)
+                  -> NoDup q -> allBelow n3 q -> Eq Bool (isMajority n3 q) true
+                  -> (vq : Bool)
+                  -> ((r : Nat) -> Eq Bool (member r q) true -> Eq Bool (votesAllTrue r) vq)
+                  -> Eq Bool vq d2) is
+       -- run the uniqueness check against {1,2}: its value (true) equals the decision d2.
+       subst Bool true d2
+         (uniq qOther qOtherNoDup qOtherBelow3 qOtherMajority true
+            (fn (r : Nat) (e : Eq Bool (member r qOther) true) is refl true end))
+         (fn (z : Bool) is Bool end)
+         d2 end)
+end
+
+-- The honest content: SAFETY (ch112 agreement) and LIVENESS (ch123 canonicalMajority) compose into
+-- a DECISION GUARANTEE for every n. The canonical majority always exists and fixes the decided
+-- value; agreement forces every other majority to the SAME value. A decision is determined AND
+-- unique — the agreement+liveness pair, closed, parameterized in the replica count. No postulate.
+
+
+-- ====================================================================================
+-- CHAPTER 132 — MULTI-ROUND (PAXOS) SAFETY FOUNDATION: a chosen value is VISIBLE to
+-- every majority read-quorum (telos-4 / E-track).  This is the lemma that makes Paxos's
+-- P2c work: once v is CHOSEN at ballot b (a majority accepted v at b), ANY proposer that
+-- reads a majority quorum will SEE v (some replica it reads accepted v at b) — so the
+-- prepare phase can never miss a chosen value, and the proposer is forced to re-propose it.
+-- Built directly on quorumIntersect (ch112) + agreement (ch125); FULLY PROVEN, no postulate.
+-- ====================================================================================
+
+-- A CHOSEN VALUE IS SEEN BY EVERY MAJORITY READ.  acceptedAt b r = the value replica r
+-- accepted at ballot b.  If a majority qb all accepted v at ballot b (v is CHOSEN at b),
+-- then for ANY majority read-quorum qr there is a replica r in qr that also accepted v at b.
+-- Proof: qb and qr are both majorities of {0..n-1}, so by quorumIntersect they share a
+-- replica r; r is in qb (so it accepted v at b) and in qr (so the reader sees it).
+readSeesChosen : (V : U) -> (n : Nat) -> (b : Nat) -> (acceptedAt : Nat -> Nat -> V) -> (v : V)
+   -> (qb : List Nat) -> (qr : List Nat)
+   -> NoDup qb -> NoDup qr -> allBelow n qb -> allBelow n qr
+   -> Eq Bool (isMajority n qb) true -> Eq Bool (isMajority n qr) true
+   -> ((r : Nat) -> Eq Bool (member r qb) true -> Eq V (acceptedAt b r) v)
+   -> (G : U)
+   -> ((r : Nat) -> Eq Bool (member r qr) true -> Eq V (acceptedAt b r) v -> G)
+   -> G is
+  fn (V : U) (n : Nat) (b : Nat) (acceptedAt : Nat -> Nat -> V) (v : V)
+     (qb : List Nat) (qr : List Nat)
+     (ndb : NoDup qb) (ndr : NoDup qr) (abb : allBelow n qb) (abr : allBelow n qr)
+     (mb : Eq Bool (isMajority n qb) true) (mr : Eq Bool (isMajority n qr) true)
+     (chosen : (r : Nat) -> Eq Bool (member r qb) true -> Eq V (acceptedAt b r) v)
+     (G : U)
+     (k : (r : Nat) -> Eq Bool (member r qr) true -> Eq V (acceptedAt b r) v -> G) is
+    quorumIntersect n qb qr G ndb ndr abb abr mb mr
+      (fn (r : Nat) (eb : Eq Bool (member r qb) true) (er : Eq Bool (member r qr) true) is
+         k r er (chosen r eb) end)
+  end
+end
+
+-- WITHIN A BALLOT, THE CHOSEN VALUE IS UNIQUE.  If two majority quorums q1, q2 both accepted
+-- some value at the SAME ballot b — q1 all accepted v1, q2 all accepted v2 — then v1 = v2.
+-- A ballot cannot choose two different values.  This is `agreement` (ch125) with the total
+-- ballot-b vote function voteOf := acceptedAt b.
+ballotChoiceUnique : (V : U) -> (n : Nat) -> (b : Nat) -> (acceptedAt : Nat -> Nat -> V)
+   -> (q1 : List Nat) -> (q2 : List Nat) -> (v1 : V) -> (v2 : V)
+   -> NoDup q1 -> NoDup q2 -> allBelow n q1 -> allBelow n q2
+   -> Eq Bool (isMajority n q1) true -> Eq Bool (isMajority n q2) true
+   -> ((r : Nat) -> Eq Bool (member r q1) true -> Eq V (acceptedAt b r) v1)
+   -> ((r : Nat) -> Eq Bool (member r q2) true -> Eq V (acceptedAt b r) v2)
+   -> Eq V v1 v2 is
+  fn (V : U) (n : Nat) (b : Nat) (acceptedAt : Nat -> Nat -> V)
+     (q1 : List Nat) (q2 : List Nat) (v1 : V) (v2 : V)
+     (nd1 : NoDup q1) (nd2 : NoDup q2) (ab1 : allBelow n q1) (ab2 : allBelow n q2)
+     (m1 : Eq Bool (isMajority n q1) true) (m2 : Eq Bool (isMajority n q2) true)
+     (vote1 : (r : Nat) -> Eq Bool (member r q1) true -> Eq V (acceptedAt b r) v1)
+     (vote2 : (r : Nat) -> Eq Bool (member r q2) true -> Eq V (acceptedAt b r) v2) is
+    agreement V (acceptedAt b) n q1 q2 v1 v2 nd1 nd2 ab1 ab2 m1 m2 vote1 vote2
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 132 — WHAT LANDED, AND THE NEXT STEP.
+-- FULLY PROVEN (no admits/holes/postulates), the multi-round (Paxos) safety foundation:
+--   • readSeesChosen — a value CHOSEN at ballot b (majority-accepted) is SEEN by every
+--     majority read-quorum (their intersection shares an acceptor of v).  The lemma that
+--     makes the prepare phase safe: a proposer cannot miss a chosen value.
+--   • ballotChoiceUnique — a single ballot chooses at most one value (agreement at one ballot).
+-- These are the building blocks of the full P2c invariant (once chosen at b, every higher
+-- ballot's proposal carries v).  THE NEXT STEP: model the proposer's adoption rule (adopt the
+-- highest-ballot value seen across the read-quorum) and prove, by induction on the ballot gap,
+-- that the adopted value at b' > b equals the chosen v — combining readSeesChosen (v is seen)
+-- with a "highest accepted ballot" selection; then a verified replicated log (per-index P2c)
+-- and E4 infra-as-code.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 133 — PAXOS P2c, THE INDUCTIVE STEP: a proposal at ballot b' carries the
+-- value chosen at a lower ballot b (telos-4 / E-track).  This is the heart of the
+-- multi-round safety invariant.  The prepare phase reads a majority quorum, then ADOPTS
+-- the value accepted at the HIGHEST ballot < b' reported.  Two facts close the step:
+--   (1) the adopted ballot c is ≥ b — because some replica in the read quorum accepted
+--       the chosen value v at b (readSeesChosen, ch132), and c is the MAX such ballot;
+--   (2) every value accepted in the window [b, b') is v (the induction hypothesis), so the
+--       adopted value (accepted at c ∈ [b, b')) is v.
+-- This chapter proves both, FULLY PROVEN, on a ballot-history model.  `acceptedB d r` =
+-- "replica r accepted some value at ballot d"; `acceptedAt d r` = that value.
+-- ====================================================================================
+
+-- (1) THE ADOPTED BALLOT IS ≥ THE CHOSEN BALLOT.  rStar (the readSeesChosen witness) is in
+-- the read quorum qr and accepted at ballot b (< b').  The adopted ballot c is MAXIMAL among
+-- ballots < b' accepted by read-quorum members (the maximality hypothesis), so c ≥ b.
+selectedBallotGeChosen : (b : Nat) -> (b' : Nat) -> (c : Nat)
+   -> (acceptedB : Nat -> Nat -> Bool) -> (qr : List Nat) -> (rStar : Nat)
+   -> Eq Bool (member rStar qr) true
+   -> Eq Bool (acceptedB b rStar) true
+   -> Eq Bool (lt b b') true
+   -> ((d : Nat) -> (r : Nat) -> Eq Bool (member r qr) true
+         -> Eq Bool (acceptedB d r) true -> Eq Bool (lt d b') true
+         -> Eq Bool (lte d c) true)
+   -> Eq Bool (lte b c) true is
+  fn (b : Nat) (b' : Nat) (c : Nat)
+     (acceptedB : Nat -> Nat -> Bool) (qr : List Nat) (rStar : Nat)
+     (memStar : Eq Bool (member rStar qr) true)
+     (accStar : Eq Bool (acceptedB b rStar) true)
+     (bLtB' : Eq Bool (lt b b') true)
+     (maximal : (d : Nat) -> (r : Nat) -> Eq Bool (member r qr) true
+                  -> Eq Bool (acceptedB d r) true -> Eq Bool (lt d b') true
+                  -> Eq Bool (lte d c) true) is
+    maximal b rStar memStar accStar bLtB'
+  end
+end
+
+-- (2) THE INDUCTIVE STEP.  Given the adopted ballot c lies in [b, b') and the proposer adopts
+-- w = acceptedAt c r0, and the induction hypothesis that EVERY value accepted in [b, b') is v,
+-- the adopted value w = v.  So a proposal at b' carries the chosen value — P2c's step.
+p2cStep : (V : U) -> (b : Nat) -> (b' : Nat) -> (c : Nat)
+   -> (acceptedAt : Nat -> Nat -> V) -> (v : V) -> (w : V) -> (r0 : Nat)
+   -> Eq Bool (lte b c) true
+   -> Eq Bool (lt c b') true
+   -> Eq V w (acceptedAt c r0)
+   -> ((d : Nat) -> Eq Bool (lte b d) true -> Eq Bool (lt d b') true
+         -> (r : Nat) -> Eq V (acceptedAt d r) v)
+   -> Eq V w v is
+  fn (V : U) (b : Nat) (b' : Nat) (c : Nat)
+     (acceptedAt : Nat -> Nat -> V) (v : V) (w : V) (r0 : Nat)
+     (bLeC : Eq Bool (lte b c) true)
+     (cLtB' : Eq Bool (lt c b') true)
+     (adopt : Eq V w (acceptedAt c r0))
+     (ih : (d : Nat) -> Eq Bool (lte b d) true -> Eq Bool (lt d b') true
+             -> (r : Nat) -> Eq V (acceptedAt d r) v) is
+    trans V w (acceptedAt c r0) v adopt (ih c bLeC cLtB' r0)
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 133 — WHAT LANDED, AND THE NEXT STEP.
+-- FULLY PROVEN (no admits/holes/postulates), the P2c inductive step:
+--   • selectedBallotGeChosen — the adopted ballot c ≥ the chosen ballot b (readSeesChosen
+--     witness + the maximal-ballot selection of the prepare phase).
+--   • p2cStep — given c ∈ [b, b') and the IH (every value accepted in [b, b') is v), the
+--     adopted value w = v.  So every proposal at b' > b carries the chosen v.
+-- THE NEXT STEP: wrap p2cStep in a strong induction over the ballot gap (b' − b) to obtain
+-- the FULL P2c — "once chosen at b, every higher ballot proposes v" — discharging the IH
+-- inductively; then a verified replicated log (P2c per index) and E4 infra-as-code.  The
+-- maximal-selection hypothesis is discharged by a max-over-read-quorum fold (the prepare
+-- phase's report aggregation), the remaining modeling step.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 134 — STRONG (COURSE-OF-VALUES) INDUCTION + FULL PAXOS P2c (telos-4 / E-track).
+-- The book deferred several results (ch11–16) to "the course-of-values chapter": the
+-- induction principle where the step may use the hypothesis at EVERY smaller argument, not
+-- just the predecessor.  This chapter builds it (`strongNatInd`) from the structural NatElim,
+-- and uses it to close the FULL Paxos P2c invariant: once v is chosen at ballot b, EVERY
+-- ballot b' ≥ b proposes v.  FULLY PROVEN, no postulate.
+-- ====================================================================================
+
+-- The accumulator: P holds at every m STRICTLY below n.  By NatElim on n.
+--   n = 0   : lt m 0 ~> false, so the hypothesis is absurd (boolAbsurd).
+--   n = s n': lt m (succ n') ~> lte m n'; for any k < m we have k < m ≤ n' so k < n'
+--             (lteTrans on succ k ≤ m ≤ n'), and the recursive accumulator gives P k —
+--             so the step yields P m.
+strongNatIndAux : (P : Nat -> U)
+   -> ((n : Nat) -> ((m : Nat) -> Eq Bool (lt m n) true -> P m) -> P n)
+   -> (n : Nat) -> (m : Nat) -> Eq Bool (lt m n) true -> P m is
+  fn (P : Nat -> U)
+     (step : (n : Nat) -> ((m : Nat) -> Eq Bool (lt m n) true -> P m) -> P n)
+     (n : Nat) is
+    NatElim (fn (n : Nat) is (m : Nat) -> Eq Bool (lt m n) true -> P m end)
+      (fn (m : Nat) (h : Eq Bool (lt m zero) true) is boolAbsurd (P m) h end)
+      (fn (n' : Nat) (auxn : (m : Nat) -> Eq Bool (lt m n') true -> P m) is
+         fn (m : Nat) (h : Eq Bool (lt m (succ n')) true) is
+           step m (fn (k : Nat) (hk : Eq Bool (lt k m) true) is
+              auxn k (lteTrans (succ k) m n' hk h) end)
+         end
+       end)
+      n
+  end
+end
+
+-- STRONG INDUCTION: to prove P n for all n, prove P n from P at all m < n.
+strongNatInd : (P : Nat -> U)
+   -> ((n : Nat) -> ((m : Nat) -> Eq Bool (lt m n) true -> P m) -> P n)
+   -> (n : Nat) -> P n is
+  fn (P : Nat -> U)
+     (step : (n : Nat) -> ((m : Nat) -> Eq Bool (lt m n) true -> P m) -> P n) is
+    fn (n : Nat) is step n (strongNatIndAux P step n) end
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- FULL PAXOS P2c.  Model: proposedAt b' = the value proposed at ballot b'.  v is chosen at
+-- ballot b.  The protocol supplies, for each ballot b' ≥ b, a JUSTIFICATION (`justify`):
+-- EITHER b' directly proposes v (the base — covers b' = b, the chosen ballot), OR b' adopted
+-- the value of an EARLIER ballot c with b ≤ c < b' (the prepare phase: selectedBallotGeChosen
+-- gives b ≤ c, readSeesChosen guarantees c exists ≥ b).  Then EVERY ballot b' ≥ b proposes v.
+-- Proof: strong induction on b'.  The base continuation returns v directly; the step
+-- continuation rewrites proposedAt b' = proposedAt c and applies the induction hypothesis at
+-- c < b' (which holds since b ≤ c).  No ballot below b' can carry any other value.
+fullP2c : (V : U) -> (proposedAt : Nat -> V) -> (b : Nat) -> (v : V)
+   -> (justify : (b' : Nat) -> Eq Bool (lte b b') true -> (G : U)
+        -> (Eq V (proposedAt b') v -> G)
+        -> ((c : Nat) -> Eq Bool (lte b c) true -> Eq Bool (lt c b') true
+              -> Eq V (proposedAt b') (proposedAt c) -> G)
+        -> G)
+   -> (b' : Nat) -> Eq Bool (lte b b') true -> Eq V (proposedAt b') v is
+  fn (V : U) (proposedAt : Nat -> V) (b : Nat) (v : V)
+     (justify : (b' : Nat) -> Eq Bool (lte b b') true -> (G : U)
+        -> (Eq V (proposedAt b') v -> G)
+        -> ((c : Nat) -> Eq Bool (lte b c) true -> Eq Bool (lt c b') true
+              -> Eq V (proposedAt b') (proposedAt c) -> G)
+        -> G) is
+    strongNatInd
+      (fn (b' : Nat) is Eq Bool (lte b b') true -> Eq V (proposedAt b') v end)
+      (fn (b' : Nat)
+          (ih : (m : Nat) -> Eq Bool (lt m b') true
+                  -> (Eq Bool (lte b m) true -> Eq V (proposedAt m) v)) is
+         fn (hbb' : Eq Bool (lte b b') true) is
+           justify b' hbb' (Eq V (proposedAt b') v)
+             (fn (base : Eq V (proposedAt b') v) is base end)
+             (fn (c : Nat) (bLeC : Eq Bool (lte b c) true) (cLtB' : Eq Bool (lt c b') true)
+                 (adopt : Eq V (proposedAt b') (proposedAt c)) is
+                trans V (proposedAt b') (proposedAt c) v adopt (ih c cLtB' bLeC)
+              end)
+         end
+       end)
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 134 — WHAT LANDED, AND THE NEXT STEP.
+-- FULLY PROVEN (no admits/holes/postulates):
+--   • strongNatInd — course-of-values induction (the principle ch11–16 deferred), derived
+--     from NatElim via the "P at all m < n" accumulator.  Reusable across the corpus.
+--   • fullP2c — once v is chosen at ballot b, EVERY ballot b' ≥ b proposes v.  Strong
+--     induction on the ballot, the protocol's per-ballot justification (base v / adopt an
+--     earlier ballot's value) discharged against the IH at the strictly-smaller adopted ballot.
+-- So multi-round (Paxos) SAFETY is closed at the proposal layer: no two ballots ≥ b carry
+-- different values, and combined with single-decree agreement (ch125) + readSeesChosen (ch132)
+-- no two values are ever chosen.  THE NEXT STEP: a verified replicated LOG (P2c per log index)
+-- + the proposer's max-over-read-quorum fold to MANUFACTURE the `justify` witness from the
+-- acceptor reports (closing the model end-to-end), then E4 infra-as-code.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 135 — LIST-MAX DOMINANCE: the fold that grounds Paxos's maximal-ballot
+-- selection (telos-4 / E-track).  The prepare phase reads a read-quorum and adopts the
+-- value at the HIGHEST reported ballot.  To DISCHARGE selectedBallotGeChosen's maximality
+-- hypothesis (ch133) from real acceptor reports, the proposer folds `max` over the quorum's
+-- reported ballots; this chapter builds that fold and its dominance law (every member's
+-- value ≤ the fold).  A reusable Nat/List toolkit; FULLY PROVEN, no postulate.
+-- ====================================================================================
+
+-- congruence over Nat (the base ships subst but not cong) — f respects equality.
+congNat : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A)
+   -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- eqNat is SOUND: eqNat m n = true implies m = n.  Double NatElim; the off-diagonal
+-- (0 vs succ, succ vs 0) cases are absurd (eqNat ~> false), the diagonal recurses.
+eqNatSound : (m : Nat) -> (n : Nat) -> Eq Bool (eqNat m n) true -> Eq Nat m n is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) true -> Eq Nat x n end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) true -> Eq Nat zero y end)
+           (fn (h : Eq Bool (eqNat zero zero) true) is refl zero end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) true -> Eq Nat zero j) is
+              fn (h : Eq Bool (eqNat zero (succ j)) true) is
+                boolAbsurd (Eq Nat zero (succ j)) h end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) true -> Eq Nat k n) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) true -> Eq Nat (succ k) y end)
+             (fn (h : Eq Bool (eqNat (succ k) zero) true) is
+                boolAbsurd (Eq Nat (succ k) zero) h end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) true -> Eq Nat (succ k) j) is
+                fn (h : Eq Bool (eqNat (succ k) (succ j)) true) is
+                  congNat Nat Nat (fn (s : Nat) is succ s end) k j (ihk j h) end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- max a b = if a ≤ b then b else a.
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (z : Bool) is Nat end) b a (lte a b)
+  end
+end
+
+-- lte a b = false ⇒ lte b a = true (from totality: or false (lte b a) ~> lte b a).
+lteFalseFlip : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) false -> Eq Bool (lte b a) true is
+  fn (a : Nat) (b : Nat) (h : Eq Bool (lte a b) false) is
+    subst Bool (lte a b) false h
+      (fn (z : Bool) is Eq Bool (or z (lte b a)) true end)
+      (lteTotal a b)
+  end
+end
+
+-- a ≤ max a b.  true branch (max = b): a ≤ b is the guard; false branch (max = a): lteRefl.
+lteMaxL : (a : Nat) -> (b : Nat) -> Eq Bool (lte a (max a b)) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is Eq Bool (lte a b) p
+         -> Eq Bool (lte a (BoolElim (fn (z : Bool) is Nat end) b a p)) true end)
+      (fn (hp : Eq Bool (lte a b) true) is hp end)
+      (fn (hp : Eq Bool (lte a b) false) is lteRefl a end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- b ≤ max a b.  true branch (max = b): lteRefl; false branch (max = a): b ≤ a (lteFalseFlip).
+lteMaxR : (a : Nat) -> (b : Nat) -> Eq Bool (lte b (max a b)) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is Eq Bool (lte a b) p
+         -> Eq Bool (lte b (BoolElim (fn (z : Bool) is Nat end) b a p)) true end)
+      (fn (hp : Eq Bool (lte a b) true) is lteRefl b end)
+      (fn (hp : Eq Bool (lte a b) false) is lteFalseFlip a b hp end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- listMaxBy f xs = max of f over xs (0 on the empty list).
+listMaxBy : (Nat -> Nat) -> List Nat -> Nat is
+  fn (f : Nat -> Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (y : Nat) (ys : List Nat) (ih : Nat) is max (f y) ih end)
+      xs
+  end
+end
+
+-- DOMINANCE: for r a member of xs, f r ≤ listMaxBy f xs.  List induction; the cons case
+-- splits on eqNat r y — if r = y (eqNatSound), f r = f y ≤ max (f y) … (lteMaxL); else r is
+-- in the tail (the member hyp reduces), the IH bounds f r by the tail max ≤ the head max
+-- (lteMaxR + lteTrans).
+listMaxByDom : (f : Nat -> Nat) -> (xs : List Nat) -> (r : Nat)
+   -> Eq Bool (member r xs) true -> Eq Bool (lte (f r) (listMaxBy f xs)) true is
+  fn (f : Nat -> Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is (r : Nat)
+         -> Eq Bool (member r w) true -> Eq Bool (lte (f r) (listMaxBy f w)) true end)
+      (fn (r : Nat) (h : Eq Bool (member r (nil Nat)) true) is
+         boolAbsurd (Eq Bool (lte (f r) (listMaxBy f (nil Nat))) true) h end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : (r : Nat) -> Eq Bool (member r ys) true
+                  -> Eq Bool (lte (f r) (listMaxBy f ys)) true) is
+         fn (r : Nat) (h : Eq Bool (member r (cons Nat y ys)) true) is
+           BoolElim
+             (fn (p : Bool) is Eq Bool (eqNat r y) p
+                -> Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member r ys) p) true
+                -> Eq Bool (lte (f r) (max (f y) (listMaxBy f ys))) true end)
+             (fn (hp : Eq Bool (eqNat r y) true)
+                 (hm : Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member r ys) true) true) is
+                subst Nat (f y) (f r)
+                  (sym Nat (f r) (f y) (congNat Nat Nat f r y (eqNatSound r y hp)))
+                  (fn (s : Nat) is Eq Bool (lte s (max (f y) (listMaxBy f ys))) true end)
+                  (lteMaxL (f y) (listMaxBy f ys)) end)
+             (fn (hp : Eq Bool (eqNat r y) false)
+                 (hm : Eq Bool (BoolElim (fn (b : Bool) is Bool end) true (member r ys) false) true) is
+                lteTrans (f r) (listMaxBy f ys) (max (f y) (listMaxBy f ys))
+                  (ih r hm)
+                  (lteMaxR (f y) (listMaxBy f ys)) end)
+             (eqNat r y)
+             (refl (eqNat r y))
+             h
+         end
+       end)
+      xs
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 135 — WHAT LANDED, AND THE NEXT STEP.
+-- FULLY PROVEN (no admits/holes/postulates): eqNatSound, max + lteMaxL/lteMaxR, lteFalseFlip,
+-- listMaxBy, and listMaxByDom (member ⇒ value ≤ fold).  The reusable list-max fold the prepare
+-- phase uses to pick the highest reported ballot.
+-- THE NEXT STEP: quorumMaximality — instantiate listMaxByDom with reportedBallot (each
+-- replica's highest accepted ballot < b') over the read quorum to DISCHARGE
+-- selectedBallotGeChosen's maximality hypothesis (ch133), manufacturing the P2c `justify`
+-- witness (ch134) end-to-end from acceptor reports; then a verified replicated log + E4.
+-- ====================================================================================

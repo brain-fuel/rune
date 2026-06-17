@@ -1,0 +1,45 @@
+-- Chapter 20 — Cofibration validity and partial elements (§F phase 3b).
+-- A Kan box is filled from data given only WHERE a cofibration holds. `holds`
+-- says when a face is true; a partial element of A on φ is `holds φ -> A`.
+--
+--   holds : F -> Prop
+--   htop  : holds ftop
+--   hand  : (φ ψ : F) -> holds φ -> holds ψ -> holds (fand φ ψ)
+--   horl  : (φ ψ : F) -> holds φ -> holds (for φ ψ)
+--   horr  : (φ ψ : F) -> holds ψ -> holds (for φ ψ)
+--
+-- holds is proof-irrelevant — that is what discharges a system's overlap
+-- agreement for free. A satisfied ATOMIC face holds because the 3a lattice
+-- reduces it: ieq0 i0 ~> ftop, so holds (ieq0 i0) is holds ftop, inhabited by
+-- htop. There is no proof of holds fbot — ⊥ never holds.
+
+-- ⊤ holds, and so does every satisfied atomic constraint.
+topHolds  : holds ftop is htop end
+leftAt0   : holds (ieq0 i0) is htop end
+rightAt1  : holds (ieq1 i1) is htop end
+
+-- A conjunction of satisfied faces holds.
+cornerHolds : holds (fand (ieq0 i0) (ieq1 i1)) is
+  hand (ieq0 i0) (ieq1 i1) htop htop
+end
+
+-- A disjunction holds as soon as one side does (here the left, since i=0 is met).
+boundaryHolds : (p : F) -> holds (for (ieq0 i0) p) is
+  fn (p : F) is horl (ieq0 i0) p htop end
+end
+
+-- A partial element: a value of A available wherever φ holds. The constant
+-- partial element is the simplest system.
+constPartial : {A : UF} -> (a : El A) -> (phi : F) -> holds phi -> El A is
+  fn {A : UF} (a : El A) (phi : F) (h : holds phi) is a end
+end
+
+-- The boundary of a path, AS a partial element on (i=0) ∨ (i=1): x on the left
+-- face, y on the right. This is the shape every Kan composition along a path
+-- consumes — the system that pins a square's sides.
+pathBoundary : {A : UF} -> {x : El A} -> {y : El A} -> El (pathF A x y) -> (i : I) ->
+    holds (for (ieq0 i) (ieq1 i)) -> El A is
+  fn {A : UF} {x : El A} {y : El A} (p : El (pathF A x y)) (i : I) (h : holds (for (ieq0 i) (ieq1 i))) is
+    papp A x y p i
+  end
+end

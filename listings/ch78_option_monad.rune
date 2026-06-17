@@ -1,0 +1,60 @@
+-- Chapter 78 — Option is a MONAD (M6 stdlib): the three monad laws — left identity, right
+-- identity, and associativity of bind — proven for the `Option` (Maybe) monad. With ch77 (List
+-- functor) the stdlib's algebraic structure now includes a verified monad. By case analysis
+-- (OptionElim) over the ambient observational `Eq`.
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- return = some; bind chains a partial computation into a continuation.
+ret : (A : U) -> A -> Option A is
+  fn (A : U) (a : A) is some A a end
+end
+
+bind : (A : U) -> (B : U) -> Option A -> (A -> Option B) -> Option B is
+  fn (A : U) (B : U) (m : Option A) (f : A -> Option B) is
+    OptionElim A (fn (w : Option A) is Option B end)
+      (none B)
+      (fn (a : A) is f a end)
+      m
+  end
+end
+
+-- LEFT IDENTITY: bind (ret a) f = f a, by `refl` (bind on a `some` fires the some-branch).
+bindLeftId : (A : U) -> (B : U) -> (a : A) -> (f : A -> Option B)
+   -> Eq (Option B) (bind A B (ret A a) f) (f a) is
+  fn (A : U) (B : U) (a : A) (f : A -> Option B) is refl (f a)
+  end
+end
+
+-- RIGHT IDENTITY: bind m ret = m. By case analysis: `some a` ↦ ret a = some a; `none` ↦ none.
+-- Both branches are `refl`, assembled by OptionElim.
+bindRightId : (A : U) -> (m : Option A) -> Eq (Option A) (bind A A m (ret A)) m is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (w : Option A) is Eq (Option A) (bind A A w (ret A)) w end)
+      (refl (none A))
+      (fn (a : A) is refl (some A a) end)
+      m
+  end
+end
+
+-- ASSOCIATIVITY: bind (bind m f) g = bind m (λx. bind (f x) g). By case analysis on m: `some a`
+-- ↦ both sides are `bind (f a) g`; `none` ↦ both `none`. Refl branches via OptionElim.
+bindAssoc : (A : U) -> (B : U) -> (C : U)
+   -> (m : Option A) -> (f : A -> Option B) -> (g : B -> Option C)
+   -> Eq (Option C)
+        (bind B C (bind A B m f) g)
+        (bind A C m (fn (x : A) is bind B C (f x) g end)) is
+  fn (A : U) (B : U) (C : U) (m : Option A) (f : A -> Option B) (g : B -> Option C) is
+    OptionElim A
+      (fn (w : Option A) is
+         Eq (Option C)
+           (bind B C (bind A B w f) g)
+           (bind A C w (fn (x : A) is bind B C (f x) g end)) end)
+      (refl (none C))
+      (fn (a : A) is refl (bind B C (f a) g) end)
+      m
+  end
+end

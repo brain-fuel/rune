@@ -1,0 +1,37 @@
+-- Chapter 25 — Coinduction: final coalgebras (R-COIND / C5a).
+-- The dual of the datatype eliminator. A codata type is `Nu F` for a functor
+-- F : UF -> UF; you OBSERVE it with `out` and BUILD it with `unfold` (give a
+-- seed and a step, get an infinite object). The one computation rule:
+--
+--   out F (unfold F S c s)  ~>  fmapF F (unfold F S c) (c s)
+--
+-- where fmapF is F's functorial action, derived structurally on the code F.
+-- A stream of A is `Nu (λX. sigmaF A (λ_. X))` (head : A, tail : the rest) — so
+-- coinduction rides on the inner Σ (A5). Here: the constant stream `a0,a0,…`
+-- built by `unfold` with the step s ↦ (s, s), and its head/tail observed.
+
+-- head of the constant stream is the seed: out reduces to a pair, fstF projects.
+streamHead : (A : UF) -> (a0 : El A) ->
+    Eq (El A)
+       (fstF A (fn (z : El A) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end)
+            (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+                 (unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) A
+                         (fn (sd : El A) is pairF A (fn (w : El A) is A end) sd sd end) a0)))
+       a0 is
+  fn (A : UF) (a0 : El A) is refl a0 end
+end
+
+-- tail of the constant stream is the SAME stream: corecursion unfolds one step.
+streamTail : (A : UF) -> (a0 : El A) ->
+    Eq (El (Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)))
+       (sndF A (fn (z : El A) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end)
+            (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+                 (unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) A
+                         (fn (sd : El A) is pairF A (fn (w : El A) is A end) sd sd end) a0)))
+       (unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) A
+               (fn (sd : El A) is pairF A (fn (w : El A) is A end) sd sd end) a0) is
+  fn (A : UF) (a0 : El A) is
+    refl (unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) A
+                 (fn (sd : El A) is pairF A (fn (w : El A) is A end) sd sd end) a0)
+  end
+end

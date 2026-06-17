@@ -1,0 +1,49 @@
+-- Chapter 79 — The path groupoid (§F / telos-1): composition and reversal of inner paths, with
+-- the laws that hold DEFINITIONALLY. `pcomp` concatenates `p : x = y` and `q : y = z` by path
+-- induction on `q`; `symP` reverses by the interval involution `ineg`. The RIGHT-unit law
+-- (`pcomp p refl ≡ p`) computes by `refl` (pathJ on `preflF`). The left-unit and inverse laws are
+-- genuine 2-cells (paths between paths) requiring an `hcomp` filler — recorded here as the
+-- remaining groupoid coherences, the hcomp-gated tail of the ∞-groupoid structure.
+
+-- composition by path induction on the second path (pathJ fixes y, transports p along q).
+pcomp : (A : UF) -> (x : El A) -> (y : El A) -> (z : El A)
+   -> El (pathF A x y) -> El (pathF A y z) -> El (pathF A x z) is
+  fn (A : UF) (x : El A) (y : El A) (z : El A) (p : El (pathF A x y)) (q : El (pathF A y z)) is
+    pathJ A y (fn (w : El A) (r : El (pathF A y w)) is pathF A x w end) p z q
+  end
+end
+
+-- reversal by the interval involution: (symP p) @ i = p @ (ineg i), with endpoints swapped.
+symP : (A : UF) -> (x : El A) -> (y : El A) -> El (pathF A x y) -> El (pathF A y x) is
+  fn (A : UF) (x : El A) (y : El A) (p : El (pathF A x y)) is
+    pabs A (fn (i : I) is papp A x y p (ineg i) end)
+  end
+end
+
+-- RIGHT UNIT, by `refl`: composing with reflexivity on the right is the identity —
+-- `pcomp p (refl y) ≡ p` (pathJ computes on `preflF`, returning its base `p`).
+pcompRightUnit : (A : UF) -> (x : El A) -> (y : El A) -> (p : El (pathF A x y))
+   -> Eq (El (pathF A x y)) (pcomp A x y y p (preflF A y)) p is
+  fn (A : UF) (x : El A) (y : El A) (p : El (pathF A x y)) is refl end
+end
+
+-- A degenerate composite, by `refl`: refl ∘ refl = refl (both reductions fire).
+pcompReflRefl : (A : UF) -> (x : El A)
+   -> Eq (El (pathF A x x)) (pcomp A x x x (preflF A x) (preflF A x)) (preflF A x) is
+  fn (A : UF) (x : El A) is refl end
+end
+
+-- Reversing reflexivity is reflexivity, by `refl` (the constant path through `ineg` is still
+-- constant; `convPathEta` equates it with `preflF`).
+symReflP : (A : UF) -> (x : El A)
+   -> Eq (El (pathF A x x)) (symP A x x (preflF A x)) (preflF A x) is
+  fn (A : UF) (x : El A) is refl end
+end
+
+-- REMAINING GROUPOID COHERENCES (the hcomp-gated tail). The LEFT-unit law `pcomp (refl x) q ≡ q`
+-- is NOT definitional — `pathJ` does not collapse the transport of `refl` along a general `q`
+-- (verified: it stays a neutral `pathJ`). Likewise the INVERSE laws `pcomp p (symP p) ≡ refl`
+-- and `pcomp (symP p) p ≡ refl`, and ASSOCIATIVITY, are propositional 2-cells built by an
+-- `hcomp` filler over the square — the genuine higher structure, not a reduction. Recorded as
+-- the next §F frontier (the path-composition Kan filler), consistent with the design's note that
+-- the De Morgan / groupoid LAWS on neutral interval terms become PATHS, not definitional rules.

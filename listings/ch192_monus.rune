@@ -1,0 +1,110 @@
+-- ====================================================================================
+-- CHAPTER 192 — TRUNCATED SUBTRACTION (MONUS) + ITS LAWS (telos-3 / stdlib arithmetic).
+-- `sub a b` = a − b clamped at 0.  The cancellation law `sub (add a b) b = a` (monus undoes
+-- addition) is the algebraic core the Euclidean division theorem builds on.  FULLY PROVEN.
+-- Self-contained (own Nat + add).
+-- ====================================================================================
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+congNat : (f : Nat -> Nat) -> (x : Nat) -> (y : Nat) -> Eq Nat x y -> Eq Nat (f x) (f y) is
+  fn (f : Nat -> Nat) (x : Nat) (y : Nat) (p : Eq Nat x y) is
+    subst Nat x y p (fn (z : Nat) is Eq Nat (f x) (f z) end) (refl (f x))
+  end
+end
+transNat : (x : Nat) -> (y : Nat) -> (z : Nat) -> Eq Nat x y -> Eq Nat y z -> Eq Nat x z is
+  fn (x : Nat) (y : Nat) (z : Nat) (p : Eq Nat x y) (q : Eq Nat y z) is
+    subst Nat y z q (fn (w : Nat) is Eq Nat x w end) p
+  end
+end
+
+symNat : (x : Nat) -> (y : Nat) -> Eq Nat x y -> Eq Nat y x is
+  fn (x : Nat) (y : Nat) (p : Eq Nat x y) is
+    subst Nat x y p (fn (z : Nat) is Eq Nat z x end) (refl x)
+  end
+end
+
+-- addition (recursion on the first argument): add 0 b = b, add (succ a') b = succ (add a' b).
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (a' : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+addZeroR : (a : Nat) -> Eq Nat (add a zero) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (a' : Nat) (ih : Eq Nat (add a' zero) a') is
+         congNat (fn (s : Nat) is succ s end) (add a' zero) a' ih end)
+      a
+  end
+end
+addSuccR : (a : Nat) -> (b : Nat) -> Eq Nat (add a (succ b)) (succ (add a b)) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ b)) (succ (add x b)) end)
+      (refl (succ b))
+      (fn (a' : Nat) (ih : Eq Nat (add a' (succ b)) (succ (add a' b))) is
+         congNat (fn (s : Nat) is succ s end) (add a' (succ b)) (succ (add a' b)) ih end)
+      a
+  end
+end
+
+-- MONUS: sub 0 b = 0, sub (succ a') 0 = succ a', sub (succ a')(succ b') = sub a' b'.
+sub : Nat -> Nat -> Nat is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (b : Nat) is zero end)
+      (fn (a' : Nat) (ih : Nat -> Nat) is
+         fn (b : Nat) is
+           NatElim (fn (x : Nat) is Nat end) (succ a') (fn (b' : Nat) (ihb : Nat) is ih b' end) b
+         end
+       end)
+      a
+  end
+end
+
+-- a − 0 = a.
+subZeroR : (a : Nat) -> Eq Nat (sub a zero) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (sub x zero) x end)
+      (refl zero)
+      (fn (a' : Nat) (ih : Eq Nat (sub a' zero) a') is refl (succ a') end)
+      a
+  end
+end
+
+-- a − a = 0.
+subSelf : (a : Nat) -> Eq Nat (sub a a) zero is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (sub x x) zero end)
+      (refl zero)
+      (fn (a' : Nat) (ih : Eq Nat (sub a' a') zero) is ih end)
+      a
+  end
+end
+
+-- CANCELLATION: (a + b) − b = a (monus undoes addition).  Induct on b; the succ case rewrites
+-- add a (succ b') to succ (add a b') (addSuccR), after which sub (succ _)(succ _) ~> sub _ _ = IH.
+subAddR : (a : Nat) -> (b : Nat) -> Eq Nat (sub (add a b) b) a is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (sub (add a x) x) a end)
+      (transNat (sub (add a zero) zero) (add a zero) a (subZeroR (add a zero)) (addZeroR a))
+      (fn (b' : Nat) (ih : Eq Nat (sub (add a b') b') a) is
+         subst Nat (succ (add a b')) (add a (succ b'))
+           (symNat (add a (succ b')) (succ (add a b')) (addSuccR a b'))
+           (fn (w : Nat) is Eq Nat (sub w (succ b')) a end) ih end)
+      b
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 192 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): truncated subtraction `sub` and its laws — `subZeroR`
+-- (a−0=a), `subSelf` (a−a=0) and the CANCELLATION law `subAddR` ((a+b)−b=a, monus undoes addition).
+-- The arithmetic core under Euclidean division (a = b·q + r via repeated monus).
+-- THE NEXT STEP: a fuel-bounded Euclidean division (div/mod) with the division theorem a = b*q+r,
+-- r<b; or a fresh frontier.
+-- ====================================================================================

@@ -1,0 +1,154 @@
+-- ====================================================================================
+-- CHAPTER 180 — (ℕ, min, max) SEMILATTICES + ABSORPTION (telos-3 / stdlib order theory).
+-- min and max as STRUCTURAL recursors (so the algebraic laws reduce by induction, unlike ch65's
+-- BoolElim-via-lte min): each is COMMUTATIVE, IDEMPOTENT, and the two ABSORPTION laws relate them
+-- (min a (max a b) = a, max a (min a b) = a).  The meet/join of the ℕ order lattice.  FULLY PROVEN.
+-- Self-contained (own Nat) to avoid the ch65 `min` name clash.
+-- ====================================================================================
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- congruence of a ℕ function over Eq Nat (Leibniz subst).
+congNat : (f : Nat -> Nat) -> (x : Nat) -> (y : Nat) -> Eq Nat x y -> Eq Nat (f x) (f y) is
+  fn (f : Nat -> Nat) (x : Nat) (y : Nat) (p : Eq Nat x y) is
+    subst Nat x y p (fn (z : Nat) is Eq Nat (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- MEET: min 0 n = 0, min (succ k) 0 = 0, min (succ k)(succ j) = succ (min k j).
+min : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is zero end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end) zero (fn (j : Nat) (ihj : Nat) is succ (ih j) end) n
+         end
+       end)
+      m
+  end
+end
+
+-- JOIN: max 0 n = n, max (succ k) 0 = succ k, max (succ k)(succ j) = succ (max k j).
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is n end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end) (succ k) (fn (j : Nat) (ihj : Nat) is succ (ih j) end) n
+         end
+       end)
+      m
+  end
+end
+
+-- IDEMPOTENCE.
+minIdem : (a : Nat) -> Eq Nat (min a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (min x x) x end)
+      (refl zero)
+      (fn (a' : Nat) (ih : Eq Nat (min a' a') a') is
+         congNat (fn (s : Nat) is succ s end) (min a' a') a' ih end)
+      a
+  end
+end
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x x) x end)
+      (refl zero)
+      (fn (a' : Nat) (ih : Eq Nat (max a' a') a') is
+         congNat (fn (s : Nat) is succ s end) (max a' a') a' ih end)
+      a
+  end
+end
+
+-- COMMUTATIVITY (double induction — the mirrored side is stuck on the neutral second argument).
+minComm : (a : Nat) -> (b : Nat) -> Eq Nat (min a b) (min b a) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (min x b) (min b x) end)
+      (fn (b : Nat) is
+         NatElim (fn (bb : Nat) is Eq Nat (min zero bb) (min bb zero) end)
+           (refl zero)
+           (fn (b' : Nat) (ihb : Eq Nat (min zero b') (min b' zero)) is refl zero end)
+           b
+       end)
+      (fn (a' : Nat) (ih : (b : Nat) -> Eq Nat (min a' b) (min b a')) is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is Eq Nat (min (succ a') bb) (min bb (succ a')) end)
+             (refl zero)
+             (fn (b' : Nat) (ihb : Eq Nat (min (succ a') b') (min b' (succ a'))) is
+                congNat (fn (s : Nat) is succ s end) (min a' b') (min b' a') (ih b') end)
+             b
+         end
+       end)
+      a
+  end
+end
+maxComm : (a : Nat) -> (b : Nat) -> Eq Nat (max a b) (max b a) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (max x b) (max b x) end)
+      (fn (b : Nat) is
+         NatElim (fn (bb : Nat) is Eq Nat (max zero bb) (max bb zero) end)
+           (refl zero)
+           (fn (b' : Nat) (ihb : Eq Nat (max zero b') (max b' zero)) is refl (succ b') end)
+           b
+       end)
+      (fn (a' : Nat) (ih : (b : Nat) -> Eq Nat (max a' b) (max b a')) is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is Eq Nat (max (succ a') bb) (max bb (succ a')) end)
+             (refl (succ a'))
+             (fn (b' : Nat) (ihb : Eq Nat (max (succ a') b') (max b' (succ a'))) is
+                congNat (fn (s : Nat) is succ s end) (max a' b') (max b' a') (ih b') end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ABSORPTION (ties meet and join into a lattice).
+minMaxAbsorb : (a : Nat) -> (b : Nat) -> Eq Nat (min a (max a b)) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (min x (max x b)) x end)
+      (fn (b : Nat) is refl zero end)
+      (fn (a' : Nat) (ih : (b : Nat) -> Eq Nat (min a' (max a' b)) a') is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is Eq Nat (min (succ a') (max (succ a') bb)) (succ a') end)
+             (congNat (fn (s : Nat) is succ s end) (min a' a') a' (minIdem a'))
+             (fn (b' : Nat) (ihb : Eq Nat (min (succ a') (max (succ a') b')) (succ a')) is
+                congNat (fn (s : Nat) is succ s end) (min a' (max a' b')) a' (ih b') end)
+             b
+         end
+       end)
+      a
+  end
+end
+maxMinAbsorb : (a : Nat) -> (b : Nat) -> Eq Nat (max a (min a b)) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (max x (min x b)) x end)
+      (fn (b : Nat) is refl zero end)
+      (fn (a' : Nat) (ih : (b : Nat) -> Eq Nat (max a' (min a' b)) a') is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is Eq Nat (max (succ a') (min (succ a') bb)) (succ a') end)
+             (refl (succ a'))
+             (fn (b' : Nat) (ihb : Eq Nat (max (succ a') (min (succ a') b')) (succ a')) is
+                congNat (fn (s : Nat) is succ s end) (max a' (min a' b')) a' (ih b') end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 180 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): structural `min`/`max` and their laws — idempotence
+-- (minIdem/maxIdem), commutativity (minComm/maxComm, double induction) and the two ABSORPTION
+-- laws (minMaxAbsorb/maxMinAbsorb).  min and max are the meet and join of the ℕ order: two
+-- commutative idempotent semilattices tied by absorption — the algebraic heart of the (ℕ,≤) lattice.
+-- THE NEXT STEP: associativity (triple induction) to close the lattice + distributivity; or a fresh frontier.
+-- ====================================================================================

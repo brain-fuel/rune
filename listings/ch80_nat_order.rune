@@ -1,0 +1,135 @@
+-- Chapter 80 — Transitivity of the order (D1, the proven tier): `lteTrans`, the law
+-- that closes (Nat, <=) into a PREORDER. ch65 proved reflexivity (`lteRefl`) and the
+-- successor monotonicities; the missing order law is transitivity — a <= b and b <= c
+-- imply a <= c. With it the comparison D2's sorting and balanced Map/Set rebalancing
+-- need is a certified preorder, not an assumed one. `lte` recurses on its FIRST
+-- argument (an inner NatElim cases the second), exactly as ch65, so `lte zero c`,
+-- `lte (succ k) zero`, and the successor-of-successor step all reduce definitionally;
+-- the proof only bridges what computation leaves open and DISCHARGES the two impossible
+-- premises (`succ _ <= zero` is `false`, and `false = true` is absurd).
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- lte a b = (a <= b), verbatim from ch65: zero is below everything; succ k <= zero is
+-- false; succ k <= succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- ABSURDITY: from `false = true`, conclude ANY ordering. subst transports the goal-as-a
+-- -function-of-the-Bool from the `false` slot (where it is the trivially-true
+-- `lte a c = lte a c`, witnessed by refl) to the `true` slot demanded — the standard
+-- way a false branch of a Bool comparison discharges (ch16 `eqNatSound`).
+lteAbsurd : (a : Nat) -> (c : Nat) -> Eq Bool false true -> Eq Bool (lte a c) true is
+  fn (a : Nat) (c : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- TRANSITIVITY: a <= b and b <= c imply a <= c, by induction on a, then b, then c.
+-- The motive of the OUTER induction is the whole implication quantified over b and c,
+-- so each successor step hands back a genuine induction hypothesis at the predecessors.
+--
+--   a = zero            : lte zero c reduces to true — refl, the premises unused.
+--   a = succ a', b = zero : the FIRST premise is lte (succ a') zero = false = true,
+--                           absurd — lteAbsurd discharges it.
+--   a = succ, b = succ, c = zero : the SECOND premise is lte (succ b') zero = false =
+--                           true, absurd — lteAbsurd again.
+--   a = succ a', b = succ b', c = succ c' : everything reduces to the predecessors —
+--                           lte a' b' = true and lte b' c' = true give lte a' c' = true
+--                           by the induction hypothesis, on the nose.
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      -- a = zero: lte zero c ~> true.
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      -- a = succ a', with IH at a'.
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             -- b = zero: first premise lte (succ a') zero ~> false; absurd.
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             -- b = succ b', with (unused) inner IH.
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    -- c = zero: second premise lte (succ b') zero ~> false; absurd.
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    -- c = succ c': everything reduces to the predecessors; the IH closes.
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- A SANITY check that the law computes at concrete arguments: 1 <= 2 and 2 <= 3 give
+-- 1 <= 3, and the certificate is the canonical `refl true`.
+oneLeThree : Eq Bool (lte (succ zero) (succ (succ (succ zero)))) true is
+  lteTrans (succ zero) (succ (succ zero)) (succ (succ (succ zero)))
+    (refl true) (refl true)
+end

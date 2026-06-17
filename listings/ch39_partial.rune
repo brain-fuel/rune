@@ -1,0 +1,27 @@
+-- Chapter 39 — General recursion: `partial` definitions (C4).
+-- Rune's total core admits recursion ONLY through eliminators. A `partial`
+-- definition opts out: its own name is in scope in its body (general recursion),
+-- and the firewall keeps its head PERMANENTLY NEUTRAL during type-checking — so
+-- the normalizer never diverges (decidable checking is preserved) — while
+-- codegen unfolds it to RUN. Partiality is segregated: the total fragment stays
+-- sound; a partial term inhabits its type but cannot reduce to a wrong value
+-- (it is a stuck neutral until run). This is the escape hatch real algorithms need.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- countdown: recurse on the predecessor via the SELF-call (not the eliminator's
+-- IH) — general recursion that the type checker never unfolds, but which runs
+-- and terminates (n strictly decreases).
+partial countdown : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end)
+      zero
+      (fn (k : Nat) (ih : Nat) is countdown k end)
+      n
+  end
+end
+
+answer : Nat is countdown (succ (succ (succ zero))) end

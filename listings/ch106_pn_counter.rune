@@ -1,0 +1,290 @@
+-- Chapter 106 — A VERIFIED PN-COUNTER CRDT (a counter that both INCREMENTS and DECREMENTS), the
+-- telos-4 distributed track's canonical CvRDT beyond ch72's grow-only G-Counter. A G-Counter can
+-- only go up; the standard trick to support decrement is a PAIR of G-Counters: P tallies all
+-- increments, N tallies all decrements, and the observed value is P − N (an INTEGER). Because the
+-- PN merge is just TWO INDEPENDENT G-Counter max-merges (one on the P's, one on the N's), the CRDT
+-- convergence laws LIFT COMPONENTWISE from ch72 — no new induction is needed. The new content is
+-- the SYNTHESIS (two G-Counters) plus the ELEGANT observation that the value lives in ℤ: a PN
+-- state's (P, N) is LITERALLY a ℤ representative (ch07's NatPair under ZRel names P − N), so
+-- `value (P, N) = qin (P, N)` directly — the PN-Counter's observed value IS a ℤ point.
+--
+-- Two replicas, each holding a (P, N) pair of Nats (small/honest, like ch72). merge = pointwise
+-- max on P and on N (the CRDT join). The convergence criterion is that (state, merge) is a
+-- JOIN-SEMILATTICE — mergeComm + mergeIdem + mergeAssoc — exactly as in ch72, lifted to the pair.
+--   mergeComm  : merge a b           = merge b a            (gossip-order independence)
+--   mergeIdem  : merge a a           = a                    (re-delivered gossip is harmless)
+--   mergeAssoc : merge (merge a b) c = merge a (merge b c)  (gossip grouping is irrelevant)
+--   value      : PNState -> Z        = qin (mergedP, mergedN) = P − N as an integer
+--
+-- ch72's G-Counter merge laws (maxComm/maxIdem/maxAssoc + GC-congruence) are REDECLARED
+-- BYTE-IDENTICAL (the self-contained-listings convention) and ch07's ℤ = NatPair / ZRel is
+-- redeclared verbatim for the value-in-ℤ half.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- addition (verbatim ch72 / ch07).
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- MAX, the CRDT join on a single slot (verbatim ch72).
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is n end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end)
+             (succ k)
+             (fn (j : Nat) (ihj : Nat) is succ (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- symmetry and succ-congruence over the ambient Eq (verbatim ch72).
+symNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat b a is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat z a end) (refl a)
+  end
+end
+
+congSucc : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) (refl (succ a))
+  end
+end
+
+-- max m 0 = m (verbatim ch72).
+maxZeroR : (m : Nat) -> Eq Nat (max m zero) m is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k zero) k) is refl (succ k) end)
+      m
+  end
+end
+
+-- MAX IS COMMUTATIVE (verbatim ch72) — the heart of CRDT convergence.
+maxComm : (m : Nat) -> (n : Nat) -> Eq Nat (max m n) (max n m) is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Nat (max x n) (max n x) end)
+      (fn (n : Nat) is symNat (max n zero) n (maxZeroR n) end)
+      (fn (k : Nat) (ih : (n : Nat) -> Eq Nat (max k n) (max n k)) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Eq Nat (max (succ k) x) (max x (succ k)) end)
+             (refl (succ k))
+             (fn (j : Nat) (ihj : Eq Nat (max (succ k) j) (max j (succ k))) is
+                congSucc (max k j) (max j k) (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- MAX IS IDEMPOTENT (verbatim ch72).
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x x) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k k) k) is congSucc (max k k) k ih end)
+      a
+  end
+end
+
+-- MAX IS ASSOCIATIVE (verbatim ch72).
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (max (max a b) c) (max a (max b c)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (max (max x b) c) (max x (max b c)) end)
+      (fn (b : Nat) (c : Nat) is refl (max b c) end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (max (max k b) c) (max k (max b c))) is
+         fn (b : Nat) is
+           NatElim (fn (x : Nat) is (c : Nat) -> Eq Nat (max (max (succ k) x) c) (max (succ k) (max x c)) end)
+             (fn (c : Nat) is refl (max (succ k) c) end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (max (max (succ k) j) c) (max (succ k) (max j c))) is
+                fn (c : Nat) is
+                  NatElim (fn (x : Nat) is Eq Nat (max (max (succ k) (succ j)) x) (max (succ k) (max (succ j) x)) end)
+                    (refl (succ (max k j)))
+                    (fn (i : Nat) (ihc : Eq Nat (max (max (succ k) (succ j)) i) (max (succ k) (max (succ j) i))) is
+                       congSucc (max (max k j) i) (max k (max j i)) (ih j i) end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- ℤ = NatPair / ZRel (verbatim ch07) — the value of a PN-Counter is an INTEGER, P − N.
+-- ====================================================================================
+
+data NatPair : U is
+  npair : Nat -> Nat -> NatPair
+end
+
+fst : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is a end) p
+  end
+end
+
+snd : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is b end) p
+  end
+end
+
+-- Equal differences, without subtraction: (a, b) ~ (c, d) iff a + d = c + b (verbatim ch07).
+ZRel : NatPair -> NatPair -> Prop is
+  fn (p : NatPair) (q : NatPair) is
+    Eq Nat (add (fst p) (snd q)) (add (fst q) (snd p))
+  end
+end
+
+Z : U is Quot NatPair ZRel end
+
+-- ====================================================================================
+-- THE PN-COUNTER: a state is a PAIR of G-Counters. We reuse ch07's NatPair as that pair:
+-- a state is (P, N) where P is the total of all increments and N the total of all decrements.
+-- A PN-Counter over a fixed replica-set is itself two G-Counters (P-counter and N-counter), but
+-- the convergence story is already the pair story, so — honest and small like ch72 — we model the
+-- AGGREGATE (P, N) of a replica and merge two replicas' aggregates pointwise.
+-- ====================================================================================
+
+-- increment bumps P; decrement bumps N. The two grow-only halves of the PN-Counter.
+inc : NatPair -> NatPair is
+  fn (s : NatPair) is npair (succ (fst s)) (snd s) end
+end
+
+dec : NatPair -> NatPair is
+  fn (s : NatPair) is npair (fst s) (succ (snd s)) end
+end
+
+-- merge = pointwise MAX on the P's and on the N's (the CRDT join, TWO independent G-merges).
+merge : NatPair -> NatPair -> NatPair is
+  fn (s : NatPair) (t : NatPair) is
+    npair (max (fst s) (fst t)) (max (snd s) (snd t))
+  end
+end
+
+-- NatPair-congruence in both slots, by two `subst`s (mirrors ch72's congGC).
+congPair : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> Eq Nat a c -> Eq Nat b d -> Eq NatPair (npair a b) (npair c d) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e1 : Eq Nat a c) (e2 : Eq Nat b d) is
+    subst Nat a c e1 (fn (x : Nat) is Eq NatPair (npair a b) (npair x d) end)
+      (subst Nat b d e2 (fn (y : Nat) is Eq NatPair (npair a b) (npair a y) end)
+         (refl (npair a b)))
+  end
+end
+
+-- THE OBSERVED VALUE, AN INTEGER. (P, N) under ZRel names P − N directly, so the value is just the
+-- quotient injection of the state — the PN-Counter's observed value IS a ℤ representative. No
+-- subtraction is performed; the integer P − N is exactly the equivalence class of (P, N).
+value : NatPair -> Z is
+  fn (s : NatPair) is qin NatPair ZRel s end
+end
+
+-- ====================================================================================
+-- CONVERGENCE (the CvRDT correctness theorem) — each law is the corresponding `max` law applied
+-- to BOTH slots via congPair, exactly mirroring ch72's G-Counter proof, lifted to the pair.
+-- ====================================================================================
+
+-- COMMUTATIVE: gossiping in either order reaches the same state, so replicas converge regardless
+-- of the order messages arrive (eventual consistency). By `maxComm` on each slot + congPair.
+mergeComm : (s : NatPair) -> (t : NatPair) -> Eq NatPair (merge s t) (merge t s) is
+  fn (s : NatPair) (t : NatPair) is
+    congPair (max (fst s) (fst t)) (max (snd s) (snd t))
+             (max (fst t) (fst s)) (max (snd t) (snd s))
+      (maxComm (fst s) (fst t)) (maxComm (snd s) (snd t))
+  end
+end
+
+-- IDEMPOTENT: re-merging a replica with itself is a no-op (re-delivered gossip is harmless). By
+-- `maxIdem` on each slot + congPair.
+mergeIdem : (s : NatPair) -> Eq NatPair (merge s s) s is
+  fn (s : NatPair) is
+    NatPairElim (fn (x : NatPair) is Eq NatPair (merge x x) x end)
+      (fn (a : Nat) (b : Nat) is
+         congPair (max a a) (max b b) a b (maxIdem a) (maxIdem b) end)
+      s
+  end
+end
+
+-- ASSOCIATIVE: the grouping of gossip is irrelevant — batching merges any way converges. By
+-- `maxAssoc` on each slot + congPair.
+mergeAssoc : (s : NatPair) -> (t : NatPair) -> (u : NatPair)
+   -> Eq NatPair (merge (merge s t) u) (merge s (merge t u)) is
+  fn (s : NatPair) (t : NatPair) (u : NatPair) is
+    congPair
+      (max (max (fst s) (fst t)) (fst u)) (max (max (snd s) (snd t)) (snd u))
+      (max (fst s) (max (fst t) (fst u))) (max (snd s) (max (snd t) (snd u)))
+      (maxAssoc (fst s) (fst t) (fst u)) (maxAssoc (snd s) (snd t) (snd u))
+  end
+end
+
+-- So (PNState, merge) is a JOIN-SEMILATTICE — commutative + idempotent + associative — exactly the
+-- state-based CRDT (CvRDT) correctness criterion. The PN-Counter is a VERIFIED convergent
+-- replicated data type supporting BOTH increment and decrement, its convergence proof inherited
+-- componentwise from ch72's verified G-Counter join.
+
+-- ====================================================================================
+-- THE REPLICATION SCENARIO.
+-- replica1 does +3 then −1   ⇒ (P, N) = (3, 1)   (net +2)
+-- replica2 does +2 then −2   ⇒ (P, N) = (2, 2)   (net  0)
+-- After gossip (merge = pointwise max), the converged state is (max 3 2, max 1 2) = (3, 2),
+-- and the observed value is qin (3, 2) — the integer 3 − 2 = +1.
+-- The same equivalence class is named by (1, 0), so `value converged ≡ qin (1, 0)` via qsound.
+-- ====================================================================================
+
+one   : Nat is succ zero end
+two   : Nat is succ (succ zero) end
+three : Nat is succ (succ (succ zero)) end
+
+-- replica1 = +3 −1, built by applying inc three times then dec once to the empty (0,0) counter.
+replica1 : NatPair is dec (inc (inc (inc (npair zero zero)))) end
+-- replica2 = +2 −2.
+replica2 : NatPair is dec (dec (inc (inc (npair zero zero)))) end
+
+-- The local states compute to their (P, N) aggregates, refl-certified.
+replica1State : Eq NatPair replica1 (npair three one) is refl (npair three one) end
+replica2State : Eq NatPair replica2 (npair two two) is refl (npair two two) end
+
+-- After gossip: the converged merged state.
+converged : NatPair is merge replica1 replica2 end
+
+-- The merged P/N counts are the pointwise maxima: (max 3 2, max 1 2) = (3, 2). Refl-certified.
+convergedState : Eq NatPair converged (npair three two) is refl (npair three two) end
+
+-- THE OBSERVED INTEGER VALUE: P − N = 3 − 2 = +1. The converged value lives in ℤ as qin (3, 2),
+-- which is the SAME integer as qin (1, 0) (= +1) — proven by `qsound` discharging the ZRel
+-- obligation 3 + 0 = 1 + 2 (both sides compute to 3), so the proof is `refl`.
+convergedValueIsOne : Eq Z (value converged) (qin NatPair ZRel (npair one zero)) is
+  qsound NatPair ZRel (npair three two) (npair one zero) (refl three)
+end
+
+-- A sanity check that the integer is NOT zero-by-construction: the net of replica2 alone is +0
+-- (P = N = 2), i.e. value replica2 = qin (2, 2) = qin (0, 0) = zero in ℤ.
+replica2NetZero : Eq Z (value replica2) (qin NatPair ZRel (npair zero zero)) is
+  qsound NatPair ZRel (npair two two) (npair zero zero) (refl two)
+end
+
+-- THE DEPLOYED OBSERVATION: codegen compiles the quotient to its carrier (qin is the identity), so
+-- the observed value emits as the converged (P, N) pair's P-count witness. We deploy the merged
+-- P-count `mergedP` (a Nat = 3), the increment tally after gossip — the runnable, backend-portable
+-- shadow of the PN-Counter's state. The integer-value certificate (`convergedValueIsOne`) rides
+-- along in the checker.
+mergedP : Nat is fst converged end
+
+mergedPCorrect : Eq Nat mergedP three is refl three end

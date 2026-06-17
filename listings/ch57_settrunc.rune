@@ -1,0 +1,50 @@
+-- Chapter 57 — Set truncation ‖A‖₀, the first dim-2 HIT (§F / R-HIT / A9).
+-- Propositional truncation already lives in Prop's impredicativity (ch08); the
+-- genuinely-new truncation is SET truncation, which forces a type to be a set by a
+-- DIM-2 path constructor: `squash` makes any two paths between the same points
+-- equal. It is the first higher inductive type whose path constructor is itself a
+-- path-between-paths.
+
+-- The point constructor includes a value; squash is the dim-2 generator.
+incPoint : (A : UF) -> El A -> El (Trunc0 A) is
+  fn (A : UF) (a : El A) is inc A a end
+end
+
+-- squash typechecks as a path between any two paths p, q : x = y in ‖A‖₀ — the
+-- proof that the truncation is a set.
+squashPath : (A : UF) -> (x : El (Trunc0 A)) -> (y : El (Trunc0 A))
+   -> (p : El (pathF (Trunc0 A) x y)) -> (q : El (pathF (Trunc0 A) x y))
+   -> El (pathF (pathF (Trunc0 A) x y) p q) is
+  fn (A : UF) (x : El (Trunc0 A)) (y : El (Trunc0 A))
+     (p : El (pathF (Trunc0 A) x y)) (q : El (pathF (Trunc0 A) x y)) is
+    squash A x y p q
+  end
+end
+
+-- The recursor maps ‖A‖₀ into any SET B (a type whose own paths-between-paths are
+-- all filled). On the point constructor it runs the chosen function f.
+trunc0Map : (A : UF) -> (B : UF)
+   -> (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+         -> El (pathF (pathF B x y) p q))
+   -> (f : El A -> El B) -> El (Trunc0 A) -> El B is
+  fn (A : UF) (B : UF)
+     (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+        -> El (pathF (pathF B x y) p q))
+     (f : El A -> El B) is
+    trunc0Rec A B setB f
+  end
+end
+
+-- Computes on the point: trunc0Rec … (inc A a) ~> f a, witnessed by refl.
+trunc0MapInc : (A : UF) -> (B : UF)
+   -> (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+         -> El (pathF (pathF B x y) p q))
+   -> (f : El A -> El B) -> (a : El A)
+   -> Eq (El B) (trunc0Rec A B setB f (inc A a)) (f a) is
+  fn (A : UF) (B : UF)
+     (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+        -> El (pathF (pathF B x y) p q))
+     (f : El A -> El B) (a : El A) is
+    refl (f a)
+  end
+end

@@ -1,0 +1,350 @@
+-- Chapter 114 — A gen_server-style STATE MACHINE (M6 / D-track, D5 OTP-class concurrency). The
+-- OTP `gen_server` behaviour, distilled to its provable essence: a server is a (state, mailbox)
+-- pair over the verified FIFO QUEUE of ch111, a user `handle : S -> Msg -> S` callback folds each
+-- message into the state, and `step`/`runN` drain the mailbox. The CORRECTNESS THEOREM is that the
+-- server processes its mailbox in FIFO / ENQUEUE order: running over a mailbox folds `handle`
+-- left-to-right over the message list — `finalState (runN (length msgs) (s, msgs)) = foldl handle
+-- s msgs`. Built on ch111's single-list queue (toList = id, enqueue = append-back, dequeue = front)
+-- reused VERBATIM, the ch73 list algebra (append/length), ch63's Nat add for the counter example,
+-- and the ambient observational `Eq`/`refl`/`subst`. No admits, holes, or postulates.
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- ch73 list algebra (REUSED VERBATIM) — append, the mailbox concatenation enqueue rides on.
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+-- length — the number of messages in the mailbox, hence the number of steps that drains it.
+length : (A : U) -> List A -> Nat is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (w : List A) is Nat end)
+      zero
+      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- ============================================================================
+-- ch111 single-list FIFO QUEUE (REUSED VERBATIM, single-list encoding — the cleanest
+-- substrate for the FIFO-order proof: toList = id, enqueue = append-back, dequeue = front).
+-- ============================================================================
+
+-- The dequeue result: an Option of a (front element, remaining queue) pair.
+StepS : U -> U is
+  fn (A : U) is Sig A (fn (h : A) is List A end) end
+end
+
+mkStepS : (A : U) -> A -> List A -> StepS A is
+  fn (A : U) (h : A) (t : List A) is
+    Pair A (fn (h2 : A) is List A end) h t
+  end
+end
+
+emptyS : (A : U) -> List A is
+  fn (A : U) is nil A end
+end
+
+-- enqueue x q = append q [x]  (insert at the BACK).
+enqueueS : (A : U) -> A -> List A -> List A is
+  fn (A : U) (x : A) (q : List A) is append A q (cons A x (nil A)) end
+end
+
+-- dequeue (cons h t) = some (h, t); dequeue nil = none  (remove from the FRONT).
+dequeueS : (A : U) -> List A -> Option (StepS A) is
+  fn (A : U) (q : List A) is
+    ListElim A (fn (w : List A) is Option (StepS A) end)
+      (none (StepS A))
+      (fn (h : A) (t : List A) (ih : Option (StepS A)) is
+         some (StepS A) (mkStepS A h t) end)
+      q
+  end
+end
+
+-- ============================================================================
+-- THE GEN_SERVER. A server is a (state, mailbox) pair; `handle` is the user callback;
+-- `step` dequeues the front message and applies handle; `runN` drains n messages.
+-- ============================================================================
+
+-- Server S Msg = (state : S, mailbox : List Msg). A non-dependent Sig (the OTP loop state).
+Server : U -> U -> U is
+  fn (S : U) (Msg : U) is Sig S (fn (s : S) is List Msg end) end
+end
+
+mkServer : (S : U) -> (Msg : U) -> S -> List Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (s : S) (q : List Msg) is
+    Pair S (fn (s2 : S) is List Msg end) s q
+  end
+end
+
+-- the loop-state observers: the current state and the pending mailbox.
+finalState : (S : U) -> (Msg : U) -> Server S Msg -> S is
+  fn (S : U) (Msg : U) (srv : Server S Msg) is Fst srv end
+end
+
+mailbox : (S : U) -> (Msg : U) -> Server S Msg -> List Msg is
+  fn (S : U) (Msg : U) (srv : Server S Msg) is Snd srv end
+end
+
+-- post m srv: ENQUEUE a message at the back of the mailbox (the gen_server `cast`/`call`
+-- entry — append-back, so order of arrival is preserved).
+post : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Msg -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (m : Msg) (srv : Server S Msg) is
+    mkServer S Msg (finalState S Msg srv) (enqueueS Msg m (mailbox S Msg srv))
+  end
+end
+
+-- step: dequeue the FRONT message and apply handle to the state. On the empty mailbox the
+-- server is quiescent (idles unchanged). Cases the mailbox directly via ListElim (which is
+-- exactly ch111's dequeueS: front-first), so step processes messages in FIFO order.
+step : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    ListElim Msg (fn (w : List Msg) is Server S Msg end)
+      (mkServer S Msg (finalState S Msg srv) (nil Msg))
+      (fn (m : Msg) (rest : List Msg) (ih : Server S Msg) is
+         mkServer S Msg (handle (finalState S Msg srv) m) rest end)
+      (mailbox S Msg srv)
+  end
+end
+
+-- runN n srv: take n steps (drain n messages). Recursion on n via NatElim:
+-- runN zero srv = srv; runN (succ k) srv = runN k (step srv). The step fires FIRST — so
+-- draining a `cons m rest` mailbox processes m (the FRONT) before recursing, and the FIFO
+-- theorem's induction lines up against the head of the message list.
+runN : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Nat -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (n : Nat) (srv : Server S Msg) is
+    NatElim (fn (x : Nat) is Server S Msg -> Server S Msg end)
+      (fn (sv : Server S Msg) is sv end)
+      (fn (k : Nat) (ih : Server S Msg -> Server S Msg) is
+         fn (sv : Server S Msg) is ih (step S Msg handle sv) end end)
+      n
+      srv
+  end
+end
+
+-- run srv: process the WHOLE current mailbox (length msgs steps). The full gen_server loop.
+run : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> Server S Msg -> Server S Msg is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (srv : Server S Msg) is
+    runN S Msg handle (length Msg (mailbox S Msg srv)) srv
+  end
+end
+
+-- foldl handle s msgs: the SPECIFICATION — fold the callback over the message list,
+-- left-to-right (first message first). Recursion on the list, threading the accumulator.
+foldl : (S : U) -> (Msg : U) -> (S -> Msg -> S) -> S -> List Msg -> S is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s0 : S) (msgs : List Msg) is
+    ListElim Msg (fn (w : List Msg) is S -> S end)
+      (fn (acc : S) is acc end)
+      (fn (m : Msg) (rest : List Msg) (ih : S -> S) is
+         fn (acc : S) is ih (handle acc m) end end)
+      msgs
+      s0
+  end
+end
+
+-- ============================================================================
+-- equational plumbing over Eq (Server S Msg), by subst.
+-- ============================================================================
+
+symServer : (S : U) -> (Msg : U) -> (a : Server S Msg) -> (b : Server S Msg)
+   -> Eq (Server S Msg) a b -> Eq (Server S Msg) b a is
+  fn (S : U) (Msg : U) (a : Server S Msg) (b : Server S Msg) (e : Eq (Server S Msg) a b) is
+    subst (Server S Msg) a b e (fn (z : Server S Msg) is Eq (Server S Msg) z a end)
+      (refl a)
+  end
+end
+
+transServer : (S : U) -> (Msg : U) -> (a : Server S Msg) -> (b : Server S Msg) -> (c : Server S Msg)
+   -> Eq (Server S Msg) a b -> Eq (Server S Msg) b c -> Eq (Server S Msg) a c is
+  fn (S : U) (Msg : U) (a : Server S Msg) (b : Server S Msg) (c : Server S Msg)
+     (e1 : Eq (Server S Msg) a b) (e2 : Eq (Server S Msg) b c) is
+    subst (Server S Msg) b c e2 (fn (z : Server S Msg) is Eq (Server S Msg) a z end) e1
+  end
+end
+
+-- congruence: step respects equality of servers.
+congStep : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (a : Server S Msg) -> (b : Server S Msg)
+   -> Eq (Server S Msg) a b
+   -> Eq (Server S Msg) (step S Msg handle a) (step S Msg handle b) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (a : Server S Msg) (b : Server S Msg)
+     (e : Eq (Server S Msg) a b) is
+    subst (Server S Msg) a b e
+      (fn (z : Server S Msg) is Eq (Server S Msg) (step S Msg handle a) (step S Msg handle z) end)
+      (refl (step S Msg handle a))
+  end
+end
+
+-- ============================================================================
+-- SUPPORTING LEMMA — step DEQUEUES THE FRONT. On a nonempty mailbox `cons m rest`, step
+-- processes m FIRST (applies handle to it) and leaves `rest` — exactly ch111's front-first
+-- dequeue (dequeueS (cons m rest) = some (m, rest)). Holds by refl: step's ListElim fires the
+-- cons branch.
+-- ============================================================================
+
+stepDequeuesFront : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S) -> (m : Msg)
+   -> (rest : List Msg)
+   -> Eq (Server S Msg)
+        (step S Msg handle (mkServer S Msg s (cons Msg m rest)))
+        (mkServer S Msg (handle s m) rest) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) (m : Msg) (rest : List Msg) is
+    refl (mkServer S Msg (handle s m) rest)
+  end
+end
+
+-- and on the EMPTY mailbox, step idles: the server is unchanged (quiescent). By refl.
+stepEmpty : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S)
+   -> Eq (Server S Msg)
+        (step S Msg handle (mkServer S Msg s (nil Msg)))
+        (mkServer S Msg s (nil Msg)) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) is
+    refl (mkServer S Msg s (nil Msg))
+  end
+end
+
+-- ============================================================================
+-- THE CORRECTNESS THEOREM — FIFO PROCESSING ORDER. Running the server over a mailbox folds
+-- `handle` left-to-right over the message list: the gen_server processes its mailbox in
+-- ENQUEUE order. We prove the strong form `runLaw` (run leaves the folded state with an empty
+-- mailbox), then read off `finalState`.
+--
+-- Strong form: runN (length msgs) (s, msgs) = (foldl handle s msgs, nil), by induction on msgs.
+--   Base (msgs = nil):  runN zero (s, nil) = (s, nil) = (foldl handle s nil, nil).  refl.
+--   Step (msgs = cons m rest): runN (succ (length rest)) (s, cons m rest)
+--     = step (runN (length rest) (s, cons m rest)).  But runN's first step on (s, cons m rest)
+--     dequeues m... we instead reassociate: NatElim's succ unfolds runN (succ k) sv =
+--     step (runN k sv), and one step on the FRONT of the cons mailbox is stepDequeuesFront.
+--   The orientation is: peel the FIRST step off the front (stepDequeuesFront), recurse on rest
+--   with state (handle s m). The IH, instantiated at (handle s m, rest), gives the tail fold;
+--   foldl on (cons m rest) is foldl on rest with accumulator (handle s m) — they line up.
+-- ============================================================================
+
+-- runN commutes with prepending a step on the FRONT: draining (cons m rest) for (length rest +1)
+-- steps = first dequeue m (front, by stepDequeuesFront), then drain rest for (length rest) steps.
+-- This is the "runN takes the front first" reorientation: runN (succ k) sv = step (runN k sv) is
+-- the NatElim unfold (refl); the content is that draining a cons mailbox processes its head first.
+runConsFront : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S) -> (m : Msg)
+   -> (rest : List Msg)
+   -> Eq (Server S Msg)
+        (runN S Msg handle (succ (length Msg rest)) (mkServer S Msg s (cons Msg m rest)))
+        (runN S Msg handle (length Msg rest) (mkServer S Msg (handle s m) rest)) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) (m : Msg) (rest : List Msg) is
+    refl (runN S Msg handle (length Msg rest) (mkServer S Msg (handle s m) rest))
+  end
+end
+
+-- THE STRONG FIFO LAW: runN (length msgs) (s, msgs) = (foldl handle s msgs, nil). Induction on msgs.
+runLaw : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (msgs : List Msg) -> (s : S)
+   -> Eq (Server S Msg)
+        (runN S Msg handle (length Msg msgs) (mkServer S Msg s msgs))
+        (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg)) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (msgs : List Msg) is
+    ListElim Msg
+      (fn (w : List Msg) is
+         (s : S) -> Eq (Server S Msg)
+            (runN S Msg handle (length Msg w) (mkServer S Msg s w))
+            (mkServer S Msg (foldl S Msg handle s w) (nil Msg)) end)
+      (fn (s : S) is refl (mkServer S Msg s (nil Msg)) end)
+      (fn (m : Msg) (rest : List Msg)
+          (ih : (s : S) -> Eq (Server S Msg)
+            (runN S Msg handle (length Msg rest) (mkServer S Msg s rest))
+            (mkServer S Msg (foldl S Msg handle s rest) (nil Msg))) is
+         fn (s : S) is
+           transServer S Msg
+             (runN S Msg handle (succ (length Msg rest)) (mkServer S Msg s (cons Msg m rest)))
+             (runN S Msg handle (length Msg rest) (mkServer S Msg (handle s m) rest))
+             (mkServer S Msg (foldl S Msg handle s (cons Msg m rest)) (nil Msg))
+             (runConsFront S Msg handle s m rest)
+             (ih (handle s m))
+         end end)
+      msgs
+  end
+end
+
+-- THE CORRECTNESS THEOREM, in the headline form: the FINAL STATE of running the server over a
+-- mailbox is `foldl handle` over the message list — the gen_server processes its mailbox in FIFO
+-- (enqueue) order. Read off runLaw by congruence (finalState of the strong form).
+fifoProcessingOrder : (S : U) -> (Msg : U) -> (handle : S -> Msg -> S) -> (s : S) -> (msgs : List Msg)
+   -> Eq S
+        (finalState S Msg (run S Msg handle (mkServer S Msg s msgs)))
+        (foldl S Msg handle s msgs) is
+  fn (S : U) (Msg : U) (handle : S -> Msg -> S) (s : S) (msgs : List Msg) is
+    subst (Server S Msg)
+      (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg))
+      (runN S Msg handle (length Msg msgs) (mkServer S Msg s msgs))
+      (symServer S Msg
+         (runN S Msg handle (length Msg msgs) (mkServer S Msg s msgs))
+         (mkServer S Msg (foldl S Msg handle s msgs) (nil Msg))
+         (runLaw S Msg handle msgs s))
+      (fn (z : Server S Msg) is
+         Eq S (finalState S Msg z) (foldl S Msg handle s msgs) end)
+      (refl (foldl S Msg handle s msgs))
+  end
+end
+
+-- ============================================================================
+-- A CONCRETE COUNTER GEN_SERVER. S = Nat, the single message Inc (modelled as the unit message
+-- `tt : Unit`), handle s Inc = succ s. Post [Inc, Inc, Inc] into the empty server, run, observe
+-- state = 3 — FIFO order on a real callback, refl-certified (closed numerals compute).
+-- ============================================================================
+
+data Unit : U is
+  tt : Unit
+end
+
+-- the counter callback: every message increments the state (handle ignores the message payload).
+inc : Nat -> Unit -> Nat is
+  fn (s : Nat) (m : Unit) is succ s end
+end
+
+-- the initial server: state 0, empty mailbox.
+counter0 : Server Nat Unit is
+  mkServer Nat Unit zero (nil Unit)
+end
+
+-- post three Inc messages (the OTP `cast` thrice — each appends at the back).
+counter3 : Server Nat Unit is
+  post Nat Unit inc tt (post Nat Unit inc tt (post Nat Unit inc tt counter0))
+end
+
+-- the mailbox is literally [Inc, Inc, Inc], front-to-back (refl: enqueue/append compute).
+counterMailboxOk : Eq (List Unit)
+   (mailbox Nat Unit counter3)
+   (cons Unit tt (cons Unit tt (cons Unit tt (nil Unit)))) is
+  refl (mailbox Nat Unit counter3)
+end
+
+-- RUN the server: drain all three messages. The final state is 3 = succ (succ (succ zero)).
+-- refl-certified: handle is succ, the three messages each fire it on closed numerals.
+counterRun : Eq Nat
+   (finalState Nat Unit (run Nat Unit inc counter3))
+   (succ (succ (succ zero))) is
+  refl (finalState Nat Unit (run Nat Unit inc counter3))
+end
+
+-- the deployed scenario: the observed final count after processing the mailbox.
+answer : Nat is
+  finalState Nat Unit (run Nat Unit inc counter3)
+end
+
+-- and it is certified to be 3 — the FIFO theorem AND the concrete computation agree.
+answerCorrect : Eq Nat answer (succ (succ (succ zero))) is
+  refl answer
+end

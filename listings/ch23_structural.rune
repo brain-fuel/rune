@@ -1,0 +1,103 @@
+-- Chapter 23 — Structural Kan fills (§F phase 3, the interior).
+-- The phase-3 endpoints (ch21–ch22) compute on degenerate input; here the Kan
+-- operations recurse on a type's HEAD FORMER. This chapter pins the `piF`
+-- (function-type) cases, which are sound WITHOUT the deep transpFill machinery:
+-- a transport/composition over a function type pushes UNDER the binder.
+
+-- transp over a function-type line with CONSTANT DOMAIN pushes under the lambda:
+--
+--   transp (λi. piF D (Fam i)) f  ~>  λx. transp (λi. Fam i x) (f x)
+--
+-- The codomain varies in i (its right endpoint slides along the path q via the
+-- papp boundary), so this is NOT the constant-line regularity rule — the
+-- type-line genuinely depends on i. The domain D is constant, which is exactly
+-- what removes the need to transport the argument backward (transpFill). Both
+-- sides are the same lambda, so `refl` certifies that the push fired: without
+-- the structural rule the left side is a transport STUCK at the top (a neutral),
+-- which eta-differs from the lambda on the right.
+transpPushPiF : {D : UF} -> {x0 : El D} -> {x1 : El D} ->
+    (q : El (pathF D x0 x1)) -> (f : (x : El D) -> El (pathF D x x0)) ->
+    Eq ((x : El D) -> El (pathF D x x1))
+       (transp (fn (i : I) is piF D (fn (x : El D) is pathF D x (papp D x0 x1 q i) end) end) f)
+       (fn (x : El D) is transp (fn (i : I) is pathF D x (papp D x0 x1 q i) end) (f x) end) is
+  fn {D : UF} {x0 : El D} {x1 : El D} (q : El (pathF D x0 x1)) (f : (x : El D) -> El (pathF D x x0)) is
+    refl (fn (x : El D) is transp (fn (i : I) is pathF D x (papp D x0 x1 q i) end) (f x) end)
+  end
+end
+
+-- hcomp over a function type pushes under the binder, for ANY face φ:
+--
+--   hcomp (piF P Fam) φ u u0  ~>  λx. hcomp (Fam x) φ (λi h. u i h x) (u0 x)
+--
+-- This is homogeneous (the base type piF P Fam is fixed), so no transport of
+-- the argument is involved — only the codomain family is indexed by x. The face
+-- is left abstract (a proper φ, not ⊤), so the inner composition stays stuck;
+-- what `refl` certifies is that the OUTER hcomp has been pushed through the
+-- lambda rather than sitting stuck at a function type.
+hcompPushPiF : {P : UF} -> {Fam : El P -> UF} -> (phi : F) ->
+    (u : I -> holds phi -> El (piF P Fam)) -> (u0 : El (piF P Fam)) ->
+    Eq (El (piF P Fam))
+       (hcomp (piF P Fam) phi u u0)
+       (fn (x : El P) is
+          hcomp (Fam x) phi (fn (i : I) is fn (h : holds phi) is u i h x end end) (u0 x)
+        end) is
+  fn {P : UF} {Fam : El P -> UF} (phi : F)
+     (u : I -> holds phi -> El (piF P Fam)) (u0 : El (piF P Fam)) is
+    refl (fn (x : El P) is
+            hcomp (Fam x) phi (fn (i : I) is fn (h : holds phi) is u i h x end end) (u0 x)
+          end)
+  end
+end
+
+-- comp (the heterogeneous composite) over a function-type LINE with CONSTANT
+-- DOMAIN pushes under the binder, for ANY face:
+--
+--   comp (λi. piF P (Fam i)) φ u u0  ~>  λx. comp (λi. Fam i x) φ (λi h. u i h x) (u0 x)
+--
+-- As with B1, the domain P is constant (the codomain slides in i via the papp
+-- boundary), so the argument needs no fill. The face is abstract, so the inner
+-- composition along the codomain line stays stuck — `refl` certifies the push.
+compPushPiF : {P : UF} -> {x0 : El P} -> {x1 : El P} ->
+    (q : El (pathF P x0 x1)) -> (phi : F) ->
+    (u : (i : I) -> holds phi -> El (piF P (fn (x : El P) is pathF P x (papp P x0 x1 q i) end))) ->
+    (u0 : (x : El P) -> El (pathF P x x0)) ->
+    Eq ((x : El P) -> El (pathF P x x1))
+       (comp (fn (i : I) is piF P (fn (x : El P) is pathF P x (papp P x0 x1 q i) end) end) phi u u0)
+       (fn (x : El P) is
+          comp (fn (i : I) is pathF P x (papp P x0 x1 q i) end) phi
+               (fn (i : I) is fn (h : holds phi) is u i h x end end) (u0 x)
+        end) is
+  fn {P : UF} {x0 : El P} {x1 : El P}
+     (q : El (pathF P x0 x1)) (phi : F)
+     (u : (i : I) -> holds phi -> El (piF P (fn (x : El P) is pathF P x (papp P x0 x1 q i) end)))
+     (u0 : (x : El P) -> El (pathF P x x0)) is
+    refl (fn (x : El P) is
+            comp (fn (i : I) is pathF P x (papp P x0 x1 q i) end) phi
+                 (fn (i : I) is fn (h : holds phi) is u i h x end end) (u0 x)
+          end)
+  end
+end
+
+-- The generalized transport `transpG : (A : I -> UF) -> (φ : F) -> El (A i0) ->
+-- El (A i1)` (R-FILL) carries a CONSTANCY COFIBRATION φ — the CCHM primitive the
+-- structural rules recurse through. Plain `transp` is `transpG … fbot`. Two
+-- endpoint laws certify the new member.
+
+-- On φ = ⊤ the line is declared constant everywhere it matters: transport is id.
+transpGTop : {A0 : UF} -> (a : El A0) ->
+    Eq (El A0) (transpG (fn (i : I) is A0 end) ftop a) a is
+  fn {A0 : UF} (a : El A0) is refl a end
+end
+
+-- Regularity: a genuinely constant line transports by the identity for ANY φ
+-- (here the empty cofibration fbot — i.e. exactly plain transport).
+transpGConst : {A0 : UF} -> (a : El A0) ->
+    Eq (El A0) (transpG (fn (i : I) is A0 end) fbot a) a is
+  fn {A0 : UF} (a : El A0) is refl a end
+end
+
+-- Plain transp is definitionally transpG on the empty cofibration.
+transpIsTranspG : {A0 : UF} -> (a : El A0) ->
+    Eq (El A0) (transp (fn (i : I) is A0 end) a) (transpG (fn (i : I) is A0 end) fbot a) is
+  fn {A0 : UF} (a : El A0) is refl a end
+end

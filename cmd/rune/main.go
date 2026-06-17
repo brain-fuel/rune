@@ -12,6 +12,7 @@ package main
 import (
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"fmt"
@@ -60,22 +61,20 @@ func main() {
 			fatal(err)
 		}
 	case "emit", "run":
-		if len(os.Args) < 3 {
+		file, main, target, err := parseEmitArgs(os.Args[2:])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "rune:", err)
 			usage()
 			os.Exit(2)
 		}
-		src, err := os.ReadFile(os.Args[2])
+		src, err := os.ReadFile(file)
 		if err != nil {
 			fatal(err)
 		}
-		main := ""
-		if len(os.Args) > 3 {
-			main = os.Args[3]
-		}
 		if os.Args[1] == "emit" {
-			err = runEmit(string(src), main, os.Stdout)
+			err = runEmit(string(src), main, target, os.Stdout)
 		} else {
-			err = runNode(string(src), main)
+			err = runTarget(string(src), main, target)
 		}
 		if err != nil {
 			fatal(err)
@@ -110,7 +109,46 @@ func runHash(src string) error {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: rune (fmt|hash) <file> | rune repl [--no-prelude]")
+	fmt.Fprintln(os.Stderr, "usage:")
+	fmt.Fprintln(os.Stderr, "  rune (fmt|hash) <file>")
+	fmt.Fprintln(os.Stderr, "  rune repl [--no-prelude]")
+	fmt.Fprintln(os.Stderr, "  rune emit <file> [name] [--target js|py|go|rs|erl|jvm]")
+	fmt.Fprintln(os.Stderr, "  rune run  <file> <name> [--target js|py|go|rs|erl|jvm]")
+	fmt.Fprintf(os.Stderr, "  targets: %s (aliases: python, rust, golang, javascript)\n",
+		strings.Join(codegen.Targets(), ", "))
+}
+
+// parseEmitArgs reads the positional <file> [name] and an optional
+// `--target NAME` (or `--target=NAME`) flag, in any order, for emit/run.
+func parseEmitArgs(args []string) (file, main, target string, err error) {
+	target = codegen.Default().Target()
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--target", a == "-target":
+			if i+1 >= len(args) {
+				return "", "", "", fmt.Errorf("--target needs a value")
+			}
+			i++
+			target = args[i]
+		case strings.HasPrefix(a, "--target="):
+			target = strings.TrimPrefix(a, "--target=")
+		default:
+			pos = append(pos, a)
+		}
+	}
+	if len(pos) == 0 {
+		return "", "", "", fmt.Errorf("emit/run needs a file")
+	}
+	file = pos[0]
+	if len(pos) > 1 {
+		main = pos[1]
+	}
+	if _, ok := codegen.ByTarget(target); !ok {
+		return "", "", "", fmt.Errorf("unknown target %q (have %s)", target, strings.Join(codegen.Targets(), ", "))
+	}
+	return file, main, target, nil
 }
 
 func fatal(err error) {
@@ -118,46 +156,121 @@ func fatal(err error) {
 	os.Exit(1)
 }
 
-// runEmit type checks a file and writes its erased JavaScript shadow to w.
-func runEmit(src, main string, w io.Writer) error {
-	s := session.New()
-	if _, err := s.LoadSource(src); err != nil {
-		return err
-	}
-	p, err := s.EmitProgram(main)
+// runEmit type checks a file and writes its erased shadow for the named target
+// to w (default target is JavaScript).
+func runEmit(src, main, target string, w io.Writer) error {
+	out, _, err := emitFor(src, main, target)
 	if err != nil {
 		return err
 	}
-	out, err := codegen.Default().Emit(p)
-	if err != nil {
-		return err
-	}
-	_, err = io.WriteString(w, string(out))
+	_, err = io.WriteString(w, out)
 	return err
 }
 
-// runNode emits the program to a temporary file and executes it with node.
-func runNode(src, main string) error {
+// emitFor checks the source and emits the erased shadow for the target backend,
+// returning the source and the resolved backend.
+func emitFor(src, main, target string) (string, codegen.Backend, error) {
+	bk, ok := codegen.ByTarget(target)
+	if !ok {
+		return "", nil, fmt.Errorf("unknown target %q", target)
+	}
+	s := session.New()
+	if _, err := s.LoadSource(src); err != nil {
+		return "", nil, err
+	}
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		return "", nil, err
+	}
+	out, err := bk.Emit(p)
+	if err != nil {
+		return "", nil, err
+	}
+	return string(out), bk, nil
+}
+
+// targetRunner names, per backend Target(), the temp-file extension and the
+// command that executes the emitted source. A nil compile means the run command
+// takes the source file directly; otherwise compile produces a binary that runs.
+var targetRunner = map[string]struct {
+	ext     string
+	bin     string // tool that must be in PATH
+	run     func(file string) *exec.Cmd
+	compile func(file, out string) *exec.Cmd // nil for interpreted backends
+}{
+	"js": {ext: "js", bin: "node", run: func(f string) *exec.Cmd { return exec.Command("node", f) }},
+	"py": {ext: "py", bin: "python3", run: func(f string) *exec.Cmd { return exec.Command("python3", f) }},
+	"go": {ext: "go", bin: "go", run: func(f string) *exec.Cmd { return exec.Command("go", "run", f) }},
+	"rs": {ext: "rs", bin: "rustc",
+		run:     func(bin string) *exec.Cmd { return exec.Command(bin) },
+		compile: func(f, out string) *exec.Cmd { return exec.Command("rustc", "--edition", "2021", "-O", "-o", out, f) }},
+	"erl": {ext: "erl", bin: "escript", run: func(f string) *exec.Cmd { return exec.Command("escript", f) }},
+	"jvm": {ext: "java", bin: javac25Path(),
+		run: func(out string) *exec.Cmd {
+			return exec.Command(java25Path(), "-cp", filepath.Dir(out), "main")
+		},
+		compile: func(f, out string) *exec.Cmd {
+			return exec.Command(javac25Path(), "--release", "25", "-d", filepath.Dir(out), f)
+		}},
+}
+
+// javac25Path / java25Path resolve a JDK 25+ toolchain for the JVM backend
+// (records/sealed/pattern-switch/virtual-threads). Prefer an asdf-installed
+// temurin-25; else a PATH javac if it is recent enough. Empty string ⇒ not found
+// (runTarget then reports it cannot run the JVM target).
+func javac25Path() string { jc, _ := resolveJava25(); return jc }
+func java25Path() string  { _, jv := resolveJava25(); return jv }
+
+func resolveJava25() (javac, java string) {
+	home, _ := os.UserHomeDir()
+	if m, _ := filepath.Glob(filepath.Join(home, ".asdf/installs/java/temurin-25*/bin/javac")); len(m) > 0 {
+		dir := filepath.Dir(m[0])
+		return m[0], filepath.Join(dir, "java")
+	}
+	if jc, err := exec.LookPath("javac"); err == nil {
+		jv, _ := exec.LookPath("java")
+		return jc, jv
+	}
+	return "", ""
+}
+
+// runTarget emits the program for the target and executes it, compiling first
+// for the backends that need it (Rust).
+func runTarget(src, main, target string) error {
 	if main == "" {
 		return fmt.Errorf("rune run needs a definition to evaluate: rune run FILE NAME")
 	}
-	if _, err := exec.LookPath("node"); err != nil {
-		return fmt.Errorf("the js backend needs node in PATH to run (use `rune emit` to inspect the output)")
-	}
-	var buf strings.Builder
-	if err := runEmit(src, main, &buf); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp("", "rune-*.js")
+	out, bk, err := emitFor(src, main, target)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
-	if _, err := io.WriteString(f, buf.String()); err != nil {
+	r, ok := targetRunner[bk.Target()]
+	if !ok {
+		return fmt.Errorf("no runner for target %q (use `rune emit` to inspect the output)", bk.Target())
+	}
+	if _, err := exec.LookPath(r.bin); err != nil {
+		return fmt.Errorf("the %s backend needs %s in PATH to run (use `rune emit` to inspect the output)", bk.Target(), r.bin)
+	}
+	dir, err := os.MkdirTemp("", "rune-run-")
+	if err != nil {
 		return err
 	}
-	f.Close()
-	cmd := exec.Command("node", f.Name())
+	defer os.RemoveAll(dir)
+	srcFile := dir + "/main." + r.ext
+	if err := os.WriteFile(srcFile, []byte(out), 0o644); err != nil {
+		return err
+	}
+	runFile := srcFile
+	if r.compile != nil {
+		binFile := dir + "/main.bin"
+		c := r.compile(srcFile, binFile)
+		c.Stderr = os.Stderr
+		if err := c.Run(); err != nil {
+			return fmt.Errorf("compiling the %s shadow failed: %w", bk.Target(), err)
+		}
+		runFile = binFile
+	}
+	cmd := r.run(runFile)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	return cmd.Run()
 }

@@ -1,0 +1,47 @@
+-- Chapter 29 — Option, a verified stdlib datatype (D1 foundations).
+-- Pure Wootz over the Phase-4 datatype machinery (no kernel changes): a sum type
+-- with its eliminator, a functorial map, and the computation laws proven by the
+-- eliminator's ι-rule. This is the typed-and-tested tier of the stdlib — every
+-- leaf below means something because the eliminator is the only recursion.
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- Functorial map over the optional value.
+mapOption : (A : U) -> (B : U) -> (A -> B) -> Option A -> Option B is
+  fn (A : U) (B : U) (f : A -> B) (o : Option A) is
+    OptionElim A (fn (x : Option A) is Option B end)
+      (none B)
+      (fn (a : A) is some B (f a) end)
+      o
+  end
+end
+
+-- map leaves none alone (ι on the none constructor).
+mapNone : (A : U) -> (B : U) -> (f : A -> B) ->
+    Eq (Option B) (mapOption A B f (none A)) (none B) is
+  fn (A : U) (B : U) (f : A -> B) is refl (none B) end
+end
+
+-- map applies f under some (ι on the some constructor).
+mapSome : (A : U) -> (B : U) -> (f : A -> B) -> (a : A) ->
+    Eq (Option B) (mapOption A B f (some A a)) (some B (f a)) is
+  fn (A : U) (B : U) (f : A -> B) (a : A) is refl (some B (f a)) end
+end
+
+-- getOrElse: a default for none, the value for some.
+getOrElse : (A : U) -> A -> Option A -> A is
+  fn (A : U) (d : A) (o : Option A) is
+    OptionElim A (fn (x : Option A) is A end) d (fn (a : A) is a end) o
+  end
+end
+
+-- getOrElse computes on both shapes.
+gorNone : (A : U) -> (d : A) -> Eq A (getOrElse A d (none A)) d is
+  fn (A : U) (d : A) is refl d end
+end
+gorSome : (A : U) -> (d : A) -> (a : A) -> Eq A (getOrElse A d (some A a)) a is
+  fn (A : U) (d : A) (a : A) is refl a end
+end

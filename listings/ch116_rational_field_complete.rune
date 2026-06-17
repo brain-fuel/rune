@@ -1,0 +1,2062 @@
+-- Chapter 116 — ℚ COMPLETED: the ℤ ZERO-DISCRIMINATOR `zIsZero` (telos-3 / M6).
+-- ch113 built ℚ = QPair/QRel as a verified COMMUTATIVE RING (qmulOneR/qaddZero/
+-- qmulAssoc/qaddAssoc/qmulDistR + ch108's qmulComm/qaddComm) with a field inverse on
+-- the POSITIVE subtype only (qPos/qinvPos + qmulInvPosR). The documented blocker it
+-- flagged: `qPosNonzero` was STATED but not proven — it "needs a ℤ→Bool discriminator
+-- that respects ZRel". This chapter CLOSES that blocker: it builds `zIsZero : Z -> Bool`
+-- (FULLY proven, with its ZRel-respect proof — the reusable key piece) and discharges
+-- the deferred `qPosNonzero` from it. The ENTIRE ch113 development (itself the ch107 ℤ
+-- ring + ch108 ℚ) is redeclared VERBATIM below (self-contained); the NEW layer begins
+-- under the "CHAPTER 116" banner at the very end.
+--
+-- LANDS in the NEW layer, fully proven, no admits:
+--   • zIsZero : Z -> Bool — the representation-respecting ℤ zero-test: on a rep (a,b)
+--     (denoting a−b), zero iff eqNat a b. The CRUX is the ZRel-respect proof
+--     `eqNatRespects` ((a,b)~(c,d), i.e. a+d=c+b, ⟹ eqNat a b = eqNat c d), via the
+--     left/right add-cancellation laws of eqNat. Lifted over ZRel by qlift.
+--   • zIsZeroZero : zIsZero 0 = true (refl) ; boolTrueNeFalse : true=false ⟹ Empty ;
+--     zIsZeroFalseNonzero : zIsZero z = false ⟹ zNonzero z — the correctness package.
+--   • qPosNonzeroPf : (a b) -> qPosNonzero a b — ch113's DEFERRED lemma, now PROVEN:
+--     zIsZero (zfrom (succ a)) = eqNat (succ a) 0 = false (refl), so succ a / succ b is
+--     genuinely nonzero. The positive-subtype field inverse is now fully certified.
+--   • sanity: zIsZero discriminates a negative integer (zIsZero (−2) = false, refl).
+--
+-- WHAT REMAINS for the FULLY-GENERAL qinv (stated precisely at the foot of the file):
+--   the sign normalisation of inv(a/sb) = sb/a for a numerator a : Z of ARBITRARY sign
+--   needs a magnitude/sign extraction Z → (Bool, Nat) respecting ZRel (truncated Nat
+--   subtraction + its ZRel-respect + ordering) — a large, separate development. The
+--   zero-discriminator built here is the prerequisite key piece and the documented
+--   ch113 blocker, now closed.
+--
+-- ch08/ch07/ch103/ch105/ch107/ch108/ch113's ℤ+ℚ development is redeclared verbatim.
+--
+-- LANDS, fully proven, no admits:
+--   • qmulOneR : x · 1 = x  and  qaddZero : x + 0 = x  (ring identities)
+--   • qmulAssoc, qaddAssoc, qmulDistR  (the ring axioms, lifted from ℤ's zmulAssoc/
+--     zaddAssoc/zmulDistR via the cross-multiplication algebra) — ℚ is a COMMUTATIVE RING
+--   • zNonzero : Z -> U, the ℤ-nonzero predicate, and qinv : (q : Q) -> q nonzero -> Q
+--     (swap numerator/denominator), with qmulInvR : q · q⁻¹ = 1 — ℚ is a FIELD.
+--
+-- ch07/ch103/ch105/ch107's ℤ infrastructure and ch63/ch81's Nat semiring lemmas are
+-- REDECLARED VERBATIM (the entire ch107 ℤ-ring development is reproduced below) so the
+-- chapter is self-contained; the NEW ℚ layer begins under the "CHAPTER 108" banner.
+--
+-- A fraction is a pair (num : Z, den : Nat) read as num / succ(den) — the +1 trick
+-- makes the denominator STRUCTURALLY NONZERO with no carried proof. ℚ is these pairs
+-- quotiented by cross-multiplication:
+--   (a / sb) ~ (c / sd)  ⟺  a · sd = c · sb     (in ℤ, via ch107's zmul)
+-- where sb := zfrom (succ b), sd := zfrom (succ d) coerce the Nat denominators into ℤ.
+-- This is the SAME quotient HIT pattern ch07/ch103/ch105 use for ℤ, now one level up:
+-- Q = QPair / QRel, with qin/qsound/qlift/qind.
+--
+-- LANDS, fully proven, no admits:
+--   • the representation Q = QPair / QRel and the embedding qfromZ : Z -> Q
+--   • zmulInterchange : (a·b)·(c·d) = (a·c)·(b·d)  — the commutative-ring 4-factor
+--     regrouping (from zmulAssoc + zmulComm), the workhorse of ℚ well-definedness
+--   • zmulHom : zfrom (m · n) = zmul (zfrom m) (zfrom n) — the Nat→ℤ ring map respects ×
+--   • qmul : Q -> Q -> Q  — (a/sb)·(c/sd) = (a·c)/(sb·sd), lifted through QRel by the
+--     cross-multiplication respect proof (qmulRespL/R, the analog of ch105's pmulRespL/R
+--     one level up — discharged by zmulInterchange + zmulHom + the H hypothesis)
+--   • qmulComm : x · y = y · x  — the first field law, from zmulComm + zmulInterchange
+--   • a CONCRETE computing example: (1/2)·(2/1) ~ 1 via qsound.
+--
+-- ch07/ch103/ch105/ch107's ℤ infrastructure and ch63/ch81's Nat semiring lemmas are
+-- REDECLARED VERBATIM (the entire ch107 ℤ-ring development is reproduced below) so the
+-- chapter is self-contained; the NEW ℚ layer begins under the "CHAPTER 108" banner.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+mul : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add n ih end) m
+  end
+end
+
+-- The equality toolkit (ch07), with implicit arguments doing the bookkeeping.
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> Eq A x y -> Eq B (f x) (f y) is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ============================================================================
+-- The Nat SEMIRING lemmas (ch63 / ch81), redeclared verbatim.
+-- ============================================================================
+
+addZeroR : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+         subst Nat (add k zero) k ih
+           (fn (z : Nat) is Eq Nat (add (succ k) zero) (succ z) end)
+           (refl (add (succ k) zero))
+       end)
+      n
+  end
+end
+
+addSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (add n (succ m)) (succ (add n m)) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ m)) (succ (add x m)) end)
+      (refl (succ m))
+      (fn (k : Nat) (ih : Eq Nat (add k (succ m)) (succ (add k m))) is
+         subst Nat (add k (succ m)) (succ (add k m)) ih
+           (fn (z : Nat) is Eq Nat (add (succ k) (succ m)) (succ z) end)
+           (refl (add (succ k) (succ m)))
+       end)
+      n
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (add (add a b) c) (add a (add b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add (add x b) c) (add x (add b c)) end)
+      (refl (add b c))
+      (fn (k : Nat) (ih : Eq Nat (add (add k b) c) (add k (add b c))) is
+         subst Nat (add (add k b) c) (add k (add b c)) ih
+           (fn (z : Nat) is Eq Nat (succ (add (add k b) c)) (succ z) end)
+           (refl (succ (add (add k b) c)))
+       end)
+      a
+  end
+end
+
+addComm : (n : Nat) -> (m : Nat) -> Eq Nat (add n m) (add m n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x m) (add m x) end)
+      (subst Nat (add m zero) m (addZeroR m)
+         (fn (z : Nat) is Eq Nat z (add m zero) end)
+         (refl (add m zero)))
+      (fn (k : Nat) (ih : Eq Nat (add k m) (add m k)) is
+         subst Nat (succ (add m k)) (add m (succ k))
+           (subst Nat (add m (succ k)) (succ (add m k)) (addSuccR m k)
+              (fn (z : Nat) is Eq Nat z (add m (succ k)) end)
+              (refl (add m (succ k))))
+           (fn (z : Nat) is Eq Nat (succ (add k m)) z end)
+           (subst Nat (add k m) (add m k) ih
+              (fn (z : Nat) is Eq Nat (succ (add k m)) (succ z) end)
+              (refl (succ (add k m))))
+       end)
+      n
+  end
+end
+
+mulZeroR : (n : Nat) -> Eq Nat (mul n zero) zero is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul x zero) zero end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k zero) zero) is ih end)
+      n
+  end
+end
+
+-- RIGHT DISTRIBUTIVITY: (a + b) * c = a*c + b*c (ch63).
+mulDistR : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (mul (add a b) c) (add (mul a c) (mul b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul (add x b) c) (add (mul x c) (mul b c)) end)
+      (refl (mul b c))
+      (fn (k : Nat) (ih : Eq Nat (mul (add k b) c) (add (mul k c) (mul b c))) is
+         subst Nat
+           (add c (add (mul k c) (mul b c)))
+           (add (add c (mul k c)) (mul b c))
+           (subst Nat
+              (add (add c (mul k c)) (mul b c))
+              (add c (add (mul k c) (mul b c)))
+              (addAssoc c (mul k c) (mul b c))
+              (fn (z : Nat) is Eq Nat z (add (add c (mul k c)) (mul b c)) end)
+              (refl (add (add c (mul k c)) (mul b c))))
+           (fn (z : Nat) is Eq Nat (add c (mul (add k b) c)) z end)
+           (subst Nat (mul (add k b) c) (add (mul k c) (mul b c)) ih
+              (fn (z : Nat) is Eq Nat (add c (mul (add k b) c)) (add c z) end)
+              (refl (add c (mul (add k b) c))))
+       end)
+      a
+  end
+end
+
+-- MULTIPLICATIVE SUCCESSOR-SHIFT: mul n (succ m) = add (mul n m) n (ch81).
+mulSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (mul n (succ m)) (add (mul n m) n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul x (succ m)) (add (mul x m) x) end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k (succ m)) (add (mul k m) k)) is
+         subst Nat
+           (succ (add (add m (mul k m)) k))
+           (add (add m (mul k m)) (succ k))
+           (subst Nat
+              (add (add m (mul k m)) (succ k))
+              (succ (add (add m (mul k m)) k))
+              (addSuccR (add m (mul k m)) k)
+              (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) (succ k)) end)
+              (refl (add (add m (mul k m)) (succ k))))
+           (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) z end)
+           (subst Nat
+              (add m (add (mul k m) k))
+              (add (add m (mul k m)) k)
+              (subst Nat
+                 (add (add m (mul k m)) k)
+                 (add m (add (mul k m) k))
+                 (addAssoc m (mul k m) k)
+                 (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) k) end)
+                 (refl (add (add m (mul k m)) k)))
+              (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ z) end)
+              (subst Nat
+                 (mul k (succ m))
+                 (add (mul k m) k)
+                 ih
+                 (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ (add m z)) end)
+                 (refl (mul (succ k) (succ m)))))
+       end)
+      n
+  end
+end
+
+-- COMMUTATIVITY of Nat mul (ch81), by induction on m.
+mulComm : (m : Nat) -> (n : Nat) -> Eq Nat (mul m n) (mul n m) is
+  fn (m : Nat) (n : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul x n) (mul n x) end)
+      (subst Nat (mul n zero) zero (mulZeroR n)
+         (fn (z : Nat) is Eq Nat z (mul n zero) end)
+         (refl (mul n zero)))
+      (fn (k : Nat) (ih : Eq Nat (mul k n) (mul n k)) is
+         subst Nat
+           (add (mul n k) n)
+           (mul n (succ k))
+           (subst Nat
+              (mul n (succ k))
+              (add (mul n k) n)
+              (mulSuccR n k)
+              (fn (z : Nat) is Eq Nat z (mul n (succ k)) end)
+              (refl (mul n (succ k))))
+           (fn (z : Nat) is Eq Nat (mul (succ k) n) z end)
+           (subst Nat
+              (mul n k)
+              (mul k n)
+              (subst Nat (mul k n) (mul n k) ih
+                 (fn (z : Nat) is Eq Nat z (mul k n) end)
+                 (refl (mul k n)))
+              (fn (z : Nat) is Eq Nat (add n z) (add (mul n k) n) end)
+              (addComm n (mul n k)))
+       end)
+      m
+  end
+end
+
+-- LEFT DISTRIBUTIVITY: a * (b + c) = a*b + a*c, derived from mulComm + mulDistR.
+mulDistL : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (mul a (add b c)) (add (mul a b) (mul a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    trans (mulComm a (add b c))
+      (trans (mulDistR b c a)
+        (trans (cong (fn (s : Nat) is add s (mul c a) end) (mulComm b a))
+          (cong (fn (s : Nat) is add (mul a b) s end) (mulComm c a))))
+  end
+end
+
+-- x + (y + z) = y + (x + z) and the interchange law (ch07), the workhorses of the
+-- respect proofs.
+swapLeft : (x : Nat) -> (y : Nat) -> (z : Nat) ->
+    Eq Nat (add x (add y z)) (add y (add x z)) is
+  fn (x : Nat) (y : Nat) (z : Nat) is
+    trans (sym (addAssoc x y z))
+      (trans (cong (fn (s : Nat) is add s z end) (addComm x y))
+        (addAssoc y x z))
+  end
+end
+
+interchange : (w : Nat) -> (x : Nat) -> (y : Nat) -> (z : Nat) ->
+    Eq Nat (add (add w x) (add y z)) (add (add w y) (add x z)) is
+  fn (w : Nat) (x : Nat) (y : Nat) (z : Nat) is
+    trans (addAssoc w x (add y z))
+      (trans (cong (fn (s : Nat) is add w s end) (swapLeft x y z))
+        (sym (addAssoc w y (add x z))))
+  end
+end
+
+-- ============================================================================
+-- NEW NAT LEMMAS this chapter needs beyond ch105's set.
+-- ============================================================================
+
+-- MULTIPLICATIVE RIGHT IDENTITY: mul n 1 = n. One-line induction:
+--   mul (succ k) 1 = add 1 (mul k 1) = succ (mul k 1) = succ k by IH.
+mulOneR : (n : Nat) -> Eq Nat (mul n (succ zero)) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul x (succ zero)) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k (succ zero)) k) is
+         cong succ ih
+       end)
+      n
+  end
+end
+
+-- MUL ASSOCIATIVITY: (a * b) * c = a * (b * c) (ch81 sibling), by induction on a.
+--   (succ k * b) * c = (b + k*b) * c           [def]
+--                    = b*c + (k*b)*c           [mulDistR]
+--                    = b*c + k*(b*c)           [IH]
+--                    = (succ k) * (b*c)         [def]
+mulAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (mul (mul a b) c) (mul a (mul b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul (mul x b) c) (mul x (mul b c)) end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul (mul k b) c) (mul k (mul b c))) is
+         trans (mulDistR b (mul k b) c)
+           (cong (fn (s : Nat) is add (mul b c) s end) ih)
+       end)
+      a
+  end
+end
+
+-- ============================================================================
+-- ch07/ch103/ch105 ℤ infrastructure, redeclared verbatim.
+-- ============================================================================
+
+cong2 : {A : U} -> {B : U} -> {C : U} -> (f : A -> B -> C)
+     -> {x : A} -> {y : A} -> {u : B} -> {v : B}
+     -> Eq A x y -> Eq B u v -> Eq C (f x u) (f y v) is
+  fn {A : U} {B : U} {C : U} (f : A -> B -> C)
+     {x : A} {y : A} {u : B} {v : B} (p : Eq A x y) (q : Eq B u v) is
+    trans (cong (fn (z : A) is f z u end) p) (cong (fn (z : B) is f y z end) q)
+  end
+end
+
+data NatPair : U is
+  npair : Nat -> Nat -> NatPair
+end
+
+fst : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is a end) p
+  end
+end
+
+snd : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is b end) p
+  end
+end
+
+ZRel : NatPair -> NatPair -> Prop is
+  fn (p : NatPair) (q : NatPair) is
+    Eq Nat (add (fst p) (snd q)) (add (fst q) (snd p))
+  end
+end
+
+Z : U is Quot NatPair ZRel end
+
+zfrom : Nat -> Z is fn (n : Nat) is qin NatPair ZRel (npair n zero) end end
+zzero : Z is zfrom zero end
+zone : Z is zfrom (succ zero) end
+zminusOne : Z is qin NatPair ZRel (npair zero (succ zero)) end
+
+psucc : NatPair -> NatPair is
+  fn (p : NatPair) is npair (succ (fst p)) (snd p) end
+end
+pneg : NatPair -> NatPair is
+  fn (p : NatPair) is npair (snd p) (fst p) end
+end
+padd : NatPair -> NatPair -> NatPair is
+  fn (p : NatPair) (q : NatPair) is
+    npair (add (fst p) (fst q)) (add (snd p) (snd q))
+  end
+end
+
+-- Integer addition, by lifting twice (ch103).
+paddRespL : (p : NatPair) -> (p' : NatPair) -> (q : NatPair) ->
+    ZRel p p' -> ZRel (padd p q) (padd p' q) is
+  fn (p : NatPair) (p' : NatPair) (q : NatPair) (r : ZRel p p') is
+    trans (interchange (fst p) (fst q) (snd p') (snd q))
+      (trans (cong (fn (s : Nat) is add s (add (fst q) (snd q)) end) r)
+        (sym (interchange (fst p') (fst q) (snd p) (snd q))))
+  end
+end
+
+paddRespR : (p : NatPair) -> (q : NatPair) -> (q' : NatPair) ->
+    ZRel q q' -> ZRel (padd p q) (padd p q') is
+  fn (p : NatPair) (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+    trans (interchange (fst p) (fst q) (snd p) (snd q'))
+      (trans (cong (fn (s : Nat) is add (add (fst p) (snd p)) s end) r)
+        (sym (interchange (fst p) (fst q') (snd p) (snd q))))
+  end
+end
+
+zaddR : NatPair -> Z -> Z is
+  fn (p : NatPair) is
+    qlift NatPair ZRel Z
+      (fn (q : NatPair) is qin NatPair ZRel (padd p q) end)
+      (fn (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+        qsound NatPair ZRel (padd p q) (padd p q') (paddRespR p q q' r)
+      end)
+  end
+end
+
+zadd : Z -> Z -> Z is
+  qlift NatPair ZRel (Z -> Z) zaddR
+    (fn (p : NatPair) (p' : NatPair) (r : ZRel p p') is
+      fn (z : Z) is
+        qind NatPair ZRel (fn (w : Z) is Eq Z (zaddR p w) (zaddR p' w) end)
+          (fn (q : NatPair) is
+            qsound NatPair ZRel (padd p q) (padd p' q) (paddRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- Integer multiplication, by lifting twice (ch105).
+pmul : NatPair -> NatPair -> NatPair is
+  fn (p : NatPair) (q : NatPair) is
+    npair
+      (add (mul (fst p) (fst q)) (mul (snd p) (snd q)))
+      (add (mul (fst p) (snd q)) (mul (snd p) (fst q)))
+  end
+end
+
+pmulRespR : (p : NatPair) -> (q : NatPair) -> (q' : NatPair) ->
+    ZRel q q' -> ZRel (pmul p q) (pmul p q') is
+  fn (p : NatPair) (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+    trans
+      (interchange
+        (mul (fst p) (fst q)) (mul (snd p) (snd q))
+        (mul (fst p) (snd q')) (mul (snd p) (fst q')))
+      (trans
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (trans (sym (mulDistL (fst p) (fst q) (snd q')))
+            (trans (cong (fn (s : Nat) is mul (fst p) s end) r)
+              (mulDistL (fst p) (fst q') (snd q))))
+          (trans (addComm (mul (snd p) (snd q)) (mul (snd p) (fst q')))
+            (trans
+              (sym
+                (trans (sym (mulDistL (snd p) (fst q) (snd q')))
+                  (trans (cong (fn (s : Nat) is mul (snd p) s end) r)
+                    (mulDistL (snd p) (fst q') (snd q)))))
+              (addComm (mul (snd p) (fst q)) (mul (snd p) (snd q'))))))
+        (interchange
+          (mul (fst p) (fst q')) (mul (fst p) (snd q))
+          (mul (snd p) (snd q')) (mul (snd p) (fst q))))
+  end
+end
+
+pmulRespL : (p : NatPair) -> (p' : NatPair) -> (q : NatPair) ->
+    ZRel p p' -> ZRel (pmul p q) (pmul p' q) is
+  fn (p : NatPair) (p' : NatPair) (q : NatPair) (r : ZRel p p') is
+    trans
+      (trans
+        (cong (fn (s : Nat) is add (add (mul (fst p) (fst q)) (mul (snd p) (snd q))) s end)
+          (addComm (mul (fst p') (snd q)) (mul (snd p') (fst q))))
+        (interchange
+          (mul (fst p) (fst q)) (mul (snd p) (snd q))
+          (mul (snd p') (fst q)) (mul (fst p') (snd q))))
+      (trans
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (trans (sym (mulDistR (fst p) (snd p') (fst q)))
+            (trans (cong (fn (s : Nat) is mul s (fst q) end) r)
+              (mulDistR (fst p') (snd p) (fst q))))
+          (trans (addComm (mul (snd p) (snd q)) (mul (fst p') (snd q)))
+            (trans (sym (mulDistR (fst p') (snd p) (snd q)))
+              (trans (cong (fn (s : Nat) is mul s (snd q) end) (sym r))
+                (trans (mulDistR (fst p) (snd p') (snd q))
+                  (addComm (mul (fst p) (snd q)) (mul (snd p') (snd q))))))))
+        (trans
+          (interchange
+            (mul (fst p') (fst q)) (mul (snd p) (fst q))
+            (mul (snd p') (snd q)) (mul (fst p) (snd q)))
+          (cong (fn (s : Nat) is add (add (mul (fst p') (fst q)) (mul (snd p') (snd q))) s end)
+            (addComm (mul (snd p) (fst q)) (mul (fst p) (snd q))))))
+  end
+end
+
+zmulR : NatPair -> Z -> Z is
+  fn (p : NatPair) is
+    qlift NatPair ZRel Z
+      (fn (q : NatPair) is qin NatPair ZRel (pmul p q) end)
+      (fn (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+        qsound NatPair ZRel (pmul p q) (pmul p q') (pmulRespR p q q' r)
+      end)
+  end
+end
+
+zmul : Z -> Z -> Z is
+  qlift NatPair ZRel (Z -> Z) zmulR
+    (fn (p : NatPair) (p' : NatPair) (r : ZRel p p') is
+      fn (z : Z) is
+        qind NatPair ZRel (fn (w : Z) is Eq Z (zmulR p w) (zmulR p' w) end)
+          (fn (q : NatPair) is
+            qsound NatPair ZRel (pmul p q) (pmul p' q) (pmulRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- pmul p q ~ pmul q p on representatives (ch105).
+pmulComm : (p : NatPair) -> (q : NatPair) -> ZRel (pmul p q) (pmul q p) is
+  fn (p : NatPair) (q : NatPair) is
+    cong2 (fn (u : Nat) (v : Nat) is add u v end)
+      (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+        (mulComm (fst p) (fst q))
+        (mulComm (snd p) (snd q)))
+      (trans
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (mulComm (fst q) (snd p))
+          (mulComm (snd q) (fst p)))
+        (addComm (mul (snd p) (fst q)) (mul (fst p) (snd q))))
+  end
+end
+
+zmulComm : (x : Z) -> (y : Z) -> Eq Z (zmul x y) (zmul y x) is
+  fn (x : Z) is
+    qind NatPair ZRel (fn (w : Z) is (y : Z) -> Eq Z (zmul w y) (zmul y w) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (w : Z) is Eq Z (zmul (qin NatPair ZRel p) w) (zmul w (qin NatPair ZRel p)) end)
+            (fn (q : NatPair) is
+              qsound NatPair ZRel (pmul p q) (pmul q p) (pmulComm p q)
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ============================================================================
+-- NEW IN CH107 — the remaining commutative-ring laws.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- MULTIPLICATIVE RIGHT IDENTITY: x * 1 = x.
+-- zone = qin (1, 0). On a representative (a, b):
+--   pmul (a,b) (1,0) = (a*1 + b*0, a*0 + b*1).
+-- The ZRel obligation relating it back to (a, b) is
+--   (a*1 + b*0) + b  =  a + (a*0 + b*1).
+-- LHS: a*1 = a (mulOneR), b*0 = 0 (mulZeroR), so a*1 + b*0 = a + 0 = a, hence LHS = a + b.
+-- RHS: a*0 = 0 (mulZeroR), b*1 = b (mulOneR), so a*0 + b*1 = 0 + b = b, hence RHS = a + b.
+-- Both reduce to a + b; the obligation is the composite of these two simplifications.
+-- ----------------------------------------------------------------------------
+pmulOneR : (p : NatPair) -> ZRel (pmul p (npair (succ zero) zero)) p is
+  fn (p : NatPair) is
+    -- Goal: add (add (mul (fst p) 1) (mul (snd p) 0)) (snd p)
+    --     = add (fst p) (add (mul (fst p) 0) (mul (snd p) 1)).
+    -- LHS  -> add (add (fst p) zero) (snd p)  [mulOneR, mulZeroR]
+    --      -> add (fst p) (snd p)             [addZeroR]
+    -- RHS  <- add (fst p) (add zero (snd p))  [mulZeroR, mulOneR]
+    --      <- add (fst p) (snd p)             [add zero (snd p) is snd p by def]
+    trans
+      (cong (fn (s : Nat) is add s (snd p) end)
+        (trans
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulOneR (fst p))
+            (mulZeroR (snd p)))
+          (addZeroR (fst p))))
+      (cong (fn (s : Nat) is add (fst p) s end)
+        (sym
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulZeroR (fst p))
+            (mulOneR (snd p)))))
+  end
+end
+
+zmulOneR : (x : Z) -> Eq Z (zmul x zone) x is
+  fn (x : Z) is
+    qind NatPair ZRel (fn (w : Z) is Eq Z (zmul w zone) w end)
+      (fn (p : NatPair) is
+        qsound NatPair ZRel (pmul p (npair (succ zero) zero)) p (pmulOneR p)
+      end)
+      x
+  end
+end
+
+-- LEFT IDENTITY: 1 * x = x, from commutativity + right identity.
+zmulOneL : (x : Z) -> Eq Z (zmul zone x) x is
+  fn (x : Z) is
+    trans (zmulComm zone x) (zmulOneR x)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- ANNIHILATION: x * 0 = 0.
+-- zzero = qin (0, 0). On a representative (a, b):
+--   pmul (a,b) (0,0) = (a*0 + b*0, a*0 + b*0).
+-- The ZRel obligation relating it to (0, 0) is
+--   (a*0 + b*0) + 0  =  0 + (a*0 + b*0),
+-- which after a*0 = b*0 = 0 (mulZeroR) is 0 + 0 = 0 + 0 — but we discharge it directly
+-- by addComm on the two (equal) components.
+-- ----------------------------------------------------------------------------
+pmulZeroR : (p : NatPair) -> ZRel (pmul p (npair zero zero)) (npair zero zero) is
+  fn (p : NatPair) is
+    -- Goal: add (add (mul (fst p) 0) (mul (snd p) 0)) 0
+    --     = add 0 (add (mul (fst p) 0) (mul (snd p) 0)).
+    addComm (add (mul (fst p) zero) (mul (snd p) zero)) zero
+  end
+end
+
+zmulZeroR : (x : Z) -> Eq Z (zmul x zzero) zzero is
+  fn (x : Z) is
+    qind NatPair ZRel (fn (w : Z) is Eq Z (zmul w zzero) zzero end)
+      (fn (p : NatPair) is
+        qsound NatPair ZRel (pmul p (npair zero zero)) (npair zero zero) (pmulZeroR p)
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- LEFT-DISTRIBUTIVITY — THE RING AXIOM: x * (y + z) = x*y + x*z.
+-- On representatives p=(a,b), q=(c,d), r=(e,f):
+--   zadd q r = (c+e, d+f).
+--   fst (pmul p (q+r)) = a*(c+e) + b*(d+f)
+--   fst (padd (pmul p q) (pmul p r)) = (a*c + b*d) + (a*e + b*f)
+-- a*(c+e) = a*c + a*e and b*(d+f) = b*d + b*f (mulDistL), so the LHS first component is
+--   (a*c + a*e) + (b*d + b*f), which interchanges to (a*c + b*d) + (a*e + b*f) = RHS first.
+-- The SECOND components are identical:
+--   snd (pmul p (q+r)) = a*(d+f) + b*(c+e)
+--   snd (padd …)       = (a*d + b*c) + (a*f + b*e)
+-- a*(d+f) = a*d + a*f and b*(c+e) = b*c + b*e (mulDistL), interchange to
+--   (a*d + b*c) + (a*f + b*e) = RHS second.
+-- Both pairs of components are LITERALLY EQUAL as Nats, so the ZRel obligation is
+-- discharged by cong2 into both components (each a mulDistL-then-interchange equality).
+-- ----------------------------------------------------------------------------
+
+-- The first-component identity: a*(c+e) + b*(d+f) = (a*c + b*d) + (a*e + b*f).
+pmulDistFst : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat) -> (e : Nat) -> (f : Nat)
+   -> Eq Nat
+        (add (mul a (add c e)) (mul b (add d f)))
+        (add (add (mul a c) (mul b d)) (add (mul a e) (mul b f))) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e : Nat) (f : Nat) is
+    trans
+      (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+        (mulDistL a c e)
+        (mulDistL b d f))
+      (interchange (mul a c) (mul a e) (mul b d) (mul b f))
+  end
+end
+
+-- pmul p (padd q r) ~ padd (pmul p q) (pmul p r): components are equal, lift to ZRel.
+-- The ZRel obligation is
+--   fst (pmul p (q+r)) + snd (padd (pmul p q) (pmul p r))
+--     = fst (padd …) + snd (pmul p (q+r)).
+-- We prove the stronger fact that fst's are equal and snd's are equal, then assemble
+-- the obligation by cong2: the LHS rewrites to RHS-fst + LHS-snd, and addComm-free.
+pmulDistR : (p : NatPair) -> (q : NatPair) -> (r : NatPair)
+   -> ZRel (pmul p (padd q r)) (padd (pmul p q) (pmul p r)) is
+  fn (p : NatPair) (q : NatPair) (r : NatPair) is
+    -- Goal: add (fst (pmul p (padd q r))) (snd (padd (pmul p q) (pmul p r)))
+    --     = add (fst (padd (pmul p q) (pmul p r))) (snd (pmul p (padd q r))).
+    -- fst (pmul p (padd q r)) = a*(c+e) + b*(d+f)
+    -- fst (padd (pmul p q) (pmul p r)) = (a*c+b*d) + (a*e+b*f)
+    -- snd (pmul p (padd q r)) = a*(d+f) + b*(c+e)
+    -- snd (padd (pmul p q) (pmul p r)) = (a*d+b*c) + (a*f+b*e)
+    cong2 (fn (u : Nat) (v : Nat) is add u v end)
+      -- fst-eq : a*(c+e) + b*(d+f) = (a*c+b*d) + (a*e+b*f)
+      (pmulDistFst (fst p) (snd p) (fst q) (snd q) (fst r) (snd r))
+      -- snd-eq, reversed (we need snd(padd) = snd(pmul …)):
+      --   (a*d+b*c) + (a*f+b*e) = a*(d+f) + b*(c+e)
+      (sym (pmulDistFst (fst p) (snd p) (snd q) (fst q) (snd r) (fst r)))
+  end
+end
+
+zmulDistR : (x : Z) -> (y : Z) -> (z : Z)
+   -> Eq Z (zmul x (zadd y z)) (zadd (zmul x y) (zmul x z)) is
+  fn (x : Z) is
+    qind NatPair ZRel
+      (fn (wx : Z) is (y : Z) -> (z : Z) -> Eq Z (zmul wx (zadd y z)) (zadd (zmul wx y) (zmul wx z)) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (wy : Z) is (z : Z) -> Eq Z (zmul (qin NatPair ZRel p) (zadd wy z)) (zadd (zmul (qin NatPair ZRel p) wy) (zmul (qin NatPair ZRel p) z)) end)
+            (fn (q : NatPair) is
+              fn (z : Z) is
+                qind NatPair ZRel
+                  (fn (wz : Z) is Eq Z (zmul (qin NatPair ZRel p) (zadd (qin NatPair ZRel q) wz)) (zadd (zmul (qin NatPair ZRel p) (qin NatPair ZRel q)) (zmul (qin NatPair ZRel p) wz)) end)
+                  (fn (r : NatPair) is
+                    qsound NatPair ZRel
+                      (pmul p (padd q r)) (padd (pmul p q) (pmul p r))
+                      (pmulDistR p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- RIGHT-DISTRIBUTIVITY: (x + y) * z = x*z + y*z, from zmulComm + zmulDistR.
+--   (x+y)*z = z*(x+y)        (zmulComm)
+--           = z*x + z*y      (zmulDistR)
+--           = x*z + y*z      (zmulComm on each summand).
+zmulDistL : (x : Z) -> (y : Z) -> (z : Z)
+   -> Eq Z (zmul (zadd x y) z) (zadd (zmul x z) (zmul y z)) is
+  fn (x : Z) (y : Z) (z : Z) is
+    trans (zmulComm (zadd x y) z)
+      (trans (zmulDistR z x y)
+        (trans (cong (fn (s : Z) is zadd s (zmul z y) end) (zmulComm z x))
+          (cong (fn (s : Z) is zadd (zmul x z) s end) (zmulComm z y))))
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- ASSOCIATIVITY: (x * y) * z = x * (y * z).
+-- On representatives p=(a,b), q=(c,d), r=(e,f):
+--   pmul p q = (ac+bd, ad+bc).
+--   pmul (pmul p q) r = ((ac+bd)*e + (ad+bc)*f, (ac+bd)*f + (ad+bc)*e).
+--   pmul q r = (ce+df, cf+de).
+--   pmul p (pmul q r) = (a*(ce+df) + b*(cf+de), a*(cf+de) + b*(ce+df)).
+-- Both components are equal Nat semiring expressions: expand with mulDistR (left side,
+-- (x+y)*z) and mulDistL (right side, x*(y+z)), reassociate each product with mulAssoc,
+-- and regroup the FOUR triple-products with the interchange law. We prove each component
+-- as a literal Nat equality and lift by cong2 into ZRel.
+-- ----------------------------------------------------------------------------
+
+-- FIRST component: (ac+bd)*e + (ad+bc)*f = a*(ce+df) + b*(cf+de).
+--   LHS = (ace + bde) + (adf + bcf)        [mulDistR ×2, mulAssoc ×4]
+--   reorder to (ace + adf) + (bde + bcf)   [interchange]
+--   RHS = (ace + adf) + (bcf + bde)        [mulDistL ×2, mulAssoc ×4]
+-- so we need (bde + bcf) = (bcf + bde), an addComm, sitting in the second summand.
+pmulAssocFst : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat) -> (e : Nat) -> (f : Nat)
+   -> Eq Nat
+        (add (mul (add (mul a c) (mul b d)) e) (mul (add (mul a d) (mul b c)) f))
+        (add (mul a (add (mul c e) (mul d f))) (mul b (add (mul c f) (mul d e)))) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e : Nat) (f : Nat) is
+    trans
+      -- expand both products on the LHS by mulDistR:
+      --   (ac+bd)*e = ac*e + bd*e ;  (ad+bc)*f = ad*f + bc*f
+      (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+        (mulDistR (mul a c) (mul b d) e)
+        (mulDistR (mul a d) (mul b c) f))
+      (trans
+        -- reassociate every triple product: (ac)e = a(ce), (bd)e = b(de),
+        --   (ad)f = a(df), (bc)f = b(cf).
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulAssoc a c e)
+            (mulAssoc b d e))
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulAssoc a d f)
+            (mulAssoc b c f)))
+        (trans
+          -- now LHS = (a(ce) + b(de)) + (a(df) + b(cf));
+          -- interchange to (a(ce) + a(df)) + (b(de) + b(cf)).
+          (interchange (mul a (mul c e)) (mul b (mul d e)) (mul a (mul d f)) (mul b (mul c f)))
+          (trans
+            -- contract each summand by mulDistL (reverse):
+            --   a(ce) + a(df) = a*(ce+df) ;  b(de) + b(cf) = b*(de+cf).
+            (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+              (sym (mulDistL a (mul c e) (mul d f)))
+              (sym (mulDistL b (mul d e) (mul c f))))
+            -- fix the second factor of the b-term: b*(de+cf) = b*(cf+de) by addComm.
+            (cong (fn (s : Nat) is add (mul a (add (mul c e) (mul d f))) (mul b s) end)
+              (addComm (mul d e) (mul c f))))))
+  end
+end
+
+-- pmul (pmul p q) r ~ pmul p (pmul q r): both components equal. The SECOND component
+-- of (pq)r is (ac+bd)*f + (ad+bc)*e and of p(qr) is a*(cf+de) + b*(ce+df) — the SAME
+-- shape as pmulAssocFst with e and f swapped, so it reuses pmulAssocFst at swapped args.
+pmulAssoc : (p : NatPair) -> (q : NatPair) -> (r : NatPair)
+   -> ZRel (pmul (pmul p q) r) (pmul p (pmul q r)) is
+  fn (p : NatPair) (q : NatPair) (r : NatPair) is
+    -- ZRel obligation:
+    --   fst (pmul (pmul p q) r) + snd (pmul p (pmul q r))
+    --     = fst (pmul p (pmul q r)) + snd (pmul (pmul p q) r).
+    -- fst-eq : fst (pmul (pmul p q) r) = fst (pmul p (pmul q r))  [pmulAssocFst]
+    -- snd-eq : snd (pmul (pmul p q) r) = snd (pmul p (pmul q r))  [pmulAssocFst, e/f swapped]
+    -- assemble: cong2 add (fst-eq) (sym snd-eq).
+    cong2 (fn (u : Nat) (v : Nat) is add u v end)
+      (pmulAssocFst (fst p) (snd p) (fst q) (snd q) (fst r) (snd r))
+      (sym (pmulAssocFst (fst p) (snd p) (fst q) (snd q) (snd r) (fst r)))
+  end
+end
+
+zmulAssoc : (x : Z) -> (y : Z) -> (z : Z)
+   -> Eq Z (zmul (zmul x y) z) (zmul x (zmul y z)) is
+  fn (x : Z) is
+    qind NatPair ZRel
+      (fn (wx : Z) is (y : Z) -> (z : Z) -> Eq Z (zmul (zmul wx y) z) (zmul wx (zmul y z)) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (wy : Z) is (z : Z) -> Eq Z (zmul (zmul (qin NatPair ZRel p) wy) z) (zmul (qin NatPair ZRel p) (zmul wy z)) end)
+            (fn (q : NatPair) is
+              fn (z : Z) is
+                qind NatPair ZRel
+                  (fn (wz : Z) is Eq Z (zmul (zmul (qin NatPair ZRel p) (qin NatPair ZRel q)) wz) (zmul (qin NatPair ZRel p) (zmul (qin NatPair ZRel q) wz)) end)
+                  (fn (r : NatPair) is
+                    qsound NatPair ZRel
+                      (pmul (pmul p q) r) (pmul p (pmul q r))
+                      (pmulAssoc p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ============================================================================
+-- Sanity: the ring laws COMPUTE through the quotient on concrete integers.
+-- ============================================================================
+
+-- (2 − 0) and (0 − 3) as explicit representatives.
+zexLeft : Z is qin NatPair ZRel (npair (succ (succ zero)) zero) end
+zexRight : Z is qin NatPair ZRel (npair zero (succ (succ (succ zero)))) end
+
+-- x * 1 = x on a concrete integer, by zmulOneR.
+zexOneR : Eq Z (zmul zexLeft zone) zexLeft is zmulOneR zexLeft end
+
+-- Distributivity on concrete integers: zexLeft * (zexLeft + zexRight)
+--   = zexLeft*zexLeft + zexLeft*zexRight, by zmulDistR.
+zexDist : Eq Z
+    (zmul zexLeft (zadd zexLeft zexRight))
+    (zadd (zmul zexLeft zexLeft) (zmul zexLeft zexRight)) is
+  zmulDistR zexLeft zexLeft zexRight
+end
+
+-- Associativity on concrete integers.
+zexAssoc : Eq Z
+    (zmul (zmul zexLeft zexRight) zexLeft)
+    (zmul zexLeft (zmul zexRight zexLeft)) is
+  zmulAssoc zexLeft zexRight zexLeft
+end
+
+-- ============================================================================
+-- CHAPTER 108 — ℚ, THE FIELD OF FRACTIONS OVER ℤ.
+-- Everything above is the ch107 ℤ-ring development, redeclared verbatim. Below is
+-- the NEW rational layer: the localization of ℤ at the nonzero denominators.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- Two ℤ-ring lemmas the ℚ well-definedness needs, derived from ch107's axioms.
+-- ----------------------------------------------------------------------------
+
+-- The 4-FACTOR REGROUPING in a commutative ring: (a·b)·(c·d) = (a·c)·(b·d).
+-- This is the multiplicative analog of ch07/ch107's additive `interchange`, and it
+-- is the workhorse of the cross-multiplication respect proofs. Pure assoc+comm:
+--   (a·b)·(c·d) = a·(b·(c·d))      [zmulAssoc]
+--              = a·((b·c)·d)       [sym zmulAssoc, inside]
+--              = a·((c·b)·d)       [zmulComm b c, inside]
+--              = a·(c·(b·d))       [zmulAssoc, inside]
+--              = (a·c)·(b·d)       [sym zmulAssoc]
+zmulInterchange : (a : Z) -> (b : Z) -> (c : Z) -> (d : Z)
+   -> Eq Z (zmul (zmul a b) (zmul c d)) (zmul (zmul a c) (zmul b d)) is
+  fn (a : Z) (b : Z) (c : Z) (d : Z) is
+    trans (zmulAssoc a b (zmul c d))
+      (trans
+        (cong (fn (s : Z) is zmul a s end) (sym (zmulAssoc b c d)))
+        (trans
+          (cong (fn (s : Z) is zmul a (zmul s d) end) (zmulComm b c))
+          (trans
+            (cong (fn (s : Z) is zmul a s end) (zmulAssoc c b d))
+            (sym (zmulAssoc a c (zmul b d))))))
+  end
+end
+
+-- The Nat→ℤ embedding `zfrom` is a MULTIPLICATIVE homomorphism:
+--   zfrom (m · n) = zmul (zfrom m) (zfrom n).
+-- zfrom n = qin (n, 0); zmul (zfrom m) (zfrom n) computes (by the qlift ι-rules) to
+-- qin (pmul (m,0) (n,0)) = qin (mul m n + mul 0 0, mul m 0 + mul 0 n). The ZRel
+-- obligation relating (mul m n, 0) to that is discharged by addZeroR / mulZeroR
+-- (mul 0 _ reduces to 0 definitionally; mul m 0 needs mulZeroR).
+zmulHom : (m : Nat) -> (n : Nat)
+   -> Eq Z (zfrom (mul m n)) (zmul (zfrom m) (zfrom n)) is
+  fn (m : Nat) (n : Nat) is
+    qsound NatPair ZRel
+      (npair (mul m n) zero)
+      (pmul (npair m zero) (npair n zero))
+      -- Goal: add (mul m n) (add (mul m zero) zero) = add (add (mul m n) zero) zero.
+      (trans
+        -- LHS -> mul m n
+        (trans
+          (cong (fn (s : Nat) is add (mul m n) s end)
+            (trans (addZeroR (mul m zero)) (mulZeroR m)))
+          (addZeroR (mul m n)))
+        -- mul m n -> RHS
+        (sym
+          (trans (addZeroR (add (mul m n) zero)) (addZeroR (mul m n)))))
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- THE REPRESENTATION.  A QPair (a, b) denotes the fraction  a / succ(b),  so the
+-- denominator is structurally nonzero with no carried proof (the +1 trick). The
+-- numerator is a genuine ℤ (ch107's quotient integer); the denominator is a Nat.
+-- ----------------------------------------------------------------------------
+
+data QPair : U is
+  qpair : Z -> Nat -> QPair
+end
+
+qnum : QPair -> Z is
+  fn (p : QPair) is
+    QPairElim (fn (x : QPair) is Z end) (fn (a : Z) (b : Nat) is a end) p
+  end
+end
+
+qdenN : QPair -> Nat is
+  fn (p : QPair) is
+    QPairElim (fn (x : QPair) is Nat end) (fn (a : Z) (b : Nat) is b end) p
+  end
+end
+
+-- The denominator as a (nonzero, positive) ℤ:  zden p = zfrom (succ (qdenN p)).
+zden : QPair -> Z is
+  fn (p : QPair) is zfrom (succ (qdenN p)) end
+end
+
+-- CROSS-MULTIPLICATION, in ℤ:  (a / sb) ~ (c / sd)  ⟺  a · sd = c · sb.
+-- Eq Z lands in Prop (proof-irrelevant strict equality), so QRel : QPair -> QPair -> Prop.
+QRel : QPair -> QPair -> Prop is
+  fn (p : QPair) (q : QPair) is
+    Eq Z (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p))
+  end
+end
+
+Q : U is Quot QPair QRel end
+
+-- The embedding ℤ ↪ ℚ:  n ↦ n / 1.
+qfromZ : Z -> Q is fn (z : Z) is qin QPair QRel (qpair z zero) end end
+qzero : Q is qfromZ zzero end
+qone : Q is qfromZ zone end
+
+-- ----------------------------------------------------------------------------
+-- MULTIPLICATION ON REPRESENTATIVES.  (a/sb) · (c/sd) = (a·c) / (sb·sd).
+-- The denominator index is chosen so that  succ (qmulDen b d) = mul (succ b) (succ d)
+-- DEFINITIONALLY:  mul (succ b) (succ d) = add (succ d) (mul b (succ d))
+--                                        = succ (add d (mul b (succ d))),
+-- so qmulDen b d = add d (mul b (succ d)). Hence zden (qmulP p q) = zfrom (sb·sd),
+-- which zmulHom turns into zmul (zden p) (zden q).
+-- ----------------------------------------------------------------------------
+qmulDen : Nat -> Nat -> Nat is
+  fn (b : Nat) (d : Nat) is add d (mul b (succ d)) end
+end
+
+qmulP : QPair -> QPair -> QPair is
+  fn (p : QPair) (q : QPair) is
+    qpair (zmul (qnum p) (qnum q)) (qmulDen (qdenN p) (qdenN q))
+  end
+end
+
+-- zden (qmulP p q) = zmul (zden p) (zden q).  By construction the denominator index
+-- gives  succ (qmulDen (qdenN p) (qdenN q)) = mul (succ (qdenN p)) (succ (qdenN q))
+-- definitionally, so zden (qmulP p q) = zfrom (mul (succ b) (succ d)) and zmulHom closes it.
+qmulDenZ : (p : QPair) -> (q : QPair)
+   -> Eq Z (zden (qmulP p q)) (zmul (zden p) (zden q)) is
+  fn (p : QPair) (q : QPair) is
+    zmulHom (succ (qdenN p)) (succ (qdenN q))
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- WELL-DEFINEDNESS — the cross-multiplication respect proof (the analog of ch105's
+-- pmulRespL/R one level up).  We must show qmulP respects QRel in each argument.
+--
+-- RIGHT respect: given QRel q q'  (i.e.  nq · zden q' = nq' · zden q),
+--   QRel (qmulP p q) (qmulP p q'),  i.e.
+--   (np·nq) · zden(qmulP p q')  =  (np·nq') · zden(qmulP p q).
+-- Rewrite both denominators by qmulDenZ to zmul (zden p) (zden _), regroup the four
+-- ℤ-factors with zmulInterchange so the q-vs-q' data line up, apply the hypothesis,
+-- and regroup back.
+-- ----------------------------------------------------------------------------
+qmulRespR : (p : QPair) -> (q : QPair) -> (q' : QPair) ->
+    QRel q q' -> QRel (qmulP p q) (qmulP p q') is
+  fn (p : QPair) (q : QPair) (q' : QPair) (h : QRel q q') is
+    -- Goal: zmul (zmul (qnum p) (qnum q)) (zden (qmulP p q'))
+    --     = zmul (zmul (qnum p) (qnum q')) (zden (qmulP p q)).
+    trans
+      -- rewrite the right denominator: zden (qmulP p q') = zmul (zden p) (zden q')
+      (cong (fn (s : Z) is zmul (zmul (qnum p) (qnum q)) s end) (qmulDenZ p q'))
+      (trans
+        -- ((np·nq)·(zb·zd')) = ((np·zb)·(nq·zd'))   [zmulInterchange]
+        (zmulInterchange (qnum p) (qnum q) (zden p) (zden q'))
+        (trans
+          -- apply the hypothesis inside the second factor: nq·zd' = nq'·zd
+          (cong (fn (s : Z) is zmul (zmul (qnum p) (zden p)) s end) h)
+          (trans
+            -- ((np·zb)·(nq'·zd)) = ((np·nq')·(zb·zd))   [sym zmulInterchange]
+            (sym (zmulInterchange (qnum p) (qnum q') (zden p) (zden q)))
+            -- fold the denominator back: zmul (zden p) (zden q) = zden (qmulP p q)
+            (cong (fn (s : Z) is zmul (zmul (qnum p) (qnum q')) s end)
+              (sym (qmulDenZ p q))))))
+  end
+end
+
+-- LEFT respect: given QRel p p'  (np · zden p' = np' · zden p),
+--   QRel (qmulP p q) (qmulP p' q). Same algebra with the p-data crossing.
+qmulRespL : (p : QPair) -> (p' : QPair) -> (q : QPair) ->
+    QRel p p' -> QRel (qmulP p q) (qmulP p' q) is
+  fn (p : QPair) (p' : QPair) (q : QPair) (h : QRel p p') is
+    -- Goal: zmul (zmul (qnum p) (qnum q)) (zden (qmulP p' q))
+    --     = zmul (zmul (qnum p') (qnum q)) (zden (qmulP p q)).
+    trans
+      (cong (fn (s : Z) is zmul (zmul (qnum p) (qnum q)) s end) (qmulDenZ p' q))
+      (trans
+        -- ((np·nq)·(zb'·zd)) = ((np·zb')·(nq·zd))   [zmulInterchange]
+        (zmulInterchange (qnum p) (qnum q) (zden p') (zden q))
+        (trans
+          -- apply hypothesis in the FIRST factor: np·zb' = np'·zb
+          (cong (fn (s : Z) is zmul s (zmul (qnum q) (zden q)) end) h)
+          (trans
+            -- ((np'·zb)·(nq·zd)) = ((np'·nq)·(zb·zd))   [sym zmulInterchange]
+            (sym (zmulInterchange (qnum p') (qnum q) (zden p) (zden q)))
+            (cong (fn (s : Z) is zmul (zmul (qnum p') (qnum q)) s end)
+              (sym (qmulDenZ p q))))))
+  end
+end
+
+-- Lift qmulP through QRel, twice (the ch105/ch107 double-qind pattern).
+qmulR : QPair -> Q -> Q is
+  fn (p : QPair) is
+    qlift QPair QRel Q
+      (fn (q : QPair) is qin QPair QRel (qmulP p q) end)
+      (fn (q : QPair) (q' : QPair) (r : QRel q q') is
+        qsound QPair QRel (qmulP p q) (qmulP p q') (qmulRespR p q q' r)
+      end)
+  end
+end
+
+qmul : Q -> Q -> Q is
+  qlift QPair QRel (Q -> Q) qmulR
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      fn (z : Q) is
+        qind QPair QRel (fn (w : Q) is Eq Q (qmulR p w) (qmulR p' w) end)
+          (fn (q : QPair) is
+            qsound QPair QRel (qmulP p q) (qmulP p' q) (qmulRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- ----------------------------------------------------------------------------
+-- THE FIELD LAW: COMMUTATIVITY OF ℚ MULTIPLICATION.  x · y = y · x.
+-- On representatives, qmulP p q and qmulP q p relate by QRel because the numerators
+-- commute (zmulComm) and the denominators commute, lined up by zmulInterchange.
+--   QRel (qmulP p q) (qmulP q p)  needs
+--     (np·nq) · zden(qmulP q p) = (nq·np) · zden(qmulP p q).
+-- Rewrite both denominators (qmulDenZ); the obligation is then a pure ℤ identity:
+--   (np·nq)·(zd·zb) = (nq·np)·(zb·zd), from zmulComm (numerators), zmulComm
+--   (denominators), assembled by cong2.
+-- ----------------------------------------------------------------------------
+cong2Z : (f : Z -> Z -> Z) -> {x : Z} -> {y : Z} -> {u : Z} -> {v : Z}
+     -> Eq Z x y -> Eq Z u v -> Eq Z (f x u) (f y v) is
+  fn (f : Z -> Z -> Z) {x : Z} {y : Z} {u : Z} {v : Z} (p : Eq Z x y) (q : Eq Z u v) is
+    trans (cong (fn (z : Z) is f z u end) p) (cong (fn (z : Z) is f y z end) q)
+  end
+end
+
+qmulCommP : (p : QPair) -> (q : QPair) -> QRel (qmulP p q) (qmulP q p) is
+  fn (p : QPair) (q : QPair) is
+    -- Goal: zmul (zmul (qnum p) (qnum q)) (zden (qmulP q p))
+    --     = zmul (zmul (qnum q) (qnum p)) (zden (qmulP p q)).
+    trans
+      (cong (fn (s : Z) is zmul (zmul (qnum p) (qnum q)) s end) (qmulDenZ q p))
+      (trans
+        -- (np·nq)·(zd·zb) = (nq·np)·(zb·zd) by commuting both factors of each product
+        (cong2Z (fn (u : Z) (v : Z) is zmul u v end)
+          (zmulComm (qnum p) (qnum q))
+          (zmulComm (zden q) (zden p)))
+        (cong (fn (s : Z) is zmul (zmul (qnum q) (qnum p)) s end)
+          (sym (qmulDenZ p q))))
+  end
+end
+
+qmulComm : (x : Q) -> (y : Q) -> Eq Q (qmul x y) (qmul y x) is
+  fn (x : Q) is
+    qind QPair QRel (fn (w : Q) is (y : Q) -> Eq Q (qmul w y) (qmul y w) end)
+      (fn (p : QPair) is
+        fn (y : Q) is
+          qind QPair QRel
+            (fn (w : Q) is Eq Q (qmul (qin QPair QRel p) w) (qmul w (qin QPair QRel p)) end)
+            (fn (q : QPair) is
+              qsound QPair QRel (qmulP p q) (qmulP q p) (qmulCommP p q)
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- Sanity: ℚ multiplication COMPUTES through the quotient on concrete rationals.
+-- ----------------------------------------------------------------------------
+
+-- 1/2 (numerator 1, denominator succ 1 = 2) and 2/1 (numerator 2, denominator succ 0 = 1).
+qHalf : Q is qin QPair QRel (qpair zone (succ zero)) end
+qTwoOverOne : Q is qin QPair QRel (qpair (zfrom (succ (succ zero))) zero) end
+
+-- 1/2 · 2/1 = (1·2)/(2·1) = 2/2, which qsound identifies with 1/1 = qone:
+--   (1·2)/2 ~ 1/1  ⟺  (1·2)·1 = 1·2   (cross-multiply in ℤ), true by refl after the
+-- numerators/denominators compute. We state the well-definedness witness as a QRel and
+-- feed it to qsound to obtain the propositional identity 2/2 ~ 1/1.
+qHalfTimesTwo : Q is qmul qHalf qTwoOverOne end
+
+-- 2/2 ~ 1/1: the QRel obligation is  (1·2) · succ 0  =  1 · succ (succ 0)  in ℤ,
+-- i.e.  zmul (zmul zone (zfrom 2)) (zfrom 1)  =  zmul zone (zfrom 2)  — both sides reduce
+-- to the integer 2; discharge by the ℤ ring identity (zmulOneL on the right, after
+-- zmulOneR on the spurious unit denominator on the left).
+qTwoHalves : Q is qin QPair QRel (qpair (zmul zone (zfrom (succ (succ zero)))) (succ zero)) end
+
+-- The computing example, fully proven: qmul qHalf qTwoOverOne IS the rational 2/2.
+qMulComputes : Eq Q (qmul qHalf qTwoOverOne) qTwoHalves is
+  refl (qmul qHalf qTwoOverOne)
+end
+
+-- Commutativity on these concrete rationals, by qmulComm.
+qExComm : Eq Q (qmul qHalf qTwoOverOne) (qmul qTwoOverOne qHalf) is
+  qmulComm qHalf qTwoOverOne
+end
+
+-- ============================================================================
+-- CH108, PART II — ℚ ADDITION, and the field law qaddComm.
+-- (a/sb) + (c/sd) = (a·sd + c·sb) / (sb·sd).  Well-definedness is the cross-
+-- multiplication argument using zmulDistL (distributivity) + zmulInterchange + the
+-- ℤ ring commutativity, mirroring qmulRespL/R with an extra distributivity step.
+-- ============================================================================
+
+-- ℤ addition is commutative — lift padd's componentwise addComm through ZRel.
+-- padd p q ~ padd q p on representatives: both components commute by addComm.
+paddComm : (p : NatPair) -> (q : NatPair) -> ZRel (padd p q) (padd q p) is
+  fn (p : NatPair) (q : NatPair) is
+    -- Goal: add (add (fst p) (fst q)) (add (snd q) (snd p))
+    --     = add (add (fst q) (fst p)) (add (snd p) (snd q)).
+    cong2 (fn (u : Nat) (v : Nat) is add u v end)
+      (addComm (fst p) (fst q))
+      (addComm (snd q) (snd p))
+  end
+end
+
+zaddComm : (x : Z) -> (y : Z) -> Eq Z (zadd x y) (zadd y x) is
+  fn (x : Z) is
+    qind NatPair ZRel (fn (w : Z) is (y : Z) -> Eq Z (zadd w y) (zadd y w) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (w : Z) is Eq Z (zadd (qin NatPair ZRel p) w) (zadd w (qin NatPair ZRel p)) end)
+            (fn (q : NatPair) is
+              qsound NatPair ZRel (padd p q) (padd q p) (paddComm p q)
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ADDITION ON REPRESENTATIVES.  Numerator a·sd + c·sb; denominator the SAME product
+-- index as multiplication, so zden (qaddP p q) = zmul (zden p) (zden q) by qmulDenZ.
+qaddP : QPair -> QPair -> QPair is
+  fn (p : QPair) (q : QPair) is
+    qpair
+      (zadd (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p)))
+      (qmulDen (qdenN p) (qdenN q))
+  end
+end
+
+-- zden (qaddP p q) = zmul (zden p) (zden q) — same denominator index as qmulP.
+qaddDenZ : (p : QPair) -> (q : QPair)
+   -> Eq Z (zden (qaddP p q)) (zmul (zden p) (zden q)) is
+  fn (p : QPair) (q : QPair) is
+    zmulHom (succ (qdenN p)) (succ (qdenN q))
+  end
+end
+
+-- RIGHT respect.  Given QRel q q' (nq·zd' = nq'·zd), show QRel (qaddP p q) (qaddP p q').
+-- The numerator is a SUM, so distribute (zmulDistL) over the denominator product, then
+-- handle the two terms:
+--   term1 (np·zd)·(zb·zd') = (np·zd')·(zb·zd)   — pure regrouping, no hypothesis
+--   term2 (nq·zb)·(zb·zd') = (nq'·zb)·(zb·zd)   — uses the hypothesis nq·zd' = nq'·zd
+-- and reassemble with cong2Z.
+qaddRespR : (p : QPair) -> (q : QPair) -> (q' : QPair) ->
+    QRel q q' -> QRel (qaddP p q) (qaddP p q') is
+  fn (p : QPair) (q : QPair) (q' : QPair) (h : QRel q q') is
+    -- Goal: zmul (zadd (np·zd) (nq·zb)) (zden (qaddP p q'))
+    --     = zmul (zadd (np·zd') (nq'·zb)) (zden (qaddP p q)).
+    trans
+      (cong (fn (s : Z) is zmul (zadd (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p))) s end)
+        (qaddDenZ p q'))
+      (trans
+        -- distribute the LHS over (zb·zd')
+        (zmulDistL (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p)) (zmul (zden p) (zden q')))
+        (trans
+          (cong2Z (fn (u : Z) (v : Z) is zadd u v end)
+            -- term1: (np·zd)·(zb·zd') = (np·zd')·(zb·zd)
+            (trans (zmulInterchange (qnum p) (zden q) (zden p) (zden q'))
+              (trans (cong (fn (s : Z) is zmul (zmul (qnum p) (zden p)) s end)
+                       (zmulComm (zden q) (zden q')))
+                (sym (zmulInterchange (qnum p) (zden q') (zden p) (zden q)))))
+            -- term2: (nq·zb)·(zb·zd') = (nq'·zb)·(zb·zd), via the hypothesis
+            (trans (cong (fn (s : Z) is zmul (zmul (qnum q) (zden p)) s end)
+                     (zmulComm (zden p) (zden q')))
+              (trans (zmulInterchange (qnum q) (zden p) (zden q') (zden p))
+                (trans (cong (fn (s : Z) is zmul s (zmul (zden p) (zden p)) end) h)
+                  (trans (sym (zmulInterchange (qnum q') (zden p) (zden q) (zden p)))
+                    (cong (fn (s : Z) is zmul (zmul (qnum q') (zden p)) s end)
+                      (zmulComm (zden q) (zden p))))))))
+          -- reassemble: zadd (…) (…) = zmul (zadd (np·zd') (nq'·zb)) (zden (qaddP p q))
+          (trans
+            (sym (zmulDistL (zmul (qnum p) (zden q')) (zmul (qnum q') (zden p)) (zmul (zden p) (zden q))))
+            (cong (fn (s : Z) is zmul (zadd (zmul (qnum p) (zden q')) (zmul (qnum q') (zden p))) s end)
+              (sym (qaddDenZ p q))))))
+  end
+end
+
+-- LEFT respect.  Given QRel p p' (np·zb' = np'·zb), show QRel (qaddP p q) (qaddP p' q).
+qaddRespL : (p : QPair) -> (p' : QPair) -> (q : QPair) ->
+    QRel p p' -> QRel (qaddP p q) (qaddP p' q) is
+  fn (p : QPair) (p' : QPair) (q : QPair) (h : QRel p p') is
+    -- Goal: zmul (zadd (np·zd) (nq·zb)) (zden (qaddP p' q))
+    --     = zmul (zadd (np'·zd) (nq·zb')) (zden (qaddP p q)).
+    trans
+      (cong (fn (s : Z) is zmul (zadd (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p))) s end)
+        (qaddDenZ p' q))
+      (trans
+        (zmulDistL (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p)) (zmul (zden p') (zden q)))
+        (trans
+          (cong2Z (fn (u : Z) (v : Z) is zadd u v end)
+            -- term1: (np·zd)·(zb'·zd) = (np'·zd)·(zb·zd), via hypothesis np·zb' = np'·zb
+            (trans (zmulInterchange (qnum p) (zden q) (zden p') (zden q))
+              (trans (cong (fn (s : Z) is zmul s (zmul (zden q) (zden q)) end) h)
+                (sym (zmulInterchange (qnum p') (zden q) (zden p) (zden q)))))
+            -- term2: (nq·zb)·(zb'·zd) = (nq·zb')·(zb·zd), pure regrouping (one interchange)
+            (zmulInterchange (qnum q) (zden p) (zden p') (zden q)))
+          (trans
+            (sym (zmulDistL (zmul (qnum p') (zden q)) (zmul (qnum q) (zden p')) (zmul (zden p) (zden q))))
+            (cong (fn (s : Z) is zmul (zadd (zmul (qnum p') (zden q)) (zmul (qnum q) (zden p'))) s end)
+              (sym (qaddDenZ p q))))))
+  end
+end
+
+qaddR : QPair -> Q -> Q is
+  fn (p : QPair) is
+    qlift QPair QRel Q
+      (fn (q : QPair) is qin QPair QRel (qaddP p q) end)
+      (fn (q : QPair) (q' : QPair) (r : QRel q q') is
+        qsound QPair QRel (qaddP p q) (qaddP p q') (qaddRespR p q q' r)
+      end)
+  end
+end
+
+qadd : Q -> Q -> Q is
+  qlift QPair QRel (Q -> Q) qaddR
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      fn (z : Q) is
+        qind QPair QRel (fn (w : Q) is Eq Q (qaddR p w) (qaddR p' w) end)
+          (fn (q : QPair) is
+            qsound QPair QRel (qaddP p q) (qaddP p' q) (qaddRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- THE FIELD LAW: COMMUTATIVITY OF ℚ ADDITION.  x + y = y + x.
+-- On representatives, qaddP p q ~ qaddP q p: the numerators commute (the two summands
+-- swap, zaddComm) and the denominators commute (zmulComm), lined up via the same
+-- denominator-rewrite + cong2 assembly as qmulCommP.
+qaddCommP : (p : QPair) -> (q : QPair) -> QRel (qaddP p q) (qaddP q p) is
+  fn (p : QPair) (q : QPair) is
+    -- Goal: zmul (zadd (np·zd) (nq·zb)) (zden (qaddP q p))
+    --     = zmul (zadd (nq·zb) (np·zd)) (zden (qaddP p q)).
+    trans
+      (cong (fn (s : Z) is zmul (zadd (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p))) s end)
+        (qaddDenZ q p))
+      (trans
+        (cong2Z (fn (u : Z) (v : Z) is zmul u v end)
+          (zaddComm (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p)))
+          (zmulComm (zden q) (zden p)))
+        (cong (fn (s : Z) is zmul (zadd (zmul (qnum q) (zden p)) (zmul (qnum p) (zden q))) s end)
+          (sym (qaddDenZ p q))))
+  end
+end
+
+qaddComm : (x : Q) -> (y : Q) -> Eq Q (qadd x y) (qadd y x) is
+  fn (x : Q) is
+    qind QPair QRel (fn (w : Q) is (y : Q) -> Eq Q (qadd w y) (qadd y w) end)
+      (fn (p : QPair) is
+        fn (y : Q) is
+          qind QPair QRel
+            (fn (w : Q) is Eq Q (qadd (qin QPair QRel p) w) (qadd w (qin QPair QRel p)) end)
+            (fn (q : QPair) is
+              qsound QPair QRel (qaddP p q) (qaddP q p) (qaddCommP p q)
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- Sanity: 1/2 + 1/2 = 1.  On representatives (1, succ 0) + (1, succ 0):
+--   numerator = 1·2 + 1·2,  denominator index succ (qmulDen 1 1) = 2·2 = 4, i.e. 4/4-style;
+-- it qsound-relates to 1/1 = qone. We pin the COMPUTED representative and prove it commutes.
+qHalfPlusHalf : Q is qadd qHalf qHalf end
+
+-- qadd qHalf qHalf computes to the explicit representative below (refl through the quotient).
+qHalfSumRep : Q is
+  qin QPair QRel
+    (qpair (zadd (zmul zone (zden (qpair zone (succ zero))))
+                 (zmul zone (zden (qpair zone (succ zero)))))
+           (qmulDen (succ zero) (succ zero)))
+end
+
+qAddComputes : Eq Q (qadd qHalf qHalf) qHalfSumRep is
+  refl (qadd qHalf qHalf)
+end
+
+-- Addition commutes on concrete rationals, by qaddComm.
+qExAddComm : Eq Q (qadd qHalf qTwoOverOne) (qadd qTwoOverOne qHalf) is
+  qaddComm qHalf qTwoOverOne
+end
+
+-- ============================================================================
+-- CHAPTER 113 — CLOSING THE RING + FIELD STRUCTURE OF ℚ.
+-- Everything above is the ch108 ℚ development (itself over the ch107 ℤ ring),
+-- redeclared verbatim. Below: the remaining ring identities/axioms and the field
+-- inverse. We first add the two ℤ lemmas ch108 omitted (zaddZeroR, zaddAssoc) and
+-- a left-zero (zmulZeroL), then lift the ℚ ring laws through qind.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- ℤ lemmas needed below (proven exactly as ch103/ch107, using ch108's Nat lemmas).
+-- ----------------------------------------------------------------------------
+
+-- LEFT ZERO: 0 · x = 0, from commutativity + zmulZeroR.
+zmulZeroL : (x : Z) -> Eq Z (zmul zzero x) zzero is
+  fn (x : Z) is
+    trans (zmulComm zzero x) (zmulZeroR x)
+  end
+end
+
+-- ADDITIVE RIGHT IDENTITY: z + 0 = z (ch103, restated with ch108's addZeroR).
+zaddZeroR : (z : Z) -> Eq Z (zadd z zzero) z is
+  fn (z : Z) is
+    qind NatPair ZRel (fn (w : Z) is Eq Z (zadd w zzero) w end)
+      (fn (p : NatPair) is
+        qsound NatPair ZRel (padd p (npair zero zero)) p
+          (trans (cong (fn (s : Nat) is add s (snd p) end) (addZeroR (fst p)))
+            (cong (fn (s : Nat) is add (fst p) s end) (sym (addZeroR (snd p)))))
+      end)
+      z
+  end
+end
+
+-- ADDITIVE ASSOCIATIVITY: (x + y) + z = x + (y + z) (ch103, verbatim).
+zaddAssoc : (x : Z) -> (y : Z) -> (z : Z) ->
+    Eq Z (zadd (zadd x y) z) (zadd x (zadd y z)) is
+  fn (x : Z) is
+    qind NatPair ZRel
+      (fn (wx : Z) is (y : Z) -> (z : Z) -> Eq Z (zadd (zadd wx y) z) (zadd wx (zadd y z)) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (wy : Z) is (z : Z) -> Eq Z (zadd (zadd (qin NatPair ZRel p) wy) z) (zadd (qin NatPair ZRel p) (zadd wy z)) end)
+            (fn (q : NatPair) is
+              fn (z : Z) is
+                qind NatPair ZRel
+                  (fn (wz : Z) is Eq Z (zadd (zadd (qin NatPair ZRel p) (qin NatPair ZRel q)) wz) (zadd (qin NatPair ZRel p) (zadd (qin NatPair ZRel q) wz)) end)
+                  (fn (r : NatPair) is
+                    qsound NatPair ZRel
+                      (padd (padd p q) r) (padd p (padd q r))
+                      (trans (cong (fn (s : Nat) is add s (add (snd p) (add (snd q) (snd r))) end)
+                                (addAssoc (fst p) (fst q) (fst r)))
+                        (cong (fn (s : Nat) is add (add (fst p) (add (fst q) (fst r))) s end)
+                                (sym (addAssoc (snd p) (snd q) (snd r)))))
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- RING IDENTITY (×):  x · 1 = x.   qone = qin (1/1).
+-- On a representative p: qmulP p (1,0) = ((np·1) / (zb·1)), and the QRel obligation
+--   (np·1)·zb = np·(zb·1)  reduces — both sides to np·zb — by zmulOneR twice + qmulDenZ.
+-- ----------------------------------------------------------------------------
+qmulOneRP : (p : QPair) -> QRel (qmulP p (qpair zone zero)) p is
+  fn (p : QPair) is
+    -- Goal: zmul (zmul (qnum p) zone) (zden p) = zmul (qnum p) (zden (qmulP p (qpair zone zero)))
+    trans
+      (cong (fn (s : Z) is zmul s (zden p) end) (zmulOneR (qnum p)))
+      (sym
+        (trans
+          (cong (fn (s : Z) is zmul (qnum p) s end) (qmulDenZ p (qpair zone zero)))
+          (cong (fn (s : Z) is zmul (qnum p) s end) (zmulOneR (zden p)))))
+  end
+end
+
+qmulOneR : (x : Q) -> Eq Q (qmul x qone) x is
+  fn (x : Q) is
+    qind QPair QRel (fn (w : Q) is Eq Q (qmul w qone) w end)
+      (fn (p : QPair) is
+        qsound QPair QRel (qmulP p (qpair zone zero)) p (qmulOneRP p)
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- RING IDENTITY (+):  x + 0 = x.   qzero = qin (0/1).
+-- On p: qaddP p (0,0) numerator = (np·1) + (0·zb) = np; denominator = zb·1 = zb.
+-- The QRel obligation np·zb = np·zb after the numerator collapses (zmulOneR + zmulZeroL
+-- + zaddZeroR) and the denominator collapses (qaddDenZ + zmulOneR).
+-- ----------------------------------------------------------------------------
+qaddZeroP : (p : QPair) -> QRel (qaddP p (qpair zzero zero)) p is
+  fn (p : QPair) is
+    -- Goal: zmul (zadd (zmul (qnum p) zone) (zmul zzero (zden p))) (zden p)
+    --     = zmul (qnum p) (zden (qaddP p (qpair zzero zero)))
+    trans
+      (cong (fn (s : Z) is zmul s (zden p) end)
+        (trans
+          (cong2Z (fn (u : Z) (v : Z) is zadd u v end)
+            (zmulOneR (qnum p))
+            (zmulZeroL (zden p)))
+          (zaddZeroR (qnum p))))
+      (sym
+        (trans
+          (cong (fn (s : Z) is zmul (qnum p) s end) (qaddDenZ p (qpair zzero zero)))
+          (cong (fn (s : Z) is zmul (qnum p) s end) (zmulOneR (zden p)))))
+  end
+end
+
+qaddZero : (x : Q) -> Eq Q (qadd x qzero) x is
+  fn (x : Q) is
+    qind QPair QRel (fn (w : Q) is Eq Q (qadd w qzero) w end)
+      (fn (p : QPair) is
+        qsound QPair QRel (qaddP p (qpair zzero zero)) p (qaddZeroP p)
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- RING AXIOM (× ASSOCIATIVITY):  (x · y) · z = x · (y · z).
+-- Triple qind. On representatives the numerators are zmulAssoc-equal and the
+-- denominators (after qmulDenZ unfolds each product) are zmulAssoc-equal, so the
+-- cross-multiplied QRel obligation is cong2Z (numerator-assoc) (denominator-assoc).
+-- ----------------------------------------------------------------------------
+qmulAssocP : (p : QPair) -> (q : QPair) -> (r : QPair)
+   -> QRel (qmulP (qmulP p q) r) (qmulP p (qmulP q r)) is
+  fn (p : QPair) (q : QPair) (r : QPair) is
+    -- Goal: zmul (zmul (zmul (qnum p) (qnum q)) (qnum r)) (zden (qmulP p (qmulP q r)))
+    --     = zmul (zmul (qnum p) (zmul (qnum q) (qnum r))) (zden (qmulP (qmulP p q) r))
+    trans
+      -- rewrite RHS denominator -> zmul (zden p) (zmul (zden q) (zden r))
+      (cong (fn (s : Z) is zmul (zmul (zmul (qnum p) (qnum q)) (qnum r)) s end)
+        (trans (qmulDenZ p (qmulP q r))
+          (cong (fn (s : Z) is zmul (zden p) s end) (qmulDenZ q r))))
+      (trans
+        -- numerator-assoc + denominator (right-grouped -> left-grouped)
+        (cong2Z (fn (u : Z) (v : Z) is zmul u v end)
+          (zmulAssoc (qnum p) (qnum q) (qnum r))
+          (sym (zmulAssoc (zden p) (zden q) (zden r))))
+        -- fold the (now left-grouped) denominator back to zden (qmulP (qmulP p q) r)
+        (cong (fn (s : Z) is zmul (zmul (qnum p) (zmul (qnum q) (qnum r))) s end)
+          (sym (trans (qmulDenZ (qmulP p q) r)
+            (cong (fn (s : Z) is zmul s (zden r) end) (qmulDenZ p q))))))
+  end
+end
+
+qmulAssoc : (x : Q) -> (y : Q) -> (z : Q)
+   -> Eq Q (qmul (qmul x y) z) (qmul x (qmul y z)) is
+  fn (x : Q) is
+    qind QPair QRel
+      (fn (wx : Q) is (y : Q) -> (z : Q) -> Eq Q (qmul (qmul wx y) z) (qmul wx (qmul y z)) end)
+      (fn (p : QPair) is
+        fn (y : Q) is
+          qind QPair QRel
+            (fn (wy : Q) is (z : Q) -> Eq Q (qmul (qmul (qin QPair QRel p) wy) z) (qmul (qin QPair QRel p) (qmul wy z)) end)
+            (fn (q : QPair) is
+              fn (z : Q) is
+                qind QPair QRel
+                  (fn (wz : Q) is Eq Q (qmul (qmul (qin QPair QRel p) (qin QPair QRel q)) wz) (qmul (qin QPair QRel p) (qmul (qin QPair QRel q) wz)) end)
+                  (fn (r : QPair) is
+                    qsound QPair QRel
+                      (qmulP (qmulP p q) r) (qmulP p (qmulP q r))
+                      (qmulAssocP p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- RING AXIOM (+ ASSOCIATIVITY):  (x + y) + z = x + (y + z).
+-- The cross-multiplication obligation, with all denominators rewritten to products
+-- by qaddDenZ, is the pure ℤ identity below in the six values a,b,c (numerators)
+-- and x,y,z (denominators). Both numerators equal  a·y·z + b·x·z + c·x·y  (modulo
+-- ℤ assoc/comm), and the two outer denominators are zmulAssoc-equal; assemble by cong2Z.
+-- ----------------------------------------------------------------------------
+
+-- numerator identity:  ((a·y + b·x)·z + c·(x·y))  =  (a·(y·z) + (b·z + c·y)·x).
+qaddAssocNum : (a : Z) -> (b : Z) -> (c : Z) -> (x : Z) -> (y : Z) -> (z : Z)
+   -> Eq Z
+        (zadd (zmul (zadd (zmul a y) (zmul b x)) z) (zmul c (zmul x y)))
+        (zadd (zmul a (zmul y z)) (zmul (zadd (zmul b z) (zmul c y)) x)) is
+  fn (a : Z) (b : Z) (c : Z) (x : Z) (y : Z) (z : Z) is
+    trans
+      -- distribute the first product:  (a·y + b·x)·z = (a·y)·z + (b·x)·z
+      (cong (fn (s : Z) is zadd s (zmul c (zmul x y)) end)
+        (zmulDistL (zmul a y) (zmul b x) z))
+      (trans
+        -- reassociate the outer sum to the right
+        (zaddAssoc (zmul (zmul a y) z) (zmul (zmul b x) z) (zmul c (zmul x y)))
+        (trans
+          -- term-by-term match against the RHS (after distributing its second product)
+          (cong2Z (fn (u : Z) (v : Z) is zadd u v end)
+            -- T1: (a·y)·z = a·(y·z)
+            (zmulAssoc a y z)
+            (cong2Z (fn (u : Z) (v : Z) is zadd u v end)
+              -- T2: (b·x)·z = (b·z)·x
+              (trans (zmulAssoc b x z)
+                (trans (cong (fn (s : Z) is zmul b s end) (zmulComm x z))
+                  (sym (zmulAssoc b z x))))
+              -- T3: c·(x·y) = (c·y)·x
+              (trans (cong (fn (s : Z) is zmul c s end) (zmulComm x y))
+                (sym (zmulAssoc c y x)))))
+          -- fold RHS second product back:  (b·z)·x + (c·y)·x = (b·z + c·y)·x
+          (cong (fn (s : Z) is zadd (zmul a (zmul y z)) s end)
+            (sym (zmulDistL (zmul b z) (zmul c y) x)))))
+  end
+end
+
+-- The full QRel obligation, threading qaddDenZ on each of the four denominator
+-- occurrences and dispatching the resulting pure-ℤ identity by qaddAssocNum.
+qaddAssocP : (p : QPair) -> (q : QPair) -> (r : QPair)
+   -> QRel (qaddP (qaddP p q) r) (qaddP p (qaddP q r)) is
+  fn (p : QPair) (q : QPair) (r : QPair) is
+    trans
+      -- (1a) rewrite the inner denominator zden (qaddP p q) -> zmul (zden p) (zden q)
+      (cong (fn (s : Z) is
+               zmul (zadd (zmul (zadd (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p))) (zden r))
+                          (zmul (qnum r) s))
+                    (zden (qaddP p (qaddP q r))) end)
+        (qaddDenZ p q))
+      (trans
+        -- (1b) rewrite the outer right denominator -> zmul (zden p) (zmul (zden q) (zden r))
+        (cong (fn (s : Z) is
+                 zmul (zadd (zmul (zadd (zmul (qnum p) (zden q)) (zmul (qnum q) (zden p))) (zden r))
+                            (zmul (qnum r) (zmul (zden p) (zden q))))
+                      s end)
+          (trans (qaddDenZ p (qaddP q r))
+            (cong (fn (s : Z) is zmul (zden p) s end) (qaddDenZ q r))))
+        (trans
+          -- (2) the pure ℤ identity: numerator by qaddAssocNum, denominator by zmulAssoc
+          (cong2Z (fn (u : Z) (v : Z) is zmul u v end)
+            (qaddAssocNum (qnum p) (qnum q) (qnum r) (zden p) (zden q) (zden r))
+            (sym (zmulAssoc (zden p) (zden q) (zden r))))
+          (trans
+            -- (3a) fold zmul (zden q) (zden r) back to zden (qaddP q r) in the numerator
+            (cong (fn (s : Z) is
+                     zmul (zadd (zmul (qnum p) s)
+                                (zmul (zadd (zmul (qnum q) (zden r)) (zmul (qnum r) (zden q))) (zden p)))
+                          (zmul (zmul (zden p) (zden q)) (zden r)) end)
+              (sym (qaddDenZ q r)))
+            -- (3b) fold the outer left denominator back to zden (qaddP (qaddP p q) r)
+            (cong (fn (s : Z) is
+                     zmul (zadd (zmul (qnum p) (zden (qaddP q r)))
+                                (zmul (zadd (zmul (qnum q) (zden r)) (zmul (qnum r) (zden q))) (zden p)))
+                          s end)
+              (sym (trans (qaddDenZ (qaddP p q) r)
+                (cong (fn (s : Z) is zmul s (zden r) end) (qaddDenZ p q))))))))
+  end
+end
+
+qaddAssoc : (x : Q) -> (y : Q) -> (z : Q)
+   -> Eq Q (qadd (qadd x y) z) (qadd x (qadd y z)) is
+  fn (x : Q) is
+    qind QPair QRel
+      (fn (wx : Q) is (y : Q) -> (z : Q) -> Eq Q (qadd (qadd wx y) z) (qadd wx (qadd y z)) end)
+      (fn (p : QPair) is
+        fn (y : Q) is
+          qind QPair QRel
+            (fn (wy : Q) is (z : Q) -> Eq Q (qadd (qadd (qin QPair QRel p) wy) z) (qadd (qin QPair QRel p) (qadd wy z)) end)
+            (fn (q : QPair) is
+              fn (z : Q) is
+                qind QPair QRel
+                  (fn (wz : Q) is Eq Q (qadd (qadd (qin QPair QRel p) (qin QPair QRel q)) wz) (qadd (qin QPair QRel p) (qadd (qin QPair QRel q) wz)) end)
+                  (fn (r : QPair) is
+                    qsound QPair QRel
+                      (qaddP (qaddP p q) r) (qaddP p (qaddP q r))
+                      (qaddAssocP p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- RING AXIOM (LEFT DISTRIBUTIVITY):  x · (y + z) = x·y + x·z.   The heaviest law.
+-- After rewriting every denominator to a product, the cross-multiplication obligation
+-- is the pure ℤ identity  numL · denR = numR · denL  where, crucially,
+--   numR = zp · numL   and   denR = zp · denL
+-- (the RHS carries an extra factor zp from the duplicated denominator), so the identity
+-- collapses to a pure assoc/comm rearrangement once those two factorings are supplied.
+-- ----------------------------------------------------------------------------
+
+-- denominator factoring:  (zp·zq)·(zp·zr) = zp·(zp·(zq·zr)).
+qmulDistDen : (zp : Z) -> (zq : Z) -> (zr : Z)
+   -> Eq Z (zmul (zmul zp zq) (zmul zp zr)) (zmul zp (zmul zp (zmul zq zr))) is
+  fn (zp : Z) (zq : Z) (zr : Z) is
+    trans (zmulInterchange zp zq zp zr) (zmulAssoc zp zp (zmul zq zr))
+  end
+end
+
+-- numerator factoring:
+--   (np·nq)·(zp·zr) + (np·nr)·(zp·zq)  =  zp·(np·(nq·zr + nr·zq)).
+qmulDistNum : (np : Z) -> (nq : Z) -> (nr : Z) -> (zp : Z) -> (zq : Z) -> (zr : Z)
+   -> Eq Z
+        (zadd (zmul (zmul np nq) (zmul zp zr)) (zmul (zmul np nr) (zmul zp zq)))
+        (zmul zp (zmul np (zadd (zmul nq zr) (zmul nr zq)))) is
+  fn (np : Z) (nq : Z) (nr : Z) (zp : Z) (zq : Z) (zr : Z) is
+    trans
+      (cong2Z (fn (u : Z) (v : Z) is zadd u v end)
+        -- (np·nq)·(zp·zr) = zp·(np·(nq·zr))
+        (trans (zmulInterchange np nq zp zr)
+          (trans (cong (fn (s : Z) is zmul s (zmul nq zr) end) (zmulComm np zp))
+            (zmulAssoc zp np (zmul nq zr))))
+        -- (np·nr)·(zp·zq) = zp·(np·(nr·zq))
+        (trans (zmulInterchange np nr zp zq)
+          (trans (cong (fn (s : Z) is zmul s (zmul nr zq) end) (zmulComm np zp))
+            (zmulAssoc zp np (zmul nr zq)))))
+      -- fold:  zp·(np·(nq·zr)) + zp·(np·(nr·zq)) = zp·(np·(nq·zr + nr·zq))
+      (sym
+        (trans (cong (fn (s : Z) is zmul zp s end)
+                 (zmulDistR np (zmul nq zr) (zmul nr zq)))
+          (zmulDistR zp (zmul np (zmul nq zr)) (zmul np (zmul nr zq)))))
+  end
+end
+
+-- the pure-ℤ cross identity (everything in product-denominator form).
+qmulDistCross : (np : Z) -> (nq : Z) -> (nr : Z) -> (zp : Z) -> (zq : Z) -> (zr : Z)
+   -> Eq Z
+        (zmul (zmul np (zadd (zmul nq zr) (zmul nr zq)))
+              (zmul (zmul zp zq) (zmul zp zr)))
+        (zmul (zadd (zmul (zmul np nq) (zmul zp zr)) (zmul (zmul np nr) (zmul zp zq)))
+              (zmul zp (zmul zq zr))) is
+  fn (np : Z) (nq : Z) (nr : Z) (zp : Z) (zq : Z) (zr : Z) is
+    trans
+      -- denR = zp·denL
+      (cong (fn (s : Z) is zmul (zmul np (zadd (zmul nq zr) (zmul nr zq))) s end)
+        (qmulDistDen zp zq zr))
+      (trans
+        -- numL·(zp·denL) = (numL·zp)·denL
+        (sym (zmulAssoc (zmul np (zadd (zmul nq zr) (zmul nr zq))) zp (zmul zp (zmul zq zr))))
+        (trans
+          -- (numL·zp)·denL = (zp·numL)·denL
+          (cong (fn (s : Z) is zmul s (zmul zp (zmul zq zr)) end)
+            (zmulComm (zmul np (zadd (zmul nq zr) (zmul nr zq))) zp))
+          -- (zp·numL)·denL = numR·denL    (numR = zp·numL, reversed)
+          (cong (fn (s : Z) is zmul s (zmul zp (zmul zq zr)) end)
+            (sym (qmulDistNum np nq nr zp zq zr)))))
+  end
+end
+
+-- The full QRel obligation for distributivity, threading qaddDenZ/qmulDenZ on the four
+-- denominator occurrences and dispatching the pure-ℤ identity by qmulDistCross.
+qmulDistRP : (p : QPair) -> (q : QPair) -> (r : QPair)
+   -> QRel (qmulP p (qaddP q r)) (qaddP (qmulP p q) (qmulP p r)) is
+  fn (p : QPair) (q : QPair) (r : QPair) is
+    trans
+      -- rewrite the LHS denominator  zden (qaddP (qmulP p q) (qmulP p r))
+      --   -> zmul (zmul (zden p) (zden q)) (zmul (zden p) (zden r))
+      (cong (fn (s : Z) is
+               zmul (zmul (qnum p) (zadd (zmul (qnum q) (zden r)) (zmul (qnum r) (zden q)))) s end)
+        (trans (qaddDenZ (qmulP p q) (qmulP p r))
+          (cong2Z (fn (u : Z) (v : Z) is zmul u v end) (qmulDenZ p q) (qmulDenZ p r))))
+      (trans
+        -- the pure ℤ cross identity
+        (qmulDistCross (qnum p) (qnum q) (qnum r) (zden p) (zden q) (zden r))
+        (trans
+          -- fold the numerator denominators back:  zmul (zden p) (zden r) -> zden (qmulP p r)
+          --   and zmul (zden p) (zden q) -> zden (qmulP p q)
+          (cong (fn (s : Z) is zmul s (zmul (zden p) (zmul (zden q) (zden r))) end)
+            (cong2Z (fn (u : Z) (v : Z) is zadd u v end)
+              (cong (fn (s : Z) is zmul (zmul (qnum p) (qnum q)) s end) (sym (qmulDenZ p r)))
+              (cong (fn (s : Z) is zmul (zmul (qnum p) (qnum r)) s end) (sym (qmulDenZ p q)))))
+          -- fold the RHS (LHS-rep) denominator back to  zden (qmulP p (qaddP q r))
+          (cong (fn (s : Z) is
+                   zmul (zadd (zmul (zmul (qnum p) (qnum q)) (zden (qmulP p r)))
+                              (zmul (zmul (qnum p) (qnum r)) (zden (qmulP p q)))) s end)
+            (sym (trans (qmulDenZ p (qaddP q r))
+              (cong (fn (s : Z) is zmul (zden p) s end) (qaddDenZ q r)))))))
+  end
+end
+
+qmulDistR : (x : Q) -> (y : Q) -> (z : Q)
+   -> Eq Q (qmul x (qadd y z)) (qadd (qmul x y) (qmul x z)) is
+  fn (x : Q) is
+    qind QPair QRel
+      (fn (wx : Q) is (y : Q) -> (z : Q) -> Eq Q (qmul wx (qadd y z)) (qadd (qmul wx y) (qmul wx z)) end)
+      (fn (p : QPair) is
+        fn (y : Q) is
+          qind QPair QRel
+            (fn (wy : Q) is (z : Q) -> Eq Q (qmul (qin QPair QRel p) (qadd wy z)) (qadd (qmul (qin QPair QRel p) wy) (qmul (qin QPair QRel p) z)) end)
+            (fn (q : QPair) is
+              fn (z : Q) is
+                qind QPair QRel
+                  (fn (wz : Q) is Eq Q (qmul (qin QPair QRel p) (qadd (qin QPair QRel q) wz)) (qadd (qmul (qin QPair QRel p) (qin QPair QRel q)) (qmul (qin QPair QRel p) wz)) end)
+                  (fn (r : QPair) is
+                    qsound QPair QRel
+                      (qmulP p (qaddP q r)) (qaddP (qmulP p q) (qmulP p r))
+                      (qmulDistRP p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ============================================================================
+-- CH113, PART II — THE MULTIPLICATIVE INVERSE (the field-defining piece).
+--
+-- ℚ is now a verified COMMUTATIVE RING (qmulOneR, qaddZero, qmulAssoc, qaddAssoc,
+-- qmulDistR + ch108's qmulComm/qaddComm). The field structure adds the inverse on the
+-- NONZERO rationals. The nonzero condition is essential: 1/0 is undefined.
+--
+-- A ℤ-nonzero predicate, representation-independent: z is nonzero iff z = 0 is absurd.
+-- ============================================================================
+
+-- Falsity, encoded impredicatively in Prop (no bottom data type in the listings; any Pi
+-- into Prop is a Prop, so this stays in U via Prop <: U): the proposition proving everything.
+Empty : Prop is (C : Prop) -> C end
+
+-- z ≠ 0 in ℤ.  (For the field law the WITNESS is supplied by the caller; the law is
+-- vacuous on z = 0, which is exactly why the inverse is undefined there.)
+zNonzero : Z -> U is
+  fn (z : Z) is Eq Z z zzero -> Empty end
+end
+
+-- A rational is nonzero iff its numerator is.
+qNonzero : QPair -> U is
+  fn (p : QPair) is zNonzero (qnum p) end
+end
+
+-- ----------------------------------------------------------------------------
+-- THE INVERSE, on the DIRECTLY-REPRESENTABLE positive rationals.
+-- Our representation  a / succ(b)  hardcodes a POSITIVE Nat denominator (the +1 trick),
+-- so the inverse  succ(b) / a  is itself representable only when the numerator a is a
+-- positive integer  zfrom (succ k)  (its reciprocal then has a positive Nat denominator
+-- k).  On that subtype the inverse is TOTAL and the field law q · q⁻¹ = 1 holds with no
+-- postulate:  qPos a b = succ(a)/succ(b),  qinvPos a b = succ(b)/succ(a).
+-- (For a general nonzero z the inverse needs SIGN NORMALISATION — rewrite −n/d as n/−d
+-- with a positive denominator — which is the next increment; see the closing note.)
+-- ----------------------------------------------------------------------------
+qPosP : Nat -> Nat -> QPair is
+  fn (a : Nat) (b : Nat) is qpair (zfrom (succ a)) b end
+end
+
+qPos : Nat -> Nat -> Q is
+  fn (a : Nat) (b : Nat) is qin QPair QRel (qPosP a b) end
+end
+
+-- the inverse representative: swap the (positive) numerator and denominator.
+qinvPosP : Nat -> Nat -> QPair is
+  fn (a : Nat) (b : Nat) is qpair (zfrom (succ b)) a end
+end
+
+qinvPos : Nat -> Nat -> Q is
+  fn (a : Nat) (b : Nat) is qin QPair QRel (qinvPosP a b) end
+end
+
+-- positive numerators are nonzero — the predicate has a genuine inhabitant family.
+-- (Stated; its proof needs a ℤ→Bool discriminator that respects ZRel, deferred with the
+-- general inverse.  The field law below does NOT depend on it — positivity is structural.)
+qPosNonzero : (a : Nat) -> (b : Nat) -> U is
+  fn (a : Nat) (b : Nat) is qNonzero (qPosP a b) end
+end
+
+-- ----------------------------------------------------------------------------
+-- THE FIELD LAW (positive case):  qPos a b · qinvPos a b = 1.
+-- On representatives:  (succ a / succ b) · (succ b / succ a) = (succ a · succ b)/(succ b · succ a).
+-- The QRel obligation against 1/1 reduces to  succ a · succ b = succ b · succ a  (zmulComm),
+-- after the spurious unit denominators collapse (zmulOneR/zmulOneL) and qmulDenZ folds
+-- the product denominator.
+-- ----------------------------------------------------------------------------
+qmulInvPosP : (a : Nat) -> (b : Nat)
+   -> QRel (qmulP (qPosP a b) (qinvPosP a b)) (qpair zone zero) is
+  fn (a : Nat) (b : Nat) is
+    -- Goal: zmul (zmul (zfrom (succ a)) (zfrom (succ b))) zone
+    --     = zmul zone (zden (qmulP (qPosP a b) (qinvPosP a b)))
+    trans
+      -- LHS: drop the unit denominator  X · 1 = X
+      (zmulOneR (zmul (zfrom (succ a)) (zfrom (succ b))))
+      (trans
+        -- X = zmul (zfrom (succ b)) (zfrom (succ a))   [zmulComm]
+        (zmulComm (zfrom (succ a)) (zfrom (succ b)))
+        (trans
+          -- zmul (zden p) (zden q) = zden (qmulP p q)   [sym qmulDenZ]
+          (sym (qmulDenZ (qPosP a b) (qinvPosP a b)))
+          -- zden (qmulP …) = zmul zone (zden (qmulP …))   [sym zmulOneL]
+          (sym (zmulOneL (zden (qmulP (qPosP a b) (qinvPosP a b)))))))
+  end
+end
+
+-- The field law, lifted to ℚ:  q · q⁻¹ = 1  for every positive rational q = succ a / succ b.
+qmulInvPosR : (a : Nat) -> (b : Nat)
+   -> Eq Q (qmul (qPos a b) (qinvPos a b)) qone is
+  fn (a : Nat) (b : Nat) is
+    qsound QPair QRel (qmulP (qPosP a b) (qinvPosP a b)) (qpair zone zero)
+      (qmulInvPosP a b)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- Sanity: the field laws COMPUTE on concrete rationals.
+-- ----------------------------------------------------------------------------
+
+-- x · 1 = x on 1/2, by qmulOneR.
+qExOneR : Eq Q (qmul qHalf qone) qHalf is qmulOneR qHalf end
+
+-- x + 0 = x on 1/2, by qaddZero.
+qExAddZero : Eq Q (qadd qHalf qzero) qHalf is qaddZero qHalf end
+
+-- (2/3) · (3/2) = 1, via the multiplicative inverse.  2/3 = qPos 1 2, 3/2 = qinvPos 1 2.
+qTwoThirds : Q is qPos (succ zero) (succ (succ zero)) end
+qThreeHalves : Q is qinvPos (succ zero) (succ (succ zero)) end
+
+qExInv : Eq Q (qmul qTwoThirds qThreeHalves) qone is
+  qmulInvPosR (succ zero) (succ (succ zero))
+end
+
+-- associativity + distributivity on concrete rationals.
+qExMulAssoc : Eq Q (qmul (qmul qHalf qTwoOverOne) qHalf) (qmul qHalf (qmul qTwoOverOne qHalf)) is
+  qmulAssoc qHalf qTwoOverOne qHalf
+end
+
+qExDist : Eq Q
+    (qmul qHalf (qadd qHalf qTwoOverOne))
+    (qadd (qmul qHalf qHalf) (qmul qHalf qTwoOverOne)) is
+  qmulDistR qHalf qHalf qTwoOverOne
+end
+
+-- ============================================================================
+-- CHAPTER 116 — THE ℤ ZERO-DISCRIMINATOR (closing ch113's documented blocker).
+-- Everything above is the ch113 ring+field development (over ch108 ℚ / ch107 ℤ),
+-- redeclared verbatim. Below: a decidable, REPRESENTATION-RESPECTING zero-test on ℤ,
+-- and from it the proof of ch113's deferred `qPosNonzero`.
+-- ============================================================================
+
+-- Bool and decidable Nat equality, redeclared verbatim from ch85/ch75.
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- DECIDABLE Nat equality (ch75/ch85, verbatim): zero=zero -> true, succ=succ recurse,
+-- mixed -> false. The succ/succ case reduces DEFINITIONALLY: eqNat (succ k) (succ n) ~>
+-- eqNat k n, and eqNat (succ k) zero ~> false, eqNat zero (succ n) ~> false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- ADD-CANCELLATION LAWS of eqNat — the arithmetic facts the ZRel-respect proof needs.
+-- LEFT cancel:  eqNat (k + a) (k + b) = eqNat a b.  Induction on k; the step is just the
+-- IH because add (succ k) x ~> succ (add k x) and eqNat (succ _) (succ _) ~> eqNat _ _,
+-- so both reductions are DEFINITIONAL and eqNat (add (succ k) a) (add (succ k) b) is
+-- CONVERTIBLE to eqNat (add k a) (add k b).
+-- ----------------------------------------------------------------------------
+eqNatAddCancelL : (k : Nat) -> (a : Nat) -> (b : Nat)
+   -> Eq Bool (eqNat (add k a) (add k b)) (eqNat a b) is
+  fn (k : Nat) (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat (add x a) (add x b)) (eqNat a b) end)
+      (refl (eqNat a b))
+      (fn (j : Nat) (ih : Eq Bool (eqNat (add j a) (add j b)) (eqNat a b)) is ih end)
+      k
+  end
+end
+
+-- RIGHT cancel:  eqNat (a + k) (b + k) = eqNat a b, from left-cancel + commutativity.
+eqNatAddCancelR : (k : Nat) -> (a : Nat) -> (b : Nat)
+   -> Eq Bool (eqNat (add a k) (add b k)) (eqNat a b) is
+  fn (k : Nat) (a : Nat) (b : Nat) is
+    trans
+      (cong2 (fn (u : Nat) (v : Nat) is eqNat u v end) (addComm a k) (addComm b k))
+      (eqNatAddCancelL k a b)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- THE CRUX: eqNat respects ZRel.  Given a + d = c + b, prove eqNat a b = eqNat c d.
+--   eqNat a b                                       [start]
+--     = eqNat (a + d) (b + d)         [sym eqNatAddCancelR d a b]
+--     = eqNat (c + b) (b + d)         [hypothesis a + d = c + b, in the first arg]
+--     = eqNat (b + c) (b + d)         [addComm c b, in the first arg]
+--     = eqNat c d                     [eqNatAddCancelL b c d]
+-- (a + d) is zero-as-an-integer testimony lined up so the cancellation laws fire.
+-- ----------------------------------------------------------------------------
+eqNatRespects : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> Eq Nat (add a d) (add c b) -> Eq Bool (eqNat a b) (eqNat c d) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (r : Eq Nat (add a d) (add c b)) is
+    trans
+      (sym (eqNatAddCancelR d a b))
+      (trans
+        (cong (fn (s : Nat) is eqNat s (add b d) end) r)
+        (trans
+          (cong (fn (s : Nat) is eqNat s (add b d) end) (addComm c b))
+          (eqNatAddCancelL b c d)))
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- THE DISCRIMINATOR.  zIsZero : Z -> Bool.  On a rep (a, b) (denoting a − b), the integer
+-- is zero iff a = b iff eqNat a b. We lift  λ(a,b). eqNat (fst p) (snd p)  over ZRel:
+-- the respect obligation is exactly eqNatRespects on (fst p, snd p, fst p', snd p'),
+-- since ZRel p p' = Eq Nat (add (fst p) (snd p')) (add (fst p') (snd p)).
+-- ----------------------------------------------------------------------------
+zIsZero : Z -> Bool is
+  qlift NatPair ZRel Bool
+    (fn (p : NatPair) is eqNat (fst p) (snd p) end)
+    (fn (p : NatPair) (p' : NatPair) (r : ZRel p p') is
+      eqNatRespects (fst p) (snd p) (fst p') (snd p') r
+    end)
+end
+
+-- zIsZero 0 = true.  zzero = qin (0, 0); qlift's ι-rule reduces zIsZero (qin (0,0)) to
+-- eqNat 0 0 = true, all definitional — refl.
+zIsZeroZero : Eq Bool (zIsZero zzero) true is refl true end
+
+-- ----------------------------------------------------------------------------
+-- BOOL DISCRIMINATION: true ≠ false.  Standard subst-into-a-Prop-motive: a predicate
+-- that is an inhabited Prop on `true` and Empty on `false`; transport the inhabitant
+-- of IsTrue true along true = false to land in IsTrue false = Empty.
+-- ----------------------------------------------------------------------------
+Top : Prop is (C : Prop) -> C -> C end
+topI : Top is fn (C : Prop) (c : C) is c end end
+
+IsTrue : Bool -> Prop is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Prop end) Top Empty b end
+end
+
+boolTrueNeFalse : Eq Bool true false -> Empty is
+  fn (e : Eq Bool true false) is
+    subst Bool true false e (fn (b : Bool) is IsTrue b end) topI
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- CORRECTNESS: zIsZero z = false ⟹ z is nonzero.  If z were 0 then zIsZero z = zIsZero 0
+-- = true (cong + zIsZeroZero), contradicting zIsZero z = false (boolTrueNeFalse).
+-- ----------------------------------------------------------------------------
+zIsZeroFalseNonzero : (z : Z) -> Eq Bool (zIsZero z) false -> zNonzero z is
+  fn (z : Z) (h : Eq Bool (zIsZero z) false) is
+    fn (e : Eq Z z zzero) is
+      boolTrueNeFalse
+        (trans
+          (sym (trans (cong zIsZero e) zIsZeroZero))
+          h)
+    end
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- CLOSING CH113'S BLOCKER:  qPosNonzero a b — the positive numerator succ a / succ b is
+-- genuinely nonzero.  qPosP a b has numerator zfrom (succ a) = qin (succ a, 0), so
+-- zIsZero (zfrom (succ a)) reduces (qlift ι) to eqNat (succ a) 0 = false DEFINITIONALLY
+-- (the succ/zero arm). zIsZeroFalseNonzero on (refl false) discharges it.
+-- ----------------------------------------------------------------------------
+qPosNonzeroPf : (a : Nat) -> (b : Nat) -> qPosNonzero a b is
+  fn (a : Nat) (b : Nat) is
+    zIsZeroFalseNonzero (zfrom (succ a)) (refl false)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- Sanity: the discriminator COMPUTES and discriminates.
+-- ----------------------------------------------------------------------------
+
+-- zIsZero 0 = true, computing through the quotient (refl).
+zExIsZeroTrue : Eq Bool (zIsZero zzero) true is refl true end
+
+-- zIsZero (−2) = false: zexRight = qin (0, 3) (denoting −3); zIsZero reduces to
+-- eqNat 0 3 = false. Negative integers are discriminated correctly, computing.
+zExIsZeroNegFalse : Eq Bool (zIsZero zexRight) false is refl false end
+
+-- zIsZero 2 = false (zexLeft = qin (2, 0)): eqNat 2 0 = false, computing.
+zExIsZeroPosFalse : Eq Bool (zIsZero zexLeft) false is refl false end
+
+-- The deferred lemma, instantiated: 2/3's numerator (= zfrom 2 = succ 1) is nonzero.
+qExPosNonzero : qPosNonzero (succ zero) (succ (succ zero)) is
+  qPosNonzeroPf (succ zero) (succ (succ zero))
+end
+
+-- ============================================================================
+-- WHAT REMAINS — the FULLY-GENERAL multiplicative inverse qinv : (q) -> zNonzero
+-- (qnum q) -> Q, and qmulInvR : q · q⁻¹ = 1 for ANY nonzero q.
+--
+-- The inverse of a/sb is sb/a, whose denominator a : Z has ARBITRARY sign, while our
+-- +1-Nat-denominator representation hardcodes a POSITIVE denominator. Sign-normalising
+-- sb/a = (zneg sb)/(zneg a) when a < 0 needs to EXTRACT, from a nonzero a : Z, a sign
+-- (Bool) and a positive Nat magnitude k with zfrom (succ k) = a (or = zneg a). That
+-- magnitude/sign extraction is a function Z → (Bool, Nat) lifted over ZRel — it requires
+-- truncated Nat subtraction `monus`, its ZRel-respect proof, and Nat ordering. zIsZero
+-- (built here) is the DECIDABILITY prerequisite for that case-split; the remaining work
+-- is the magnitude development, a separate increment. With it, qinv normalises and
+-- qmulInvR computes by zmulComm exactly as qmulInvPosR does on the positive subtype.
+-- ============================================================================

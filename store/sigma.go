@@ -1,0 +1,163 @@
+package store
+
+import "goforge.dev/rune/v3/core"
+
+// The inner Sigma builtin group (§F / R-SIGMA / A5): dependent pairs in the
+// FIBRANT universe, the inner-stratum twin of the outer-core Σ (R-SUM/C1). It is
+// a separate builtin group on its own hash space (like path/face/sys/kan), built
+// against the fibrant group, so fib's hashes — and ch09–ch23 — stay byte-stable.
+//
+//	sigmaF : (A : UF) -> (B : El A -> UF) -> UF
+//	pairF  : (A : UF) -> (B : El A -> UF) -> (a : El A) -> (b : El (B a))
+//	            -> El (sigmaF A B)
+//	fstF   : (A : UF) -> (B : El A -> UF) -> (p : El (sigmaF A B)) -> El A
+//	sndF   : (A : UF) -> (B : El A -> UF) -> (p : El (sigmaF A B))
+//	            -> El (B (fstF A B p))
+//
+// sigmaF is a fibrant former whose `El` stays NEUTRAL (no decode — there is no
+// outer carrier and none is needed; the content lives in the projections, like
+// El (pathF …)). pairF is a canonical, permanently-neutral intro (like pabs/qin);
+// fstF/sndF COMPUTE by ι (core.SigmaInfo / the evaluator's trySigmaIota):
+//
+//	fstF A B (pairF A' B' a b)  ~>  a
+//	sndF A B (pairF A' B' a b)  ~>  b
+//
+// Kan over sigmaF (transp/hcomp/comp componentwise) is the A5a/A5b increment and
+// is NOT shipped here — this group delivers the former, the intro, and the
+// computing projections. No hash-format bump (no new core constructor).
+
+var sigmaNames = [4]string{"sigmaF", "pairF", "fstF", "sndF"}
+
+type sigmaEntry struct {
+	hashes [4]core.Hash
+}
+
+// AddSigma registers the inner Sigma group against the already-registered
+// fibrant group, binding its names and returning the member hashes in
+// sigmaNames order.
+func (s *Store) AddSigma(fib [10]core.Hash) [4]core.Hash {
+	tys := sigmaTypes(fib)
+
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'G'})
+	for _, ty := range tys {
+		th := core.HashTerm(ty)
+		g.Write(th[:])
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	var hs [4]core.Hash
+	for i := range hs {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, 'g'})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		copy(hs[i][:], h.Sum(nil))
+	}
+	subst := func(t core.Tm) core.Tm {
+		for i := range hs {
+			t = replaceRef(t, Placeholder(i), hs[i])
+		}
+		return t
+	}
+	for i, ty := range tys {
+		s.defs[hs[i]] = Def{Type: subst(ty)}
+		s.names[sigmaNames[i]] = hs[i]
+	}
+	s.si = &sigmaEntry{hashes: hs}
+	return hs
+}
+
+// SigmaRoleOf implements core.SigmaInfo.
+func (s *Store) SigmaRoleOf(h core.Hash) core.SigmaRole {
+	if s.si == nil {
+		return core.GRoleNone
+	}
+	switch h {
+	case s.si.hashes[0]:
+		return core.GRoleSigma
+	case s.si.hashes[1]:
+		return core.GRolePair
+	case s.si.hashes[2]:
+		return core.GRoleFst
+	case s.si.hashes[3]:
+		return core.GRoleSnd
+	}
+	return core.GRoleNone
+}
+
+// SigmaHash implements core.SigmaInfo: the reverse lookup, for the structural
+// Kan rules to construct sigmaF sub-terms (A5a/A5b).
+func (s *Store) SigmaHash(role core.SigmaRole) (core.Hash, bool) {
+	if s.si == nil {
+		return core.Hash{}, false
+	}
+	idx := map[core.SigmaRole]int{
+		core.GRoleSigma: 0, core.GRolePair: 1, core.GRoleFst: 2, core.GRoleSnd: 3,
+	}
+	i, ok := idx[role]
+	if !ok {
+		return core.Hash{}, false
+	}
+	return s.si.hashes[i], true
+}
+
+// SigmaHashes returns the registered group's hashes (and whether it exists).
+func (s *Store) SigmaHashes() ([4]core.Hash, bool) {
+	if s.si == nil {
+		return [4]core.Hash{}, false
+	}
+	return s.si.hashes, true
+}
+
+// SigmaNames returns the surface names of the group members, in hash order.
+func SigmaNames() [4]string { return sigmaNames }
+
+// sigmaTypes builds the four member types, referencing the fibrant group
+// (UF = fib[0], El = fib[1]). The second projection's type uses fstF itself, so
+// the family B lands on the right point (sndF p : El (B (fstF p))).
+func sigmaTypes(fib [10]core.Hash) [4]core.Tm {
+	v := func(i int) core.Tm { return core.Var{Idx: i} }
+	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
+		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
+	}
+	app := func(f core.Tm, xs ...core.Tm) core.Tm {
+		for _, x := range xs {
+			f = core.App{Fn: f, Arg: x, Icit: core.Expl}
+		}
+		return f
+	}
+	uf := core.Tm(core.Ref{Hash: fib[0]})
+	el := func(x core.Tm) core.Tm { return app(core.Ref{Hash: fib[1]}, x) }
+	// B : El A -> UF
+	famTy := func(a core.Tm) core.Tm { return pi("_", el(a), uf) }
+	sigmaH := core.Ref{Hash: Placeholder(0)}
+	fstH := core.Ref{Hash: Placeholder(2)}
+
+	// sigmaF : (A : UF) -> (B : El A -> UF) -> UF
+	sigmaTy := pi("A", uf, pi("B", famTy(v(0)), uf))
+
+	// pairF : (A : UF) -> (B : El A -> UF) -> (a : El A) -> (b : El (B a))
+	//           -> El (sigmaF A B)
+	pairTy := pi("A", uf,
+		pi("B", famTy(v(0)),
+			pi("a", el(v(1)), // [B, A]: A = 1
+				pi("b", el(app(v(1), v(0))), // [a, B, A]: B = 1, a = 0
+					el(app(sigmaH, v(3), v(2))))))) // [b, a, B, A]: A=3, B=2
+
+	// fstF : (A : UF) -> (B : El A -> UF) -> (p : El (sigmaF A B)) -> El A
+	fstTy := pi("A", uf,
+		pi("B", famTy(v(0)),
+			pi("p", el(app(sigmaH, v(1), v(0))), // [B, A]: A=1, B=0
+				el(v(2))))) // [p, B, A]: A = 2
+
+	// sndF : (A : UF) -> (B : El A -> UF) -> (p : El (sigmaF A B))
+	//          -> El (B (fstF A B p))
+	sndTy := pi("A", uf,
+		pi("B", famTy(v(0)),
+			pi("p", el(app(sigmaH, v(1), v(0))),
+				el(app(v(1), app(fstH, v(2), v(1), v(0))))))) // B (fstF A B p)
+
+	return [4]core.Tm{sigmaTy, pairTy, fstTy, sndTy}
+}

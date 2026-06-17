@@ -1,0 +1,34 @@
+-- Chapter 46 — Filling a box of paths: proper-face hcomp on pathF (§F / R-BOX).
+-- Homogeneous composition over a PATH type fills pointwise in the path direction
+-- and recurses into the carrier — the open-box keystone for path composition
+-- (A3/A4). The result is a path with the SAME endpoints a, b: even on a PROPER
+-- face φ (where the interior stays symbolic) the boundary computes, because the
+-- walls u are themselves paths a→b, so their endpoints are a/b automatically.
+--
+--   hcomp (pathF A a b) φ u u0
+--     ~> pabs A (λj. hcomp A (for φ (for (ieq0 j) (ieq1 j)))
+--                          (λi h. papp A a b (u i h) j)
+--                          (papp A a b u0 j))
+--
+-- No per-face dispatch is needed (overlap-free): the endpoint/φ overlap agrees
+-- definitionally via the path boundary rule. See RBOX-DESIGN.md.
+
+-- LEFT endpoint: the filled path starts at a, on ANY face (here φ is free).
+pathFillLeft : (A : UF) -> (a : El A) -> (b : El A) -> (phi : F)
+   -> (u : I -> holds phi -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El A) (papp A a b (hcomp (pathF A a b) phi u u0) i0) a is
+  fn (A : UF) (a : El A) (b : El A) (phi : F)
+     (u : I -> holds phi -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl a
+  end
+end
+
+-- RIGHT endpoint: the filled path ends at b, dual to the left.
+pathFillRight : (A : UF) -> (a : El A) -> (b : El A) -> (phi : F)
+   -> (u : I -> holds phi -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El A) (papp A a b (hcomp (pathF A a b) phi u u0) i1) b is
+  fn (A : UF) (a : El A) (b : El A) (phi : F)
+     (u : I -> holds phi -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl b
+  end
+end

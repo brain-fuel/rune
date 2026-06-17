@@ -1,0 +1,279 @@
+-- Chapter 65 — Decidable order (D1, the proven tier): the ≤ comparison on Nat with
+-- its order laws proven, plus `min`. This is the comparison D2's sorting and balanced
+-- Map/Set rebalancing need; the laws are proven, not assumed. `lte` recurses on its
+-- first argument (an inner NatElim cases the second), so `lte zero n` and the
+-- successor-of-successor step reduce definitionally — the proofs only bridge what
+-- computation leaves open, exactly as the numeric-tower laws (ch63).
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- lte a b = (a <= b): zero is below everything; succ k <= zero is false; succ k <=
+-- succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- 0 <= n always — definitionally (lte zero n reduces to true), so refl.
+lteZero : (n : Nat) -> Eq Bool (lte zero n) true is
+  fn (n : Nat) is refl true end
+end
+
+-- REFLEXIVITY: n <= n, by induction on n. Base lte zero zero = true; the succ step
+-- reduces lte (succ k) (succ k) to lte k k, so the IH discharges it directly.
+lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end)
+      n
+  end
+end
+
+-- MONOTONICITY at the successor: n <= succ n, same induction shape (the succ step
+-- reduces lte (succ k) (succ (succ k)) to lte k (succ k) = the IH).
+lteSucc : (n : Nat) -> Eq Bool (lte n (succ n)) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x (succ x)) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k (succ k)) true) is ih end)
+      n
+  end
+end
+
+-- min picks the smaller by branching on the comparison (BoolElim).
+min : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (x : Bool) is Nat end) a b (lte a b)
+  end
+end
+
+-- min zero n = zero — definitionally: lte zero n reduces to true, so BoolElim takes
+-- the first branch (zero). The order law `min` discharges by computation alone.
+minZeroL : (n : Nat) -> Eq Nat (min zero n) zero is
+  fn (n : Nat) is refl zero end
+end
+
+-- add (numeric tower, ch63) — needed to relate order to arithmetic.
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- MONOTONICITY of addition under the order: a <= a + b, by induction on a. Base
+-- lte zero (add zero b) reduces to lte zero b = true; the succ step reduces
+-- lte (succ k) (add (succ k) b) = lte (succ k) (succ (add k b)) to lte k (add k b),
+-- discharged by the IH. The order law D2's sorting bounds rely on.
+lteAddR : (a : Nat) -> (b : Nat) -> Eq Bool (lte a (add a b)) true is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x (add x b)) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k (add k b)) true) is ih end)
+      a
+  end
+end
+
+
+-- ====================================================================================
+-- CHAPTER 178 — ℕ ≤ IS A PARTIAL ORDER (telos-3 / stdlib order theory).
+-- The decidable `lte` (ch65) is TRANSITIVE and ANTISYMMETRIC — so (ℕ,≤) with lteRefl (ch65) is
+-- a partial order.  Transitivity is a triple induction (with the off-alignment `false=true`
+-- cases discharged by a Bool discriminator); antisymmetry a double induction.  FULLY PROVEN.
+-- ====================================================================================
+
+-- A Bool discriminator: from `false = true` (a stuck constructor clash) anything follows.
+-- Built impredicatively at Prop (cf. ch116/ch173) so it stays in Prop — no universe escalation.
+Top : Prop is (C : Prop) -> C -> C end
+tt : Top is fn (C : Prop) (c : C) is c end end
+Empty : Prop is (C : Prop) -> C end
+boolCode : Bool -> Prop is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Prop end) Empty Top b end
+end
+falseNotTrue : Eq Bool false true -> Empty is
+  fn (h : Eq Bool false true) is
+    subst Bool false true h (fn (x : Bool) is boolCode x end) tt
+  end
+end
+boolAbsurd : (C : Prop) -> Eq Bool false true -> C is
+  fn (C : Prop) (h : Eq Bool false true) is falseNotTrue h C end
+end
+
+-- congruence of a ℕ function over Eq Nat (via Leibniz subst).
+congNat : (f : Nat -> Nat) -> (x : Nat) -> (y : Nat) -> Eq Nat x y -> Eq Nat (f x) (f y) is
+  fn (f : Nat -> Nat) (x : Nat) (y : Nat) (p : Eq Nat x y) is
+    subst Nat x y p (fn (z : Nat) is Eq Nat (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- TRANSITIVITY:  a≤b ⇒ b≤c ⇒ a≤c.  Induct on a; in the succ case induct on b then c, the two
+-- off-alignment (·≤0) hypotheses being false=true ⇒ absurd; the aligned case is `ih b' c' h1 h2`
+-- (lte (succ _)(succ _) ≡ lte _ _ lines the types up on the nose).
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat) -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+            -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat) (h1 : Eq Bool (lte zero b) true) (h2 : Eq Bool (lte b c) true) is
+         lteZero c end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat) -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (bb : Nat) is
+                (c : Nat) -> Eq Bool (lte (succ a') bb) true -> Eq Bool (lte bb c) true
+                   -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat) (h1 : Eq Bool (lte (succ a') zero) true)
+                 (h2 : Eq Bool (lte zero c) true) is
+                boolAbsurd (Eq Bool (lte (succ a') c) true) h1 end)
+             (fn (b' : Nat)
+                 (ih2 : (c : Nat) -> Eq Bool (lte (succ a') b') true -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (cc : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true -> Eq Bool (lte (succ b') cc) true
+                          -> Eq Bool (lte (succ a') cc) true end)
+                    (fn (h1 : Eq Bool (lte (succ a') (succ b')) true)
+                        (h2 : Eq Bool (lte (succ b') zero) true) is
+                       boolAbsurd (Eq Bool (lte (succ a') zero) true) h2 end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (h1 : Eq Bool (lte (succ a') (succ b')) true)
+                          (h2 : Eq Bool (lte (succ b') (succ c')) true) is
+                         ih b' c' h1 h2 end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ANTISYMMETRY:  a≤b ⇒ b≤a ⇒ a=b.  Induct on a then b; off-diagonal (0 vs succ) absurd; the
+-- diagonal is `congNat succ … (ih b' h1 h2)`.
+lteAntisym : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b a) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (lte x b) true -> Eq Bool (lte b x) true -> Eq Nat x b end)
+      (fn (b : Nat) is
+         NatElim
+           (fn (bb : Nat) is
+              Eq Bool (lte zero bb) true -> Eq Bool (lte bb zero) true -> Eq Nat zero bb end)
+           (fn (h1 : Eq Bool (lte zero zero) true) (h2 : Eq Bool (lte zero zero) true) is
+              refl zero end)
+           (fn (b' : Nat)
+               (ihb : Eq Bool (lte zero b') true -> Eq Bool (lte b' zero) true -> Eq Nat zero b') is
+              fn (h1 : Eq Bool (lte zero (succ b')) true)
+                 (h2 : Eq Bool (lte (succ b') zero) true) is
+                boolAbsurd (Eq Nat zero (succ b')) h2 end
+              end)
+           b
+       end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (lte a' b) true -> Eq Bool (lte b a') true -> Eq Nat a' b) is
+         fn (b : Nat) is
+           NatElim
+             (fn (bb : Nat) is
+                Eq Bool (lte (succ a') bb) true -> Eq Bool (lte bb (succ a')) true
+                   -> Eq Nat (succ a') bb end)
+             (fn (h1 : Eq Bool (lte (succ a') zero) true)
+                 (h2 : Eq Bool (lte zero (succ a')) true) is
+                boolAbsurd (Eq Nat (succ a') zero) h1 end)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (lte (succ a') b') true -> Eq Bool (lte b' (succ a')) true
+                          -> Eq Nat (succ a') b') is
+                fn (h1 : Eq Bool (lte (succ a') (succ b')) true)
+                   (h2 : Eq Bool (lte (succ b') (succ a')) true) is
+                  congNat (fn (s : Nat) is succ s end) a' b' (ih b' h1 h2) end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 178 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): `lteTrans` (transitivity, triple induction with the
+-- off-alignment false=true cases discharged by the Bool discriminator `boolAbsurd`) and
+-- `lteAntisym` (antisymmetry, double induction).  With `lteRefl` (ch65), (ℕ,≤) is a verified
+-- PARTIAL ORDER — reflexive, antisymmetric, transitive.
+-- THE NEXT STEP: totality (lte a b ∨ lte b a) ⇒ a decidable TOTAL order; or the (ℕ,min,max) lattice.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 179 — ℕ ≤ IS A (DECIDABLE) TOTAL ORDER (telos-3 / stdlib order theory).
+-- The TOTALITY law: for all a,b at least one of a≤b, b≤a holds (`lte a b ∨ lte b a = true`).
+-- With the partial-order laws (ch178) this makes (ℕ,≤) a TOTAL order — and `lte` is itself the
+-- Bool-valued decision procedure, so the order is DECIDABLE by construction.  FULLY PROVEN.
+-- ====================================================================================
+
+-- Boolean disjunction (ch65's order prelude has no booleans beyond `lte`'s codomain).
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+-- TOTALITY:  lte a b ∨ lte b a = true.  Double induction: a=0 gives `or true _ ~> true`;
+-- (succ a', 0) gives `or false true ~> true`; (succ a', succ b') ≡ `or (lte a' b')(lte b' a')`
+-- which is exactly the induction hypothesis.
+lteTotal : (a : Nat) -> (b : Nat) -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (bb : Nat) is Eq Bool (or (lte (succ a') bb) (lte bb (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat) (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b' end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 179 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): `lteTotal` — totality of ≤ (a≤b ∨ b≤a), a double
+-- induction whose three live leaves all reduce definitionally (`or true _`, `or false true`, and
+-- the (succ,succ) case ≡ the IH).  With lteRefl (ch65) + lteTrans/lteAntisym (ch178), (ℕ,≤) is a
+-- verified DECIDABLE TOTAL ORDER — `lte` is reflexive, antisymmetric, transitive, total, and is
+-- itself the Bool-valued decision procedure.
+-- THE NEXT STEP: the (ℕ,min,max) distributive lattice (meet/join laws), or a fresh frontier.
+-- ====================================================================================

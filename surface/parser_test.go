@@ -277,8 +277,9 @@ func TestInfixPrinting(t *testing.T) {
 	}
 }
 
-// TestNumerals pins §5.5: literals expand against the registered builtin nat at
-// parse time; without a binding they are a parse error; quantities still parse.
+// TestNumerals pins §5.5: a literal parses to an unexpanded ENum (its meaning is
+// fixed downstream by the `builtin nat` expected type), so no binding is needed
+// at parse time; quantities still parse.
 func TestNumerals(t *testing.T) {
 	prog := `data Nat : U is zero : Nat | succ : Nat -> Nat end
 builtin nat Nat zero succ
@@ -290,13 +291,13 @@ qty : (0 A : U) -> (1 x : A) -> A is fn {- placeholder -} (0 A : U) (1 x : A) is
 		t.Fatalf("parse: %v", err)
 	}
 	var two surface.Exp
-	var sawBuiltin bool
+	var sawNat bool
 	for _, it := range items {
 		switch d := it.(type) {
 		case surface.BuiltinNat:
-			sawBuiltin = true
+			sawNat = true
 			if d.TyName != "Nat" || d.Zero != "zero" || d.Succ != "succ" {
-				t.Fatalf("builtin parsed as %+v", d)
+				t.Fatalf("builtin nat parsed as %+v", d)
 			}
 		case surface.Def:
 			if d.Name == "two" {
@@ -304,23 +305,26 @@ qty : (0 A : U) -> (1 x : A) -> A is fn {- placeholder -} (0 A : U) (1 x : A) is
 			}
 		}
 	}
-	if !sawBuiltin {
-		t.Fatal("builtin nat item missing")
+	if !sawNat {
+		t.Fatalf("builtin nat item missing")
 	}
-	want := surface.EApp{Fn: surface.EVar{Name: "succ"},
-		Arg: surface.EApp{Fn: surface.EVar{Name: "succ"}, Arg: surface.EVar{Name: "zero"}}}
-	if !reflect.DeepEqual(two, surface.Exp(want)) {
-		t.Errorf("2 expanded to %#v, want %#v", two, want)
+	// `builtin bin` is retired (C7 / R-NUM, Decision 5): the kind is unknown and
+	// no longer parses.
+	if _, err := surface.ParseProgram("builtin bin BN bn0 bnP Pos pH pO pI"); err == nil {
+		t.Errorf("`builtin bin` should no longer parse (the kind is retired)")
 	}
-
-	if _, err := surface.ParseExpr("2"); err == nil || !strings.Contains(err.Error(), "no `builtin nat`") {
-		t.Errorf("bare numeral without binding: want parse error, got %v", err)
+	if got, ok := two.(surface.ENum); !ok || got.Val != 2 {
+		t.Errorf("2 parsed to %#v, want surface.ENum{Val: 2}", two)
 	}
-	if _, err := surface.ParseExprNat("succ 41", "zero", "succ"); err != nil {
-		t.Errorf("ParseExprNat: %v", err)
+	// A bare numeral parses with no binding at all — lowering, not parsing, is
+	// where a missing binding is reported.
+	if e, err := surface.ParseExpr("2"); err != nil {
+		t.Errorf("bare numeral should parse: %v", err)
+	} else if n, ok := e.(surface.ENum); !ok || n.Val != 2 {
+		t.Errorf("bare 2 parsed to %#v, want ENum{Val: 2}", e)
 	}
-	if _, err := surface.ParseExprNat("99999999999", "zero", "succ"); err == nil {
-		t.Errorf("oversized numeral should fail")
+	if _, err := surface.ParseExpr("99999999999999999999999999"); err == nil {
+		t.Errorf("numeral exceeding int range should fail to parse")
 	}
 }
 

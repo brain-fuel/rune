@@ -1,0 +1,55 @@
+-- Chapter 45 — Glue types: the engine of computational univalence (§F / A6).
+-- `Glue` welds a partial type `T` onto a base `A` along a partial equivalence
+-- `e`. It is the construct that turns an equivalence into a transporting path —
+-- the heart of `ua`. This chapter certifies the READY slice of A6: the former,
+-- the glue/unglue intro/elim, and the THREE equations that compute. (The
+-- transp/hcomp-over-Glue fixups are the honest-stuck remainder, blocked on
+-- proper-face hcomp (R-BOX) and the ∀i.φ cofibration — see GLUE-DESIGN.md.)
+--
+--   Glue   : (A : UF) -> (φ : F) -> (T : holds φ -> UF)
+--              -> (e : (h : holds φ) -> El (Equiv (T h) A)) -> UF
+--   glue   : … -> (t : (h : holds φ) -> El (T h)) -> (a : El A) -> El (Glue A φ T e)
+--   unglue : … -> El (Glue A φ T e) -> El A
+--
+-- `Equiv`/`equivFun` are the (opaque, A6) equivalence group; on a total face the
+-- glued type IS its T-component and unglue IS the equivalence's forward map.
+
+-- (1) TYPE boundary: Glue on a TOTAL face IS its T-component. El (Glue A ⊤ T e)
+-- reduces to El (T htop), so reflexivity certifies the two are the same type.
+glueTopType : (A : UF) -> (T : holds ftop -> UF)
+   -> (e : (h : holds ftop) -> El (Equiv (T h) A))
+   -> Eq U (El (Glue A ftop T e)) (El (T htop)) is
+  fn (A : UF) (T : holds ftop -> UF)
+     (e : (h : holds ftop) -> El (Equiv (T h) A)) is
+    refl (El (T htop))
+  end
+end
+
+-- (2) unglue BETA: unglue of a glued pair is its A-component, on ANY face.
+--   unglue A φ T e (glue A φ T e t a)  ~>  a
+unglueBeta : (A : UF) -> (phi : F) -> (T : holds phi -> UF)
+   -> (e : (h : holds phi) -> El (Equiv (T h) A))
+   -> (t : (h : holds phi) -> El (T h)) -> (a : El A)
+   -> Eq (El A) (unglue A phi T e (glue A phi T e t a)) a is
+  fn (A : UF) (phi : F) (T : holds phi -> UF)
+     (e : (h : holds phi) -> El (Equiv (T h) A))
+     (t : (h : holds phi) -> El (T h)) (a : El A) is
+    refl a
+  end
+end
+
+-- (3) unglue BOUNDARY: on a total face, unglue is the equivalence's forward map.
+--   unglue A ⊤ T e g  ~>  equivFun (T htop) A (e htop) g
+-- NB g : El (Glue A ⊤ T e) ≡ El (T htop) by (1), so it typechecks as the
+-- T-element equivFun consumes — the equation that lands a univalence path's end
+-- on `f` rather than the identity.
+unglueTop : (A : UF) -> (T : holds ftop -> UF)
+   -> (e : (h : holds ftop) -> El (Equiv (T h) A))
+   -> (g : El (Glue A ftop T e))
+   -> Eq (El A) (unglue A ftop T e g) (equivFun (T htop) A (e htop) g) is
+  fn (A : UF) (T : holds ftop -> UF)
+     (e : (h : holds ftop) -> El (Equiv (T h) A))
+     (g : El (Glue A ftop T e)) is
+    refl (equivFun (T htop) A (e htop) g)
+  end
+end

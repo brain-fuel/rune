@@ -1,11 +1,13 @@
--- Chapter 10 — Univalence, postulated; transport, computing.
+-- Chapter 10 — Univalence, DERIVED; transport, computing.
 -- The construction v1 and v2 correctly refused now has a home that costs
 -- nothing it bought: ua turns an isomorphism into an inner path between
--- fibrant types, and castU transports along it AS A PROGRAM. What computes
--- and what is postulated is the chapter's whole point:
+-- fibrant types, and castU transports along it AS A PROGRAM. ua is NOT a
+-- postulate — it is a DERIVED definition (a Glue line; the ambient
+-- derived-univalence prelude), and there is no baked-in castU-over-ua rule.
+-- What computes is the chapter's whole point:
 --
 --   castU A B (ureflU A) x      computes to x
---   castU A B (ua … f …) x      computes to f x      ← the programming idiom
+--   castU A B (ua … f …) x      computes to f x      ← via transp-over-Glue
 --   path induction OVER a ua-path                     ← does NOT compute: §F
 --
 -- And the reason the two equalities can share a core: pathU A B is ordinary
@@ -33,8 +35,8 @@ end
 
 -- Univalence, used: the not-isomorphism becomes an inner path Bool = Bool.
 -- This is the inhabitant that UIP forbids globally and the inner layer
--- houses locally — ua is POSTULATED (a permanently neutral head), exactly
--- the honesty v3 ships with.
+-- houses locally — ua is DERIVED (a Glue line via the ambient prelude), so
+-- this path is a genuine construction, not a postulate.
 notPath : pathU boolF boolF is
   ua boolF boolF not not notNot notNot
 end

@@ -1,0 +1,109 @@
+-- Chapter 83 — TOTALITY of the order (D1, the proven tier): `lteTotal`, the law that
+-- upgrades (Nat, <=) from a PARTIAL ORDER to a TOTAL / LINEAR order. ch65 proved
+-- reflexivity (`lteRefl`) and the successor monotonicities; ch80 proved transitivity
+-- (`lteTrans`); ch82 proved antisymmetry (`lteAntisym`) — together a genuine partial
+-- order. The remaining law that makes the order LINEAR is totality (a.k.a.
+-- comparability / connexity): every pair of Nats is comparable, i.e. one of a <= b,
+-- b <= a always holds. With it (Nat, <=) is a total order, the precondition that
+-- certified SORTING and balanced Map/Set rebalancing (the comparison D2) ride on —
+-- a comparison that can be STUCK (neither direction) would leave those algorithms
+-- with no case to take.
+--
+-- `lte` recurses on its FIRST argument (an inner NatElim cases the second), verbatim
+-- from ch65/ch80/ch82, so `lte zero b`, `lte (succ a') zero`, and the
+-- successor-of-successor step all reduce definitionally. `or` is the Boolean
+-- disjunction by BoolElim: `or true _ ~> true`, `or false b ~> b`. The proof is
+-- double induction on a then b; almost everything closes by COMPUTATION:
+--
+--   a = zero            : lte zero b ~> true, so or true _ ~> true — refl true.
+--   a = succ a', b = zero : lte (succ a') zero ~> false and lte zero (succ a') ~> true,
+--                           so or false true ~> true — refl true.
+--   a = succ a', b = succ b' : both comparisons step to the predecessors —
+--                           or (lte a' b') (lte b' a') — which is exactly the IH
+--                           `lteTotal a' b'`, applied on the nose.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- lte a b = (a <= b), verbatim from ch65/ch80/ch82: zero is below everything;
+-- succ k <= zero is false; succ k <= succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- or a b = Boolean disjunction by BoolElim on the first argument: when a is true the
+-- answer is true regardless of b; when a is false the answer is b. So or true _ ~> true
+-- and or false b ~> b both reduce definitionally.
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- TOTALITY / LINEARITY: for every a, b at least one of a <= b, b <= a holds, by
+-- induction on a, then b. The motive of the OUTER induction is the whole statement
+-- quantified over b, so the successor step hands back a genuine induction hypothesis
+-- at the predecessor.
+--
+--   a = zero            : lte zero b ~> true, so or true (lte b zero) ~> true — refl.
+--   a = succ a', b = zero : lte (succ a') zero ~> false, lte zero (succ a') ~> true,
+--                           so or false true ~> true — refl.
+--   a = succ a', b = succ b' : lte (succ a') (succ b') ~> lte a' b' and
+--                           lte (succ b') (succ a') ~> lte b' a', so the goal is
+--                           or (lte a' b') (lte b' a') = true = the IH at (a', b').
+lteTotal : (a : Nat) -> (b : Nat)
+   -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      -- a = zero: lte zero b ~> true, so or true _ ~> true.
+      (fn (b : Nat) is refl true end)
+      -- a = succ a', with IH at a'.
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             -- b = zero: or false true ~> true.
+             (refl true)
+             -- b = succ b': both comparisons step; the goal is the IH at (a', b').
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- A SANITY check that the law computes at concrete arguments: 2 and 3 are comparable
+-- (2 <= 3 is true, so the disjunction is true), and the certificate is the canonical
+-- `refl true`.
+twoThreeComparable : Eq Bool
+  (or (lte (succ (succ zero)) (succ (succ (succ zero))))
+      (lte (succ (succ (succ zero))) (succ (succ zero)))) true is
+  lteTotal (succ (succ zero)) (succ (succ (succ zero)))
+end

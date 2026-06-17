@@ -205,6 +205,60 @@ func (e *Elaborator) InferCore(c *Ctx, t core.Tm) (core.Val, error) {
 			return nil, err
 		}
 		return want, nil
+	case core.Sig:
+		domSort, err := e.checkTypeCore(c, tm.Dom)
+		if err != nil {
+			return nil, err
+		}
+		dom := e.Eval(c, tm.Dom)
+		codSort, err := e.checkTypeCore(c.bind(tm.Cod.Name, dom), tm.Cod.Body)
+		if err != nil {
+			return nil, err
+		}
+		return sigSort(domSort, codSort), nil
+	case core.Pair:
+		if _, err := e.checkTypeCore(c, tm.Dom); err != nil {
+			return nil, err
+		}
+		vdom := e.Eval(c, tm.Dom)
+		if _, err := e.checkTypeCore(c.bind(tm.Cod.Name, vdom), tm.Cod.Body); err != nil {
+			return nil, err
+		}
+		if err := e.CheckCore(c, tm.A, vdom); err != nil {
+			return nil, err
+		}
+		vsig, ok := e.Eval(c, core.Sig{Dom: tm.Dom, Cod: tm.Cod}).(core.VSig)
+		if !ok {
+			return nil, fmt.Errorf("pair: Σ did not evaluate to a Σ value")
+		}
+		if err := e.CheckCore(c, tm.B, vsig.Cod(e.Eval(c, tm.A))); err != nil {
+			return nil, err
+		}
+		return vsig, nil
+	case core.Fst:
+		pty, err := e.InferCore(c, tm.P)
+		if err != nil {
+			return nil, err
+		}
+		sig, ok := e.M.Force(pty).(core.VSig)
+		if !ok {
+			return nil, fmt.Errorf("fst of a non-Σ of type %s", e.pretty(c, pty))
+		}
+		return sig.Dom, nil
+	case core.Snd:
+		pty, err := e.InferCore(c, tm.P)
+		if err != nil {
+			return nil, err
+		}
+		sig, ok := e.M.Force(pty).(core.VSig)
+		if !ok {
+			return nil, fmt.Errorf("snd of a non-Σ of type %s", e.pretty(c, pty))
+		}
+		return sig.Cod(e.Eval(c, core.Fst{P: tm.P})), nil
+	case core.NatLit:
+		// A compressed numeral inhabits its nat binding's type — the type of its
+		// zero constructor (NatLit is definitionally succ^N zero of that nat).
+		return e.refType(tm.Zero)
 	default:
 		return nil, fmt.Errorf("infer: unknown core term %T", t)
 	}

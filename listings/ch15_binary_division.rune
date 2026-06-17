@@ -1,0 +1,281 @@
+-- Chapter 15 — Binary division and gcd: the fast operations, on the bits.
+-- Chapter 14 routed addition and multiplication through a binary datatype and
+-- proved each agrees with the unary spec. Division and gcd are the next rung.
+-- The win is real this time only if the work happens IN binary: long division
+-- recurses on the dividend's bit-spine (logarithmically many steps), and each
+-- step shifts, compares, and conditionally subtracts — all on the binary
+-- representation, never by walking a unary chain. Comparison and truncated
+-- subtraction are the binary primitives that make it go; gcd is Euclid over
+-- binary modulus, fuel-bounded exactly as in chapter 11.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
+double : Nat -> Nat is
+  fn (n : Nat) is case n of | zero -> 0 | succ k with ih -> succ (succ ih) end end
+end
+
+-- Pos is the strictly-positive binaries (no leading-zero junk): pH is 1, pO p
+-- is 2p, pI p is 2p+1. BN adjoins zero.
+data Pos : U is
+  pH : Pos
+| pO : Pos -> Pos
+| pI : Pos -> Pos
+end
+
+data BN : U is
+  bn0 : BN
+| bnP : Pos -> BN
+end
+
+-- Readback to the unary spec, for the agreement certificates at the end.
+toNatP : Pos -> Nat is
+  fn (p : Pos) is
+    case p of
+    | pH -> 1
+    | pO a with ih -> double ih
+    | pI a with ih -> succ (double ih)
+    end
+  end
+end
+
+toNat : BN -> Nat is
+  fn (b : BN) is case b of | bn0 -> 0 | bnP p -> toNatP p end end
+end
+
+-- Successor on Pos and BN: the carry rides into psucc.
+psucc : Pos -> Pos is
+  fn (p : Pos) is
+    case p of
+    | pH -> pO pH
+    | pO a -> pI a
+    | pI a with ih -> pO ih
+    end
+  end
+end
+
+bnsucc : BN -> BN is
+  fn (b : BN) is case b of | bn0 -> bnP pH | bnP p -> bnP (psucc p) end end
+end
+
+-- A binary value from a Nat, by iterated bnsucc. The certificates below feed
+-- their inputs in as `fromNat N` rather than a bare numeral: the old
+-- `builtin bin` literal binding that let `N : BN` lower straight to a bit-spine
+-- is retired (C7 / R-NUM, Decision 5) — the compressed core numeral NatLit
+-- subsumes it for Nat, and BN is an ordinary datatype populated explicitly.
+fromNat : Nat -> BN is
+  fn (n : Nat) is case n of | zero -> bn0 | succ k with ih -> bnsucc ih end end
+end
+
+
+-- Truncated subtraction, the heart of long division. The standard binary trick:
+-- a three-way "mask" carrying whether p - q is zero, a positive, or negative,
+-- and a SECOND mask for the borrow case p - q - 1. They are mutually recursive,
+-- which the eliminator does not give directly, so subBoth returns the pair and
+-- recurses once; sub and subCarry read off the components.
+
+data Mask : U is
+  isNul : Mask
+| isPos : Pos -> Mask
+| isNeg : Mask
+end
+
+data MM : U is mm : Mask -> Mask -> MM end
+fstM : MM -> Mask is fn (m : MM) is case m of | mm a b -> a end end end
+sndM : MM -> Mask is fn (m : MM) is case m of | mm a b -> b end end end
+
+doubleMask : Mask -> Mask is
+  fn (m : Mask) is case m of | isNul -> isNul | isPos p -> isPos (pO p) | isNeg -> isNeg end end
+end
+
+succDoubleMask : Mask -> Mask is
+  fn (m : Mask) is case m of | isNul -> isPos pH | isPos p -> isPos (pI p) | isNeg -> isNeg end end
+end
+
+-- predDouble p = 2p - 1 (always positive for p >= 1).
+predDouble : Pos -> Pos is
+  fn (p : Pos) is
+    case p of
+    | pH -> pH
+    | pO a with ih -> pI ih
+    | pI a -> pI (pO a)
+    end
+  end
+end
+
+-- doublePredMask p = 2*(p - 1).
+doublePredMask : Pos -> Mask is
+  fn (p : Pos) is
+    case p of
+    | pH -> isNul
+    | pO a -> isPos (pO (predDouble a))
+    | pI a -> isPos (pO (pO a))
+    end
+  end
+end
+
+-- subBoth p q = (p - q  as mask,  p - q - 1  as mask), by recursion on p.
+subBoth : Pos -> Pos -> MM is
+  fn (p : Pos) is
+    case p of
+    | pH -> fn (q : Pos) is
+        case q of
+        | pH -> mm isNul isNeg
+        | pO b -> mm isNeg isNeg
+        | pI b -> mm isNeg isNeg
+        end
+      end
+    | pO a with ih -> fn (q : Pos) is
+        case q of
+        | pO b -> mm (doubleMask (fstM (ih b))) (succDoubleMask (sndM (ih b)))
+        | pI b -> mm (succDoubleMask (sndM (ih b))) (doubleMask (sndM (ih b)))
+        | pH -> mm (isPos (predDouble a)) (doublePredMask a)
+        end
+      end
+    | pI a with ih -> fn (q : Pos) is
+        case q of
+        | pO b -> mm (succDoubleMask (fstM (ih b))) (doubleMask (fstM (ih b)))
+        | pI b -> mm (doubleMask (fstM (ih b))) (succDoubleMask (sndM (ih b)))
+        | pH -> mm (isPos (pO a)) (isPos (predDouble a))
+        end
+      end
+    end
+  end
+end
+
+subMask : Pos -> Pos -> Mask is fn (p : Pos) (q : Pos) is fstM (subBoth p q) end end
+
+-- posSub p q truncates at zero: a BN, since p - q can be zero or negative.
+posSub : Pos -> Pos -> BN is
+  fn (p : Pos) (q : Pos) is
+    case subMask p q of
+    | isNul -> bn0
+    | isPos r -> bnP r
+    | isNeg -> bn0
+    end
+  end
+end
+
+
+-- Comparison falls out of the mask: p >= q exactly when p - q is not negative.
+
+-- Long division proper. The quotient/remainder pair, and the two shift helpers
+-- that append a bit to a BN (2*b and 2*b+1).
+data QR : U is qr : BN -> BN -> QR end
+qQuot : QR -> BN is fn (x : QR) is case x of | qr q r -> q end end end
+qRem  : QR -> BN is fn (x : QR) is case x of | qr q r -> r end end end
+
+shift0 : BN -> BN is
+  fn (b : BN) is case b of | bn0 -> bn0 | bnP p -> bnP (pO p) end end
+end
+shift1 : BN -> BN is
+  fn (b : BN) is case b of | bn0 -> bnP pH | bnP p -> bnP (pI p) end end
+end
+
+-- One bit of long division: extend the running quotient q' and feed in the new
+-- candidate remainder cand. If cand >= d, the quotient bit is 1 and the new
+-- remainder is cand - d; otherwise the bit is 0 and the remainder is cand.
+extend : BN -> BN -> Pos -> QR is
+  fn (qprev : BN) (cand : BN) (d : Pos) is
+    case cand of
+    | bn0 -> qr (shift0 qprev) bn0
+    | bnP c ->
+        case subMask c d of
+        | isNeg -> qr (shift0 qprev) (bnP c)
+        | isNul -> qr (shift1 qprev) bn0
+        | isPos r -> qr (shift1 qprev) (bnP r)
+        end
+    end
+  end
+end
+
+-- Long division of a positive dividend by a positive divisor, by recursion on
+-- the dividend's bit-spine. The IH divides the higher bits; each step shifts the
+-- remainder left by one and brings down the current bit (0 for pO, 1 for pI).
+bndivmodP : Pos -> Pos -> QR is
+  fn (p : Pos) is
+    case p of
+    | pH -> fn (d : Pos) is extend bn0 (bnP pH) d end
+    | pO a with ih -> fn (d : Pos) is extend (qQuot (ih d)) (shift0 (qRem (ih d))) d end
+    | pI a with ih -> fn (d : Pos) is extend (qQuot (ih d)) (shift1 (qRem (ih d))) d end
+    end
+  end
+end
+
+-- BN wrapper: zero dividend gives (0,0); a zero divisor is left undefined and
+-- returns (0, dividend) by convention (no listing divides by zero).
+bndivmod : BN -> BN -> QR is
+  fn (x : BN) (y : BN) is
+    case y of
+    | bn0 -> qr bn0 x
+    | bnP d ->
+        case x of
+        | bn0 -> qr bn0 bn0
+        | bnP n -> bndivmodP n d
+        end
+    end
+  end
+end
+
+bndiv : BN -> BN -> BN is fn (x : BN) (y : BN) is qQuot (bndivmod x y) end end
+bnmod : BN -> BN -> BN is fn (x : BN) (y : BN) is qRem (bndivmod x y) end end
+
+
+-- gcd by Euclid over binary modulus. The second argument strictly decreases
+-- (a mod b < b), so it is fuel-bounded exactly as chapter 11's gcd: succ of the
+-- second argument's value is always enough. Each step's modulus runs in binary.
+bngcdF : Nat -> BN -> BN -> BN is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : BN) (b : BN) is a end
+    | succ f with ih -> fn (a : BN) (b : BN) is
+        case b of
+        | bn0 -> a
+        | bnP d -> ih b (bnmod a b)
+        end
+      end
+    end
+  end
+end
+
+bngcd : BN -> BN -> BN is
+  fn (a : BN) (b : BN) is bngcdF (succ (toNat b)) a b end
+end
+
+
+-- The agreement certificates. As in chapter 11, the GENERAL division-algorithm
+-- and gcd-divides theorems are course-of-values material (deferred); what is
+-- pinned here is the readiness gate's working form — each result certified by
+-- running the binary operation and reading it back against the unary answer.
+-- "Trusted implementation" stays a theorem: the certificate is the proof.
+
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end
+end
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case m of | zero -> 0 | succ k with ih -> ih + n end end
+end
+
+-- Quotient and remainder, computed in binary, agree with the unary answers. The
+-- inputs cross into BN via fromNat (the retired `builtin bin` literal binding no
+-- longer lowers a bare numeral straight to a bit-spine); the answers on the right
+-- are ordinary Nat literals (compressed NatLit).
+divCert : toNat (bndiv (fromNat 1435) (fromNat 41)) = 35 is refl 35 end
+modCert : toNat (bnmod (fromNat 1435) (fromNat 41)) = 0 is refl 0 end
+div100Cert : toNat (bndiv (fromNat 100) (fromNat 7)) = 14 is refl 14 end
+mod100Cert : toNat (bnmod (fromNat 100) (fromNat 7)) = 2 is refl 2 end
+
+-- The division-with-remainder invariant, checked through binary: the binary
+-- quotient times the divisor plus the binary remainder is the dividend.
+divModInvariant : toNat (bndiv (fromNat 100) (fromNat 7)) * 7 + toNat (bnmod (fromNat 100) (fromNat 7)) = 100 is refl 100 end
+
+-- gcd, computed in binary, agrees with the unary answers.
+gcdCert : toNat (bngcd (fromNat 252) (fromNat 105)) = 21 is refl 21 end
+gcdCoprime : toNat (bngcd (fromNat 35) (fromNat 64)) = 1 is refl 1 end
+
+-- The gate's runnable answer: gcd(1071, 462) through binary, read back to a Nat.
+answer : Nat is toNat (bngcd (fromNat 1071) (fromNat 462)) end

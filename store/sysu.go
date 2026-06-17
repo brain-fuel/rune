@@ -1,0 +1,127 @@
+package store
+
+import "goforge.dev/rune/v3/core"
+
+// The UF-valued face-split builtin group (§F / R-BOX / A8): the universe-level
+// counterpart of `fsplit`. Where `fsplit A φ ψ u v h : El A` dispatches a partial
+// ELEMENT by which disjunct of `holds (for φ ψ)` holds, `sysU` dispatches a partial
+// TYPE — its branches are UF-valued and so is its result:
+//
+//	sysU : (φ : F) -> (ψ : F)
+//	         -> (u : holds φ -> UF) -> (v : holds ψ -> UF)
+//	         -> holds (for φ ψ) -> UF
+//
+// This is the primitive a type-level system `[φ ↦ U; ψ ↦ V]` needs — exactly the
+// T-component of a univalence Glue line `Glue B ((i=0)∨(i=1)) [i=0↦A; i=1↦B] …`,
+// whose T is UF-valued (A at one face, B at the other) and which the element-valued
+// `fsplit` cannot express. A separate group on its own hash space (like fsplit),
+// built against the fibrant, face, and system groups, so their hashes — and every
+// earlier chapter — stay stable.
+//
+// sysU COMPUTES by face-ι (core.SysUInfo / the evaluator's trySysUIota):
+//
+//	sysU φ ψ u v h  ~>  u htop   when φ ≡ ⊤
+//	sysU φ ψ u v h  ~>  v htop   when ψ ≡ ⊤
+//
+// stuck when both faces are proper. Overlap (both ⊤) takes the φ-branch; agreement
+// on the overlap is the caller's obligation (vacuous for disjoint faces like
+// ieq0/ieq1). No hash-format bump (no new core constructor).
+
+var sysUNames = [1]string{"sysU"}
+
+type sysUEntry struct {
+	hashes [1]core.Hash
+}
+
+// AddSysU registers the UF-valued face-split group against the already-registered
+// fibrant, face, and system groups, binding its name and returning the member hash.
+func (s *Store) AddSysU(fib [10]core.Hash, face [7]core.Hash, sys [5]core.Hash) [1]core.Hash {
+	tys := sysUTypes(fib, face, sys)
+
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'Z'})
+	for _, ty := range tys {
+		th := core.HashTerm(ty)
+		g.Write(th[:])
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	var hs [1]core.Hash
+	for i := range hs {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, 'z'})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		copy(hs[i][:], h.Sum(nil))
+	}
+	for i, ty := range tys {
+		s.defs[hs[i]] = Def{Type: ty}
+		s.names[sysUNames[i]] = hs[i]
+	}
+	s.syu = &sysUEntry{hashes: hs}
+	return hs
+}
+
+// SysURoleOf implements core.SysUInfo.
+func (s *Store) SysURoleOf(h core.Hash) core.SysURole {
+	if s.syu == nil {
+		return core.SURoleNone
+	}
+	if h == s.syu.hashes[0] {
+		return core.SURoleSysU
+	}
+	return core.SURoleNone
+}
+
+// SysUHash implements core.SysUInfo: the member hash, for callers to construct
+// type-level systems.
+func (s *Store) SysUHash() (core.Hash, bool) {
+	if s.syu == nil {
+		return core.Hash{}, false
+	}
+	return s.syu.hashes[0], true
+}
+
+// SysUHashes returns the registered group's hashes (and whether it exists).
+func (s *Store) SysUHashes() ([1]core.Hash, bool) {
+	if s.syu == nil {
+		return [1]core.Hash{}, false
+	}
+	return s.syu.hashes, true
+}
+
+// SysUNames returns the surface names of the group members, in hash order.
+func SysUNames() [1]string { return sysUNames }
+
+// sysUTypes builds the one member type, referencing the fibrant group (UF =
+// fib[0]), the face former (F = face[0]) and disjunction (for = face[4]), and
+// holds (sys[0]).
+func sysUTypes(fib [10]core.Hash, face [7]core.Hash, sys [5]core.Hash) [1]core.Tm {
+	v := func(i int) core.Tm { return core.Var{Idx: i} }
+	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
+		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
+	}
+	app := func(f core.Tm, xs ...core.Tm) core.Tm {
+		for _, x := range xs {
+			f = core.App{Fn: f, Arg: x, Icit: core.Expl}
+		}
+		return f
+	}
+	uf := core.Tm(core.Ref{Hash: fib[0]})
+	fTy := core.Tm(core.Ref{Hash: face[0]})
+	holds := func(x core.Tm) core.Tm { return app(core.Ref{Hash: sys[0]}, x) }
+	forC := func(x, y core.Tm) core.Tm { return app(core.Ref{Hash: face[4]}, x, y) }
+
+	// sysU : (φ : F) -> (ψ : F)
+	//          -> (u : holds φ -> UF) -> (v : holds ψ -> UF)
+	//          -> holds (for φ ψ) -> UF
+	sysUTy := pi("phi", fTy, //                                 [φ]: φ=0
+		pi("psi", fTy, //                                       [ψ,φ]: ψ=0,φ=1
+			pi("u", pi("_", holds(v(1)), uf), //               u: holds φ -> UF
+				pi("v", pi("_", holds(v(1)), uf), //           v: holds ψ -> UF
+					pi("h", holds(forC(v(3), v(2))), //        h: holds (for φ ψ)
+						uf))))) //                              -> UF
+
+	return [1]core.Tm{sysUTy}
+}

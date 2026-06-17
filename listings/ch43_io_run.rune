@@ -1,0 +1,15 @@
+-- Chapter 43 — IO runs (R-EFFECT / C3 runtime).
+-- The IO monad now DEPLOYS: IO A erases to a world thunk, pureIO/bindIO sequence
+-- effects, and an IO main is RUN (its thunk forced) before its result is shown.
+-- This is pure IO (no host op needed); foreign effectful ops (putStr/readFile)
+-- layer on via R-FFI. IO is OUTER — it executes.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- a two-step IO computation: return 1, then map succ over it.
+prog : IO Nat is
+  bindIO Nat Nat (pureIO Nat (succ zero)) (fn (n : Nat) is pureIO Nat (succ n) end)
+end

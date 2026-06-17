@@ -1,0 +1,33 @@
+-- Chapter 60 — Verified FFI contracts (R-FFI / B4): a `foreign` axiom can carry a
+-- PRECONDITION the caller must discharge with a PROOF. Here `guardedNat` may be
+-- implemented by the host assuming its argument is nonzero, because every caller
+-- must supply a proof that `isZero d = false`. The proof binder is 0-quantity, so
+-- the contract is CHECKED at compile time and ERASED at runtime — verified interop
+-- that costs nothing to deploy (the emitted call passes the proof as the unit token,
+-- and the same program runs on every backend). A caller that cannot prove the
+-- precondition (e.g. passing `zero`) simply fails to elaborate — the contract is the
+-- type. This is the "assume" tier of the FFI contract design, realized on the
+-- existing dependent-foreign + QTT machinery.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+isZero : Nat -> Bool is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n
+  end
+end
+
+-- The guarded foreign: the host gets `d` only with evidence that it is nonzero.
+foreign guardedNat : (d : Nat) -> (0 pf : Eq Bool (isZero d) false) -> Nat end
+
+-- A valid call: isZero (succ (succ zero)) reduces to false, so `refl false` proves
+-- the precondition on the nose.
+answer : Nat is guardedNat (succ (succ zero)) (refl false) end

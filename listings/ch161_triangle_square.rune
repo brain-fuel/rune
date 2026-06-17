@@ -1,0 +1,971 @@
+-- Chapter 107 — ℤ is a COMPLETE COMMUTATIVE RING, machine-checked (telos-3 / M6).
+-- ch07 built ℤ = NatPair / ZRel; ch103 made (ℤ, +, 0, −) an abelian GROUP
+-- (zaddComm/Assoc + zaddNegR); ch105 added integer multiplication `zmul`, proved its
+-- well-definedness through ZRel (pmulRespL/R) and commutativity `zmulComm`. This chapter
+-- lands the REMAINING ring axioms and closes the ring:
+--   • zmulOneR  : x * 1 = x        (multiplicative right identity)
+--   • zmulOneL  : 1 * x = x        (left identity, from zmulComm)
+--   • zmulZeroR : x * 0 = 0        (annihilation)
+--   • zmulDistR : x * (y + z) = x*y + x*z   (LEFT-distributivity of × over +)
+--   • zmulDistL : (x + y) * z = x*z + y*z   (right-distributivity, from zmulComm)
+--   • zmulAssoc : (x * y) * z = x * (y * z) (associativity)
+-- With ch105's zmulComm + these, (ℤ, +, ×, 0, 1, −) is a FULLY VERIFIED COMMUTATIVE RING.
+--
+-- Each law is proven on representatives, where ℤ multiplication is the signed-pair product
+-- pmul (a,b)(c,d) = (ac+bd, ad+bc), and lifted through ZRel by qind/qsound. The
+-- representative obligations run on the Nat SEMIRING (mulDistL/mulDistR + interchange/
+-- addComm regrouping for distributivity; a four-way mul reassociation for associativity).
+--
+-- ch07/ch103/ch105's ℤ infrastructure and ch63/ch81's Nat semiring lemmas are REDECLARED
+-- VERBATIM so the chapter is self-contained.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+mul : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add n ih end) m
+  end
+end
+
+-- The equality toolkit (ch07), with implicit arguments doing the bookkeeping.
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> Eq A x y -> Eq B (f x) (f y) is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ============================================================================
+-- The Nat SEMIRING lemmas (ch63 / ch81), redeclared verbatim.
+-- ============================================================================
+
+addZeroR : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+         subst Nat (add k zero) k ih
+           (fn (z : Nat) is Eq Nat (add (succ k) zero) (succ z) end)
+           (refl (add (succ k) zero))
+       end)
+      n
+  end
+end
+
+addSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (add n (succ m)) (succ (add n m)) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ m)) (succ (add x m)) end)
+      (refl (succ m))
+      (fn (k : Nat) (ih : Eq Nat (add k (succ m)) (succ (add k m))) is
+         subst Nat (add k (succ m)) (succ (add k m)) ih
+           (fn (z : Nat) is Eq Nat (add (succ k) (succ m)) (succ z) end)
+           (refl (add (succ k) (succ m)))
+       end)
+      n
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (add (add a b) c) (add a (add b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add (add x b) c) (add x (add b c)) end)
+      (refl (add b c))
+      (fn (k : Nat) (ih : Eq Nat (add (add k b) c) (add k (add b c))) is
+         subst Nat (add (add k b) c) (add k (add b c)) ih
+           (fn (z : Nat) is Eq Nat (succ (add (add k b) c)) (succ z) end)
+           (refl (succ (add (add k b) c)))
+       end)
+      a
+  end
+end
+
+addComm : (n : Nat) -> (m : Nat) -> Eq Nat (add n m) (add m n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x m) (add m x) end)
+      (subst Nat (add m zero) m (addZeroR m)
+         (fn (z : Nat) is Eq Nat z (add m zero) end)
+         (refl (add m zero)))
+      (fn (k : Nat) (ih : Eq Nat (add k m) (add m k)) is
+         subst Nat (succ (add m k)) (add m (succ k))
+           (subst Nat (add m (succ k)) (succ (add m k)) (addSuccR m k)
+              (fn (z : Nat) is Eq Nat z (add m (succ k)) end)
+              (refl (add m (succ k))))
+           (fn (z : Nat) is Eq Nat (succ (add k m)) z end)
+           (subst Nat (add k m) (add m k) ih
+              (fn (z : Nat) is Eq Nat (succ (add k m)) (succ z) end)
+              (refl (succ (add k m))))
+       end)
+      n
+  end
+end
+
+mulZeroR : (n : Nat) -> Eq Nat (mul n zero) zero is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul x zero) zero end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k zero) zero) is ih end)
+      n
+  end
+end
+
+-- RIGHT DISTRIBUTIVITY: (a + b) * c = a*c + b*c (ch63).
+mulDistR : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (mul (add a b) c) (add (mul a c) (mul b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul (add x b) c) (add (mul x c) (mul b c)) end)
+      (refl (mul b c))
+      (fn (k : Nat) (ih : Eq Nat (mul (add k b) c) (add (mul k c) (mul b c))) is
+         subst Nat
+           (add c (add (mul k c) (mul b c)))
+           (add (add c (mul k c)) (mul b c))
+           (subst Nat
+              (add (add c (mul k c)) (mul b c))
+              (add c (add (mul k c) (mul b c)))
+              (addAssoc c (mul k c) (mul b c))
+              (fn (z : Nat) is Eq Nat z (add (add c (mul k c)) (mul b c)) end)
+              (refl (add (add c (mul k c)) (mul b c))))
+           (fn (z : Nat) is Eq Nat (add c (mul (add k b) c)) z end)
+           (subst Nat (mul (add k b) c) (add (mul k c) (mul b c)) ih
+              (fn (z : Nat) is Eq Nat (add c (mul (add k b) c)) (add c z) end)
+              (refl (add c (mul (add k b) c))))
+       end)
+      a
+  end
+end
+
+-- MULTIPLICATIVE SUCCESSOR-SHIFT: mul n (succ m) = add (mul n m) n (ch81).
+mulSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (mul n (succ m)) (add (mul n m) n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul x (succ m)) (add (mul x m) x) end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k (succ m)) (add (mul k m) k)) is
+         subst Nat
+           (succ (add (add m (mul k m)) k))
+           (add (add m (mul k m)) (succ k))
+           (subst Nat
+              (add (add m (mul k m)) (succ k))
+              (succ (add (add m (mul k m)) k))
+              (addSuccR (add m (mul k m)) k)
+              (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) (succ k)) end)
+              (refl (add (add m (mul k m)) (succ k))))
+           (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) z end)
+           (subst Nat
+              (add m (add (mul k m) k))
+              (add (add m (mul k m)) k)
+              (subst Nat
+                 (add (add m (mul k m)) k)
+                 (add m (add (mul k m) k))
+                 (addAssoc m (mul k m) k)
+                 (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) k) end)
+                 (refl (add (add m (mul k m)) k)))
+              (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ z) end)
+              (subst Nat
+                 (mul k (succ m))
+                 (add (mul k m) k)
+                 ih
+                 (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ (add m z)) end)
+                 (refl (mul (succ k) (succ m)))))
+       end)
+      n
+  end
+end
+
+-- COMMUTATIVITY of Nat mul (ch81), by induction on m.
+mulComm : (m : Nat) -> (n : Nat) -> Eq Nat (mul m n) (mul n m) is
+  fn (m : Nat) (n : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul x n) (mul n x) end)
+      (subst Nat (mul n zero) zero (mulZeroR n)
+         (fn (z : Nat) is Eq Nat z (mul n zero) end)
+         (refl (mul n zero)))
+      (fn (k : Nat) (ih : Eq Nat (mul k n) (mul n k)) is
+         subst Nat
+           (add (mul n k) n)
+           (mul n (succ k))
+           (subst Nat
+              (mul n (succ k))
+              (add (mul n k) n)
+              (mulSuccR n k)
+              (fn (z : Nat) is Eq Nat z (mul n (succ k)) end)
+              (refl (mul n (succ k))))
+           (fn (z : Nat) is Eq Nat (mul (succ k) n) z end)
+           (subst Nat
+              (mul n k)
+              (mul k n)
+              (subst Nat (mul k n) (mul n k) ih
+                 (fn (z : Nat) is Eq Nat z (mul k n) end)
+                 (refl (mul k n)))
+              (fn (z : Nat) is Eq Nat (add n z) (add (mul n k) n) end)
+              (addComm n (mul n k)))
+       end)
+      m
+  end
+end
+
+-- LEFT DISTRIBUTIVITY: a * (b + c) = a*b + a*c, derived from mulComm + mulDistR.
+mulDistL : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (mul a (add b c)) (add (mul a b) (mul a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    trans (mulComm a (add b c))
+      (trans (mulDistR b c a)
+        (trans (cong (fn (s : Nat) is add s (mul c a) end) (mulComm b a))
+          (cong (fn (s : Nat) is add (mul a b) s end) (mulComm c a))))
+  end
+end
+
+-- x + (y + z) = y + (x + z) and the interchange law (ch07), the workhorses of the
+-- respect proofs.
+swapLeft : (x : Nat) -> (y : Nat) -> (z : Nat) ->
+    Eq Nat (add x (add y z)) (add y (add x z)) is
+  fn (x : Nat) (y : Nat) (z : Nat) is
+    trans (sym (addAssoc x y z))
+      (trans (cong (fn (s : Nat) is add s z end) (addComm x y))
+        (addAssoc y x z))
+  end
+end
+
+interchange : (w : Nat) -> (x : Nat) -> (y : Nat) -> (z : Nat) ->
+    Eq Nat (add (add w x) (add y z)) (add (add w y) (add x z)) is
+  fn (w : Nat) (x : Nat) (y : Nat) (z : Nat) is
+    trans (addAssoc w x (add y z))
+      (trans (cong (fn (s : Nat) is add w s end) (swapLeft x y z))
+        (sym (addAssoc w y (add x z))))
+  end
+end
+
+-- ============================================================================
+-- NEW NAT LEMMAS this chapter needs beyond ch105's set.
+-- ============================================================================
+
+-- MULTIPLICATIVE RIGHT IDENTITY: mul n 1 = n. One-line induction:
+--   mul (succ k) 1 = add 1 (mul k 1) = succ (mul k 1) = succ k by IH.
+mulOneR : (n : Nat) -> Eq Nat (mul n (succ zero)) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul x (succ zero)) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k (succ zero)) k) is
+         cong succ ih
+       end)
+      n
+  end
+end
+
+-- MUL ASSOCIATIVITY: (a * b) * c = a * (b * c) (ch81 sibling), by induction on a.
+--   (succ k * b) * c = (b + k*b) * c           [def]
+--                    = b*c + (k*b)*c           [mulDistR]
+--                    = b*c + k*(b*c)           [IH]
+--                    = (succ k) * (b*c)         [def]
+mulAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (mul (mul a b) c) (mul a (mul b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul (mul x b) c) (mul x (mul b c)) end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul (mul k b) c) (mul k (mul b c))) is
+         trans (mulDistR b (mul k b) c)
+           (cong (fn (s : Nat) is add (mul b c) s end) ih)
+       end)
+      a
+  end
+end
+
+-- ============================================================================
+-- ch07/ch103/ch105 ℤ infrastructure, redeclared verbatim.
+-- ============================================================================
+
+cong2 : {A : U} -> {B : U} -> {C : U} -> (f : A -> B -> C)
+     -> {x : A} -> {y : A} -> {u : B} -> {v : B}
+     -> Eq A x y -> Eq B u v -> Eq C (f x u) (f y v) is
+  fn {A : U} {B : U} {C : U} (f : A -> B -> C)
+     {x : A} {y : A} {u : B} {v : B} (p : Eq A x y) (q : Eq B u v) is
+    trans (cong (fn (z : A) is f z u end) p) (cong (fn (z : B) is f y z end) q)
+  end
+end
+
+data NatPair : U is
+  npair : Nat -> Nat -> NatPair
+end
+
+fst : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is a end) p
+  end
+end
+
+snd : NatPair -> Nat is
+  fn (p : NatPair) is
+    NatPairElim (fn (x : NatPair) is Nat end) (fn (a : Nat) (b : Nat) is b end) p
+  end
+end
+
+ZRel : NatPair -> NatPair -> Prop is
+  fn (p : NatPair) (q : NatPair) is
+    Eq Nat (add (fst p) (snd q)) (add (fst q) (snd p))
+  end
+end
+
+Z : U is Quot NatPair ZRel end
+
+zfrom : Nat -> Z is fn (n : Nat) is qin NatPair ZRel (npair n zero) end end
+zzero : Z is zfrom zero end
+zone : Z is zfrom (succ zero) end
+zminusOne : Z is qin NatPair ZRel (npair zero (succ zero)) end
+
+psucc : NatPair -> NatPair is
+  fn (p : NatPair) is npair (succ (fst p)) (snd p) end
+end
+pneg : NatPair -> NatPair is
+  fn (p : NatPair) is npair (snd p) (fst p) end
+end
+padd : NatPair -> NatPair -> NatPair is
+  fn (p : NatPair) (q : NatPair) is
+    npair (add (fst p) (fst q)) (add (snd p) (snd q))
+  end
+end
+
+-- Integer addition, by lifting twice (ch103).
+paddRespL : (p : NatPair) -> (p' : NatPair) -> (q : NatPair) ->
+    ZRel p p' -> ZRel (padd p q) (padd p' q) is
+  fn (p : NatPair) (p' : NatPair) (q : NatPair) (r : ZRel p p') is
+    trans (interchange (fst p) (fst q) (snd p') (snd q))
+      (trans (cong (fn (s : Nat) is add s (add (fst q) (snd q)) end) r)
+        (sym (interchange (fst p') (fst q) (snd p) (snd q))))
+  end
+end
+
+paddRespR : (p : NatPair) -> (q : NatPair) -> (q' : NatPair) ->
+    ZRel q q' -> ZRel (padd p q) (padd p q') is
+  fn (p : NatPair) (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+    trans (interchange (fst p) (fst q) (snd p) (snd q'))
+      (trans (cong (fn (s : Nat) is add (add (fst p) (snd p)) s end) r)
+        (sym (interchange (fst p) (fst q') (snd p) (snd q))))
+  end
+end
+
+zaddR : NatPair -> Z -> Z is
+  fn (p : NatPair) is
+    qlift NatPair ZRel Z
+      (fn (q : NatPair) is qin NatPair ZRel (padd p q) end)
+      (fn (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+        qsound NatPair ZRel (padd p q) (padd p q') (paddRespR p q q' r)
+      end)
+  end
+end
+
+zadd : Z -> Z -> Z is
+  qlift NatPair ZRel (Z -> Z) zaddR
+    (fn (p : NatPair) (p' : NatPair) (r : ZRel p p') is
+      fn (z : Z) is
+        qind NatPair ZRel (fn (w : Z) is Eq Z (zaddR p w) (zaddR p' w) end)
+          (fn (q : NatPair) is
+            qsound NatPair ZRel (padd p q) (padd p' q) (paddRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- Integer multiplication, by lifting twice (ch105).
+pmul : NatPair -> NatPair -> NatPair is
+  fn (p : NatPair) (q : NatPair) is
+    npair
+      (add (mul (fst p) (fst q)) (mul (snd p) (snd q)))
+      (add (mul (fst p) (snd q)) (mul (snd p) (fst q)))
+  end
+end
+
+pmulRespR : (p : NatPair) -> (q : NatPair) -> (q' : NatPair) ->
+    ZRel q q' -> ZRel (pmul p q) (pmul p q') is
+  fn (p : NatPair) (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+    trans
+      (interchange
+        (mul (fst p) (fst q)) (mul (snd p) (snd q))
+        (mul (fst p) (snd q')) (mul (snd p) (fst q')))
+      (trans
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (trans (sym (mulDistL (fst p) (fst q) (snd q')))
+            (trans (cong (fn (s : Nat) is mul (fst p) s end) r)
+              (mulDistL (fst p) (fst q') (snd q))))
+          (trans (addComm (mul (snd p) (snd q)) (mul (snd p) (fst q')))
+            (trans
+              (sym
+                (trans (sym (mulDistL (snd p) (fst q) (snd q')))
+                  (trans (cong (fn (s : Nat) is mul (snd p) s end) r)
+                    (mulDistL (snd p) (fst q') (snd q)))))
+              (addComm (mul (snd p) (fst q)) (mul (snd p) (snd q'))))))
+        (interchange
+          (mul (fst p) (fst q')) (mul (fst p) (snd q))
+          (mul (snd p) (snd q')) (mul (snd p) (fst q))))
+  end
+end
+
+pmulRespL : (p : NatPair) -> (p' : NatPair) -> (q : NatPair) ->
+    ZRel p p' -> ZRel (pmul p q) (pmul p' q) is
+  fn (p : NatPair) (p' : NatPair) (q : NatPair) (r : ZRel p p') is
+    trans
+      (trans
+        (cong (fn (s : Nat) is add (add (mul (fst p) (fst q)) (mul (snd p) (snd q))) s end)
+          (addComm (mul (fst p') (snd q)) (mul (snd p') (fst q))))
+        (interchange
+          (mul (fst p) (fst q)) (mul (snd p) (snd q))
+          (mul (snd p') (fst q)) (mul (fst p') (snd q))))
+      (trans
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (trans (sym (mulDistR (fst p) (snd p') (fst q)))
+            (trans (cong (fn (s : Nat) is mul s (fst q) end) r)
+              (mulDistR (fst p') (snd p) (fst q))))
+          (trans (addComm (mul (snd p) (snd q)) (mul (fst p') (snd q)))
+            (trans (sym (mulDistR (fst p') (snd p) (snd q)))
+              (trans (cong (fn (s : Nat) is mul s (snd q) end) (sym r))
+                (trans (mulDistR (fst p) (snd p') (snd q))
+                  (addComm (mul (fst p) (snd q)) (mul (snd p') (snd q))))))))
+        (trans
+          (interchange
+            (mul (fst p') (fst q)) (mul (snd p) (fst q))
+            (mul (snd p') (snd q)) (mul (fst p) (snd q)))
+          (cong (fn (s : Nat) is add (add (mul (fst p') (fst q)) (mul (snd p') (snd q))) s end)
+            (addComm (mul (snd p) (fst q)) (mul (fst p) (snd q))))))
+  end
+end
+
+zmulR : NatPair -> Z -> Z is
+  fn (p : NatPair) is
+    qlift NatPair ZRel Z
+      (fn (q : NatPair) is qin NatPair ZRel (pmul p q) end)
+      (fn (q : NatPair) (q' : NatPair) (r : ZRel q q') is
+        qsound NatPair ZRel (pmul p q) (pmul p q') (pmulRespR p q q' r)
+      end)
+  end
+end
+
+zmul : Z -> Z -> Z is
+  qlift NatPair ZRel (Z -> Z) zmulR
+    (fn (p : NatPair) (p' : NatPair) (r : ZRel p p') is
+      fn (z : Z) is
+        qind NatPair ZRel (fn (w : Z) is Eq Z (zmulR p w) (zmulR p' w) end)
+          (fn (q : NatPair) is
+            qsound NatPair ZRel (pmul p q) (pmul p' q) (pmulRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- pmul p q ~ pmul q p on representatives (ch105).
+pmulComm : (p : NatPair) -> (q : NatPair) -> ZRel (pmul p q) (pmul q p) is
+  fn (p : NatPair) (q : NatPair) is
+    cong2 (fn (u : Nat) (v : Nat) is add u v end)
+      (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+        (mulComm (fst p) (fst q))
+        (mulComm (snd p) (snd q)))
+      (trans
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (mulComm (fst q) (snd p))
+          (mulComm (snd q) (fst p)))
+        (addComm (mul (snd p) (fst q)) (mul (fst p) (snd q))))
+  end
+end
+
+zmulComm : (x : Z) -> (y : Z) -> Eq Z (zmul x y) (zmul y x) is
+  fn (x : Z) is
+    qind NatPair ZRel (fn (w : Z) is (y : Z) -> Eq Z (zmul w y) (zmul y w) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (w : Z) is Eq Z (zmul (qin NatPair ZRel p) w) (zmul w (qin NatPair ZRel p)) end)
+            (fn (q : NatPair) is
+              qsound NatPair ZRel (pmul p q) (pmul q p) (pmulComm p q)
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ============================================================================
+-- NEW IN CH107 — the remaining commutative-ring laws.
+-- ============================================================================
+
+-- ----------------------------------------------------------------------------
+-- MULTIPLICATIVE RIGHT IDENTITY: x * 1 = x.
+-- zone = qin (1, 0). On a representative (a, b):
+--   pmul (a,b) (1,0) = (a*1 + b*0, a*0 + b*1).
+-- The ZRel obligation relating it back to (a, b) is
+--   (a*1 + b*0) + b  =  a + (a*0 + b*1).
+-- LHS: a*1 = a (mulOneR), b*0 = 0 (mulZeroR), so a*1 + b*0 = a + 0 = a, hence LHS = a + b.
+-- RHS: a*0 = 0 (mulZeroR), b*1 = b (mulOneR), so a*0 + b*1 = 0 + b = b, hence RHS = a + b.
+-- Both reduce to a + b; the obligation is the composite of these two simplifications.
+-- ----------------------------------------------------------------------------
+pmulOneR : (p : NatPair) -> ZRel (pmul p (npair (succ zero) zero)) p is
+  fn (p : NatPair) is
+    -- Goal: add (add (mul (fst p) 1) (mul (snd p) 0)) (snd p)
+    --     = add (fst p) (add (mul (fst p) 0) (mul (snd p) 1)).
+    -- LHS  -> add (add (fst p) zero) (snd p)  [mulOneR, mulZeroR]
+    --      -> add (fst p) (snd p)             [addZeroR]
+    -- RHS  <- add (fst p) (add zero (snd p))  [mulZeroR, mulOneR]
+    --      <- add (fst p) (snd p)             [add zero (snd p) is snd p by def]
+    trans
+      (cong (fn (s : Nat) is add s (snd p) end)
+        (trans
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulOneR (fst p))
+            (mulZeroR (snd p)))
+          (addZeroR (fst p))))
+      (cong (fn (s : Nat) is add (fst p) s end)
+        (sym
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulZeroR (fst p))
+            (mulOneR (snd p)))))
+  end
+end
+
+zmulOneR : (x : Z) -> Eq Z (zmul x zone) x is
+  fn (x : Z) is
+    qind NatPair ZRel (fn (w : Z) is Eq Z (zmul w zone) w end)
+      (fn (p : NatPair) is
+        qsound NatPair ZRel (pmul p (npair (succ zero) zero)) p (pmulOneR p)
+      end)
+      x
+  end
+end
+
+-- LEFT IDENTITY: 1 * x = x, from commutativity + right identity.
+zmulOneL : (x : Z) -> Eq Z (zmul zone x) x is
+  fn (x : Z) is
+    trans (zmulComm zone x) (zmulOneR x)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- ANNIHILATION: x * 0 = 0.
+-- zzero = qin (0, 0). On a representative (a, b):
+--   pmul (a,b) (0,0) = (a*0 + b*0, a*0 + b*0).
+-- The ZRel obligation relating it to (0, 0) is
+--   (a*0 + b*0) + 0  =  0 + (a*0 + b*0),
+-- which after a*0 = b*0 = 0 (mulZeroR) is 0 + 0 = 0 + 0 — but we discharge it directly
+-- by addComm on the two (equal) components.
+-- ----------------------------------------------------------------------------
+pmulZeroR : (p : NatPair) -> ZRel (pmul p (npair zero zero)) (npair zero zero) is
+  fn (p : NatPair) is
+    -- Goal: add (add (mul (fst p) 0) (mul (snd p) 0)) 0
+    --     = add 0 (add (mul (fst p) 0) (mul (snd p) 0)).
+    addComm (add (mul (fst p) zero) (mul (snd p) zero)) zero
+  end
+end
+
+zmulZeroR : (x : Z) -> Eq Z (zmul x zzero) zzero is
+  fn (x : Z) is
+    qind NatPair ZRel (fn (w : Z) is Eq Z (zmul w zzero) zzero end)
+      (fn (p : NatPair) is
+        qsound NatPair ZRel (pmul p (npair zero zero)) (npair zero zero) (pmulZeroR p)
+      end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- LEFT-DISTRIBUTIVITY — THE RING AXIOM: x * (y + z) = x*y + x*z.
+-- On representatives p=(a,b), q=(c,d), r=(e,f):
+--   zadd q r = (c+e, d+f).
+--   fst (pmul p (q+r)) = a*(c+e) + b*(d+f)
+--   fst (padd (pmul p q) (pmul p r)) = (a*c + b*d) + (a*e + b*f)
+-- a*(c+e) = a*c + a*e and b*(d+f) = b*d + b*f (mulDistL), so the LHS first component is
+--   (a*c + a*e) + (b*d + b*f), which interchanges to (a*c + b*d) + (a*e + b*f) = RHS first.
+-- The SECOND components are identical:
+--   snd (pmul p (q+r)) = a*(d+f) + b*(c+e)
+--   snd (padd …)       = (a*d + b*c) + (a*f + b*e)
+-- a*(d+f) = a*d + a*f and b*(c+e) = b*c + b*e (mulDistL), interchange to
+--   (a*d + b*c) + (a*f + b*e) = RHS second.
+-- Both pairs of components are LITERALLY EQUAL as Nats, so the ZRel obligation is
+-- discharged by cong2 into both components (each a mulDistL-then-interchange equality).
+-- ----------------------------------------------------------------------------
+
+-- The first-component identity: a*(c+e) + b*(d+f) = (a*c + b*d) + (a*e + b*f).
+pmulDistFst : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat) -> (e : Nat) -> (f : Nat)
+   -> Eq Nat
+        (add (mul a (add c e)) (mul b (add d f)))
+        (add (add (mul a c) (mul b d)) (add (mul a e) (mul b f))) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e : Nat) (f : Nat) is
+    trans
+      (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+        (mulDistL a c e)
+        (mulDistL b d f))
+      (interchange (mul a c) (mul a e) (mul b d) (mul b f))
+  end
+end
+
+-- pmul p (padd q r) ~ padd (pmul p q) (pmul p r): components are equal, lift to ZRel.
+-- The ZRel obligation is
+--   fst (pmul p (q+r)) + snd (padd (pmul p q) (pmul p r))
+--     = fst (padd …) + snd (pmul p (q+r)).
+-- We prove the stronger fact that fst's are equal and snd's are equal, then assemble
+-- the obligation by cong2: the LHS rewrites to RHS-fst + LHS-snd, and addComm-free.
+pmulDistR : (p : NatPair) -> (q : NatPair) -> (r : NatPair)
+   -> ZRel (pmul p (padd q r)) (padd (pmul p q) (pmul p r)) is
+  fn (p : NatPair) (q : NatPair) (r : NatPair) is
+    -- Goal: add (fst (pmul p (padd q r))) (snd (padd (pmul p q) (pmul p r)))
+    --     = add (fst (padd (pmul p q) (pmul p r))) (snd (pmul p (padd q r))).
+    -- fst (pmul p (padd q r)) = a*(c+e) + b*(d+f)
+    -- fst (padd (pmul p q) (pmul p r)) = (a*c+b*d) + (a*e+b*f)
+    -- snd (pmul p (padd q r)) = a*(d+f) + b*(c+e)
+    -- snd (padd (pmul p q) (pmul p r)) = (a*d+b*c) + (a*f+b*e)
+    cong2 (fn (u : Nat) (v : Nat) is add u v end)
+      -- fst-eq : a*(c+e) + b*(d+f) = (a*c+b*d) + (a*e+b*f)
+      (pmulDistFst (fst p) (snd p) (fst q) (snd q) (fst r) (snd r))
+      -- snd-eq, reversed (we need snd(padd) = snd(pmul …)):
+      --   (a*d+b*c) + (a*f+b*e) = a*(d+f) + b*(c+e)
+      (sym (pmulDistFst (fst p) (snd p) (snd q) (fst q) (snd r) (fst r)))
+  end
+end
+
+zmulDistR : (x : Z) -> (y : Z) -> (z : Z)
+   -> Eq Z (zmul x (zadd y z)) (zadd (zmul x y) (zmul x z)) is
+  fn (x : Z) is
+    qind NatPair ZRel
+      (fn (wx : Z) is (y : Z) -> (z : Z) -> Eq Z (zmul wx (zadd y z)) (zadd (zmul wx y) (zmul wx z)) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (wy : Z) is (z : Z) -> Eq Z (zmul (qin NatPair ZRel p) (zadd wy z)) (zadd (zmul (qin NatPair ZRel p) wy) (zmul (qin NatPair ZRel p) z)) end)
+            (fn (q : NatPair) is
+              fn (z : Z) is
+                qind NatPair ZRel
+                  (fn (wz : Z) is Eq Z (zmul (qin NatPair ZRel p) (zadd (qin NatPair ZRel q) wz)) (zadd (zmul (qin NatPair ZRel p) (qin NatPair ZRel q)) (zmul (qin NatPair ZRel p) wz)) end)
+                  (fn (r : NatPair) is
+                    qsound NatPair ZRel
+                      (pmul p (padd q r)) (padd (pmul p q) (pmul p r))
+                      (pmulDistR p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- RIGHT-DISTRIBUTIVITY: (x + y) * z = x*z + y*z, from zmulComm + zmulDistR.
+--   (x+y)*z = z*(x+y)        (zmulComm)
+--           = z*x + z*y      (zmulDistR)
+--           = x*z + y*z      (zmulComm on each summand).
+zmulDistL : (x : Z) -> (y : Z) -> (z : Z)
+   -> Eq Z (zmul (zadd x y) z) (zadd (zmul x z) (zmul y z)) is
+  fn (x : Z) (y : Z) (z : Z) is
+    trans (zmulComm (zadd x y) z)
+      (trans (zmulDistR z x y)
+        (trans (cong (fn (s : Z) is zadd s (zmul z y) end) (zmulComm z x))
+          (cong (fn (s : Z) is zadd (zmul x z) s end) (zmulComm z y))))
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- ASSOCIATIVITY: (x * y) * z = x * (y * z).
+-- On representatives p=(a,b), q=(c,d), r=(e,f):
+--   pmul p q = (ac+bd, ad+bc).
+--   pmul (pmul p q) r = ((ac+bd)*e + (ad+bc)*f, (ac+bd)*f + (ad+bc)*e).
+--   pmul q r = (ce+df, cf+de).
+--   pmul p (pmul q r) = (a*(ce+df) + b*(cf+de), a*(cf+de) + b*(ce+df)).
+-- Both components are equal Nat semiring expressions: expand with mulDistR (left side,
+-- (x+y)*z) and mulDistL (right side, x*(y+z)), reassociate each product with mulAssoc,
+-- and regroup the FOUR triple-products with the interchange law. We prove each component
+-- as a literal Nat equality and lift by cong2 into ZRel.
+-- ----------------------------------------------------------------------------
+
+-- FIRST component: (ac+bd)*e + (ad+bc)*f = a*(ce+df) + b*(cf+de).
+--   LHS = (ace + bde) + (adf + bcf)        [mulDistR ×2, mulAssoc ×4]
+--   reorder to (ace + adf) + (bde + bcf)   [interchange]
+--   RHS = (ace + adf) + (bcf + bde)        [mulDistL ×2, mulAssoc ×4]
+-- so we need (bde + bcf) = (bcf + bde), an addComm, sitting in the second summand.
+pmulAssocFst : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat) -> (e : Nat) -> (f : Nat)
+   -> Eq Nat
+        (add (mul (add (mul a c) (mul b d)) e) (mul (add (mul a d) (mul b c)) f))
+        (add (mul a (add (mul c e) (mul d f))) (mul b (add (mul c f) (mul d e)))) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e : Nat) (f : Nat) is
+    trans
+      -- expand both products on the LHS by mulDistR:
+      --   (ac+bd)*e = ac*e + bd*e ;  (ad+bc)*f = ad*f + bc*f
+      (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+        (mulDistR (mul a c) (mul b d) e)
+        (mulDistR (mul a d) (mul b c) f))
+      (trans
+        -- reassociate every triple product: (ac)e = a(ce), (bd)e = b(de),
+        --   (ad)f = a(df), (bc)f = b(cf).
+        (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulAssoc a c e)
+            (mulAssoc b d e))
+          (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+            (mulAssoc a d f)
+            (mulAssoc b c f)))
+        (trans
+          -- now LHS = (a(ce) + b(de)) + (a(df) + b(cf));
+          -- interchange to (a(ce) + a(df)) + (b(de) + b(cf)).
+          (interchange (mul a (mul c e)) (mul b (mul d e)) (mul a (mul d f)) (mul b (mul c f)))
+          (trans
+            -- contract each summand by mulDistL (reverse):
+            --   a(ce) + a(df) = a*(ce+df) ;  b(de) + b(cf) = b*(de+cf).
+            (cong2 (fn (u : Nat) (v : Nat) is add u v end)
+              (sym (mulDistL a (mul c e) (mul d f)))
+              (sym (mulDistL b (mul d e) (mul c f))))
+            -- fix the second factor of the b-term: b*(de+cf) = b*(cf+de) by addComm.
+            (cong (fn (s : Nat) is add (mul a (add (mul c e) (mul d f))) (mul b s) end)
+              (addComm (mul d e) (mul c f))))))
+  end
+end
+
+-- pmul (pmul p q) r ~ pmul p (pmul q r): both components equal. The SECOND component
+-- of (pq)r is (ac+bd)*f + (ad+bc)*e and of p(qr) is a*(cf+de) + b*(ce+df) — the SAME
+-- shape as pmulAssocFst with e and f swapped, so it reuses pmulAssocFst at swapped args.
+pmulAssoc : (p : NatPair) -> (q : NatPair) -> (r : NatPair)
+   -> ZRel (pmul (pmul p q) r) (pmul p (pmul q r)) is
+  fn (p : NatPair) (q : NatPair) (r : NatPair) is
+    -- ZRel obligation:
+    --   fst (pmul (pmul p q) r) + snd (pmul p (pmul q r))
+    --     = fst (pmul p (pmul q r)) + snd (pmul (pmul p q) r).
+    -- fst-eq : fst (pmul (pmul p q) r) = fst (pmul p (pmul q r))  [pmulAssocFst]
+    -- snd-eq : snd (pmul (pmul p q) r) = snd (pmul p (pmul q r))  [pmulAssocFst, e/f swapped]
+    -- assemble: cong2 add (fst-eq) (sym snd-eq).
+    cong2 (fn (u : Nat) (v : Nat) is add u v end)
+      (pmulAssocFst (fst p) (snd p) (fst q) (snd q) (fst r) (snd r))
+      (sym (pmulAssocFst (fst p) (snd p) (fst q) (snd q) (snd r) (fst r)))
+  end
+end
+
+zmulAssoc : (x : Z) -> (y : Z) -> (z : Z)
+   -> Eq Z (zmul (zmul x y) z) (zmul x (zmul y z)) is
+  fn (x : Z) is
+    qind NatPair ZRel
+      (fn (wx : Z) is (y : Z) -> (z : Z) -> Eq Z (zmul (zmul wx y) z) (zmul wx (zmul y z)) end)
+      (fn (p : NatPair) is
+        fn (y : Z) is
+          qind NatPair ZRel
+            (fn (wy : Z) is (z : Z) -> Eq Z (zmul (zmul (qin NatPair ZRel p) wy) z) (zmul (qin NatPair ZRel p) (zmul wy z)) end)
+            (fn (q : NatPair) is
+              fn (z : Z) is
+                qind NatPair ZRel
+                  (fn (wz : Z) is Eq Z (zmul (zmul (qin NatPair ZRel p) (qin NatPair ZRel q)) wz) (zmul (qin NatPair ZRel p) (zmul (qin NatPair ZRel q) wz)) end)
+                  (fn (r : NatPair) is
+                    qsound NatPair ZRel
+                      (pmul (pmul p q) r) (pmul p (pmul q r))
+                      (pmulAssoc p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- ============================================================================
+-- Sanity: the ring laws COMPUTE through the quotient on concrete integers.
+-- ============================================================================
+
+-- (2 − 0) and (0 − 3) as explicit representatives.
+zexLeft : Z is qin NatPair ZRel (npair (succ (succ zero)) zero) end
+zexRight : Z is qin NatPair ZRel (npair zero (succ (succ (succ zero)))) end
+
+-- x * 1 = x on a concrete integer, by zmulOneR.
+zexOneR : Eq Z (zmul zexLeft zone) zexLeft is zmulOneR zexLeft end
+
+-- Distributivity on concrete integers: zexLeft * (zexLeft + zexRight)
+--   = zexLeft*zexLeft + zexLeft*zexRight, by zmulDistR.
+zexDist : Eq Z
+    (zmul zexLeft (zadd zexLeft zexRight))
+    (zadd (zmul zexLeft zexLeft) (zmul zexLeft zexRight)) is
+  zmulDistR zexLeft zexLeft zexRight
+end
+
+-- Associativity on concrete integers.
+zexAssoc : Eq Z
+    (zmul (zmul zexLeft zexRight) zexLeft)
+    (zmul zexLeft (zmul zexRight zexLeft)) is
+  zmulAssoc zexLeft zexRight zexLeft
+end
+
+
+-- ====================================================================================
+-- CHAPTER 159 — GAUSS'S SUM: 2·(0+1+…+n) = n·(n+1) (telos-3 / number theory, a classic).
+-- The triangular-number identity, stated WITHOUT division (multiply through by 2) so it lives
+-- in the verified ℕ semiring.  By induction, using distributivity + commutativity.  FULLY
+-- PROVEN, no postulate.
+-- ====================================================================================
+
+-- sumTo n = 0 + 1 + 2 + … + n.
+sumTo : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add (succ k) ih end) n
+  end
+end
+
+-- 2·sumTo n = n·(n+1).  Induction on n: base 2·0 = 0·1 = 0 (mulZeroR); the step expands
+-- 2·(n'+1 + sumTo n') = 2·(n'+1) + 2·sumTo n' (mulDistL), applies the IH, and refactors
+-- (n'+1)·2 + (n'+1)·n' = (n'+1)·(2+n') = (n'+1)·(n'+2) (mulComm + mulDistL backward).
+gaussSum : (n : Nat)
+   -> Eq Nat (mul (succ (succ zero)) (sumTo n)) (mul n (succ n)) is
+  fn (n : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul (succ (succ zero)) (sumTo x)) (mul x (succ x)) end)
+      (mulZeroR (succ (succ zero)))
+      (fn (n' : Nat) (ih : Eq Nat (mul (succ (succ zero)) (sumTo n')) (mul n' (succ n'))) is
+         trans (mulDistL (succ (succ zero)) (succ n') (sumTo n'))
+           (trans (cong (fn (s : Nat) is
+                     add (mul (succ (succ zero)) (succ n')) s end) ih)
+             (trans (cong (fn (s : Nat) is add s (mul n' (succ n')) end)
+                       (mulComm (succ (succ zero)) (succ n')))
+               (trans (cong (fn (s : Nat) is
+                         add (mul (succ n') (succ (succ zero))) s end)
+                         (mulComm n' (succ n')))
+                 (sym (mulDistL (succ n') (succ (succ zero)) n')))))
+       end)
+      n
+  end
+end
+
+-- A concrete value: 2·(0+1+…+4) = 2·10 = 20 = 4·5.
+gaussFour : Eq Nat (mul (succ (succ zero)) (sumTo (succ (succ (succ (succ zero))))))
+                   (mul (succ (succ (succ (succ zero)))) (succ (succ (succ (succ (succ zero)))))) is
+  gaussSum (succ (succ (succ (succ zero))))
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 159 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): sumTo (the triangular sum) and gaussSum
+-- (2·(0+1+…+n) = n·(n+1)) — Gauss's classic identity over the verified ℕ semiring, by induction
+-- with distributivity and commutativity.  A worked closed-form for a recursively-defined sum.
+-- THE NEXT STEP: the sum of squares (Σk² = n(n+1)(2n+1)/6, ×6), or geometric sums; more
+-- closed-form summation identities for the numeric stdlib.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 160 — SUM OF ODD NUMBERS: 1+3+5+…+(2n−1) = n² (telos-3 / number theory, a classic).
+-- The sum of the first n odd numbers is a perfect square — proven by induction, the inductive
+-- step being the square-of-a-successor expansion (n+1)² = n² + 2n + 1.  FULLY PROVEN.
+-- ====================================================================================
+
+-- 2·n = n + n (two copies; mul (succ(succ zero)) n ~> add n (add n 0), then addZeroR).
+mul2isAddSelf : (n : Nat) -> Eq Nat (mul (succ (succ zero)) n) (add n n) is
+  fn (n : Nat) is cong (fn (s : Nat) is add n s end) (addZeroR n) end
+end
+
+-- SQUARE OF A SUCCESSOR: (n+1)² = n² + (2n+1).  mul (succ n)(succ n) = (succ n) + n·(succ n)
+-- = (succ n) + (n² + n) = succ(n² + 2n) = n² + (2n+1), via mulSuccR + addAssoc/addComm +
+-- mul2isAddSelf + addSuccR.
+squareSucc : (n : Nat)
+   -> Eq Nat (mul (succ n) (succ n))
+             (add (mul n n) (succ (mul (succ (succ zero)) n))) is
+  fn (n : Nat) is
+    trans (cong (fn (s : Nat) is add (succ n) s end) (mulSuccR n n))
+      (trans
+        (cong (fn (s : Nat) is succ s end)
+          (trans (sym (addAssoc n (mul n n) n))
+            (trans (cong (fn (s : Nat) is add s n end) (addComm n (mul n n)))
+              (trans (addAssoc (mul n n) n n)
+                (cong (fn (s : Nat) is add (mul n n) s end) (sym (mul2isAddSelf n)))))))
+        (sym (addSuccR (mul n n) (mul (succ (succ zero)) n))))
+  end
+end
+
+-- The sum of the first n odd numbers: at step k add the k-th odd number 2k+1.
+sumOdd : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero
+      (fn (k : Nat) (ih : Nat) is add ih (succ (mul (succ (succ zero)) k)) end)
+      n
+  end
+end
+
+-- 1 + 3 + … + (2n−1) = n².  Induction on n: base 0 = 0²; the step adds the n-th odd number
+-- 2n+1 to n² (the IH) and refolds via squareSucc into (n+1)².
+sumOddSquare : (n : Nat) -> Eq Nat (sumOdd n) (mul n n) is
+  fn (n : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (sumOdd x) (mul x x) end)
+      (refl zero)
+      (fn (n' : Nat) (ih : Eq Nat (sumOdd n') (mul n' n')) is
+         trans (cong (fn (s : Nat) is add s (succ (mul (succ (succ zero)) n')) end) ih)
+           (sym (squareSucc n'))
+       end)
+      n
+  end
+end
+
+-- A concrete value: 1+3+5+7 = 16 = 4².
+sumOddFour : Eq Nat (sumOdd (succ (succ (succ (succ zero)))))
+                    (mul (succ (succ (succ (succ zero)))) (succ (succ (succ (succ zero))))) is
+  sumOddSquare (succ (succ (succ (succ zero))))
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 160 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): squareSucc ((n+1)²=n²+2n+1), sumOdd, and
+-- sumOddSquare (1+3+…+(2n−1)=n²) — the sum of the first n odd numbers is a perfect square, the
+-- classic visual proof made rigorous over the ℕ semiring.  With Gauss's sum (ch159), the
+-- numeric stdlib now has two closed-form summation identities.  THE NEXT STEP: the sum of
+-- squares (Σk²·6 = n(n+1)(2n+1)) or a geometric sum; more summation closed forms.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 161 — TRIANGULAR NUMBERS SUM TO SQUARES: T(n)+T(n+1) = (n+1)² (telos-3 / number
+-- theory).  Two consecutive triangular numbers add to a perfect square — a classic identity,
+-- proved directly from Gauss's sum (ch159): T(n)+T(n+1) = (n+1) + 2·T(n) = (n+1) + n·(n+1) =
+-- (n+1)².  FULLY PROVEN, no postulate.
+-- ====================================================================================
+
+-- T(n) + T(n+1) = (n+1)².  T(n+1) = (n+1) + T(n) definitionally; rearrange to (n+1) + (T(n)+
+-- T(n)), turn T(n)+T(n) into 2·T(n) = n·(n+1) (gaussSum), and (n+1) + n·(n+1) ≡ (n+1)·(n+1).
+triangleSquare : (n : Nat)
+   -> Eq Nat (add (sumTo n) (sumTo (succ n))) (mul (succ n) (succ n)) is
+  fn (n : Nat) is
+    trans
+      (trans (sym (addAssoc (sumTo n) (succ n) (sumTo n)))
+        (trans (cong (fn (s : Nat) is add s (sumTo n) end) (addComm (sumTo n) (succ n)))
+          (addAssoc (succ n) (sumTo n) (sumTo n))))
+      (cong (fn (s : Nat) is add (succ n) s end)
+        (trans (sym (mul2isAddSelf (sumTo n))) (gaussSum n)))
+  end
+end
+
+-- A concrete value: T(3) + T(4) = 6 + 10 = 16 = 4².
+triangleSquareThree : Eq Nat
+  (add (sumTo (succ (succ (succ zero)))) (sumTo (succ (succ (succ (succ zero))))))
+  (mul (succ (succ (succ (succ zero)))) (succ (succ (succ (succ zero))))) is
+  triangleSquare (succ (succ (succ zero)))
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 161 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): triangleSquare (T(n)+T(n+1)=(n+1)²) — consecutive
+-- triangular numbers sum to a perfect square, derived directly from Gauss's sum (ch159).  A
+-- third closed-form identity for the numeric stdlib (Gauss / sum-of-odds / triangle-square).
+-- THE NEXT STEP: the sum of cubes (Σk³ = (Σk)², Nicomachus, connecting cubes to the triangular
+-- numbers) or a geometric sum; more summation closed forms.
+-- ====================================================================================

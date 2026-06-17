@@ -1,0 +1,70 @@
+-- Chapter 50 — The Glue Kan fixup and univalence that COMPUTES (§F / A6 / A7).
+-- Glue welds a partial type onto a base along an equivalence; the Kan operations
+-- over Glue turn that weld into transport, and `ua` derived from Glue makes
+-- univalence a computation, not a postulate. All three Kan ops over Glue reduce a
+-- canonical (glued) input to a `glue` constructor; castU along a Glue path-line
+-- runs the transport.
+
+-- transp over a Glue line on a glued value: the T-component transports, the base
+-- is reconciled through the equivalence, and the result is a glued value.
+glueTransp : (A : UF) -> (phi : F) -> (T : holds phi -> UF)
+   -> (e : I -> (h : holds phi) -> El (Equiv (T h) A))
+   -> (t : (h : holds phi) -> El (T h)) -> (a : El A)
+   -> El (Glue A phi T (e i1)) is
+  fn (A : UF) (phi : F) (T : holds phi -> UF)
+     (e : I -> (h : holds phi) -> El (Equiv (T h) A))
+     (t : (h : holds phi) -> El (T h)) (a : El A) is
+    transp (fn (i : I) is Glue A phi T (e i) end) (glue A phi T (e i0) t a)
+  end
+end
+
+-- hcomp over a Glue type: the base composes through unglue, each fibre through
+-- unglueT, and `glue` re-assembles.
+glueHcomp : (A : UF) -> (phi : F) -> (T : holds phi -> UF)
+   -> (e : (h : holds phi) -> El (Equiv (T h) A)) -> (psi : F)
+   -> (u : I -> holds psi -> El (Glue A phi T e)) -> (u0 : El (Glue A phi T e))
+   -> El (Glue A phi T e) is
+  fn (A : UF) (phi : F) (T : holds phi -> UF)
+     (e : (h : holds phi) -> El (Equiv (T h) A)) (psi : F)
+     (u : I -> holds psi -> El (Glue A phi T e)) (u0 : El (Glue A phi T e)) is
+    hcomp (Glue A phi T e) psi u u0
+  end
+end
+
+-- unglueT projects the glued fibre on the face — dual to unglue (which projects
+-- the base). On a glued value it returns the welded T-component.
+glueProjT : (A : UF) -> (phi : F) -> (T : holds phi -> UF)
+   -> (e : (h : holds phi) -> El (Equiv (T h) A))
+   -> (t : (h : holds phi) -> El (T h)) -> (a : El A) -> (h : holds phi)
+   -> Eq (El (T h)) (unglueT A phi T e (glue A phi T e t a) h) (t h) is
+  fn (A : UF) (phi : F) (T : holds phi -> UF)
+     (e : (h : holds phi) -> El (Equiv (T h) A))
+     (t : (h : holds phi) -> El (T h)) (a : El A) (h : holds phi) is
+    refl (t h)
+  end
+end
+
+-- ua DERIVED from Glue: a type-path built by abstracting a Glue line over the
+-- interval (pabsU). Univalence is no longer a postulate here — it is this term.
+uaFromGlue : (A : UF) -> (phi : F) -> (T : holds phi -> UF)
+   -> (e : I -> (h : holds phi) -> El (Equiv (T h) A))
+   -> pathU (Glue A phi T (e i0)) (Glue A phi T (e i1)) is
+  fn (A : UF) (phi : F) (T : holds phi -> UF)
+     (e : I -> (h : holds phi) -> El (Equiv (T h) A)) is
+    pabsU (fn (i : I) is Glue A phi T (e i) end)
+  end
+end
+
+-- Univalence COMPUTES: castU along the derived ua-path transports a glued value,
+-- running the equivalence through transp-over-Glue, and lands a glued value.
+uaTransports : (A : UF) -> (phi : F) -> (T : holds phi -> UF)
+   -> (e : I -> (h : holds phi) -> El (Equiv (T h) A))
+   -> (t : (h : holds phi) -> El (T h)) -> (a : El A)
+   -> El (Glue A phi T (e i1)) is
+  fn (A : UF) (phi : F) (T : holds phi -> UF)
+     (e : I -> (h : holds phi) -> El (Equiv (T h) A))
+     (t : (h : holds phi) -> El (T h)) (a : El A) is
+    castU (Glue A phi T (e i0)) (Glue A phi T (e i1))
+          (uaFromGlue A phi T e) (glue A phi T (e i0) t a)
+  end
+end

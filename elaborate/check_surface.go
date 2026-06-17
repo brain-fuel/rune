@@ -34,8 +34,44 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		return core.Univ{Lvl: s.Lvl}, core.VU{Lvl: s.Lvl + 1}, nil // U_i : U_{i+1}
 	case surface.EProp:
 		return core.Prop{}, core.VU{}, nil // Prop : U_0
+	case surface.ENum:
+		// In infer position a numeral takes its default (unary) meaning; the
+		// expected type, when there is one, redirects it in Check.
+		tm, err := e.Num.Nat(s.Val)
+		if err != nil {
+			return nil, nil, err
+		}
+		natTy, err := e.natType()
+		if err != nil {
+			return nil, nil, err
+		}
+		return tm, natTy, nil
 	case surface.EEq, surface.ERefl, surface.ECast, surface.ESubst:
 		return nil, nil, fmt.Errorf("an equality former needs its arguments (Eq T l r · refl x · cast A B p x · subst A x y p P px)")
+	case surface.ESig, surface.EPair:
+		return nil, nil, fmt.Errorf("a Σ former needs its arguments (Sig A B · Pair A B a b)")
+	case surface.EFst:
+		p, pty, err := e.Infer(c, s.P)
+		if err != nil {
+			return nil, nil, err
+		}
+		p, pty = e.insertImplicits(c, p, pty)
+		sig, ok := e.M.Force(pty).(core.VSig)
+		if !ok {
+			return nil, nil, fmt.Errorf("fst (.1) applied to a non-Σ of type %s", e.pretty(c, pty))
+		}
+		return core.Fst{P: p}, sig.Dom, nil
+	case surface.ESnd:
+		p, pty, err := e.Infer(c, s.P)
+		if err != nil {
+			return nil, nil, err
+		}
+		p, pty = e.insertImplicits(c, p, pty)
+		sig, ok := e.M.Force(pty).(core.VSig)
+		if !ok {
+			return nil, nil, fmt.Errorf("snd (.2) applied to a non-Σ of type %s", e.pretty(c, pty))
+		}
+		return core.Snd{P: p}, sig.Cod(e.Eval(c, core.Fst{P: p})), nil
 	case surface.ECase:
 		return nil, nil, fmt.Errorf("a case expression needs an expected type for its motive; ascribe it: (case … end : T)")
 	case surface.EHole:
@@ -163,10 +199,56 @@ func (e *Elaborator) insertImplicits(c *Ctx, tm core.Tm, ty core.Val) (core.Tm, 
 		if !ok || pi.Icit != core.Impl {
 			return tm, ty
 		}
+		// C2: if the implicit's domain is a registered typeclass, resolve the
+		// dictionary by instance search instead of inserting a metavariable.
+		if e.InstanceFor != nil {
+			if class, arg, ok := e.classKey(c, pi.Dom); ok {
+				if inst, found := e.InstanceFor(class, arg); found {
+					tm = core.App{Fn: tm, Arg: inst, Icit: core.Impl}
+					ty = pi.Cod(e.Eval(c, inst))
+					continue
+				}
+			}
+		}
 		m := e.freshMeta(c, "implicit argument")
 		tm = core.App{Fn: tm, Arg: m, Icit: core.Impl}
 		ty = pi.Cod(e.Eval(c, m))
 	}
+}
+
+// classKey extracts the (class-former, last-argument-head) hashes from a class
+// application type value `C … T` (e.g. Monoid Nat → (Monoid, Nat)), the key the
+// instance table is indexed by. Returns ok=false for any non-(ref-headed) type,
+// so ordinary implicits (domain U, a variable, …) fall through to a meta.
+func (e *Elaborator) classKey(c *Ctx, dom core.Val) (class, arg core.Hash, ok bool) {
+	t := e.M.Quote(c.Lvl(), dom)
+	var args []core.Tm
+	for {
+		if app, isApp := t.(core.App); isApp {
+			args = append([]core.Tm{app.Arg}, args...)
+			t = app.Fn
+			continue
+		}
+		break
+	}
+	ref, isRef := t.(core.Ref)
+	if !isRef || len(args) == 0 {
+		return core.Hash{}, core.Hash{}, false
+	}
+	// head of the last argument (the indexing type).
+	last := args[len(args)-1]
+	for {
+		if app, isApp := last.(core.App); isApp {
+			last = app.Fn
+			continue
+		}
+		break
+	}
+	lref, isLRef := last.(core.Ref)
+	if !isLRef {
+		return core.Hash{}, core.Hash{}, false
+	}
+	return ref.Hash, lref.Hash, true
 }
 
 // expectPi unifies a (typically meta-headed) type with a fresh Pi of the given
@@ -273,6 +355,8 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 			return nil, err
 		}
 		return core.Lam{Icit: s.Icit, Qty: qty, Body: core.Scope{Name: s.Param, Body: body}}, nil
+	case surface.ENum:
+		return e.elabNum(c, s, fw)
 	case surface.ELet:
 		tm, _, inner, err := e.elabLet(c, s)
 		if err != nil {
@@ -304,6 +388,35 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 		}
 		return tm, nil
 	}
+}
+
+// elabNum lowers a numeral literal to a compressed core numeral (NatLit) and
+// unifies its `builtin nat` type against the expectation, so a genuine mismatch
+// is still reported. (The old binary-literal lowering — a numeral checked at a
+// `builtin bin` Pos/BN type — is retired; C7 / R-NUM, Decision 5.)
+func (e *Elaborator) elabNum(c *Ctx, s surface.ENum, want core.Val) (core.Tm, error) {
+	tm, err := e.Num.Nat(s.Val)
+	if err != nil {
+		return nil, err
+	}
+	natTy, err := e.natType()
+	if err != nil {
+		return nil, err
+	}
+	if err := e.Unify(c.Lvl(), natTy, want); err != nil {
+		return nil, fmt.Errorf("numeral %d is a %s, but %s was expected",
+			s.Val, e.pretty(c, natTy), e.pretty(c, want))
+	}
+	return tm, nil
+}
+
+// natType is the type a unary numeral inhabits — the type of the registered
+// `builtin nat` zero constructor.
+func (e *Elaborator) natType() (core.Val, error) {
+	if !e.Num.HasNat {
+		return nil, fmt.Errorf("a numeral has no meaning here: no `builtin nat` is in scope")
+	}
+	return e.refType(e.Num.NatZero)
 }
 
 // checkType elaborates e as a TYPE: its type must be a sort (U or Prop). A
@@ -390,6 +503,20 @@ func shift(t core.Tm, cutoff, by int) core.Tm {
 		return core.Subst{A: shift(tm.A, cutoff, by), X: shift(tm.X, cutoff, by),
 			Y: shift(tm.Y, cutoff, by), Prf: shift(tm.Prf, cutoff, by),
 			P: shift(tm.P, cutoff, by), Px: shift(tm.Px, cutoff, by)}
+	case core.Sig:
+		return core.Sig{Qty: tm.Qty, Dom: shift(tm.Dom, cutoff, by),
+			Cod: core.Scope{Name: tm.Cod.Name, Body: shift(tm.Cod.Body, cutoff+1, by)}}
+	case core.Pair:
+		return core.Pair{Dom: shift(tm.Dom, cutoff, by),
+			Cod: core.Scope{Name: tm.Cod.Name, Body: shift(tm.Cod.Body, cutoff+1, by)},
+			A:   shift(tm.A, cutoff, by), B: shift(tm.B, cutoff, by)}
+	case core.Fst:
+		return core.Fst{P: shift(tm.P, cutoff, by)}
+	case core.Snd:
+		return core.Snd{P: shift(tm.P, cutoff, by)}
+	case core.NatLit:
+		// A compressed numeral binds and mentions no variable: shift is identity.
+		return tm
 	default:
 		panic(fmt.Sprintf("shift: unknown core term %T", t))
 	}
@@ -499,8 +626,82 @@ func (e *Elaborator) elabFormer(c *Ctx, head surface.Exp, args []surface.Exp) (c
 			return nil, nil, true, err
 		}
 		return core.Cast{A: a, B: b, P: pr, X: x}, vb, true, nil
+	case surface.ESig:
+		if len(args) != 2 {
+			return nil, nil, true, fmt.Errorf("Sig takes exactly 2 arguments (Sig A B), got %d", len(args))
+		}
+		m0 := e.pushZero()
+		defer e.popMult(m0)
+		a, sa, err := e.checkType(c, args[0])
+		if err != nil {
+			return nil, nil, true, err
+		}
+		cod, codSort, err := e.elabFamily(c, e.Eval(c, a), args[1], "Sig")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return core.Sig{Dom: a, Cod: cod}, sigSort(sa, codSort), true, nil
+	case surface.EPair:
+		if len(args) != 4 {
+			return nil, nil, true, fmt.Errorf("pair takes exactly 4 arguments (pair A B a b), got %d", len(args))
+		}
+		a, _, err := e.checkType(c, args[0])
+		if err != nil {
+			return nil, nil, true, err
+		}
+		cod, _, err := e.elabFamily(c, e.Eval(c, a), args[1], "pair")
+		if err != nil {
+			return nil, nil, true, err
+		}
+		vsig, ok := e.Eval(c, core.Sig{Dom: a, Cod: cod}).(core.VSig)
+		if !ok {
+			return nil, nil, true, fmt.Errorf("pair: internal — Σ did not evaluate to a Σ value")
+		}
+		av, err := e.Check(c, args[2], vsig.Dom)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		bv, err := e.Check(c, args[3], vsig.Cod(e.Eval(c, av)))
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return core.Pair{Dom: a, Cod: cod, A: av, B: bv}, vsig, true, nil
 	}
 	return nil, nil, false, nil
+}
+
+// elabFamily elaborates a Σ family argument (a function literal `fn (x:A) is B
+// end`) and returns its body as a Scope (for a core Sig/Pair Cod) and the
+// codomain sort. The family's parameter is re-bound at the REAL domain vA —
+// the lambda's own (printed-as-U) annotation is ignored — so dependent families
+// type-check correctly (this mirrors EPi's codomain elaboration).
+func (e *Elaborator) elabFamily(c *Ctx, vA core.Val, fam surface.Exp, who string) (core.Scope, core.Val, error) {
+	lam, ok := fam.(surface.ELam)
+	if !ok {
+		return core.Scope{}, nil, fmt.Errorf("%s's family must be a function literal: %s A (fn (x : A) is B end)", who, who)
+	}
+	inner := c.bind(lam.Param, vA)
+	cod, codSort, err := e.checkType(inner, lam.Body)
+	if err != nil {
+		return core.Scope{}, nil, err
+	}
+	return core.Scope{Name: lam.Param, Body: cod}, codSort, nil
+}
+
+// sigSort gives the universe of Σ (x : A), B: the max of the two component
+// levels (Σ always lands in a U; it is never impredicatively a Prop here).
+func sigSort(a, b core.Val) core.Val {
+	la, lb := 0, 0
+	if u, ok := a.(core.VU); ok {
+		la = u.Lvl
+	}
+	if u, ok := b.(core.VU); ok {
+		lb = u.Lvl
+	}
+	if lb > la {
+		return core.VU{Lvl: lb}
+	}
+	return core.VU{Lvl: la}
 }
 
 // elabLet elaborates the binding part of a let (annotation and value), returning
@@ -544,6 +745,58 @@ func (e *Elaborator) ElabDef(d surface.Def) (ty, body core.Tm, err error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
 	}
+	body, err = e.Check(c, d.Body, e.Eval(c, ty))
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+	}
+	ty, body = e.Zonk(0, ty), e.Zonk(0, body)
+	if err := e.ErrUnsolved(d.Name); err != nil {
+		return nil, nil, err
+	}
+	if !MetaFree(ty) || !MetaFree(body) {
+		return nil, nil, fmt.Errorf("%s: internal: metavariable survived zonking", d.Name)
+	}
+	return ty, body, nil
+}
+
+// ElabForeign elaborates a `foreign` axiom's type (R-FFI / B4): there is no
+// body — the type is the contract, checked and returned zonked and meta-free.
+func (e *Elaborator) ElabForeign(d surface.Def) (core.Tm, error) {
+	c := &Ctx{}
+	if d.Ty == nil {
+		return nil, fmt.Errorf("%s: foreign declaration has no type", d.Name)
+	}
+	ty, _, err := e.checkType(c, d.Ty)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", d.Name, err)
+	}
+	ty = e.Zonk(0, ty)
+	if err := e.ErrUnsolved(d.Name); err != nil {
+		return nil, err
+	}
+	if !MetaFree(ty) {
+		return nil, fmt.Errorf("%s: internal: metavariable survived zonking", d.Name)
+	}
+	return ty, nil
+}
+
+// ElabPartialDef elaborates a `partial` (general-recursive) definition (C4). The
+// definition's own name is in scope in its body, resolving to selfHash with the
+// declared type — a neutral self-reference. The caller hashes the result over
+// selfHash and substitutes the real content hash, marking it partial (so the
+// evaluator keeps the head neutral; the body runs only through codegen).
+func (e *Elaborator) ElabPartialDef(d surface.Def, selfHash core.Hash) (ty, body core.Tm, err error) {
+	c := &Ctx{}
+	if d.Ty == nil {
+		return nil, nil, fmt.Errorf("%s: definition has no type", d.Name)
+	}
+	ty, _, err = e.checkType(c, d.Ty)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+	}
+	e.SelfHash = selfHash
+	e.SelfType = ty
+	e.Refs[d.Name] = selfHash
 	body, err = e.Check(c, d.Body, e.Eval(c, ty))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)

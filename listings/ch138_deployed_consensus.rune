@@ -1,0 +1,71 @@
+-- Chapter 138 — E4: A DEPLOYED, VERIFIED CONSENSUS DECISION (telos-4 / E-track).
+-- The safety stack (ch112–137) proves consensus correct.  E4's promise is "provably
+-- correct, simulated and DEPLOYED from the same verified source."  This chapter takes the
+-- consensus essence — a 3-replica majority decision — as a COMPUTABLE function, proves the
+-- "majority decides" correctness (the agreement property, concretely), and DEPLOYS a
+-- concrete instance that RUNS on a backend (gated in the emit-and-execute suite under node).
+-- FULLY PROVEN + DEPLOYED, no postulate.
+--
+-- This chapter is SELF-CONTAINED (a minimal Bool prelude only) so it ERASES and RUNS — the
+-- ch112–137 safety proofs are propositional (U0, continuation-passing) and proof-only; the
+-- deployable artifact is this computable decision rule, certified by the same kind of theorem.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+-- Boolean conjunction / disjunction by BoolElim on the first argument.
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+-- The 3-replica majority of booleans: if replica 0 voted a, the decision is "a and at least
+-- one of b,c" — i.e. if a then (b or c) else (b and c).  A total, computable decision rule.
+maj3 : Bool -> Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) (or b c) (and b c) a
+  end
+end
+
+-- MAJORITY DECIDES (the agreement property, concretely): if replicas 0 and 1 BOTH voted a,
+-- the decision is a — regardless of replica 2's vote c.  By BoolElim on a: a=true ⇒
+-- maj3 true true c ~> or true c ~> true; a=false ⇒ maj3 false false c ~> and false c ~> false.
+maj3TwoAgree : (a : Bool) -> (c : Bool) -> Eq Bool (maj3 a a c) a is
+  fn (a : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (maj3 x x c) x end)
+      (refl true)
+      (refl false)
+      a
+  end
+end
+
+-- A CONCRETE INSTANCE.  Three replicas: 0 and 1 vote `true` (the majority), 2 votes `false`.
+vote0 : Bool is true end
+vote1 : Bool is true end
+vote2 : Bool is false end
+
+-- THE DECISION — a computable value that DEPLOYS and RUNS (emit-and-execute, node): true.
+decision : Bool is maj3 vote0 vote1 vote2 end
+
+-- THE CERTIFICATE, two ways: the decision computes to true (refl), AND it equals the
+-- majority's value vote0 by the proven "majority decides" theorem (not just by computation).
+decisionCorrect : Eq Bool decision true is refl true end
+decisionIsMajorityValue : Eq Bool decision vote0 is maj3TwoAgree vote0 vote2 end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 138 — WHAT LANDED.
+-- FULLY PROVEN + DEPLOYED (no admits/holes/postulates): maj3 (the computable 3-replica
+-- majority decision), maj3TwoAgree (the AGREEMENT property concretely — two agreeing
+-- replicas fix the value), and a concrete instance whose `decision` DEPLOYS and RUNS on a
+-- backend to `true` (harness emit-and-execute), certified BOTH by computation (refl) and by
+-- the proven theorem (decisionIsMajorityValue).  This is E4 in miniature: a consensus
+-- decision that is provably correct AND deployed from the same verified source — the
+-- propositional safety stack (ch112–137) and a runnable artifact, two faces of one result.
+-- THE NEXT STEP: scale to a multi-value decision projected to runnable OTP-style actors, and
+-- a log-PREFIX matching property; the full simulate-and-deploy infra-as-code surface.
+-- ====================================================================================

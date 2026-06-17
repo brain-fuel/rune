@@ -1,0 +1,35 @@
+-- Chapter 21 — Transport, the regularity rule (§F phase 3c).
+-- A Kan operation transports a point along a LINE of fibrant types:
+--
+--   transp : (A : I -> UF) -> El (A i0) -> El (A i1)
+--
+-- The first rule it computes is REGULARITY: a type-line that does not depend on
+-- i transports by the identity. Detecting "does not depend on i" is the genuine
+-- new machinery — the type-line is probed at a fresh interval point and the
+-- result scanned for it; if it is absent, the line is constant and transport is
+-- the identity. (Transport over piF/pathF, and through `ua`, are the next
+-- increments and phase 4 — they stay stuck, honestly, until then.)
+
+-- Transport along a constant line is the identity, at any fibrant type.
+reglConst : {A : UF} -> (a : El A) -> Eq (El A) (transp (fn (i : I) is A end) a) a is
+  fn {A : UF} (a : El A) is refl a end
+end
+
+-- Same, at a concrete `fib` type (an outer set, always Kan-trivial).
+reglFib : {X : U} -> (x : X) -> Eq X (transp (fn (i : I) is fib X end) x) x is
+  fn {X : U} (x : X) is refl x end
+end
+
+-- And along a constant PATH type — transporting a path by a degenerate line
+-- gives the path back. (Genuine transport ALONG a path of types is phase 4.)
+reglPath : {A : UF} -> {x : El A} -> {y : El A} -> (p : El (pathF A x y)) ->
+    Eq (El (pathF A x y)) (transp (fn (i : I) is pathF A x y end) p) p is
+  fn {A : UF} {x : El A} {y : El A} (p : El (pathF A x y)) is refl p end
+end
+
+-- Regularity makes a constant transport vanish wherever it appears — here inside
+-- a function, the shape the piF transport rule will eventually general­ise.
+reglUnderPi : {A : UF} -> {B : UF} -> (f : El A -> El B) -> (a : El A) ->
+    Eq (El B) (transp (fn (i : I) is B end) (f a)) (f a) is
+  fn {A : UF} {B : UF} (f : El A -> El B) (a : El A) is refl (f a) end
+end

@@ -1,0 +1,30 @@
+-- Chapter 31 — Typeclasses by instance search (C2 / C-ABS).
+-- A typeclass is a type family; an instance is a value of it registered in the
+-- session table; a class-constrained function takes the dictionary as an IMPLICIT
+-- argument that the elaborator resolves by searching the registered instances —
+-- keyed by (class, the argument type's head). No new core: the inserted
+-- dictionary is type-checked by the kernel, so resolution can never be unsound,
+-- only fail. Explicit dictionaries ({s}) remain the always-available floor.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+-- A one-method class: the canonical self-map on A.
+Self : U -> U is fn (A : U) is A -> A end end
+
+-- An instance for Bool (the identity), registered under (Self, Bool).
+instance selfBool : Self Bool is fn (b : Bool) is b end end
+
+-- A class-constrained function: {s : Self A} is found by search at each call.
+applySelf : (A : U) -> {s : Self A} -> A -> A is
+  fn (A : U) {s : Self A} (x : A) is s x end
+end
+
+-- At the use site the dictionary is resolved implicitly to selfBool, so the
+-- computation goes through and the result is certified by refl.
+resolved : Eq Bool (applySelf Bool true) true is refl true end
+
+-- The explicit-dictionary floor still works: pass {selfBool} by hand.
+explicit : Eq Bool (applySelf Bool {selfBool} false) false is refl false end

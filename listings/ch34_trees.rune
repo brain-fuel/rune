@@ -1,0 +1,40 @@
+-- Chapter 34 — Branching datatypes: the binary tree (eliminator regression).
+-- A constructor with TWO recursive arguments (node) exercises the eliminator's
+-- induction-hypothesis telescope at nIH ≥ 2 — a path no earlier datatype hit,
+-- and which previously crashed (a de Bruijn miscount in the case-type
+-- generation). Now it computes: every branching datatype (trees, a process
+-- calculus with parallel, … ) is available.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+data Tree : U is
+  leaf : Tree
+| node : Tree -> Tree -> Tree
+end
+
+-- leaf-count, summing the two induction hypotheses — the node case binds both
+-- recursive results (ihl, ihr).
+leaves : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end)
+      (succ zero)
+      (fn (l : Tree) (r : Tree) (ihl : Nat) (ihr : Nat) is add ihl ihr end)
+      t
+  end
+end
+
+-- a balanced tree of 4 leaves.
+balanced : Tree is node (node leaf leaf) (node leaf leaf) end
+
+leavesAreFour : Eq Nat (leaves balanced) (succ (succ (succ (succ zero)))) is
+  refl (succ (succ (succ (succ zero))))
+end

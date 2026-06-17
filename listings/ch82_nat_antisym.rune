@@ -1,0 +1,140 @@
+-- Chapter 82 — ANTISYMMETRY of the order (D1, the proven tier): `lteAntisym`, the law
+-- that upgrades (Nat, <=) from a PREORDER to a PARTIAL ORDER. ch65 proved reflexivity
+-- (`lteRefl`) and the successor monotonicities; ch80 proved transitivity (`lteTrans`),
+-- closing (Nat, <=) into a preorder. The remaining order law is antisymmetry — a <= b
+-- and b <= a together force a = b. With it (Nat, <=) is a genuine partial order, so the
+-- comparison D2's sorting and balanced Map/Set rebalancing ride on a certified poset,
+-- not merely a preorder.
+--
+-- `lte` recurses on its FIRST argument (an inner NatElim cases the second), verbatim
+-- from ch65/ch80, so `lte zero b`, `lte (succ a') zero`, and the successor-of-successor
+-- step all reduce definitionally. The proof is double induction on a and b: the two
+-- mixed cases (zero vs succ) have an impossible premise `lte (succ _) zero = false = true`
+-- discharged by the ch80 `lteAbsurd` idiom (subst with a case-on-Bool motive into the
+-- absurd); the succ/succ case descends both premises to the predecessors, where the IH
+-- yields `Eq Nat a' b'`, lifted through `succ` by a `subst` congruence (congSucc).
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- lte a b = (a <= b), verbatim from ch65/ch80: zero is below everything; succ k <= zero
+-- is false; succ k <= succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- ABSURDITY: from `false = true`, conclude ANY equation. subst transports the
+-- goal-as-a-function-of-the-Bool from the `false` slot (where it is the trivially-true
+-- `Eq Nat a b`-when-a-is-b ... here we just need SOME absurd target, so we use the
+-- Nat-equality goal directly via a Bool case motive), verbatim idiom from ch80.
+-- We instantiate it at the Nat-equality conclusion the antisymmetry mixed cases need.
+lteAbsurdNat : (a : Nat) -> (b : Nat) -> Eq Bool false true -> Eq Nat a b is
+  fn (a : Nat) (b : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Nat a b
+         | false -> Eq Nat a a
+         end
+       end)
+      (refl a)
+  end
+end
+
+-- ANTISYMMETRY: a <= b and b <= a imply a = b, by induction on a, then b. The motive of
+-- the OUTER induction is the whole implication quantified over b, so the successor step
+-- hands back a genuine induction hypothesis at the predecessor.
+--
+--   a = zero, b = zero       : goal Eq Nat zero zero — refl, premises unused.
+--   a = zero, b = succ b'    : SECOND premise is lte (succ b') zero = false = true,
+--                              absurd — lteAbsurdNat discharges it.
+--   a = succ a', b = zero    : FIRST premise is lte (succ a') zero = false = true,
+--                              absurd — lteAbsurdNat again.
+--   a = succ a', b = succ b' : both premises reduce to the predecessors (lte a' b' = true
+--                              and lte b' a' = true); the IH gives Eq Nat a' b', lifted
+--                              through succ by subst (congSucc).
+lteAntisym : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b a) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b x) true
+           -> Eq Nat x b end)
+      -- a = zero, with inner induction on b.
+      (fn (b : Nat) is
+         NatElim
+           (fn (y : Nat) is
+              Eq Bool (lte zero y) true -> Eq Bool (lte y zero) true
+                -> Eq Nat zero y end)
+           -- b = zero: goal Eq Nat zero zero — refl.
+           (fn (hab : Eq Bool (lte zero zero) true)
+               (hba : Eq Bool (lte zero zero) true) is
+              refl zero end)
+           -- b = succ b': second premise lte (succ b') zero ~> false; absurd.
+           (fn (b' : Nat)
+               (ihb : Eq Bool (lte zero b') true -> Eq Bool (lte b' zero) true
+                        -> Eq Nat zero b') is
+              fn (hab : Eq Bool (lte zero (succ b')) true)
+                 (hba : Eq Bool false true) is
+                lteAbsurdNat zero (succ b') hba end
+            end)
+           b
+       end)
+      -- a = succ a', with IH at a'.
+      (fn (a' : Nat)
+          (ih : (b : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b a') true
+                  -> Eq Nat a' b) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (lte (succ a') y) true -> Eq Bool (lte y (succ a')) true
+                  -> Eq Nat (succ a') y end)
+             -- b = zero: first premise lte (succ a') zero ~> false; absurd.
+             (fn (hab : Eq Bool false true)
+                 (hba : Eq Bool (lte zero (succ a')) true) is
+                lteAbsurdNat (succ a') zero hab end)
+             -- b = succ b': both premises reduce to the predecessors; IH then congSucc.
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' (succ a')) true
+                          -> Eq Nat (succ a') b') is
+                fn (hab : Eq Bool (lte a' b') true)
+                   (hba : Eq Bool (lte b' a') true) is
+                  subst Nat a' b' (ih b' hab hba)
+                    (fn (z : Nat) is Eq Nat (succ a') (succ z) end)
+                    (refl (succ a'))
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- A SANITY check that the law computes at concrete arguments: 2 <= 2 and 2 <= 2 give
+-- 2 = 2, and the certificate is the canonical `refl 2`.
+twoEqTwo : Eq Nat (succ (succ zero)) (succ (succ zero)) is
+  lteAntisym (succ (succ zero)) (succ (succ zero)) (refl true) (refl true)
+end

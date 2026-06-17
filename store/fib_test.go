@@ -41,7 +41,7 @@ func TestFibRolesAndBarrier(t *testing.T) {
 	want := []core.FibRole{
 		core.FRoleUF, core.FRoleEl, core.FRoleFib, core.FRolePiF,
 		core.FRolePathF, core.FRolePrefl, core.FRoleJ,
-		core.FRolePathU, core.FRoleUrefl, core.FRoleUa, core.FRoleCastU,
+		core.FRolePathU, core.FRoleUrefl, core.FRoleCastU,
 	}
 	for i, h := range hs {
 		if got := s.FibRoleOf(h); got != want[i] {
@@ -61,6 +61,12 @@ func TestFibRolesAndBarrier(t *testing.T) {
 	}
 	if s.FibRoleOf(core.Hash{}) != core.FRoleNone {
 		t.Fatal("unknown hash should have no fibrant role")
+	}
+	// FibHash is the reverse of FibRoleOf.
+	for i, role := range want {
+		if rh, ok := s.FibHash(role); !ok || rh != hs[i] {
+			t.Fatalf("FibHash(%v) did not round-trip to member %d", role, i)
+		}
 	}
 }
 

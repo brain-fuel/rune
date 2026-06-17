@@ -1,0 +1,64 @@
+-- Chapter 18 — Paths as interval functions (§F phase 2).
+-- Phase 1 gave the interval; now inner paths get computational content. An
+-- inner path p : El (pathF A x y) is a function of the interval pinned at the
+-- ends: pabs builds one, papp applies one, and the endpoints are FORCED by
+-- computation:
+--
+--   pabs A f       : El (pathF A (f i0) (f i1))     path abstraction
+--   papp A x y p i : El A                            path application
+--   papp A x y p i0 ~> x        papp A x y p i1 ~> y        (boundary)
+--   papp A x x (preflF A x) i ~> x                          (refl is constant)
+--   papp A (f i0) (f i1) (pabs A f) i ~> f i                (β)
+--
+-- Everything below CHECKS because those rules fire — the boundary reductions in
+-- particular make the endpoint types line up on the nose.
+
+-- Boundary, as theorems (true for any path, including a variable).
+boundaryL : {A : UF} -> {x : El A} -> {y : El A} -> (p : El (pathF A x y)) -> Eq (El A) (papp A x y p i0) x is
+  fn {A : UF} {x : El A} {y : El A} (p : El (pathF A x y)) is refl x end
+end
+boundaryR : {A : UF} -> {x : El A} -> {y : El A} -> (p : El (pathF A x y)) -> Eq (El A) (papp A x y p i1) y is
+  fn {A : UF} {x : El A} {y : El A} (p : El (pathF A x y)) is refl y end
+end
+
+-- Reflexivity is the constant path, definitionally, at every interval point.
+reflIsConstant : {A : UF} -> {x : El A} -> (i : I) -> Eq (El A) (papp A x x (preflF A x) i) x is
+  fn {A : UF} {x : El A} (i : I) is refl x end
+end
+
+-- β: applying an abstraction is the underlying interval function.
+pathBeta : {A : UF} -> (f : I -> El A) -> (i : I) -> Eq (El A) (papp A (f i0) (f i1) (pabs A f) i) (f i) is
+  fn {A : UF} (f : I -> El A) (i : I) is refl (f i) end
+end
+
+-- Symmetry: reverse the interval. sym p walks the path backwards.
+sym : {A : UF} -> {x : El A} -> {y : El A} -> El (pathF A x y) -> El (pathF A y x) is
+  fn {A : UF} {x : El A} {y : El A} (p : El (pathF A x y)) is
+    pabs A (fn (i : I) is papp A x y p (ineg i) end)
+  end
+end
+
+-- Functoriality (ap / cong): a function takes a path to a path. The result type
+-- type-checks ONLY because papp p i0 ~> x and papp p i1 ~> y reduce the
+-- endpoints to f x and f y.
+ap : {A : UF} -> {B : UF} -> (f : El A -> El B) -> {x : El A} -> {y : El A} ->
+     El (pathF A x y) -> El (pathF B (f x) (f y)) is
+  fn {A : UF} {B : UF} (f : El A -> El B) {x : El A} {y : El A} (p : El (pathF A x y)) is
+    pabs B (fn (i : I) is f (papp A x y p i) end)
+  end
+end
+
+-- ap of the identity path (refl) is refl — and it reduces, since papp on
+-- preflF is constant and pabs of a constant is reflexivity's witness up to β.
+apReflEndpoint : {A : UF} -> {B : UF} -> (f : El A -> El B) -> {x : El A} ->
+    Eq (El B) (papp B (f x) (f x) (ap f (preflF A x)) i0) (f x) is
+  fn {A : UF} {B : UF} (f : El A -> El B) {x : El A} is refl (f x) end
+end
+
+-- A connection: imin i i1 ~> i, so re-abstracting a path through it is the path
+-- again (its endpoints stay x, y). The boundary then reads the left end as x —
+-- the phase-1 algebra and the phase-2 boundary rule composing inside one term.
+connId : {A : UF} -> {x : El A} -> {y : El A} -> (p : El (pathF A x y)) ->
+    Eq (El A) (papp A x y (pabs A (fn (i : I) is papp A x y p (imin i i1) end)) i0) x is
+  fn {A : UF} {x : El A} {y : El A} (p : El (pathF A x y)) is refl x end
+end

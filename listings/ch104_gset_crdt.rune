@@ -1,0 +1,494 @@
+-- Chapter 104 — A VERIFIED GROW-ONLY SET CRDT (G-Set), the telos-4 distributed track FED BY the
+-- telos-3 stdlib. ch72 built a G-Counter (merge = pointwise max) and proved it a join-semilattice
+-- by induction; ch95/ch96/ch97 built a VERIFIED FINITE SET and proved (Set, ∪, ∩) a bounded
+-- distributive lattice at the MEMBERSHIP level. This chapter SYNTHESISES the two: a replicated
+-- grow-only set whose merge is set UNION, so its CRDT convergence proof IS the set lattice —
+-- mergeComm IS unionComm, mergeAssoc IS unionAssoc, mergeIdem IS unionIdem. No new induction is
+-- needed; the hard lattice lemmas were proven once in ch97 and are REUSED VERBATIM here. The new
+-- content is the SYNTHESIS plus two CRDT-specific facts: MONOTONICITY (merge only grows — merging
+-- never loses an element) and a concrete, refl-certified replication SCENARIO.
+--
+-- A G-Set replica is a finite set (`List Nat` under `member`). The state-based CRDT (CvRDT)
+-- correctness criterion is that (replica, merge) is a JOIN-SEMILATTICE — merge commutative,
+-- associative, idempotent — so all replicas CONVERGE regardless of gossip order. Stated
+-- EXTENSIONALLY at the membership level (two sets are equal iff they have the same members):
+--   mergeComm  : member x (merge a b)           = member x (merge b a)        (gossip-order indep.)
+--   mergeAssoc : member x (merge (merge a b) c)  = member x (merge a (merge b c))
+--   mergeIdem  : member x (merge a a)            = member x a
+--   mergeMono  : member x a = true -> member x (merge a b) = true             (merge only GROWS)
+--
+-- The primitives (Bool, Nat, List, eqNat + its laws, member, insert, not/and/or, union, the union
+-- member-homomorphism memberUnion, the Boolean lattice lemmas orComm/orIdem/orAssoc, the ambient
+-- trans, and unionComm/unionIdem/unionAssoc) are redeclared BYTE-IDENTICAL to ch95/ch96/ch97 per
+-- the self-contained-listings convention. `merge := union` makes each CRDT law a one-line
+-- corollary; `mergeMono` is `memberUnion` plus an or-introduction (orTrueL).
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- DECIDABLE Nat equality (verbatim from ch95): zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true (verbatim from ch95).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- eqNat is SYMMETRIC, false-preserving: eqNat m n = false -> eqNat n m = false (verbatim ch95).
+eqNatSymFalse : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) false -> Eq Bool (eqNat n m) false is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) false -> Eq Bool (eqNat n x) false end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) false -> Eq Bool (eqNat y zero) false end)
+           (fn (h : Eq Bool true false) is h end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) false -> Eq Bool (eqNat j zero) false) is
+              fn (h : Eq Bool false false) is refl false end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) false -> Eq Bool (eqNat n k) false) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) false -> Eq Bool (eqNat y (succ k)) false end)
+             (fn (h : Eq Bool false false) is refl false end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) false -> Eq Bool (eqNat j (succ k)) false) is
+                fn (h : Eq Bool (eqNat k j) false) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is SOUND: eqNat x y = true -> x = y (verbatim ch96).
+eqNatSound : (x : Nat) -> (y : Nat) -> Eq Bool (eqNat x y) true -> Eq Nat x y is
+  fn (x : Nat) is
+    NatElim
+      (fn (w : Nat) is (y : Nat) -> Eq Bool (eqNat w y) true -> Eq Nat w y end)
+      (fn (y : Nat) is
+         NatElim
+           (fn (u : Nat) is Eq Bool (eqNat zero u) true -> Eq Nat zero u end)
+           (fn (h : Eq Bool true true) is refl zero end)
+           (fn (m : Nat) (ihm : Eq Bool (eqNat zero m) true -> Eq Nat zero m) is
+              fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat zero (succ m)
+                     | false -> Eq Nat zero zero
+                     end
+                   end)
+                  (refl zero) end
+            end)
+           y end)
+      (fn (k : Nat) (ih : (y : Nat) -> Eq Bool (eqNat k y) true -> Eq Nat k y) is
+         fn (y : Nat) is
+           NatElim
+             (fn (u : Nat) is Eq Bool (eqNat (succ k) u) true -> Eq Nat (succ k) u end)
+             (fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat (succ k) zero
+                     | false -> Eq Nat (succ k) (succ k)
+                     end
+                   end)
+                  (refl (succ k)) end)
+             (fn (m : Nat) (ihm : Eq Bool (eqNat (succ k) m) true -> Eq Nat (succ k) m) is
+                fn (h : Eq Bool (eqNat k m) true) is
+                  subst Nat k m (ih m h)
+                    (fn (z : Nat) is Eq Nat (succ k) (succ z) end)
+                    (refl (succ k)) end
+              end)
+             y end
+       end)
+      x
+  end
+end
+
+-- ====================================================================================
+-- THE AMBIENT EQUALITY combinator (ch03), redeclared verbatim — the lattice chains thread it.
+-- ====================================================================================
+
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ====================================================================================
+-- MEMBERSHIP + SET INSERTION (verbatim ch96/ch97)
+-- ====================================================================================
+
+member : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (ys : List Nat) (ih : Bool) is
+         BoolElim (fn (b : Bool) is Bool end) true ih (eqNat x y) end)
+      xs
+  end
+end
+
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim (fn (b : Bool) is List Nat end)
+      xs
+      (cons Nat x xs)
+      (member x xs)
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN ALGEBRA (verbatim ch97 not/and/or) + the or-lattice lemmas + or-left-true.
+-- ====================================================================================
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- COMMUTATIVITY of or (verbatim ch97): double case-split, all four arms compute to a common value.
+orComm : (a : Bool) -> (b : Bool) -> Eq Bool (or a b) (or b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (or x b) (or b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool true (or y true) end) (refl true) (refl true) b)
+      (BoolElim (fn (y : Bool) is Eq Bool y (or y false) end) (refl true) (refl false) b)
+      a
+  end
+end
+
+-- IDEMPOTENCE of or (verbatim ch97): or a a = a. Case on a; both arms refl.
+orIdem : (a : Bool) -> Eq Bool (or a a) a is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (or x x) x end) (refl true) (refl false) a
+  end
+end
+
+-- ASSOCIATIVITY of or (verbatim ch97): or (or a b) c = or a (or b c). Two refl arms.
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool)
+   -> Eq Bool (or (or a b) c) (or a (or b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (or (or x b) c) (or x (or b c)) end)
+      (refl true)
+      (refl (or b c))
+      a
+  end
+end
+
+-- or-left-true: a = true -> or a b = true. Rewrite the GOAL's `or a b` back to `or true b ~> true`
+-- by substituting along (symBool h : true = a) under the motive `or z b`, landing `refl true`. The
+-- Boolean analog of "join only grows" — feeding a true into a disjunction keeps it true; carries
+-- mergeMono.
+orTrueL : (a : Bool) -> (b : Bool) -> Eq Bool a true -> Eq Bool (or a b) true is
+  fn (a : Bool) (b : Bool) (h : Eq Bool a true) is
+    subst Bool true a (symBool a true h)
+      (fn (z : Bool) is Eq Bool (or z b) true end)
+      (refl true)
+  end
+end
+
+-- ====================================================================================
+-- INSERT membership laws (verbatim ch97) — memberUnion rides on these.
+-- ====================================================================================
+
+memberInsertSame : (x : Nat) -> (xs : List Nat)
+   -> Eq Bool (member x (insert x xs)) true is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member x (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                true end)
+      (fn (hm : Eq Bool (member x xs) true) is hm end)
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+           (fn (g : Bool) is
+              Eq Bool (BoolElim (fn (c : Bool) is Bool end) true (member x xs) g) true end)
+           (refl true) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+memberInsertOther : (x : Nat) -> (y : Nat) -> (xs : List Nat)
+   -> Eq Bool (eqNat x y) false
+   -> Eq Bool (member y (insert x xs)) (member y xs) is
+  fn (x : Nat) (y : Nat) (xs : List Nat) (hxy : Eq Bool (eqNat x y) false) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member y (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                (member y xs) end)
+      (fn (hm : Eq Bool (member x xs) true) is refl (member y xs) end)
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool false (eqNat y x) (symBool (eqNat y x) false (eqNatSymFalse x y hxy))
+           (fn (g : Bool) is
+              Eq Bool
+                (BoolElim (fn (c : Bool) is Bool end) true (member y xs) g)
+                (member y xs) end)
+           (refl (member y xs)) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+-- ====================================================================================
+-- UNION (verbatim ch96/ch97) + its member-HOMOMORPHISM (verbatim ch96/ch97).
+-- ====================================================================================
+
+union : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      b
+      (fn (h : Nat) (t : List Nat) (ih : List Nat) is insert h ih end)
+      a
+  end
+end
+
+memberUnion : (x : Nat) -> (a : List Nat) -> (b : List Nat)
+   -> Eq Bool (member x (union a b)) (or (member x a) (member x b)) is
+  fn (x : Nat) (a : List Nat) (b : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member x (union w b)) (or (member x w) (member x b)) end)
+      (refl (member x b))
+      (fn (h : Nat) (t : List Nat)
+          (ih : Eq Bool (member x (union t b)) (or (member x t) (member x b))) is
+         BoolElim
+           (fn (gxh : Bool) is
+              Eq Bool (eqNat x h) gxh
+                -> Eq Bool
+                     (member x (insert h (union t b)))
+                     (or (BoolElim (fn (c : Bool) is Bool end) true (member x t) gxh) (member x b)) end)
+           (fn (hxh : Eq Bool (eqNat x h) true) is
+              subst Nat x h (eqNatSound x h hxh)
+                (fn (w : Nat) is
+                   Eq Bool
+                     (member x (insert w (union t b)))
+                     (or true (member x b)) end)
+                (memberInsertSame x (union t b)) end)
+           (fn (hxh : Eq Bool (eqNat x h) false) is
+              subst Bool (member x (union t b)) (member x (insert h (union t b)))
+                (symBool (member x (insert h (union t b))) (member x (union t b))
+                   (memberInsertOther h x (union t b) (eqNatSymFalse x h hxh)))
+                (fn (w : Bool) is Eq Bool w (or (member x t) (member x b)) end)
+                ih end)
+           (eqNat x h)
+           (refl (eqNat x h)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- THE SET LATTICE LAWS (verbatim ch97) — these ARE the CRDT convergence proof.
+-- ====================================================================================
+
+-- COMMUTATIVITY of union (verbatim ch97).
+unionComm : (a : List Nat) -> (b : List Nat) -> (x : Nat)
+   -> Eq Bool (member x (union a b)) (member x (union b a)) is
+  fn (a : List Nat) (b : List Nat) (x : Nat) is
+    trans Bool (member x (union a b)) (or (member x a) (member x b)) (member x (union b a))
+      (memberUnion x a b)
+      (trans Bool (or (member x a) (member x b)) (or (member x b) (member x a)) (member x (union b a))
+         (orComm (member x a) (member x b))
+         (symBool (member x (union b a)) (or (member x b) (member x a))
+            (memberUnion x b a)))
+  end
+end
+
+-- IDEMPOTENCE of union (verbatim ch97).
+unionIdem : (a : List Nat) -> (x : Nat)
+   -> Eq Bool (member x (union a a)) (member x a) is
+  fn (a : List Nat) (x : Nat) is
+    trans Bool (member x (union a a)) (or (member x a) (member x a)) (member x a)
+      (memberUnion x a a)
+      (orIdem (member x a))
+  end
+end
+
+-- ASSOCIATIVITY of union (verbatim ch97).
+unionAssoc : (a : List Nat) -> (b : List Nat) -> (c : List Nat) -> (x : Nat)
+   -> Eq Bool (member x (union (union a b) c)) (member x (union a (union b c))) is
+  fn (a : List Nat) (b : List Nat) (c : List Nat) (x : Nat) is
+    trans Bool
+      (member x (union (union a b) c))
+      (or (member x (union a b)) (member x c))
+      (member x (union a (union b c)))
+      (memberUnion x (union a b) c)
+      (trans Bool
+        (or (member x (union a b)) (member x c))
+        (or (or (member x a) (member x b)) (member x c))
+        (member x (union a (union b c)))
+        (subst Bool (member x (union a b)) (or (member x a) (member x b))
+           (memberUnion x a b)
+           (fn (w : Bool) is Eq Bool (or (member x (union a b)) (member x c)) (or w (member x c)) end)
+           (refl (or (member x (union a b)) (member x c))))
+        (trans Bool
+          (or (or (member x a) (member x b)) (member x c))
+          (or (member x a) (or (member x b) (member x c)))
+          (member x (union a (union b c)))
+          (orAssoc (member x a) (member x b) (member x c))
+          (trans Bool
+            (or (member x a) (or (member x b) (member x c)))
+            (or (member x a) (member x (union b c)))
+            (member x (union a (union b c)))
+            (subst Bool (or (member x b) (member x c)) (member x (union b c))
+               (symBool (member x (union b c)) (or (member x b) (member x c))
+                  (memberUnion x b c))
+               (fn (w : Bool) is
+                  Eq Bool (or (member x a) (or (member x b) (member x c))) (or (member x a) w) end)
+               (refl (or (member x a) (or (member x b) (member x c)))))
+            (symBool (member x (union a (union b c))) (or (member x a) (member x (union b c)))
+               (memberUnion x a (union b c))))))
+  end
+end
+
+-- ====================================================================================
+-- THE G-SET CRDT — merge IS union. The CRDT laws are corollaries of the set lattice.
+-- ====================================================================================
+
+-- A replica's state is a finite set; merge gossips two replicas by taking their UNION (every
+-- element either side has). This is the grow-only set: merge can only ADD elements, never remove.
+merge : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is union a b end
+end
+
+-- CONVERGENCE (the CvRDT correctness theorem), all stated EXTENSIONALLY at the membership level
+-- (two replicas are equal as sets iff every element has the same membership in both):
+
+-- COMMUTATIVE: gossiping a into b or b into a reaches the same set — replicas CONVERGE regardless
+-- of the order messages arrive. This IS unionComm (merge ~> union definitionally).
+mergeComm : (a : List Nat) -> (b : List Nat) -> (x : Nat)
+   -> Eq Bool (member x (merge a b)) (member x (merge b a)) is
+  fn (a : List Nat) (b : List Nat) (x : Nat) is unionComm a b x end
+end
+
+-- IDEMPOTENT: re-merging a replica with itself is a no-op (re-delivered gossip is harmless). This
+-- IS unionIdem.
+mergeIdem : (a : List Nat) -> (x : Nat)
+   -> Eq Bool (member x (merge a a)) (member x a) is
+  fn (a : List Nat) (x : Nat) is unionIdem a x end
+end
+
+-- ASSOCIATIVE: the grouping of gossip is irrelevant — batching merges any way converges. This IS
+-- unionAssoc.
+mergeAssoc : (a : List Nat) -> (b : List Nat) -> (c : List Nat) -> (x : Nat)
+   -> Eq Bool (member x (merge (merge a b) c)) (member x (merge a (merge b c))) is
+  fn (a : List Nat) (b : List Nat) (c : List Nat) (x : Nat) is unionAssoc a b c x end
+end
+
+-- So (replica, merge) is a JOIN-SEMILATTICE (commutative + idempotent + associative) — exactly the
+-- state-based CRDT (CvRDT) convergence criterion. The G-Set is a VERIFIED convergent replicated
+-- data type, its convergence proof inherited WHOLESALE from the verified set lattice.
+
+-- MONOTONICITY — the defining CRDT property of a grow-only set: merging NEVER LOSES an element. If
+-- x is in replica a, it is still in (merge a b) after gossip. Chain: member x (merge a b) ~>
+-- member x (union a b) =[memberUnion] or (member x a) (member x b); with member x a = true,
+-- orTrueL forces the disjunction to true.
+mergeMono : (a : List Nat) -> (b : List Nat) -> (x : Nat)
+   -> Eq Bool (member x a) true -> Eq Bool (member x (merge a b)) true is
+  fn (a : List Nat) (b : List Nat) (x : Nat) (h : Eq Bool (member x a) true) is
+    trans Bool
+      (member x (merge a b))
+      (or (member x a) (member x b))
+      true
+      (memberUnion x a b)
+      (orTrueL (member x a) (member x b) h)
+  end
+end
+
+-- The dual monotonicity (an element of b survives) is symmetric: by mergeComm the two states
+-- agree, so a fact about (merge a b) transfers to (merge b a). We record the left half as the
+-- canonical "merge only grows" certificate; the right follows by commutativity.
+
+-- ====================================================================================
+-- THE REPLICATION SCENARIO (representation-agnostic: assert via Eq + refl).
+-- replica1 = {1,2}, replica2 = {2,3}. After gossip (merge), the set is {1,2,3}: 3 (added by
+-- replica2) is now observable in replica1's merged view. Concretely refl-certified.
+-- ====================================================================================
+
+one   : Nat is succ zero end
+two   : Nat is succ (succ zero) end
+three : Nat is succ (succ (succ zero)) end
+
+replica1 : List Nat is cons Nat one (cons Nat two (nil Nat)) end
+replica2 : List Nat is cons Nat two (cons Nat three (nil Nat)) end
+
+-- THE DEPLOYED OBSERVATION: after gossip, element 3 — which originated on replica2 — is present in
+-- the merged replica. `observed3` DEPLOYS + RUNS on a real backend (the emit-and-execute gate),
+-- printing `true`. The certificate rides along: `observed3Correct` is refl.
+observed3 : Bool is member three (merge replica1 replica2) end
+
+observed3Correct : Eq Bool observed3 true is refl true end
+
+-- Element 1 (replica1's own) survives the merge (monotonicity, concretely).
+observed1Correct : Eq Bool (member one (merge replica1 replica2)) true is refl true end
+
+-- Element 4 was never added by anyone, so it is absent from the merged set (grow-only: merge adds
+-- nothing spurious).
+four : Nat is succ (succ (succ (succ zero))) end
+observed4Absent : Eq Bool (member four (merge replica1 replica2)) false is refl false end
+
+-- CONVERGENCE on the concrete replicas: replica1 ∪ replica2 and replica2 ∪ replica1 agree on
+-- every observation (gossip-order independence, witnessed concretely at element 3).
+convergeExample : Eq Bool
+   (member three (merge replica1 replica2))
+   (member three (merge replica2 replica1)) is refl true end
+
+-- MONOTONICITY on the concrete replicas, via the general theorem: since 1 ∈ replica1, 1 ∈ merge.
+monoExample : Eq Bool (member one (merge replica1 replica2)) true is
+  mergeMono replica1 replica2 one (refl true)
+end

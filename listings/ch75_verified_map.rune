@@ -1,0 +1,100 @@
+-- Chapter 75 — A verified finite Map (association list over Nat keys), M6 stdlib. insert/lookup
+-- with the key correctness law: looking up a key just inserted returns the inserted value —
+-- `lookup k (insert k v m) = some v`. The decidable key equality `eqNat` and its reflexivity
+-- `eqNat n n = true` carry the proof. A small but honest verified data structure.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- a key/value entry and a map as a list of entries.
+data Entry : U -> U is
+  mkE : (V : U) -> Nat -> V -> Entry V
+end
+
+data Map : U -> U is
+  empty : (V : U) -> Map V
+| put   : (V : U) -> Entry V -> Map V -> Map V
+end
+
+-- DECIDABLE Nat equality: zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true. base refl; step is the IH on the nose (eqNat (succ k)
+-- (succ k) ~> eqNat k k definitionally).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+insert : (V : U) -> Nat -> V -> Map V -> Map V is
+  fn (V : U) (k : Nat) (v : V) (m : Map V) is put V (mkE V k v) m end
+end
+
+-- lookup: walk the entries; the first whose key equals `k` (by eqNat) wins.
+lookup : (V : U) -> Nat -> Map V -> Option V is
+  fn (V : U) (k : Nat) (m : Map V) is
+    MapElim V (fn (w : Map V) is Option V end)
+      (none V)
+      (fn (e : Entry V) (rest : Map V) (ih : Option V) is
+         EntryElim V (fn (w : Entry V) is Option V end)
+           (fn (k2 : Nat) (v2 : V) is
+              BoolElim (fn (b : Bool) is Option V end)
+                (some V v2)
+                ih
+                (eqNat k k2)
+            end)
+           e
+       end)
+      m
+  end
+end
+
+-- THE CORRECTNESS LAW: lookup of a freshly inserted key returns its value. `lookup k (insert k v
+-- m)` unfolds to `if eqNat k k then some v else lookup k m`; `eqNatRefl k` rewrites the guard to
+-- `true`, and the `true` branch is `some v`.
+lookupInsertSame : (V : U) -> (k : Nat) -> (v : V) -> (m : Map V)
+   -> Eq (Option V) (lookup V k (insert V k v m)) (some V v) is
+  fn (V : U) (k : Nat) (v : V) (m : Map V) is
+    subst Bool true (eqNat k k) (symBool (eqNat k k) true (eqNatRefl k))
+      (fn (b : Bool) is
+         Eq (Option V)
+           (BoolElim (fn (w : Bool) is Option V end) (some V v) (lookup V k m) b)
+           (some V v) end)
+      (refl (some V v))
+  end
+end

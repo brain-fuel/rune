@@ -12,6 +12,13 @@ import (
 // free identifiers to definition references. There is NO type elaboration here.
 type Resolver struct {
 	Refs map[string]core.Hash
+	// Num lowers numeral literals. Resolution is untyped, so it always picks the
+	// unary `builtin nat` default — byte-identical to the old parse-time
+	// expansion, keeping content hashes unchanged. A numeral whose real type is
+	// binary lowers here to the (type-wrong) unary form, but that only feeds the
+	// proof-cache fast path, where a miss is harmless: the typed elaborator is
+	// the authority and lowers it to the binary spine.
+	Num NumConfig
 }
 
 // ResolveExp resolves a closed-or-reference-only surface expression into core. Bound
@@ -43,8 +50,26 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 		return nil, fmt.Errorf("a hole (_) needs the type checker to solve it; name resolution alone cannot")
 	case EProp:
 		return core.Prop{}, nil
+	case ENum:
+		// Untyped: lower to the unary default. An over-cap literal errors, which
+		// only disables the cache fast path (the elaborator handles it typed).
+		return r.Num.Nat(x.Val)
 	case EEq, ERefl, ECast, ESubst:
 		return nil, fmt.Errorf("an under-applied equality former; Eq takes 3 arguments, refl 1, cast 4, subst 6")
+	case ESig, EPair:
+		return nil, fmt.Errorf("an under-applied Σ former; Sig takes 2 (Sig A B), Pair 4 (Pair A B a b)")
+	case EFst:
+		pp, err := r.resolve(x.P, ctx)
+		if err != nil {
+			return nil, err
+		}
+		return core.Fst{P: pp}, nil
+	case ESnd:
+		pp, err := r.resolve(x.P, ctx)
+		if err != nil {
+			return nil, err
+		}
+		return core.Snd{P: pp}, nil
 	case ECase:
 		return nil, fmt.Errorf("a case expression needs the type checker (its motive comes from the expected type); name resolution alone cannot lower it")
 	case ELam:
@@ -116,6 +141,40 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 					rs[i] = t
 				}
 				return core.Subst{A: rs[0], X: rs[1], Y: rs[2], Prf: rs[3], P: rs[4], Px: rs[5]}, nil
+			case ESig:
+				if len(args) != 2 {
+					return nil, fmt.Errorf("Sig takes exactly 2 arguments (Sig A B), got %d", len(args))
+				}
+				aT, err := r.resolve(args[0], ctx)
+				if err != nil {
+					return nil, err
+				}
+				bT, err := r.resolve(args[1], ctx)
+				if err != nil {
+					return nil, err
+				}
+				lam, ok := bT.(core.Lam)
+				if !ok {
+					return nil, fmt.Errorf("Sig's family must be a function literal: Sig A (fn (x : A) is B end)")
+				}
+				return core.Sig{Dom: aT, Cod: lam.Body}, nil
+			case EPair:
+				if len(args) != 4 {
+					return nil, fmt.Errorf("pair takes exactly 4 arguments (pair A B a b), got %d", len(args))
+				}
+				var rs [4]core.Tm
+				for i, a := range args {
+					t, err := r.resolve(a, ctx)
+					if err != nil {
+						return nil, err
+					}
+					rs[i] = t
+				}
+				lam, ok := rs[1].(core.Lam)
+				if !ok {
+					return nil, fmt.Errorf("pair's family must be a function literal: pair A (fn (x : A) is B end) a b")
+				}
+				return core.Pair{Dom: rs[0], Cod: lam.Body, A: rs[2], B: rs[3]}, nil
 			}
 		}
 		fn, err := r.resolve(x.Fn, ctx)
@@ -206,6 +265,11 @@ func FreeIdents(e Exp) []string {
 			}
 		case EHole:
 		case EProp, EEq, ERefl, ECast, ESubst:
+		case ESig, EPair:
+		case EFst:
+			walk(x.P, bound)
+		case ESnd:
+			walk(x.P, bound)
 		case EUniv:
 		case ELam:
 			if x.Dom != nil {

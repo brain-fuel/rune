@@ -1,0 +1,438 @@
+-- Chapter 84 — A CERTIFIED SORT (M6 / D-track stdlib), step one: the sortedness predicate
+-- `Sorted : List Nat -> U` and the keystone preservation lemma
+-- `insertSorted : (x : Nat) -> (xs : List Nat) -> Sorted xs -> Sorted (insert x xs)`,
+-- then insertion `sort` and `sortSorts : (xs : List Nat) -> Sorted (sort xs)`. This is the
+-- payoff of the now-complete Nat TOTAL order: reflexivity (ch65 `lteRefl`), transitivity
+-- (ch80 `lteTrans`), antisymmetry (ch82), and — the one this proof actually consumes —
+-- TOTALITY (ch83 `lteTotal`), the law that lets `insert` BRANCH on `lte x y` knowing one of
+-- the two directions holds. `lteTrans` threads the lower bound through the recursive branch.
+--
+-- The order primitives (`Bool`, `Nat`, `lte`, `lteTrans`, `lteTotal`, `lteAbsurd`) are
+-- redeclared VERBATIM from ch65/ch80/ch83 per the self-contained-listings convention.
+--
+-- DESIGN — sortedness via a DECIDABLE Boolean predicate, then reflection. The universe is
+-- predicative and the generated eliminators land their motive in `U` (small elimination), so
+-- a `U`-VALUED predicate built by recursion over a list would be a large elimination and is
+-- not available. The idiomatic route (every order chapter already speaks `Eq Bool _ true`):
+-- compute a Boolean `sortedb : List Nat -> Bool` by ordinary ListElim, then DEFINE
+--   Sorted xs    := Eq Bool (sortedb xs) true        (sortedness is its truth)
+--   lteAll x xs  := Eq Bool (allLte x xs) true       (x bounds xs from below)
+-- where `allLte x xs` is the Boolean "x <= every element". `sortedb (cons x ys) = and (allLte
+-- x ys) (sortedb ys)` and `allLte x (cons y ys) = and (lte x y) (allLte x ys)`. Reflection
+-- between `and a b = true` and the pair `(a = true, b = true)` (`andTrue*`/`andIntro`) carries
+-- the proofs; `insert` drops x in front of the first element it does not exceed.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- lte a b = (a <= b), verbatim from ch65/ch80/ch83: zero is below everything; succ k <= zero
+-- is false; succ k <= succ m recurses to k <= m.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- Boolean conjunction by BoolElim on the first argument: `and true b ~> b`, `and false _ ~>
+-- false`. (`or` from ch83 is needed only by the totality statement below.)
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- ABSURDITY (ch80): from `false = true`, conclude any ordering.
+lteAbsurd : (a : Nat) -> (c : Nat) -> Eq Bool false true -> Eq Bool (lte a c) true is
+  fn (a : Nat) (c : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- TRANSITIVITY (ch80), redeclared verbatim — the bound is threaded through it.
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TOTALITY (ch83), redeclared verbatim — the comparison `insert` branches on.
+lteTotal : (a : Nat) -> (b : Nat)
+   -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN-CONJUNCTION REFLECTION
+-- ====================================================================================
+
+-- From `and a b = true`, recover each conjunct, and conversely build `and a b = true` from
+-- both. BoolElim on `a` with a motive `(and a b = true) -> (a = true)` etc.; the `false`
+-- branch is absurd (`and false b ~> false`, so the premise is `false = true`).
+
+andTrueL : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool x true end)
+      (fn (h : Eq Bool b true) is refl true end)
+      (fn (h : Eq Bool false true) is h end)
+      a
+  end
+end
+
+andTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool b true) is h end)
+      (fn (h : Eq Bool false true) is
+         subst Bool false true h
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool b true
+              | false -> Eq Bool true true
+              end
+            end)
+           (refl true) end)
+      a
+  end
+end
+
+andIntro : (a : Bool) -> (b : Bool)
+   -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool x true -> Eq Bool b true -> Eq Bool (and x b) true end)
+      -- a = true: and true b ~> b, so the b-witness is exactly the goal.
+      (fn (ha : Eq Bool true true) (hb : Eq Bool b true) is hb end)
+      -- a = false: the a-witness is the absurd false = true.
+      (fn (ha : Eq Bool false true) (hb : Eq Bool b true) is
+         subst Bool false true ha
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool (and false b) true
+              | false -> Eq Bool (and false b) (and false b)
+              end
+            end)
+           (refl (and false b)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- SORTEDNESS (decidable, then reflected into U)
+-- ====================================================================================
+
+-- allLte x xs : x <= every element of xs (a Bool). nil ~> true; cons y ys ~> and (lte x y)
+-- (allLte x ys). Small elimination into Bool — no universe issue.
+allLte : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (y : Nat) (rest : List Nat) (ih : Bool) is and (lte x y) ih end)
+      xs
+  end
+end
+
+-- sortedb xs : xs is non-decreasing (a Bool). nil/singleton ~> true; cons x ys ~> the head
+-- bounds the tail AND the tail is sorted.
+sortedb : List Nat -> Bool is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (x : Nat) (rest : List Nat) (ih : Bool) is and (allLte x rest) ih end)
+      xs
+  end
+end
+
+-- The U-valued predicates are the TRUTH of the Boolean ones (decidable reflection).
+lteAll : Nat -> List Nat -> U is
+  fn (x : Nat) (xs : List Nat) is Eq Bool (allLte x xs) true end
+end
+
+Sorted : List Nat -> U is
+  fn (xs : List Nat) is Eq Bool (sortedb xs) true end
+end
+
+-- ordered insertion: drop x in front of the first element it does not exceed. The inner
+-- BoolElim on `lte x y` chooses `cons x (cons y ys)` (x belongs here) or `cons y (rest)`
+-- (x is larger; keep looking; `rest` is the already-inserted tail).
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (cons Nat x (nil Nat))
+      (fn (y : Nat) (ys : List Nat) (rest : List Nat) is
+         BoolElim (fn (b : Bool) is List Nat end)
+           (cons Nat x (cons Nat y ys))
+           (cons Nat y rest)
+           (lte x y)
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- PRESERVATION
+-- ====================================================================================
+
+-- LOWER-BOUND TRANSITIVITY: if a <= b and b bounds xs from below, then a bounds xs from
+-- below. Each element y of xs has b <= y; with a <= b, transitivity gives a <= y. Induction
+-- on xs, threading `lteTrans` at the head and the IH at the tail. Note `allLte _ (cons y ys)
+-- ~> and (lte _ y) (allLte _ ys)`, so the reflection lemmas split/join the bound.
+lteAllTrans : (a : Nat) -> (b : Nat) -> (xs : List Nat)
+   -> Eq Bool (lte a b) true -> lteAll b xs -> lteAll a xs is
+  fn (a : Nat) (b : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (lte a b) true -> lteAll b w -> lteAll a w end)
+      (fn (hab : Eq Bool (lte a b) true) (hall : lteAll b (nil Nat)) is refl true end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Bool (lte a b) true -> lteAll b ys -> lteAll a ys) is
+         fn (hab : Eq Bool (lte a b) true) (hall : lteAll b (cons Nat y ys)) is
+           andIntro (lte a y) (allLte a ys)
+             (lteTrans a b y hab (andTrueL (lte b y) (allLte b ys) hall))
+             (ih hab (andTrueR (lte b y) (allLte b ys) hall))
+         end
+       end)
+      xs
+  end
+end
+
+-- KEYSTONE SUBLEMMA: insert preserves a lower bound. If b bounds xs from below AND b <= x,
+-- then b bounds `insert x xs` from below — x is the only new element, and b <= x covers it.
+-- Induction on xs; at each cons we branch on `lte x y` with a motive that states the bound
+-- under insert's BoolElim, so the two arms line up on the nose.
+insertAll : (x : Nat) -> (b : Nat) -> (xs : List Nat)
+   -> Eq Bool (lte b x) true -> lteAll b xs -> lteAll b (insert x xs) is
+  fn (x : Nat) (b : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (lte b x) true -> lteAll b w -> lteAll b (insert x w) end)
+      -- xs = nil: insert x nil ~> cons x nil, so allLte b ~> and (lte b x) true; b <= x gives it.
+      (fn (hbx : Eq Bool (lte b x) true) (hall : lteAll b (nil Nat)) is
+         andIntro (lte b x) true hbx (refl true) end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Eq Bool (lte b x) true -> lteAll b ys -> lteAll b (insert x ys)) is
+         fn (hbx : Eq Bool (lte b x) true) (hall : lteAll b (cons Nat y ys)) is
+           BoolElim
+             (fn (bb : Bool) is
+                lteAll b
+                  (BoolElim (fn (c : Bool) is List Nat end)
+                     (cons Nat x (cons Nat y ys))
+                     (cons Nat y (insert x ys))
+                     bb) end)
+             -- lte x y = true: insert ~> cons x (cons y ys); need b <= x then the whole
+             -- original bound `hall : allLte b (cons y ys) = true`.
+             (andIntro (lte b x) (allLte b (cons Nat y ys)) hbx hall)
+             -- lte x y = false: insert ~> cons y (insert x ys); need b <= y (head of hall)
+             -- and the bound on the inserted tail (IH on the tail of hall).
+             (andIntro (lte b y) (allLte b (insert x ys))
+                (andTrueL (lte b y) (allLte b ys) hall)
+                (ih hbx (andTrueR (lte b y) (allLte b ys) hall)))
+             (lte x y)
+         end
+       end)
+      xs
+  end
+end
+
+-- TOTALITY, ONE DIRECTION: when `lte x y = false`, the other disjunct must hold, i.e.
+-- `lte y x = true`. subst rewrites `lte x y` to `false` inside `lteTotal x y`; the
+-- disjunction `or false (lte y x)` then reduces to `lte y x`.
+yLeX : (x : Nat) -> (y : Nat)
+   -> Eq Bool (lte x y) false -> Eq Bool (lte y x) true is
+  fn (x : Nat) (y : Nat) (heq : Eq Bool (lte x y) false) is
+    subst Bool (lte x y) false heq
+      (fn (z : Bool) is Eq Bool (or z (lte y x)) true end)
+      (lteTotal x y)
+  end
+end
+
+-- INSERT PRESERVES SORTEDNESS. Induction on xs. The cons case branches on `lte x y` with a
+-- motive that ALSO abstracts the branch equation `Eq Bool (lte x y) bb`, discharged with
+-- `refl (lte x y)`, so each arm receives `heq : lte x y = true` / `= false`. In the false
+-- arm (x sinks past y) we need that y still bounds `insert x ys` — true because y <= x (the
+-- OTHER totality disjunct via `yLeX`) plus y already bounded ys, fed through `insertAll`.
+insertSorted : (x : Nat) -> (xs : List Nat) -> Sorted xs -> Sorted (insert x xs) is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is Sorted w -> Sorted (insert x w) end)
+      -- xs = nil: insert x nil ~> cons x nil; sortedb ~> and (allLte x nil) (sortedb nil) =
+      -- and true true ~> true.
+      (fn (s : Sorted (nil Nat)) is refl true end)
+      (fn (y : Nat) (ys : List Nat)
+          (ih : Sorted ys -> Sorted (insert x ys)) is
+         fn (s : Sorted (cons Nat y ys)) is
+           BoolElim
+             (fn (bb : Bool) is
+                Eq Bool (lte x y) bb
+                  -> Sorted
+                       (BoolElim (fn (c : Bool) is List Nat end)
+                          (cons Nat x (cons Nat y ys))
+                          (cons Nat y (insert x ys))
+                          bb) end)
+             -- TRUE arm: heq : lte x y = true. insert ~> cons x (cons y ys). sortedb needs
+             -- (a) x bounds (cons y ys): x <= y (heq) AND x bounds ys (from x<=y and y bounds
+             --     ys, by lteAllTrans); (b) sortedb (cons y ys) = s.
+             (fn (heq : Eq Bool (lte x y) true) is
+                andIntro (allLte x (cons Nat y ys)) (sortedb (cons Nat y ys))
+                  (andIntro (lte x y) (allLte x ys)
+                     heq
+                     (lteAllTrans x y ys heq
+                        (andTrueL (allLte y ys) (sortedb ys) s)))
+                  s end)
+             -- FALSE arm: heq : lte x y = false. insert ~> cons y (insert x ys). sortedb needs
+             -- (a) y bounds (insert x ys): y bounds ys (head of s) and y <= x (yLeX), via
+             --     insertAll; (b) sortedb (insert x ys), by the IH on (sortedb ys = tail of s).
+             (fn (heq : Eq Bool (lte x y) false) is
+                andIntro (allLte y (insert x ys)) (sortedb (insert x ys))
+                  (insertAll x y ys
+                     (yLeX x y heq)
+                     (andTrueL (allLte y ys) (sortedb ys) s))
+                  (ih (andTrueR (allLte y ys) (sortedb ys) s)) end)
+             (lte x y)
+             (refl (lte x y))
+         end
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- INSERTION SORT
+-- ====================================================================================
+
+-- sort xs : insertion sort. Fold `insert` over the list: nil ~> nil; cons x ys ~> insert x
+-- (sort ys).
+sort : List Nat -> List Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is insert x ih end)
+      xs
+  end
+end
+
+-- THE CERTIFIED SORT: sort produces a sorted list, for EVERY input. Induction on xs: the
+-- empty list is sorted (refl), and `insert x` preserves sortedness (insertSorted) of the
+-- already-sorted tail.
+sortSorts : (xs : List Nat) -> Sorted (sort xs) is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Sorted (sort w) end)
+      (refl true)
+      (fn (x : Nat) (rest : List Nat) (ih : Sorted (sort rest)) is
+         insertSorted x (sort rest) ih end)
+      xs
+  end
+end
+
+-- SANITY: sorting [3,1,2] yields [1,2,3], and its sortedness certificate is canonical.
+threeOneTwo : List Nat is
+  cons Nat (succ (succ (succ zero)))
+    (cons Nat (succ zero)
+      (cons Nat (succ (succ zero)) (nil Nat)))
+end
+
+sortedExample : Sorted (sort threeOneTwo) is sortSorts threeOneTwo end

@@ -1,0 +1,62 @@
+-- Chapter 52 — Multi-branch systems and the overlap mechanism (§F / A8).
+-- A *system* is a partial element defined by cases over a disjunction of faces:
+-- `[φ1 ↦ u1; φ2 ↦ u2; …]`. The dispatch primitive is `fsplit`, the eliminator of
+-- a binary disjunction `holds (for φ ψ)` (ch20/ch47). An N-branch system is just
+-- a NESTED fsplit — no new primitive is needed. This is the resolution of the
+-- C-OVERLAP question: systems compute by left-biased face dispatch, and agreement
+-- on overlapping faces is the writer's obligation (vacuous when the faces are
+-- disjoint, as the Kan operations always arrange).
+
+-- A two-branch system over `for φ ψ`: select u on φ, v on ψ. `fsplit` reduces to
+-- `u htop` when φ ≡ ⊤ and to `v htop` when ψ ≡ ⊤.
+system2 : (A : UF) -> (phi : F) -> (psi : F)
+   -> (u : holds phi -> El A) -> (v : holds psi -> El A)
+   -> holds (for phi psi) -> El A is
+  fn (A : UF) (phi : F) (psi : F)
+     (u : holds phi -> El A) (v : holds psi -> El A) is
+    fsplit A phi psi u v
+  end
+end
+
+-- A THREE-branch system over `for φ1 (for φ2 φ3)`: nest a second fsplit in the
+-- fall-through (ψ = for φ2 φ3) disjunct. Dispatch is left-biased: φ1, then φ2,
+-- then φ3 — exactly the order the disjunction is associated.
+system3 : (A : UF) -> (phi1 : F) -> (phi2 : F) -> (phi3 : F)
+   -> (u1 : holds phi1 -> El A) -> (u2 : holds phi2 -> El A)
+   -> (u3 : holds phi3 -> El A)
+   -> holds (for phi1 (for phi2 phi3)) -> El A is
+  fn (A : UF) (phi1 : F) (phi2 : F) (phi3 : F)
+     (u1 : holds phi1 -> El A) (u2 : holds phi2 -> El A)
+     (u3 : holds phi3 -> El A) is
+    fsplit A phi1 (for phi2 phi3) u1
+      (fn (hh : holds (for phi2 phi3)) is
+         fsplit A phi2 phi3 u2 u3 hh
+       end)
+  end
+end
+
+-- A concrete dispatch: the endpoints of an interval point i give DISJOINT faces
+-- ieq0 i and ieq1 i (i cannot be both 0 and 1), so a two-branch system over them
+-- has NO overlap — the agreement obligation is vacuous. This is the shape every
+-- Kan operation's wall system takes.
+endpointSystem : (A : UF) -> (i : I)
+   -> (l : holds (ieq0 i) -> El A) -> (r : holds (ieq1 i) -> El A)
+   -> holds (for (ieq0 i) (ieq1 i)) -> El A is
+  fn (A : UF) (i : I)
+     (l : holds (ieq0 i) -> El A) (r : holds (ieq1 i) -> El A) is
+    fsplit A (ieq0 i) (ieq1 i) l r
+  end
+end
+
+-- The overlap mechanism (C-OVERLAP, resolved): when two branches CAN both hold,
+-- the system is only well-defined if they AGREE there. The honest discipline is
+-- to make agreement structural — e.g. both branches compute the same value on the
+-- meet — so the system is independent of which face dispatch picks. Here both
+-- branches of an overlapping system return the same constant `a`, so agreement
+-- holds definitionally regardless of the (left-biased) choice.
+agreeingSystem : (A : UF) -> (phi : F) -> (psi : F) -> (a : El A)
+   -> holds (for phi psi) -> El A is
+  fn (A : UF) (phi : F) (psi : F) (a : El A) is
+    fsplit A phi psi (fn (hp : holds phi) is a end) (fn (hq : holds psi) is a end)
+  end
+end

@@ -71,9 +71,15 @@ func TestCastUComputesOnBothIntros(t *testing.T) {
 
 func TestCastUStuckOnNeutralPath(t *testing.T) {
 	s := loadFib(t)
+	// castU IS transport over the decoded pathU line (R-UA Decision 2): on a NEUTRAL
+	// path it reduces to a STUCK `transp` over `λi. pappU … p i` (not a stuck castU,
+	// and crucially not to a value — no path content to transport along).
 	got := normalize(t, s, `fn (p : pathU boolF boolF) is castU boolF boolF p true end`)
-	if !strings.Contains(got, "castU") {
-		t.Fatalf("castU on a neutral path should stay stuck, got %s", got)
+	if !strings.Contains(got, "transp") || !strings.Contains(got, "pappU") {
+		t.Fatalf("castU on a neutral path should reduce to a stuck transp over pappU, got %s", got)
+	}
+	if strings.Contains(got, "true") && !strings.Contains(got, "pappU") {
+		t.Fatalf("castU on a neutral path must not fabricate a value, got %s", got)
 	}
 }
 
@@ -92,9 +98,12 @@ end
 	if got := normalize(t, s, `psym boolF true true (preflF boolF true)`); !strings.HasPrefix(got, "preflF") {
 		t.Fatalf("pathJ on preflF should compute to the base case, got %s", got)
 	}
+	// A4: pathJ on a GENERAL path now COMPUTES (transport along the J-line), so
+	// psym of a neutral path reduces to the reversed path — a `pabs`, no residual
+	// `pathJ` head. (Previously this stayed stuck; A4 unblocked it.)
 	got := normalize(t, s, `fn (p : El (pathF boolF true false)) is psym boolF true false p end`)
-	if !strings.Contains(got, "pathJ") {
-		t.Fatalf("pathJ on a neutral path should stay stuck, got %s", got)
+	if strings.Contains(got, "pathJ ") {
+		t.Fatalf("pathJ on a general path must reduce (A4), got %s", got)
 	}
 }
 
@@ -116,8 +125,15 @@ flipped : Bool is castU boolF boolF notPath true end
 	if _, err := s.LoadSource(defs); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.EmitProgram("flipped"); err == nil {
-		t.Fatal("emission of an inner-layer construction must be refused (§F)")
+	// B5 / R-ERASE2: `flipped` uses the inner layer in its SOURCE but its normal
+	// form computes (castU-through-ua) to the outer Bool `false`, so it now DEPLOYS
+	// soundly (its erased normal form is a genuine outer value). A bare inner
+	// type-path (notPath, a pathU value) still has no erased meaning and is refused.
+	if _, err := s.EmitProgram("flipped"); err != nil {
+		t.Fatalf("flipped computes to an outer Bool and must deploy (B5): %v", err)
+	}
+	if _, err := s.EmitProgram("notPath"); err == nil {
+		t.Fatal("a bare inner type-path (no erased meaning) must be refused (§F)")
 	}
 	// A definition that only MENTIONS fibrant types in its TYPE still
 	// deploys: boolF's body is a type and erases to a unit.

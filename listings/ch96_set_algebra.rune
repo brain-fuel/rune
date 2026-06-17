@@ -1,0 +1,724 @@
+-- Chapter 96 — A VERIFIED FINITE-SET ALGEBRA over `List Nat` (M6 / telos-3 tiered-verified
+-- stdlib). Chapter 95 certified a finite SET — the `member`/`insert` membership laws and the
+-- no-duplicates invariant. A set library is not done until the SET OPERATIONS (delete, union,
+-- intersect) are certified against `member` too: the contract of a set algebra is that each
+-- operation acts on MEMBERSHIP by the expected Boolean homomorphism.
+--
+-- This chapter proves exactly those membership-homomorphism laws:
+--   delete    : memberDelete    member y (delete x xs) = and (not (eqNat x y)) (member y xs)
+--               deleteNoDup     delete preserves the no-duplicates invariant
+--   union     : memberUnion     member x (union a b)   = or  (member x a) (member x b)
+--   intersect : memberIntersect member x (intersect a b) = and (member x a) (member x b)
+--
+-- DESIGN — every operation is a FILTER or a FOLD of ch95's `insert`, so each membership law
+-- reduces to ch95's membership laws plus the BoolElim algebra of `and`/`or`/`not`:
+--   delete x xs    = filter (λy. eqNat x y = false) xs   (drop every occurrence of x)
+--   union a b      = foldr insert b a                     (insert each elem of a into b)
+--   intersect a b  = filter (λy. member y b) a            (keep elems of a that are in b)
+-- The proofs are inductions over the list whose cons-cases branch (BoolElim) on the decidable
+-- guards `eqNat x z` / `eqNat y z` / `member z b`; each arm is closed by the IH and the Boolean
+-- algebra, the analog of ch85/ch92's order-lemma case splits. `eqNatSound` (ch85) collapses an
+-- `eqNat = true` guard to a genuine Nat equality so the two membership keys can be unified.
+--
+-- Primitives are redeclared BYTE-IDENTICAL to ch95 (member, insert, eqNat, eqNatRefl, symBool,
+-- eqNatSymFalse, not, and, or, andIntro, nodupb, NoDup, notMemberTrue) and ch85 (eqNatSound),
+-- per the self-contained-listings convention.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- DECIDABLE Nat equality (verbatim from ch95): zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true (verbatim from ch95).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- eqNat is SYMMETRIC, false-preserving: eqNat m n = false -> eqNat n m = false (verbatim ch95).
+eqNatSymFalse : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) false -> Eq Bool (eqNat n m) false is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) false -> Eq Bool (eqNat n x) false end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) false -> Eq Bool (eqNat y zero) false end)
+           (fn (h : Eq Bool true false) is h end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) false -> Eq Bool (eqNat j zero) false) is
+              fn (h : Eq Bool false false) is refl false end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) false -> Eq Bool (eqNat n k) false) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) false -> Eq Bool (eqNat y (succ k)) false end)
+             (fn (h : Eq Bool false false) is refl false end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) false -> Eq Bool (eqNat j (succ k)) false) is
+                fn (h : Eq Bool (eqNat k j) false) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is SOUND: eqNat x y = true -> x = y (verbatim ch85). At the `true` branch the motive is
+-- Eq Nat x x = refl x; mixed branches discharge an absurd `false = true`.
+eqNatSound : (x : Nat) -> (y : Nat) -> Eq Bool (eqNat x y) true -> Eq Nat x y is
+  fn (x : Nat) is
+    NatElim
+      (fn (w : Nat) is (y : Nat) -> Eq Bool (eqNat w y) true -> Eq Nat w y end)
+      (fn (y : Nat) is
+         NatElim
+           (fn (u : Nat) is Eq Bool (eqNat zero u) true -> Eq Nat zero u end)
+           (fn (h : Eq Bool true true) is refl zero end)
+           (fn (m : Nat) (ihm : Eq Bool (eqNat zero m) true -> Eq Nat zero m) is
+              fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat zero (succ m)
+                     | false -> Eq Nat zero zero
+                     end
+                   end)
+                  (refl zero) end
+            end)
+           y end)
+      (fn (k : Nat) (ih : (y : Nat) -> Eq Bool (eqNat k y) true -> Eq Nat k y) is
+         fn (y : Nat) is
+           NatElim
+             (fn (u : Nat) is Eq Bool (eqNat (succ k) u) true -> Eq Nat (succ k) u end)
+             (fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat (succ k) zero
+                     | false -> Eq Nat (succ k) (succ k)
+                     end
+                   end)
+                  (refl (succ k)) end)
+             (fn (m : Nat) (ihm : Eq Bool (eqNat (succ k) m) true -> Eq Nat (succ k) m) is
+                fn (h : Eq Bool (eqNat k m) true) is
+                  subst Nat k m (ih m h)
+                    (fn (z : Nat) is Eq Nat (succ k) (succ z) end)
+                    (refl (succ k)) end
+              end)
+             y end
+       end)
+      x
+  end
+end
+
+-- ====================================================================================
+-- MEMBERSHIP + SET INSERTION (verbatim ch95)
+-- ====================================================================================
+
+member : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (ys : List Nat) (ih : Bool) is
+         BoolElim (fn (b : Bool) is Bool end) true ih (eqNat x y) end)
+      xs
+  end
+end
+
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim (fn (b : Bool) is List Nat end)
+      xs
+      (cons Nat x xs)
+      (member x xs)
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN ALGEBRA (verbatim ch95) + the small `and` eliminators this chapter needs
+-- ====================================================================================
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+andIntro : (a : Bool) -> (b : Bool)
+   -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool x true -> Eq Bool b true -> Eq Bool (and x b) true end)
+      (fn (ha : Eq Bool true true) (hb : Eq Bool b true) is hb end)
+      (fn (ha : Eq Bool false true) (hb : Eq Bool b true) is
+         subst Bool false true ha
+           (fn (z : Bool) is
+              case z of
+              | true  -> Eq Bool (and false b) true
+              | false -> Eq Bool (and false b) (and false b)
+              end
+            end)
+           (refl (and false b)) end)
+      a
+  end
+end
+
+-- absurdBool : from a false witness `false = true` conclude any Boolean equation.
+absurdBool : (p : Bool) -> (q : Bool) -> Eq Bool false true -> Eq Bool p q is
+  fn (p : Bool) (q : Bool) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool p q
+         | false -> Eq Bool p p
+         end
+       end)
+      (refl p)
+  end
+end
+
+-- and a false = false (the right zero): branch on a; both branches compute to false.
+andFalseR : (a : Bool) -> Eq Bool (and a false) false is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x false) false end)
+      (refl false)
+      (refl false)
+      a
+  end
+end
+
+-- and a b = true -> a = true (left projection). a=true: refl; a=false: and ~> false, absurd.
+andElimL : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool x true end)
+      (fn (h : Eq Bool b true) is refl true end)
+      (fn (h : Eq Bool false true) is h end)
+      a
+  end
+end
+
+-- and a b = true -> b = true (right projection). a=true: and ~> b, so the witness is h itself;
+-- a=false: and ~> false, premise is `false = true`, absurd.
+andElimR : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (and x b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool b true) is h end)
+      (fn (h : Eq Bool false true) is absurdBool b true h end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- MEMBERSHIP LAWS for insert (verbatim ch95) — union rides on these.
+-- ====================================================================================
+
+memberInsertSame : (x : Nat) -> (xs : List Nat)
+   -> Eq Bool (member x (insert x xs)) true is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member x (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                true end)
+      (fn (hm : Eq Bool (member x xs) true) is hm end)
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+           (fn (g : Bool) is
+              Eq Bool (BoolElim (fn (c : Bool) is Bool end) true (member x xs) g) true end)
+           (refl true) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+memberInsertOther : (x : Nat) -> (y : Nat) -> (xs : List Nat)
+   -> Eq Bool (eqNat x y) false
+   -> Eq Bool (member y (insert x xs)) (member y xs) is
+  fn (x : Nat) (y : Nat) (xs : List Nat) (hxy : Eq Bool (eqNat x y) false) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member y (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                (member y xs) end)
+      (fn (hm : Eq Bool (member x xs) true) is refl (member y xs) end)
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool false (eqNat y x) (symBool (eqNat y x) false (eqNatSymFalse x y hxy))
+           (fn (g : Bool) is
+              Eq Bool
+                (BoolElim (fn (c : Bool) is Bool end) true (member y xs) g)
+                (member y xs) end)
+           (refl (member y xs)) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+-- ====================================================================================
+-- NO-DUPLICATES INVARIANT (verbatim ch95) — deleteNoDup rides on these.
+-- ====================================================================================
+
+nodupb : List Nat -> Bool is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      true
+      (fn (x : Nat) (ys : List Nat) (ih : Bool) is and (not (member x ys)) ih end)
+      xs
+  end
+end
+
+NoDup : List Nat -> U is
+  fn (xs : List Nat) is Eq Bool (nodupb xs) true end
+end
+
+notMemberTrue : (x : Nat) -> (xs : List Nat)
+   -> Eq Bool (member x xs) false -> Eq Bool (not (member x xs)) true is
+  fn (x : Nat) (xs : List Nat) (h : Eq Bool (member x xs) false) is
+    subst Bool false (member x xs) (symBool (member x xs) false h)
+      (fn (z : Bool) is Eq Bool (not z) true end)
+      (refl true)
+  end
+end
+
+-- ====================================================================================
+-- DELETE — remove every occurrence of a key, via filter (eqNat x y = false).
+-- ====================================================================================
+
+-- delete x xs ~> nil at nil; at cons y ys, branch on eqNat x y: drop y (~> delete x ys) when it
+-- equals x, otherwise keep it (~> cons y (delete x ys)). A small elimination into List Nat.
+delete : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (y : Nat) (ys : List Nat) (ih : List Nat) is
+         BoolElim (fn (b : Bool) is List Nat end) ih (cons Nat y ih) (eqNat x y) end)
+      xs
+  end
+end
+
+-- MEMBERSHIP AFTER DELETE: member y (delete x xs) = and (not (eqNat x y)) (member y xs). y is in
+-- (delete x xs) iff y ≠ x AND y was in xs. Induction on xs.
+--   nil:  both sides are false (`andFalseR (not (eqNat x y))` on the right).
+--   cons z ys: case on eqNat y z (the membership branch), then eqNat x z (the delete branch).
+--     g2 = eqNat y z = true (y = z): `eqNatSound` rewrites z to y; the goal collapses on a single
+--          case of eqNat x y (true ⇒ both sides reduce to `and false _ ~> false`; false ⇒ both
+--          reduce to true via eqNatRefl), no transitivity lemma needed.
+--     g2 = false (y ≠ z): RHS ~> and (not (eqNat x y)) (member y ys); case on eqNat x z — both arms
+--          close by the IH (the keep-arm first collapses the `eqNat y z` guard to false via g2).
+memberDelete : (x : Nat) -> (y : Nat) -> (xs : List Nat)
+   -> Eq Bool (member y (delete x xs)) (and (not (eqNat x y)) (member y xs)) is
+  fn (x : Nat) (y : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member y (delete x w)) (and (not (eqNat x y)) (member y w)) end)
+      -- nil: member y (delete x nil) ~> false; and (not (eqNat x y)) (member y nil) ~> and _ false.
+      (symBool (and (not (eqNat x y)) false) false (andFalseR (not (eqNat x y))))
+      (fn (z : Nat) (ys : List Nat)
+          (ih : Eq Bool (member y (delete x ys)) (and (not (eqNat x y)) (member y ys))) is
+         -- Branch on eqNat y z, abstracting it where it guards `member y (cons z _)`.
+         BoolElim
+           (fn (g2 : Bool) is
+              Eq Bool (eqNat y z) g2
+                -> Eq Bool
+                     (member y (delete x (cons Nat z ys)))
+                     (and (not (eqNat x y)) (BoolElim (fn (c : Bool) is Bool end) true (member y ys) g2)) end)
+           -- g2 = true: y = z. Rewrite z to y throughout; then case on eqNat x y.
+           (fn (hyz : Eq Bool (eqNat y z) true) is
+              -- The g2=true arm's expected type has the RHS BoolElim guard fixed to the literal
+              -- `true`, so RHS ~> and (not (eqNat x y)) true. Rewrite z to y (eqNatSound); the LHS
+              -- becomes member y (delete x (cons y ys)).
+              subst Nat y z (eqNatSound y z hyz)
+                (fn (w : Nat) is
+                   Eq Bool
+                     (member y (delete x (cons Nat w ys)))
+                     (and (not (eqNat x y)) true) end)
+                -- goal with w := y: delete x (cons y ys) branches on eqNat x y. Case on it.
+                   (BoolElim
+                      (fn (gxy : Bool) is
+                         Eq Bool (eqNat x y) gxy
+                           -> Eq Bool
+                                (member y (BoolElim (fn (b : Bool) is List Nat end)
+                                             (delete x ys) (cons Nat y (delete x ys)) gxy))
+                                (and (BoolElim (fn (c : Bool) is Bool end) false true gxy) true) end)
+                      -- eqNat x y = true: delete drops y (~> delete x ys); both sides reduce to
+                      -- false. LHS = member y (delete x ys) = ih = and false (member y ys) ~> false;
+                      -- RHS = and (not true) true = and false true ~> false.
+                      (fn (hxy : Eq Bool (eqNat x y) true) is
+                         -- LHS ~> member y (delete x ys); ih gives `= and (not (eqNat x y))
+                         -- (member y ys)`. Rewrite eqNat x y to true (hxy): not true ~> false, and
+                         -- `and false _ ~> false` — matching Goal[true]'s RHS `and false true ~> false`.
+                         subst Bool (eqNat x y) true hxy
+                           (fn (g : Bool) is
+                              Eq Bool (member y (delete x ys))
+                                (and (not g) (member y ys)) end)
+                           ih end)
+                      -- eqNat x y = false: delete keeps y (~> cons y (delete x ys)); member y of it
+                      -- has guard eqNat y y ~> true so LHS ~> true. RHS = and (not false) true ~> true.
+                      (fn (hxy : Eq Bool (eqNat x y) false) is
+                         -- Goal[false]: the delete BoolElim's gxy is literally false, so it keeps y
+                         -- (~> cons y (delete x ys)) and RHS ~> and (not false) true ~> true. LHS =
+                         -- BoolElim _ true (member y (delete x ys)) (eqNat y y); rewrite eqNat y y to
+                         -- true (eqNatRefl) so LHS ~> true; close with refl true.
+                         subst Bool true (eqNat y y) (symBool (eqNat y y) true (eqNatRefl y))
+                           (fn (gyy : Bool) is
+                              Eq Bool
+                                (BoolElim (fn (c : Bool) is Bool end) true (member y (delete x ys)) gyy)
+                                true end)
+                           (refl true) end)
+                      (eqNat x y)
+                      (refl (eqNat x y))) end)
+           -- g2 = false: y ≠ z. RHS ~> and (not (eqNat x y)) (member y ys). Case on eqNat x z.
+           (fn (hyz : Eq Bool (eqNat y z) false) is
+              BoolElim
+                (fn (gxz : Bool) is
+                   Eq Bool (eqNat x z) gxz
+                     -> Eq Bool
+                          (member y (BoolElim (fn (b : Bool) is List Nat end)
+                                       (delete x ys) (cons Nat z (delete x ys)) gxz))
+                          (and (not (eqNat x y)) (member y ys)) end)
+                -- eqNat x z = true: delete drops z (~> delete x ys); LHS = ih = RHS.
+                (fn (hxz : Eq Bool (eqNat x z) true) is ih end)
+                -- eqNat x z = false: delete keeps z (~> cons z (delete x ys)); member y of it has
+                -- guard eqNat y z ~> false (hyz), collapsing to member y (delete x ys) = ih = RHS.
+                (fn (hxz : Eq Bool (eqNat x z) false) is
+                   subst Bool false (eqNat y z) (symBool (eqNat y z) false hyz)
+                     (fn (gyz : Bool) is
+                        Eq Bool
+                          (BoolElim (fn (c : Bool) is Bool end) true (member y (delete x ys)) gyz)
+                          (and (not (eqNat x y)) (member y ys)) end)
+                     ih end)
+                (eqNat x z)
+                (refl (eqNat x z)) end)
+           (eqNat y z)
+           (refl (eqNat y z))
+       end)
+      xs
+  end
+end
+
+-- helper: not (member z ys) = true -> member z ys = false (unfold `not`, branch on the membership).
+memberAbsentFromHead : (z : Nat) -> (ys : List Nat)
+   -> Eq Bool (not (member z ys)) true -> Eq Bool (member z ys) false is
+  fn (z : Nat) (ys : List Nat) (h : Eq Bool (not (member z ys)) true) is
+    BoolElim
+      (fn (b : Bool) is Eq Bool (not b) true -> Eq Bool b false end)
+      (fn (ht : Eq Bool false true) is absurdBool true false ht end)
+      (fn (hf : Eq Bool true true) is refl false end)
+      (member z ys)
+      h
+  end
+end
+
+-- DELETE PRESERVES NoDup: deleting from a duplicate-free set keeps it duplicate-free. Induction
+-- on xs. At cons z ys, branch on eqNat x z:
+--   eqNat x z = true: delete ~> delete x ys; the goal is `ih` applied to the tail's no-dup
+--                     certificate (andElimR of s).
+--   eqNat x z = false: delete ~> cons z (delete x ys); nodupb of it ~> and (not (member z
+--                     (delete x ys))) (nodupb (delete x ys)). The head z is still absent —
+--                     member z (delete x ys) = and (not (eqNat x z)) (member z ys) (memberDelete)
+--                     = and _ false ~> false since z was absent from ys (andElimL of s) — and the
+--                     tail is dup-free (ih). andIntro closes it.
+deleteNoDup : (x : Nat) -> (xs : List Nat) -> NoDup xs -> NoDup (delete x xs) is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is NoDup w -> NoDup (delete x w) end)
+      (fn (s : NoDup (nil Nat)) is refl true end)
+      (fn (z : Nat) (ys : List Nat)
+          (ih : NoDup ys -> NoDup (delete x ys)) is
+         fn (s : NoDup (cons Nat z ys)) is
+           BoolElim
+             (fn (gxz : Bool) is
+                Eq Bool (eqNat x z) gxz
+                  -> NoDup (BoolElim (fn (b : Bool) is List Nat end)
+                              (delete x ys) (cons Nat z (delete x ys)) gxz) end)
+             -- eqNat x z = true: delete ~> delete x ys; ih on the tail's certificate.
+             (fn (hxz : Eq Bool (eqNat x z) true) is
+                ih (andElimR (not (member z ys)) (nodupb ys) s) end)
+             -- eqNat x z = false: delete ~> cons z (delete x ys); andIntro.
+             (fn (hxz : Eq Bool (eqNat x z) false) is
+                andIntro (not (member z (delete x ys))) (nodupb (delete x ys))
+                  -- z still absent: member z (delete x ys) = and (not (eqNat x z)) (member z ys),
+                  -- and member z ys = false (andElimL of s gives not (member z ys) = true), so the
+                  -- conjunction is `and _ false ~> false`; notMemberTrue lifts it.
+                  (notMemberTrue z (delete x ys)
+                     (subst Bool (and (not (eqNat x z)) (member z ys)) (member z (delete x ys))
+                        (symBool (member z (delete x ys)) (and (not (eqNat x z)) (member z ys))
+                           (memberDelete x z ys))
+                        (fn (w : Bool) is Eq Bool w false end)
+                        -- and (not (eqNat x z)) (member z ys) = false: member z ys = false from s.
+                        (subst Bool false (member z ys)
+                           (symBool (member z ys) false
+                              (memberAbsentFromHead z ys
+                                 (andElimL (not (member z ys)) (nodupb ys) s)))
+                           (fn (w : Bool) is Eq Bool (and (not (eqNat x z)) w) false end)
+                           (andFalseR (not (eqNat x z))))))
+                  (ih (andElimR (not (member z ys)) (nodupb ys) s)) end)
+             (eqNat x z)
+             (refl (eqNat x z))
+         end
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- UNION — insert each element of a into b (foldr insert b a). Reuses the set `insert`.
+-- ====================================================================================
+
+union : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      b
+      (fn (h : Nat) (t : List Nat) (ih : List Nat) is insert h ih end)
+      a
+  end
+end
+
+-- MEMBER-HOMOMORPHISM: member x (union a b) = or (member x a) (member x b). Induction on a.
+--   nil: union nil b ~> b; or (member x nil) (member x b) ~> or false _ ~> member x b. refl.
+--   cons h t: union ~> insert h (union t b). Case on eqNat x h (the head-membership guard of a):
+--     eqNat x h = true (x = h): `eqNatSound` rewrites h to x; LHS = member x (insert x (union t b))
+--          ~> true (memberInsertSame); RHS = or (member x (cons x t)) _ ~> or true _ ~> true.
+--     eqNat x h = false (x ≠ h): memberInsertOther lifts insert away (LHS = member x (union t b)),
+--          the IH rewrites it to or (member x t) (member x b); RHS collapses the eqNat x h guard
+--          to false, leaving the same disjunction.
+memberUnion : (x : Nat) -> (a : List Nat) -> (b : List Nat)
+   -> Eq Bool (member x (union a b)) (or (member x a) (member x b)) is
+  fn (x : Nat) (a : List Nat) (b : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member x (union w b)) (or (member x w) (member x b)) end)
+      -- nil.
+      (refl (member x b))
+      (fn (h : Nat) (t : List Nat)
+          (ih : Eq Bool (member x (union t b)) (or (member x t) (member x b))) is
+         BoolElim
+           (fn (gxh : Bool) is
+              Eq Bool (eqNat x h) gxh
+                -> Eq Bool
+                     (member x (insert h (union t b)))
+                     (or (BoolElim (fn (c : Bool) is Bool end) true (member x t) gxh) (member x b)) end)
+           -- eqNat x h = true: x = h.
+           (fn (hxh : Eq Bool (eqNat x h) true) is
+              -- The arm's expected RHS has the or-guard fixed to the literal `true`, so RHS ~> or
+              -- true (member x b) ~> true. Rewrite h to x; LHS = member x (insert x (union t b)) ~>
+              -- true by memberInsertSame.
+              subst Nat x h (eqNatSound x h hxh)
+                (fn (w : Nat) is
+                   Eq Bool
+                     (member x (insert w (union t b)))
+                     (or true (member x b)) end)
+                (memberInsertSame x (union t b)) end)
+           -- eqNat x h = false: x ≠ h.
+           (fn (hxh : Eq Bool (eqNat x h) false) is
+              -- The arm's expected RHS has gxh = false, so it is or (member x t) (member x b). LHS:
+              -- memberInsertOther rewrites member x (insert h _) to member x (union t b); ih lands it.
+              subst Bool (member x (union t b)) (member x (insert h (union t b)))
+                (symBool (member x (insert h (union t b))) (member x (union t b))
+                   (memberInsertOther h x (union t b) (eqNatSymFalse x h hxh)))
+                (fn (w : Bool) is Eq Bool w (or (member x t) (member x b)) end)
+                ih end)
+           (eqNat x h)
+           (refl (eqNat x h)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- INTERSECT — keep elements of a that are in b (filter (λy. member y b) a).
+-- ====================================================================================
+
+intersect : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (h : Nat) (t : List Nat) (ih : List Nat) is
+         BoolElim (fn (g : Bool) is List Nat end) (cons Nat h ih) ih (member h b) end)
+      a
+  end
+end
+
+-- MEMBER-HOMOMORPHISM: member x (intersect a b) = and (member x a) (member x b). Induction on a.
+--   nil: intersect nil b ~> nil; member x nil ~> false; and false _ ~> false. refl.
+--   cons h t: intersect ~> if member h b then cons h (intersect t b) else intersect t b. Case on
+--     eqNat x h, then member h b / member x b.
+--     eqNat x h = true (x = h): rewrite h to x; RHS = and (member x (cons x t)) _ ~> and true _ ~>
+--          member x b. Case on member x b: true ⇒ x is in (cons x (intersect t b)) head (eqNat x x);
+--          false ⇒ filter drops x, LHS = ih = and _ false ~> false (andFalseR).
+--     eqNat x h = false (x ≠ h): RHS ~> and (member x t) (member x b). Case on member h b: both
+--          arms collapse the eqNat x h guard (false) and close by the IH.
+memberIntersect : (x : Nat) -> (a : List Nat) -> (b : List Nat)
+   -> Eq Bool (member x (intersect a b)) (and (member x a) (member x b)) is
+  fn (x : Nat) (a : List Nat) (b : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member x (intersect w b)) (and (member x w) (member x b)) end)
+      -- nil.
+      (refl false)
+      (fn (h : Nat) (t : List Nat)
+          (ih : Eq Bool (member x (intersect t b)) (and (member x t) (member x b))) is
+         BoolElim
+           (fn (gxh : Bool) is
+              Eq Bool (eqNat x h) gxh
+                -> Eq Bool
+                     (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                  (cons Nat h (intersect t b)) (intersect t b) (member h b)))
+                     (and (BoolElim (fn (c : Bool) is Bool end) true (member x t) gxh) (member x b)) end)
+           -- eqNat x h = true: x = h.
+           (fn (hxh : Eq Bool (eqNat x h) true) is
+              -- The arm's expected RHS has the and-guard fixed to literal true, so RHS ~> and true
+              -- (member x b) ~> member x b. Rewrite h to x; the filter guard becomes member x b.
+              subst Nat x h (eqNatSound x h hxh)
+                (fn (w : Nat) is
+                   Eq Bool
+                     (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                  (cons Nat w (intersect t b)) (intersect t b) (member w b)))
+                     (and true (member x b)) end)
+                -- Now case on member x b (the filter guard; RHS ~> member x b).
+                   (BoolElim
+                      (fn (gmb : Bool) is
+                         Eq Bool (member x b) gmb
+                           -> Eq Bool
+                                (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                             (cons Nat x (intersect t b)) (intersect t b) gmb))
+                                gmb end)
+                      -- member x b = true: filter keeps x; member x (cons x _) has guard eqNat x x
+                      -- ~> true so LHS ~> true = member x b.
+                      (fn (hmb : Eq Bool (member x b) true) is
+                         subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+                           (fn (gxx : Bool) is
+                              Eq Bool
+                                (BoolElim (fn (c : Bool) is Bool end) true (member x (intersect t b)) gxx)
+                                true end)
+                           (refl true) end)
+                      -- member x b = false: filter drops x; LHS = member x (intersect t b) = ih
+                      -- = and (member x t) false ~> false = member x b.
+                      (fn (hmb : Eq Bool (member x b) false) is
+                         -- expected: Eq Bool (member x (intersect t b)) false. Rewrite member x
+                         -- (intersect t b) to and (member x t) (member x b) via ih; then member x b
+                         -- to false (hmb) so `and (member x t) false ~> false` (andFalseR).
+                         subst Bool (and (member x t) (member x b)) (member x (intersect t b))
+                           (symBool (member x (intersect t b)) (and (member x t) (member x b)) ih)
+                           (fn (w : Bool) is Eq Bool w false end)
+                           (subst Bool false (member x b) (symBool (member x b) false hmb)
+                              (fn (gmb : Bool) is
+                                 Eq Bool (and (member x t) gmb) false end)
+                              (andFalseR (member x t))) end)
+                      (member x b)
+                      (refl (member x b))) end)
+           -- eqNat x h = false: x ≠ h. RHS ~> and (member x t) (member x b). Case on member h b.
+           (fn (hxh : Eq Bool (eqNat x h) false) is
+              -- The arm's expected RHS has gxh = false, so it is and (member x t) (member x b).
+              -- Case on member h b (the filter guard).
+              BoolElim
+                   (fn (gmb : Bool) is
+                      Eq Bool (member h b) gmb
+                        -> Eq Bool
+                             (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                          (cons Nat h (intersect t b)) (intersect t b) gmb))
+                             (and (member x t) (member x b)) end)
+                   -- member h b = true: filter keeps h; member x (cons h _) has guard eqNat x h ~>
+                   -- false (hxh), collapsing to member x (intersect t b) = ih = RHS.
+                   (fn (hmb : Eq Bool (member h b) true) is
+                      subst Bool false (eqNat x h) (symBool (eqNat x h) false hxh)
+                        (fn (gxh : Bool) is
+                           Eq Bool
+                             (BoolElim (fn (c : Bool) is Bool end) true (member x (intersect t b)) gxh)
+                             (and (member x t) (member x b)) end)
+                        ih end)
+                   -- member h b = false: filter drops h; LHS = member x (intersect t b) = ih = RHS.
+                   (fn (hmb : Eq Bool (member h b) false) is ih end)
+                   (member h b)
+                   (refl (member h b)) end)
+           (eqNat x h)
+           (refl (eqNat x h)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- SANITY (representation-agnostic: assert via Eq + refl)
+-- ====================================================================================
+
+oneTwoThree : List Nat is
+  cons Nat (succ zero)
+    (cons Nat (succ (succ zero))
+      (cons Nat (succ (succ (succ zero))) (nil Nat)))
+end
+
+-- delete 2 [1,2,3] = [1,3]; member 2 of it is false (2 was removed).
+delete2 : Eq Bool (member (succ (succ zero)) (delete (succ (succ zero)) oneTwoThree)) false is
+  refl false
+end
+
+-- member 1 (delete 2 [1,2,3]) = true (1 survives the delete).
+delete2Keeps1 : Eq Bool (member (succ zero) (delete (succ (succ zero)) oneTwoThree)) true is
+  refl true
+end
+
+-- union [1] [2,3] : member 1 of it is true.
+oneList : List Nat is cons Nat (succ zero) (nil Nat) end
+twoThree : List Nat is
+  cons Nat (succ (succ zero)) (cons Nat (succ (succ (succ zero))) (nil Nat))
+end
+
+union1True : Eq Bool (member (succ zero) (union oneList twoThree)) true is refl true end
+union2True : Eq Bool (member (succ (succ zero)) (union oneList twoThree)) true is refl true end
+
+-- intersect [1,2,3] [2,3] : 2 is in, 1 is out.
+intersectHas2 : Eq Bool (member (succ (succ zero)) (intersect oneTwoThree twoThree)) true is
+  refl true
+end
+intersectNo1 : Eq Bool (member (succ zero) (intersect oneTwoThree twoThree)) false is
+  refl false
+end
+
+-- delete preserves no-dup: [1,3] is dup-free.
+deleted2NoDup : NoDup (delete (succ (succ zero)) oneTwoThree) is refl true end

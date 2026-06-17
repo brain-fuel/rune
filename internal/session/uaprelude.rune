@@ -1,0 +1,178 @@
+-- Derived-univalence prelude (ambient in every session). The construction the
+-- postulated `ua` builtin USED to fiat: an isomorphism becomes an inner path
+-- A = B as a Glue line, and `castU` along it transports by the forward map via
+-- the genuine transp-over-Glue arm. `ua` is now this DERIVED definition — no
+-- postulate, no kernel fiat rule. Moved here from ch58 so it is available to
+-- every listing (ch10's `notPath`, etc.) without duplication.
+
+-- Bridge the outer strict Eq to an inner cubical path (subst transports refl).
+eqToPathF : (A : UF) -> (a : El A) -> (b : El A) -> Eq (El A) a b -> El (pathF A a b) is
+  fn (A : UF) (a : El A) (b : El A) (e : Eq (El A) a b) is
+    subst (El A) a b e (fn (z : El A) is El (pathF A a z) end) (preflF A a)
+  end
+end
+
+-- The triangle coherence between `ap f (gf x)` and `fg (f x)` — PROVEN, no axiom.
+-- This is a square in B whose four EDGES are pinned by the face system (each edge
+-- is the branch whose face becomes ⊤ when that interval endpoint is substituted),
+-- built as a comp over a proper face. Proper-face Kan needs only the BOUNDARY to be
+-- definitional (which it is, via fsplit dispatch on the ⊤-ified face) — the interior
+-- stays a canonical (stuck) comp, which is all a square requires.
+--   edges:  (i=0) ↦ fg(f x)@j   (i=1) ↦ f x   (j=0) ↦ f(gf x @ i)   (j=1) ↦ f x
+triangleCoh :
+  (A : UF) -> (B : UF) -> (f : El A -> El B) -> (g : El B -> El A)
+  -> (gf : (x : El A) -> El (pathF A (g (f x)) x))
+  -> (fg : (y : El B) -> El (pathF B (f (g y)) y))
+  -> (x : El A)
+  -> El (pathP (fn (i : I) is pathF B (f (papp A (g (f x)) x (gf x) i)) (f x) end)
+               (fg (f x)) (preflF B (f x))) is
+  fn (A : UF) (B : UF) (f : El A -> El B) (g : El B -> El A)
+     (gf : (x : El A) -> El (pathF A (g (f x)) x))
+     (fg : (y : El B) -> El (pathF B (f (g y)) y))
+     (x : El A) is
+    pabsP (fn (i : I) is pathF B (f (papp A (g (f x)) x (gf x) i)) (f x) end)
+      (fn (i : I) is
+        pabs B (fn (j : I) is
+          comp (fn (k : I) is B end)
+               (for (for (ieq0 i) (ieq1 i)) (for (ieq0 j) (ieq1 j)))
+               (fn (k : I) (h : holds (for (for (ieq0 i) (ieq1 i)) (for (ieq0 j) (ieq1 j)))) is
+                  fsplit B (for (ieq0 i) (ieq1 i)) (for (ieq0 j) (ieq1 j))
+                    (fn (hi : holds (for (ieq0 i) (ieq1 i))) is
+                       fsplit B (ieq0 i) (ieq1 i)
+                         (fn (h0 : holds (ieq0 i)) is papp B (f (g (f x))) (f x) (fg (f x)) j end)
+                         (fn (h1 : holds (ieq1 i)) is f x end)
+                         hi end)
+                    (fn (hj : holds (for (ieq0 j) (ieq1 j))) is
+                       fsplit B (ieq0 j) (ieq1 j)
+                         (fn (j0 : holds (ieq0 j)) is f (papp A (g (f x)) x (gf x) i) end)
+                         (fn (j1 : holds (ieq1 j)) is f x end)
+                         hj end)
+                    h end)
+               (f (papp A (g (f x)) x (gf x) i))
+          end) end)
+  end
+end
+
+isoToEquiv :
+  (A : UF) -> (B : UF) -> (f : El A -> El B) -> (g : El B -> El A)
+  -> (gf : (x : El A) -> El (pathF A (g (f x)) x))
+  -> (fg : (y : El B) -> El (pathF B (f (g y)) y))
+  -> El (isEquiv A B f) is
+  fn (A : UF) (B : UF) (f : El A -> El B) (g : El B -> El A)
+     (gf : (x : El A) -> El (pathF A (g (f x)) x))
+     (fg : (y : El B) -> El (pathF B (f (g y)) y)) is
+    fn (y : El B) is
+      pairF (fiber A B f y)
+            (fn (c : El (fiber A B f y)) is
+               piF (fiber A B f y)
+                   (fn (w : El (fiber A B f y)) is pathF (fiber A B f y) c w end) end)
+            (pairF A (fn (x : El A) is pathF B (f x) y end) (g y) (fg y))
+            (fn (w : El (fiber A B f y)) is
+               pathJ B (f (fstF A (fn (x : El A) is pathF B (f x) y end) w))
+                 (fn (y2 : El B) (p2 : El (pathF B (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)) y2)) is
+                    pathF (fiber A B f y2)
+                      (pairF A (fn (x : El A) is pathF B (f x) y2 end) (g y2) (fg y2))
+                      (pairF A (fn (x : El A) is pathF B (f x) y2 end)
+                             (fstF A (fn (x : El A) is pathF B (f x) y end) w) p2) end)
+                 (pabs (fiber A B f (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)))
+                    (fn (i : I) is
+                       pairF A (fn (x : El A) is pathF B (f x) (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)) end)
+                         (papp A (g (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)))
+                               (fstF A (fn (x : El A) is pathF B (f x) y end) w)
+                               (gf (fstF A (fn (x : El A) is pathF B (f x) y end) w)) i)
+                         (pappP (fn (i2 : I) is
+                                   pathF B (f (papp A (g (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)))
+                                                 (fstF A (fn (x : El A) is pathF B (f x) y end) w)
+                                                 (gf (fstF A (fn (x : El A) is pathF B (f x) y end) w)) i2))
+                                           (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)) end)
+                                (fg (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)))
+                                (preflF B (f (fstF A (fn (x : El A) is pathF B (f x) y end) w)))
+                                (triangleCoh A B f g gf fg (fstF A (fn (x : El A) is pathF B (f x) y end) w))
+                                i) end))
+                 y
+                 (sndF A (fn (x : El A) is pathF B (f x) y end) w)
+            end)
+    end
+  end
+end
+
+-- The identity equivalence, assembled from `isoToEquiv` on the identity iso (no
+-- postulate): the forward map is `id`, and `equivProof` projects a contractible
+-- fibre whose centre at y is (y, refl). This is the i1 endpoint of the univalence
+-- Glue line `Glue B ((i=0)∨(i=1)) [i=0↦A; i=1↦B] [i=0↦e; i=1↦idEquivF B]`.
+idEquivF : (B : UF) -> El (Equiv B B) is
+  fn (B : UF) is
+    pairF (piF B (fn (x : El B) is B end))
+          (fn (f : El (piF B (fn (x : El B) is B end))) is isEquiv B B f end)
+          (fn (x : El B) is x end)
+          (isoToEquiv B B (fn (x : El B) is x end) (fn (x : El B) is x end)
+                      (fn (x : El B) is preflF B x end)
+                      (fn (y : El B) is preflF B y end))
+  end
+end
+
+-- The equivalence an isomorphism (f, g, s, t) yields, packaged as `Equiv A B`: the
+-- forward map is f and the proof is `isoToEquiv` (the s/t round-trips bridged from
+-- the strict Eq to inner paths by `eqToPathF`). The i0 endpoint of the ua line.
+equivFromIso :
+  (A : UF) -> (B : UF) -> (f : El A -> El B) -> (g : El B -> El A)
+  -> (s : (x : El A) -> Eq (El A) (g (f x)) x)
+  -> (t : (y : El B) -> Eq (El B) (f (g y)) y)
+  -> El (Equiv A B) is
+  fn (A : UF) (B : UF) (f : El A -> El B) (g : El B -> El A)
+     (s : (x : El A) -> Eq (El A) (g (f x)) x)
+     (t : (y : El B) -> Eq (El B) (f (g y)) y) is
+    pairF (piF A (fn (x : El A) is B end))
+          (fn (f2 : El (piF A (fn (x : El A) is B end))) is isEquiv A B f2 end)
+          f
+          (isoToEquiv A B f g
+             (fn (x : El A) is eqToPathF A (g (f x)) x (s x) end)
+             (fn (y : El B) is eqToPathF B (f (g y)) y (t y) end))
+  end
+end
+
+-- UNIVALENCE, DERIVED — no postulate. An isomorphism becomes an inner path A = B as
+-- the Glue line `pabsU (λi. Glue B ((i=0)∨(i=1)) [i=0↦A; i=1↦B] [i=0↦e; i=1↦idEquiv])`.
+-- The type-level T-component is `sysU` (A8); the dependent e-component is `fsplitD`
+-- (A8), whose i0-branch `equivFromIso` checks against `Equiv A B` because the
+-- validity proof `horl … h` drives `sysU … (horl … h) ~> A` (proof-directed dispatch).
+-- At i=0 the face is ⊤ so `Glue B ⊤ … ` converts to A, at i=1 to B — so the line
+-- genuinely inhabits `pathU A B`. This is the inhabitant `ua` postulated; here it is
+-- a checked construction, every piece kernel-verified.
+uaGlue :
+  (A : UF) -> (B : UF) -> (f : El A -> El B) -> (g : El B -> El A)
+  -> (s : (x : El A) -> Eq (El A) (g (f x)) x)
+  -> (t : (y : El B) -> Eq (El B) (f (g y)) y)
+  -> pathU A B is
+  fn (A : UF) (B : UF) (f : El A -> El B) (g : El B -> El A)
+     (s : (x : El A) -> Eq (El A) (g (f x)) x)
+     (t : (y : El B) -> Eq (El B) (f (g y)) y) is
+    pabsU (fn (i : I) is
+      Glue B (for (ieq0 i) (ieq1 i))
+        (fn (h : holds (for (ieq0 i) (ieq1 i))) is
+           sysU (ieq0 i) (ieq1 i) (fn (h0 : holds (ieq0 i)) is A end)
+                (fn (h1 : holds (ieq1 i)) is B end) h end)
+        (fn (h : holds (for (ieq0 i) (ieq1 i))) is
+           fsplitD (ieq0 i) (ieq1 i)
+             (fn (hc : holds (for (ieq0 i) (ieq1 i))) is
+                Equiv (sysU (ieq0 i) (ieq1 i) (fn (h0 : holds (ieq0 i)) is A end)
+                            (fn (h1 : holds (ieq1 i)) is B end) hc) B end)
+             (fn (h0 : holds (ieq0 i)) is equivFromIso A B f g s t end)
+             (fn (h1 : holds (ieq1 i)) is idEquivF B end) h end)
+    end)
+  end
+end
+
+-- `ua` itself, DERIVED — the drop-in for the retired postulate (identical signature).
+-- An isomorphism (f, g, s, t) yields an inner path `pathU A B`; `castU` along it
+-- computes the forward map `f`. No postulate, no baked-in `castU`-over-`ua` rule.
+ua : (A : UF) -> (B : UF) -> (f : El A -> El B) -> (g : El B -> El A)
+  -> (s : (x : El A) -> Eq (El A) (g (f x)) x)
+  -> (t : (y : El B) -> Eq (El B) (f (g y)) y)
+  -> pathU A B is
+  fn (A : UF) (B : UF) (f : El A -> El B) (g : El B -> El A)
+     (s : (x : El A) -> Eq (El A) (g (f x)) x)
+     (t : (y : El B) -> Eq (El B) (f (g y)) y) is
+    uaGlue A B f g s t
+  end
+end

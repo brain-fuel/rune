@@ -1,0 +1,363 @@
+-- ====================================================================================
+-- CHAPTER 183 — REPLICATED-LOG PREFIX MATCHING, VERIFIED + DEPLOYED (telos-4 / E-track).
+-- A core Raft/Paxos invariant: a follower's committed log is a PREFIX of the leader's.  This
+-- chapter models a log as a List Nat, defines the decidable `isPrefix`, proves it REFLEXIVE
+-- (every log is a prefix of itself — the base of the log-matching order), and DEPLOYS a concrete
+-- prefix check that RUNS on a backend.  FULLY PROVEN + DEPLOYED.  Self-contained (minimal prelude).
+-- ====================================================================================
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U is
+  nil : List
+| cons : Nat -> List -> List
+end
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- both-true ⇒ conjunction-true (rewrite the first conjunct to true, then `and true q ~> q`).
+andBothTrue : (p : Bool) -> (q : Bool) -> Eq Bool p true -> Eq Bool q true -> Eq Bool (and p q) true is
+  fn (p : Bool) (q : Bool) (hp : Eq Bool p true) (hq : Eq Bool q true) is
+    subst Bool true p (symBool p true hp) (fn (z : Bool) is Eq Bool (and z q) true end) hq
+  end
+end
+
+-- decidable equality on ℕ + reflexivity (the per-entry comparison).
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n end
+       end)
+      m
+  end
+end
+
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+-- isPrefix xs ys: nil is a prefix of anything; a cons is never a prefix of nil; cons-vs-cons
+-- compares heads (eqNat) and recurses on tails.
+isPrefix : List -> List -> Bool is
+  fn (xs : List) is
+    ListElim (fn (zs : List) is List -> Bool end)
+      (fn (ys : List) is true end)
+      (fn (x : Nat) (xs' : List) (ih : List -> Bool) is
+         fn (ys : List) is
+           ListElim (fn (ws : List) is Bool end)
+             false
+             (fn (y : Nat) (ys' : List) (ihy : Bool) is and (eqNat x y) (ih ys') end)
+             ys
+         end
+       end)
+      xs
+  end
+end
+
+-- REFLEXIVITY: every log is a prefix of itself (cons-case: and (eqNat x x)(isPrefix xs' xs') with
+-- both conjuncts true by eqNatRefl and the IH).  The base of the log-matching prefix order.
+prefixRefl : (xs : List) -> Eq Bool (isPrefix xs xs) true is
+  fn (xs : List) is
+    ListElim (fn (zs : List) is Eq Bool (isPrefix zs zs) true end)
+      (refl true)
+      (fn (x : Nat) (xs' : List) (ih : Eq Bool (isPrefix xs' xs') true) is
+         andBothTrue (eqNat x x) (isPrefix xs' xs') (eqNatRefl x) ih end)
+      xs
+  end
+end
+
+-- A CONCRETE DEPLOYED SCENARIO: a follower's log [1,2] is a prefix of the leader's [1,2,3].
+one : Nat is succ zero end
+two : Nat is succ (succ zero) end
+three : Nat is succ (succ (succ zero)) end
+followerLog : List is cons one (cons two nil) end
+leaderLog : List is cons one (cons two (cons three nil)) end
+
+-- THE DECISION — DEPLOYS + RUNS (emit-and-execute, node): isPrefix [1,2] [1,2,3] ~> true.
+prefixDecision : Bool is isPrefix followerLog leaderLog end
+
+-- Certified by computation (refl) AND (for self-prefix) by the proven reflexivity theorem.
+prefixDecisionCorrect : Eq Bool prefixDecision true is refl true end
+followerSelfPrefix : Eq Bool (isPrefix followerLog followerLog) true is prefixRefl followerLog end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 183 — WHAT LANDED.
+-- FULLY PROVEN + DEPLOYED (no admits/holes/postulates): the decidable `isPrefix` on logs (List
+-- Nat), `prefixRefl` (every log is a prefix of itself — the base of the Raft/Paxos log-matching
+-- order), and a concrete `prefixDecision` that DEPLOYS + RUNS on a backend to `true` (a follower
+-- log is a prefix of the leader log), certified by refl AND by the reflexivity theorem.  The
+-- log-matching invariant, verified and deployed from one source.
+-- THE NEXT STEP: prefixTrans (prefix is a partial order on logs) + log-matching safety (agreement
+-- on the common prefix); or runnable OTP-style replica actors.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 184 — LOG-PREFIX TRANSITIVITY → A PARTIAL ORDER ON LOGS (telos-4 / E-track).
+-- `isPrefix` (ch183) is TRANSITIVE: if xs ⊑ ys and ys ⊑ zs then xs ⊑ zs.  With prefixRefl (ch183)
+-- the prefix relation is a PREORDER on logs — the structure underneath Raft/Paxos log matching
+-- (a follower's log grows monotonically as a prefix chain toward the leader's).  FULLY PROVEN.
+-- Needs: a Bool discriminator, and-projections, and ℕ-equality soundness/completeness.
+-- ====================================================================================
+
+-- A Bool discriminator (impredicative Prop, cf. ch178).
+Top : Prop is (C : Prop) -> C -> C end
+tt : Top is fn (C : Prop) (c : C) is c end end
+Empty : Prop is (C : Prop) -> C end
+boolCode : Bool -> Prop is fn (b : Bool) is BoolElim (fn (x : Bool) is Prop end) Empty Top b end end
+falseNotTrue : Eq Bool false true -> Empty is
+  fn (h : Eq Bool false true) is subst Bool false true h (fn (x : Bool) is boolCode x end) tt end
+end
+boolAbsurd : (C : Prop) -> Eq Bool false true -> C is
+  fn (C : Prop) (h : Eq Bool false true) is falseNotTrue h C end
+end
+
+congNat : (f : Nat -> Nat) -> (x : Nat) -> (y : Nat) -> Eq Nat x y -> Eq Nat (f x) (f y) is
+  fn (f : Nat -> Nat) (x : Nat) (y : Nat) (p : Eq Nat x y) is
+    subst Nat x y p (fn (z : Nat) is Eq Nat (f x) (f z) end) (refl (f x))
+  end
+end
+
+transNat : (x : Nat) -> (y : Nat) -> (z : Nat) -> Eq Nat x y -> Eq Nat y z -> Eq Nat x z is
+  fn (x : Nat) (y : Nat) (z : Nat) (p : Eq Nat x y) (q : Eq Nat y z) is
+    subst Nat y z q (fn (w : Nat) is Eq Nat x w end) p
+  end
+end
+
+-- and-projections: from `and p q = true` each conjunct is true (p=false makes `and` false).
+andProjL : (p : Bool) -> (q : Bool) -> Eq Bool (and p q) true -> Eq Bool p true is
+  fn (p : Bool) (q : Bool) is
+    BoolElim (fn (z : Bool) is Eq Bool (and z q) true -> Eq Bool z true end)
+      (fn (h : Eq Bool (and true q) true) is refl true end)
+      (fn (h : Eq Bool (and false q) true) is h end)
+      p
+  end
+end
+andProjR : (p : Bool) -> (q : Bool) -> Eq Bool (and p q) true -> Eq Bool q true is
+  fn (p : Bool) (q : Bool) is
+    BoolElim (fn (z : Bool) is Eq Bool (and z q) true -> Eq Bool q true end)
+      (fn (h : Eq Bool (and true q) true) is h end)
+      (fn (h : Eq Bool (and false q) true) is boolAbsurd (Eq Bool q true) h end)
+      p
+  end
+end
+
+-- ℕ-equality SOUNDNESS (eqNat m n = true ⇒ m = n) and COMPLETENESS (m = n ⇒ eqNat m n = true).
+eqNatSound : (m : Nat) -> (n : Nat) -> Eq Bool (eqNat m n) true -> Eq Nat m n is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) true -> Eq Nat x n end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) true -> Eq Nat zero y end)
+           (fn (h : Eq Bool (eqNat zero zero) true) is refl zero end)
+           (fn (n' : Nat) (ihn : Eq Bool (eqNat zero n') true -> Eq Nat zero n') is
+              fn (h : Eq Bool (eqNat zero (succ n')) true) is
+                boolAbsurd (Eq Nat zero (succ n')) h end
+            end)
+           n
+       end)
+      (fn (m' : Nat) (ihm : (n : Nat) -> Eq Bool (eqNat m' n) true -> Eq Nat m' n) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ m') y) true -> Eq Nat (succ m') y end)
+             (fn (h : Eq Bool (eqNat (succ m') zero) true) is
+                boolAbsurd (Eq Nat (succ m') zero) h end)
+             (fn (n' : Nat) (ihn : Eq Bool (eqNat (succ m') n') true -> Eq Nat (succ m') n') is
+                fn (h : Eq Bool (eqNat (succ m') (succ n')) true) is
+                  congNat (fn (s : Nat) is succ s end) m' n' (ihm n' h) end
+             end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+eqNatComplete : (m : Nat) -> (n : Nat) -> Eq Nat m n -> Eq Bool (eqNat m n) true is
+  fn (m : Nat) (n : Nat) (p : Eq Nat m n) is
+    subst Nat m n p (fn (z : Nat) is Eq Bool (eqNat m z) true end) (eqNatRefl m)
+  end
+end
+
+-- transitivity of decidable ℕ-equality (through soundness/Eq-Nat/completeness).
+eqNatTrans : (x : Nat) -> (y : Nat) -> (z : Nat)
+   -> Eq Bool (eqNat x y) true -> Eq Bool (eqNat y z) true -> Eq Bool (eqNat x z) true is
+  fn (x : Nat) (y : Nat) (z : Nat) (h1 : Eq Bool (eqNat x y) true) (h2 : Eq Bool (eqNat y z) true) is
+    eqNatComplete x z (transNat x y z (eqNatSound x y h1) (eqNatSound y z h2))
+  end
+end
+
+-- TRANSITIVITY of the prefix relation.  Induct on xs; case ys then zs; the off-alignment
+-- (cons ⊑ nil) hypotheses are false=true ⇒ absurd; the aligned case combines head-equality
+-- transitivity (eqNatTrans) and tail-prefix transitivity (ih) via andBothTrue.
+prefixTrans : (xs : List) -> (ys : List) -> (zs : List)
+   -> Eq Bool (isPrefix xs ys) true -> Eq Bool (isPrefix ys zs) true
+   -> Eq Bool (isPrefix xs zs) true is
+  fn (xs : List) is
+    ListElim
+      (fn (ws : List) is
+         (ys : List) -> (zs : List) -> Eq Bool (isPrefix ws ys) true
+            -> Eq Bool (isPrefix ys zs) true -> Eq Bool (isPrefix ws zs) true end)
+      (fn (ys : List) (zs : List) (h1 : Eq Bool (isPrefix nil ys) true)
+          (h2 : Eq Bool (isPrefix ys zs) true) is refl true end)
+      (fn (x : Nat) (xs' : List)
+          (ih : (ys : List) -> (zs : List) -> Eq Bool (isPrefix xs' ys) true
+                  -> Eq Bool (isPrefix ys zs) true -> Eq Bool (isPrefix xs' zs) true) is
+         fn (ys : List) is
+           ListElim
+             (fn (ws : List) is
+                (zs : List) -> Eq Bool (isPrefix (cons x xs') ws) true
+                   -> Eq Bool (isPrefix ws zs) true -> Eq Bool (isPrefix (cons x xs') zs) true end)
+             (fn (zs : List) (h1 : Eq Bool (isPrefix (cons x xs') nil) true)
+                 (h2 : Eq Bool (isPrefix nil zs) true) is
+                boolAbsurd (Eq Bool (isPrefix (cons x xs') zs) true) h1 end)
+             (fn (y : Nat) (ys' : List)
+                 (ihy : (zs : List) -> Eq Bool (isPrefix (cons x xs') ys') true
+                          -> Eq Bool (isPrefix ys' zs) true
+                          -> Eq Bool (isPrefix (cons x xs') zs) true) is
+                fn (zs : List) is
+                  ListElim
+                    (fn (vs : List) is
+                       Eq Bool (isPrefix (cons x xs') (cons y ys')) true
+                          -> Eq Bool (isPrefix (cons y ys') vs) true
+                          -> Eq Bool (isPrefix (cons x xs') vs) true end)
+                    (fn (h1 : Eq Bool (isPrefix (cons x xs') (cons y ys')) true)
+                        (h2 : Eq Bool (isPrefix (cons y ys') nil) true) is
+                       boolAbsurd (Eq Bool (isPrefix (cons x xs') nil) true) h2 end)
+                    (fn (z : Nat) (zs' : List)
+                        (ihz : Eq Bool (isPrefix (cons x xs') (cons y ys')) true
+                                 -> Eq Bool (isPrefix (cons y ys') zs') true
+                                 -> Eq Bool (isPrefix (cons x xs') zs') true) is
+                       fn (h1 : Eq Bool (isPrefix (cons x xs') (cons y ys')) true)
+                          (h2 : Eq Bool (isPrefix (cons y ys') (cons z zs')) true) is
+                         andBothTrue (eqNat x z) (isPrefix xs' zs')
+                           (eqNatTrans x y z
+                              (andProjL (eqNat x y) (isPrefix xs' ys') h1)
+                              (andProjL (eqNat y z) (isPrefix ys' zs') h2))
+                           (ih ys' zs'
+                              (andProjR (eqNat x y) (isPrefix xs' ys') h1)
+                              (andProjR (eqNat y z) (isPrefix ys' zs') h2)) end
+                     end)
+                    zs
+                end
+              end)
+             ys
+         end
+       end)
+      xs
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 184 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): `prefixTrans` (the prefix relation on logs is
+-- transitive), built on the Bool discriminator `boolAbsurd`, the and-projections, and ℕ-equality
+-- SOUNDNESS (`eqNatSound`) / COMPLETENESS (`eqNatComplete`) / TRANSITIVITY (`eqNatTrans`).  With
+-- prefixRefl (ch183), `isPrefix` is a verified PREORDER on logs — the order underlying Raft/Paxos
+-- log matching (a follower's log advances along a prefix chain toward the leader's).
+-- THE NEXT STEP: prefixAntisym (⇒ partial order) + log-matching agreement (entries on the common
+-- prefix coincide); or runnable OTP-style replica actors exchanging log-append messages.
+-- ====================================================================================
+
+
+-- ====================================================================================
+-- CHAPTER 185 — LOG-PREFIX ANTISYMMETRY → A PARTIAL ORDER ON LOGS (telos-4 / E-track).
+-- `isPrefix` is ANTISYMMETRIC: if xs ⊑ ys and ys ⊑ xs then xs = ys.  With prefixRefl (ch183) and
+-- prefixTrans (ch184), the prefix relation is a verified PARTIAL ORDER on logs — two logs each a
+-- prefix of the other are equal (no divergence).  FULLY PROVEN.
+-- ====================================================================================
+
+-- congruence of `cons` over Eq Nat (heads) and Eq List (tails), via double Leibniz subst.
+consCong : (x : Nat) -> (y : Nat) -> (xs : List) -> (ys : List)
+   -> Eq Nat x y -> Eq List xs ys -> Eq List (cons x xs) (cons y ys) is
+  fn (x : Nat) (y : Nat) (xs : List) (ys : List) (px : Eq Nat x y) (pxs : Eq List xs ys) is
+    subst Nat x y px (fn (w : Nat) is Eq List (cons x xs) (cons w ys) end)
+      (subst List xs ys pxs (fn (ws : List) is Eq List (cons x xs) (cons x ws) end)
+         (refl (cons x xs)))
+  end
+end
+
+prefixAntisym : (xs : List) -> (ys : List)
+   -> Eq Bool (isPrefix xs ys) true -> Eq Bool (isPrefix ys xs) true -> Eq List xs ys is
+  fn (xs : List) is
+    ListElim
+      (fn (ws : List) is
+         (ys : List) -> Eq Bool (isPrefix ws ys) true -> Eq Bool (isPrefix ys ws) true
+            -> Eq List ws ys end)
+      (fn (ys : List) is
+         ListElim
+           (fn (vs : List) is
+              Eq Bool (isPrefix nil vs) true -> Eq Bool (isPrefix vs nil) true
+                 -> Eq List nil vs end)
+           (fn (h1 : Eq Bool (isPrefix nil nil) true) (h2 : Eq Bool (isPrefix nil nil) true) is
+              refl nil end)
+           (fn (y : Nat) (ys' : List)
+               (ihy : Eq Bool (isPrefix nil ys') true -> Eq Bool (isPrefix ys' nil) true
+                        -> Eq List nil ys') is
+              fn (h1 : Eq Bool (isPrefix nil (cons y ys')) true)
+                 (h2 : Eq Bool (isPrefix (cons y ys') nil) true) is
+                boolAbsurd (Eq List nil (cons y ys')) h2 end
+              end)
+           ys
+       end)
+      (fn (x : Nat) (xs' : List)
+          (ih : (ys : List) -> Eq Bool (isPrefix xs' ys) true -> Eq Bool (isPrefix ys xs') true
+                  -> Eq List xs' ys) is
+         fn (ys : List) is
+           ListElim
+             (fn (vs : List) is
+                Eq Bool (isPrefix (cons x xs') vs) true -> Eq Bool (isPrefix vs (cons x xs')) true
+                   -> Eq List (cons x xs') vs end)
+             (fn (h1 : Eq Bool (isPrefix (cons x xs') nil) true)
+                 (h2 : Eq Bool (isPrefix nil (cons x xs')) true) is
+                boolAbsurd (Eq List (cons x xs') nil) h1 end)
+             (fn (y : Nat) (ys' : List)
+                 (ihy : Eq Bool (isPrefix (cons x xs') ys') true
+                          -> Eq Bool (isPrefix ys' (cons x xs')) true
+                          -> Eq List (cons x xs') ys') is
+                fn (h1 : Eq Bool (isPrefix (cons x xs') (cons y ys')) true)
+                   (h2 : Eq Bool (isPrefix (cons y ys') (cons x xs')) true) is
+                  consCong x y xs' ys'
+                    (eqNatSound x y (andProjL (eqNat x y) (isPrefix xs' ys') h1))
+                    (ih ys' (andProjR (eqNat x y) (isPrefix xs' ys') h1)
+                            (andProjR (eqNat y x) (isPrefix ys' xs') h2)) end
+              end)
+             ys
+         end
+       end)
+      xs
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 185 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): `prefixAntisym` (logs each a prefix of the other are
+-- equal), via `consCong` (cons-congruence by double subst) + eqNatSound + the and-projections.
+-- With prefixRefl (ch183) and prefixTrans (ch184), `isPrefix` is a verified PARTIAL ORDER on logs
+-- — reflexive, transitive, antisymmetric.  The Raft/Paxos log-matching order, fully axiomatized.
+-- THE NEXT STEP: log-matching AGREEMENT (entries on the common prefix coincide, via nth); or
+-- runnable OTP-style replica actors exchanging append-entries messages.
+-- ====================================================================================

@@ -1,0 +1,726 @@
+-- Chapter 102 — THE COMPLETE BOOLEAN ALGEBRA (M6 / telos-3 tiered-verified stdlib).
+-- ch96/ch97 certified (P(u), ∪, ∩, ∅) a BOUNDED DISTRIBUTIVE LATTICE (comm/idem/assoc, both
+-- distributivities, absorption), and ch101 added the RELATIVE COMPLEMENT (`complement u a`,
+-- `memberComplement`) with the first De Morgan law (`deMorganUnion`) — leaving the set algebra a
+-- RELATIVELY-COMPLEMENTED distributive lattice. A distributive lattice with ⊥ (∅), ⊤ (the universe
+-- u) and a complement satisfying the COMPLEMENT LAWS (a ∪ ¬a = ⊤, a ∩ ¬a = ⊥) is a BOOLEAN ALGEBRA.
+-- This chapter discharges exactly those two laws — plus the second De Morgan — completing the proof
+-- that (P(u), ∪, ∩, ∅, u, complement u) is a VERIFIED BOOLEAN ALGEBRA, all at the membership level:
+--   unionComplementU      : member x u = true -> member x (union a (complement u a)) = true   (EXCLUDED MIDDLE)
+--   intersectComplementU  : member x (intersect a (complement u a)) = false                    (NON-CONTRADICTION)
+--   deMorganIntersect     :                                                                    (DE MORGAN, second)
+--     member x (complement u (intersect a b)) = member x (union (complement u a) (complement u b))
+--
+-- DESIGN. Same idiom as ch96/ch97/ch101: each set law is a CHAIN through the member-homomorphisms
+-- (memberUnion/memberIntersect/memberComplement) onto a BOOLEAN law, threaded by `trans`/`subst`/`sym`
+-- (ambient ch03 equality). Writing p := member x a, q := member x b, mu := member x u, each set law
+-- reduces to a Bool identity over p, q, mu. The new Boolean kernels are the COMPLEMENT LAWS of the
+-- two-element Boolean algebra — `orNotSelf` (or p (not p) = true, excluded middle) and `andNotSelf`
+-- (and p (not p) = false, non-contradiction) — and the second De Morgan `notAnd`, each by EXHAUSTIVE
+-- BoolElim with refl arms. The set/Bool primitives, the homomorphisms, and trans are redeclared
+-- BYTE-IDENTICAL to ch95/ch96/ch97/ch101 per the self-contained-listings convention.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- DECIDABLE Nat equality (verbatim from ch95): zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true (verbatim from ch95).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+-- eqNat is SYMMETRIC, false-preserving: eqNat m n = false -> eqNat n m = false (verbatim ch95).
+eqNatSymFalse : (m : Nat) -> (n : Nat)
+   -> Eq Bool (eqNat m n) false -> Eq Bool (eqNat n m) false is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Bool (eqNat x n) false -> Eq Bool (eqNat n x) false end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (eqNat zero y) false -> Eq Bool (eqNat y zero) false end)
+           (fn (h : Eq Bool true false) is h end)
+           (fn (j : Nat) (ihj : Eq Bool (eqNat zero j) false -> Eq Bool (eqNat j zero) false) is
+              fn (h : Eq Bool false false) is refl false end
+            end)
+           n
+       end)
+      (fn (k : Nat) (ihk : (n : Nat) -> Eq Bool (eqNat k n) false -> Eq Bool (eqNat n k) false) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (eqNat (succ k) y) false -> Eq Bool (eqNat y (succ k)) false end)
+             (fn (h : Eq Bool false false) is refl false end)
+             (fn (j : Nat) (ihj : Eq Bool (eqNat (succ k) j) false -> Eq Bool (eqNat j (succ k)) false) is
+                fn (h : Eq Bool (eqNat k j) false) is ihk j h end
+              end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is SOUND: eqNat x y = true -> x = y (verbatim ch96).
+eqNatSound : (x : Nat) -> (y : Nat) -> Eq Bool (eqNat x y) true -> Eq Nat x y is
+  fn (x : Nat) is
+    NatElim
+      (fn (w : Nat) is (y : Nat) -> Eq Bool (eqNat w y) true -> Eq Nat w y end)
+      (fn (y : Nat) is
+         NatElim
+           (fn (u : Nat) is Eq Bool (eqNat zero u) true -> Eq Nat zero u end)
+           (fn (h : Eq Bool true true) is refl zero end)
+           (fn (m : Nat) (ihm : Eq Bool (eqNat zero m) true -> Eq Nat zero m) is
+              fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat zero (succ m)
+                     | false -> Eq Nat zero zero
+                     end
+                   end)
+                  (refl zero) end
+            end)
+           y end)
+      (fn (k : Nat) (ih : (y : Nat) -> Eq Bool (eqNat k y) true -> Eq Nat k y) is
+         fn (y : Nat) is
+           NatElim
+             (fn (u : Nat) is Eq Bool (eqNat (succ k) u) true -> Eq Nat (succ k) u end)
+             (fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat (succ k) zero
+                     | false -> Eq Nat (succ k) (succ k)
+                     end
+                   end)
+                  (refl (succ k)) end)
+             (fn (m : Nat) (ihm : Eq Bool (eqNat (succ k) m) true -> Eq Nat (succ k) m) is
+                fn (h : Eq Bool (eqNat k m) true) is
+                  subst Nat k m (ih m h)
+                    (fn (z : Nat) is Eq Nat (succ k) (succ z) end)
+                    (refl (succ k)) end
+              end)
+             y end
+       end)
+      x
+  end
+end
+
+-- ====================================================================================
+-- THE AMBIENT EQUALITY combinator (ch03), redeclared verbatim — the chains thread through it.
+-- ====================================================================================
+
+trans : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ====================================================================================
+-- MEMBERSHIP + SET INSERTION (verbatim ch96)
+-- ====================================================================================
+
+member : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (ys : List Nat) (ih : Bool) is
+         BoolElim (fn (b : Bool) is Bool end) true ih (eqNat x y) end)
+      xs
+  end
+end
+
+insert : Nat -> List Nat -> List Nat is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim (fn (b : Bool) is List Nat end)
+      xs
+      (cons Nat x xs)
+      (member x xs)
+  end
+end
+
+-- ====================================================================================
+-- BOOLEAN ALGEBRA (verbatim ch96 not/and/or) + the new Boolean kernels this chapter lifts.
+-- ====================================================================================
+
+not : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b false a
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- and a false = false (the right zero) — verbatim ch96, used by memberIntersect.
+andFalseR : (a : Bool) -> Eq Bool (and a false) false is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x false) false end)
+      (refl false)
+      (refl false)
+      a
+  end
+end
+
+-- and DISTRIBUTES over or (verbatim ch97) — carries deMorganIntersect's RHS normalisation.
+--   and a (or b c) = or (and a b) (and a c). Case on a:
+--     a = true:  and true (or b c) ~> or b c; or (and true b) (and true c) ~> or b c.
+--     a = false: and false _ ~> false; or (and false b) (and false c) ~> or false false ~> false.
+andOrDistrib : (a : Bool) -> (b : Bool) -> (c : Bool)
+   -> Eq Bool (and a (or b c)) (or (and a b) (and a c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (and x (or b c)) (or (and x b) (and x c)) end)
+      (refl (or b c))
+      (refl false)
+      a
+  end
+end
+
+-- EXCLUDED MIDDLE in Bool — or p (not p) = true. The complement law a ∨ ¬a = ⊤. Case on p:
+--   p = true:  or true (not true) ~> true.
+--   p = false: or false (not false) ~> or false true ~> true.
+orNotSelf : (p : Bool) -> Eq Bool (or p (not p)) true is
+  fn (p : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (or x (not x)) true end)
+      (refl true)
+      (refl true)
+      p
+  end
+end
+
+-- NON-CONTRADICTION in Bool — and p (not p) = false. The complement law a ∧ ¬a = ⊥. Case on p:
+--   p = true:  and true (not true) ~> and true false ~> false.
+--   p = false: and false _ ~> false.
+andNotSelf : (p : Bool) -> Eq Bool (and p (not p)) false is
+  fn (p : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (and x (not x)) false end)
+      (refl false)
+      (refl false)
+      p
+  end
+end
+
+-- DE MORGAN, second law: not (and a b) = or (not a) (not b). Case on a:
+--   a = true:  not (and true b) ~> not b; or (not true) (not b) ~> or false (not b) ~> not b.
+--   a = false: not (and false b) ~> not false ~> true; or (not false) (not b) ~> or true _ ~> true.
+notAnd : (a : Bool) -> (b : Bool) -> Eq Bool (not (and a b)) (or (not a) (not b)) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (not (and x b)) (or (not x) (not b)) end)
+      (refl (not b))
+      (refl true)
+      a
+  end
+end
+
+-- ====================================================================================
+-- THE SET OPERATIONS (verbatim ch96) + their member-HOMOMORPHISMS.
+-- ====================================================================================
+
+-- memberInsertSame/memberInsertOther (verbatim ch96) — memberUnion rides on these.
+memberInsertSame : (x : Nat) -> (xs : List Nat)
+   -> Eq Bool (member x (insert x xs)) true is
+  fn (x : Nat) (xs : List Nat) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member x (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                true end)
+      (fn (hm : Eq Bool (member x xs) true) is hm end)
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+           (fn (g : Bool) is
+              Eq Bool (BoolElim (fn (c : Bool) is Bool end) true (member x xs) g) true end)
+           (refl true) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+memberInsertOther : (x : Nat) -> (y : Nat) -> (xs : List Nat)
+   -> Eq Bool (eqNat x y) false
+   -> Eq Bool (member y (insert x xs)) (member y xs) is
+  fn (x : Nat) (y : Nat) (xs : List Nat) (hxy : Eq Bool (eqNat x y) false) is
+    BoolElim
+      (fn (bb : Bool) is
+         Eq Bool (member x xs) bb
+           -> Eq Bool
+                (member y (BoolElim (fn (c : Bool) is List Nat end) xs (cons Nat x xs) bb))
+                (member y xs) end)
+      (fn (hm : Eq Bool (member x xs) true) is refl (member y xs) end)
+      (fn (hm : Eq Bool (member x xs) false) is
+         subst Bool false (eqNat y x) (symBool (eqNat y x) false (eqNatSymFalse x y hxy))
+           (fn (g : Bool) is
+              Eq Bool
+                (BoolElim (fn (c : Bool) is Bool end) true (member y xs) g)
+                (member y xs) end)
+           (refl (member y xs)) end)
+      (member x xs)
+      (refl (member x xs))
+  end
+end
+
+-- UNION (verbatim ch96): insert each element of a into b.
+union : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      b
+      (fn (h : Nat) (t : List Nat) (ih : List Nat) is insert h ih end)
+      a
+  end
+end
+
+-- THE UNION MEMBER-HOMOMORPHISM (verbatim ch96).
+memberUnion : (x : Nat) -> (a : List Nat) -> (b : List Nat)
+   -> Eq Bool (member x (union a b)) (or (member x a) (member x b)) is
+  fn (x : Nat) (a : List Nat) (b : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member x (union w b)) (or (member x w) (member x b)) end)
+      (refl (member x b))
+      (fn (h : Nat) (t : List Nat)
+          (ih : Eq Bool (member x (union t b)) (or (member x t) (member x b))) is
+         BoolElim
+           (fn (gxh : Bool) is
+              Eq Bool (eqNat x h) gxh
+                -> Eq Bool
+                     (member x (insert h (union t b)))
+                     (or (BoolElim (fn (c : Bool) is Bool end) true (member x t) gxh) (member x b)) end)
+           (fn (hxh : Eq Bool (eqNat x h) true) is
+              subst Nat x h (eqNatSound x h hxh)
+                (fn (w : Nat) is
+                   Eq Bool
+                     (member x (insert w (union t b)))
+                     (or true (member x b)) end)
+                (memberInsertSame x (union t b)) end)
+           (fn (hxh : Eq Bool (eqNat x h) false) is
+              subst Bool (member x (union t b)) (member x (insert h (union t b)))
+                (symBool (member x (insert h (union t b))) (member x (union t b))
+                   (memberInsertOther h x (union t b) (eqNatSymFalse x h hxh)))
+                (fn (w : Bool) is Eq Bool w (or (member x t) (member x b)) end)
+                ih end)
+           (eqNat x h)
+           (refl (eqNat x h)) end)
+      a
+  end
+end
+
+-- INTERSECT (verbatim ch96): keep elements of a that are in b.
+intersect : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (h : Nat) (t : List Nat) (ih : List Nat) is
+         BoolElim (fn (g : Bool) is List Nat end) (cons Nat h ih) ih (member h b) end)
+      a
+  end
+end
+
+-- THE INTERSECT MEMBER-HOMOMORPHISM (verbatim ch96).
+memberIntersect : (x : Nat) -> (a : List Nat) -> (b : List Nat)
+   -> Eq Bool (member x (intersect a b)) (and (member x a) (member x b)) is
+  fn (x : Nat) (a : List Nat) (b : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member x (intersect w b)) (and (member x w) (member x b)) end)
+      (refl false)
+      (fn (h : Nat) (t : List Nat)
+          (ih : Eq Bool (member x (intersect t b)) (and (member x t) (member x b))) is
+         BoolElim
+           (fn (gxh : Bool) is
+              Eq Bool (eqNat x h) gxh
+                -> Eq Bool
+                     (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                  (cons Nat h (intersect t b)) (intersect t b) (member h b)))
+                     (and (BoolElim (fn (c : Bool) is Bool end) true (member x t) gxh) (member x b)) end)
+           (fn (hxh : Eq Bool (eqNat x h) true) is
+              subst Nat x h (eqNatSound x h hxh)
+                (fn (w : Nat) is
+                   Eq Bool
+                     (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                  (cons Nat w (intersect t b)) (intersect t b) (member w b)))
+                     (and true (member x b)) end)
+                   (BoolElim
+                      (fn (gmb : Bool) is
+                         Eq Bool (member x b) gmb
+                           -> Eq Bool
+                                (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                             (cons Nat x (intersect t b)) (intersect t b) gmb))
+                                gmb end)
+                      (fn (hmb : Eq Bool (member x b) true) is
+                         subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+                           (fn (gxx : Bool) is
+                              Eq Bool
+                                (BoolElim (fn (c : Bool) is Bool end) true (member x (intersect t b)) gxx)
+                                true end)
+                           (refl true) end)
+                      (fn (hmb : Eq Bool (member x b) false) is
+                         subst Bool (and (member x t) (member x b)) (member x (intersect t b))
+                           (symBool (member x (intersect t b)) (and (member x t) (member x b)) ih)
+                           (fn (w : Bool) is Eq Bool w false end)
+                           (subst Bool false (member x b) (symBool (member x b) false hmb)
+                              (fn (gmb : Bool) is
+                                 Eq Bool (and (member x t) gmb) false end)
+                              (andFalseR (member x t))) end)
+                      (member x b)
+                      (refl (member x b))) end)
+           (fn (hxh : Eq Bool (eqNat x h) false) is
+              BoolElim
+                   (fn (gmb : Bool) is
+                      Eq Bool (member h b) gmb
+                        -> Eq Bool
+                             (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                          (cons Nat h (intersect t b)) (intersect t b) gmb))
+                             (and (member x t) (member x b)) end)
+                   (fn (hmb : Eq Bool (member h b) true) is
+                      subst Bool false (eqNat x h) (symBool (eqNat x h) false hxh)
+                        (fn (gxh : Bool) is
+                           Eq Bool
+                             (BoolElim (fn (c : Bool) is Bool end) true (member x (intersect t b)) gxh)
+                             (and (member x t) (member x b)) end)
+                        ih end)
+                   (fn (hmb : Eq Bool (member h b) false) is ih end)
+                   (member h b)
+                   (refl (member h b)) end)
+           (eqNat x h)
+           (refl (eqNat x h)) end)
+      a
+  end
+end
+
+-- ====================================================================================
+-- RELATIVE COMPLEMENT w.r.t. a universe list `u` (verbatim ch101).
+-- complement u a = filter (λy. not (member y a)) u : keep the elements of u NOT in a.
+-- ====================================================================================
+
+complement : List Nat -> List Nat -> List Nat is
+  fn (u : List Nat) (a : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (nil Nat)
+      (fn (h : Nat) (t : List Nat) (ih : List Nat) is
+         BoolElim (fn (g : Bool) is List Nat end) (cons Nat h ih) ih (not (member h a)) end)
+      u
+  end
+end
+
+-- THE COMPLEMENT MEMBER-HOMOMORPHISM (verbatim ch101):
+-- member x (complement u a) = and (member x u) (not (member x a)).
+memberComplement : (x : Nat) -> (u : List Nat) -> (a : List Nat)
+   -> Eq Bool (member x (complement u a)) (and (member x u) (not (member x a))) is
+  fn (x : Nat) (u : List Nat) (a : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Bool (member x (complement w a)) (and (member x w) (not (member x a))) end)
+      (refl false)
+      (fn (h : Nat) (t : List Nat)
+          (ih : Eq Bool (member x (complement t a)) (and (member x t) (not (member x a)))) is
+         BoolElim
+           (fn (gxh : Bool) is
+              Eq Bool (eqNat x h) gxh
+                -> Eq Bool
+                     (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                  (cons Nat h (complement t a)) (complement t a) (not (member h a))))
+                     (and (BoolElim (fn (c : Bool) is Bool end) true (member x t) gxh) (not (member x a))) end)
+           (fn (hxh : Eq Bool (eqNat x h) true) is
+              subst Nat x h (eqNatSound x h hxh)
+                (fn (w : Nat) is
+                   Eq Bool
+                     (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                  (cons Nat w (complement t a)) (complement t a) (not (member w a))))
+                     (and true (not (member x a))) end)
+                   (BoolElim
+                      (fn (gma : Bool) is
+                         Eq Bool (not (member x a)) gma
+                           -> Eq Bool
+                                (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                             (cons Nat x (complement t a)) (complement t a) gma))
+                                gma end)
+                      (fn (hma : Eq Bool (not (member x a)) true) is
+                         subst Bool true (eqNat x x) (symBool (eqNat x x) true (eqNatRefl x))
+                           (fn (gxx : Bool) is
+                              Eq Bool
+                                (BoolElim (fn (c : Bool) is Bool end) true (member x (complement t a)) gxx)
+                                true end)
+                           (refl true) end)
+                      (fn (hma : Eq Bool (not (member x a)) false) is
+                         subst Bool (and (member x t) (not (member x a))) (member x (complement t a))
+                           (symBool (member x (complement t a)) (and (member x t) (not (member x a))) ih)
+                           (fn (w : Bool) is Eq Bool w false end)
+                           (subst Bool false (not (member x a)) (symBool (not (member x a)) false hma)
+                              (fn (gma : Bool) is
+                                 Eq Bool (and (member x t) gma) false end)
+                              (andFalseR (member x t))) end)
+                      (not (member x a))
+                      (refl (not (member x a)))) end)
+           (fn (hxh : Eq Bool (eqNat x h) false) is
+              BoolElim
+                   (fn (gma : Bool) is
+                      Eq Bool (not (member h a)) gma
+                        -> Eq Bool
+                             (member x (BoolElim (fn (g : Bool) is List Nat end)
+                                          (cons Nat h (complement t a)) (complement t a) gma))
+                             (and (member x t) (not (member x a))) end)
+                   (fn (hma : Eq Bool (not (member h a)) true) is
+                      subst Bool false (eqNat x h) (symBool (eqNat x h) false hxh)
+                        (fn (gxh : Bool) is
+                           Eq Bool
+                             (BoolElim (fn (c : Bool) is Bool end) true (member x (complement t a)) gxh)
+                             (and (member x t) (not (member x a))) end)
+                        ih end)
+                   (fn (hma : Eq Bool (not (member h a)) false) is ih end)
+                   (not (member h a))
+                   (refl (not (member h a))) end)
+           (eqNat x h)
+           (refl (eqNat x h)) end)
+      u
+  end
+end
+
+-- ====================================================================================
+-- THE COMPLEMENT LAWS — completing the BOOLEAN ALGEBRA. (member x ranging over the universe u.)
+-- ====================================================================================
+
+-- EXCLUDED MIDDLE for sets: a ∪ ¬a covers the universe. For x ∈ u (member x u = true):
+--   member x (union a (complement u a))
+--     =[memberUnion]                          or (member x a) (member x (complement u a))
+--     =[memberComplement under or, right]     or (member x a) (and (member x u) (not (member x a)))
+--     =[hypothesis member x u = true, in and]  or (member x a) (and true (not (member x a)))
+--                                              (and true _ ~> _ definitionally)
+--                                           =  or (member x a) (not (member x a))
+--     =[orNotSelf]                            true.
+unionComplementU : (u : List Nat) -> (a : List Nat) -> (x : Nat)
+   -> Eq Bool (member x u) true
+   -> Eq Bool (member x (union a (complement u a))) true is
+  fn (u : List Nat) (a : List Nat) (x : Nat) (hxu : Eq Bool (member x u) true) is
+    trans Bool
+      (member x (union a (complement u a)))
+      (or (member x a) (member x (complement u a)))
+      true
+      (memberUnion x a (complement u a))
+      (trans Bool
+        (or (member x a) (member x (complement u a)))
+        (or (member x a) (and (member x u) (not (member x a))))
+        true
+        -- rewrite member x (complement u a) ~> and (member x u) (not (member x a)) in right of or.
+        (subst Bool (member x (complement u a)) (and (member x u) (not (member x a)))
+           (memberComplement x u a)
+           (fn (w : Bool) is Eq Bool (or (member x a) (member x (complement u a))) (or (member x a) w) end)
+           (refl (or (member x a) (member x (complement u a)))))
+        (trans Bool
+          (or (member x a) (and (member x u) (not (member x a))))
+          (or (member x a) (and true (not (member x a))))
+          true
+          -- rewrite member x u ~> true (hypothesis) inside the and, in right of or.
+          (subst Bool (member x u) true hxu
+             (fn (w : Bool) is Eq Bool (or (member x a) (and (member x u) (not (member x a)))) (or (member x a) (and w (not (member x a)))) end)
+             (refl (or (member x a) (and (member x u) (not (member x a))))))
+          -- and true (not (member x a)) ~> not (member x a) definitionally; excluded middle closes it.
+          (orNotSelf (member x a))))
+  end
+end
+
+-- NON-CONTRADICTION for sets: a ∩ ¬a = ∅. No hypothesis needed (holds for ALL x):
+--   member x (intersect a (complement u a))
+--     =[memberIntersect]                       and (member x a) (member x (complement u a))
+--     =[memberComplement under and, right]     and (member x a) (and (member x u) (not (member x a)))
+--     =[andCommBridge: and p (and mu np) = and mu (and p np)]  and (member x u) (and (member x a) (not (member x a)))
+--     =[andNotSelf under and, right]           and (member x u) false
+--     =[andFalseR]                             false.
+-- The rearrangement and-bridge is proved inline by exhaustive BoolElim on the two outer factors.
+andCommBridge : (p : Bool) -> (mu : Bool) -> (np : Bool)
+   -> Eq Bool (and p (and mu np)) (and mu (and p np)) is
+  fn (p : Bool) (mu : Bool) (np : Bool) is
+    BoolElim
+      (fn (x : Bool) is Eq Bool (and x (and mu np)) (and mu (and x np)) end)
+      -- p = true:  and true (and mu np) ~> and mu np; and mu (and true np) ~> and mu np.
+      (refl (and mu np))
+      -- p = false: and false _ ~> false; and mu (and false np) ~> and mu false. Need = false: andFalseR mu, symm-aligned.
+      (symBool (and mu false) false (andFalseR mu))
+      p
+  end
+end
+
+intersectComplementU : (u : List Nat) -> (a : List Nat) -> (x : Nat)
+   -> Eq Bool (member x (intersect a (complement u a))) false is
+  fn (u : List Nat) (a : List Nat) (x : Nat) is
+    trans Bool
+      (member x (intersect a (complement u a)))
+      (and (member x a) (member x (complement u a)))
+      false
+      (memberIntersect x a (complement u a))
+      (trans Bool
+        (and (member x a) (member x (complement u a)))
+        (and (member x a) (and (member x u) (not (member x a))))
+        false
+        -- rewrite member x (complement u a) ~> and (member x u) (not (member x a)) in right of and.
+        (subst Bool (member x (complement u a)) (and (member x u) (not (member x a)))
+           (memberComplement x u a)
+           (fn (w : Bool) is Eq Bool (and (member x a) (member x (complement u a))) (and (member x a) w) end)
+           (refl (and (member x a) (member x (complement u a)))))
+        (trans Bool
+          (and (member x a) (and (member x u) (not (member x a))))
+          (and (member x u) (and (member x a) (not (member x a))))
+          false
+          -- pull the common factor (member x u) outward via the and-bridge.
+          (andCommBridge (member x a) (member x u) (not (member x a)))
+          (trans Bool
+            (and (member x u) (and (member x a) (not (member x a))))
+            (and (member x u) false)
+            false
+            -- rewrite and (member x a) (not (member x a)) ~> false (non-contradiction) in right of and.
+            (subst Bool (and (member x a) (not (member x a))) false
+               (andNotSelf (member x a))
+               (fn (w : Bool) is Eq Bool (and (member x u) (and (member x a) (not (member x a)))) (and (member x u) w) end)
+               (refl (and (member x u) (and (member x a) (not (member x a))))))
+            -- and (member x u) false ~> false.
+            (andFalseR (member x u)))))
+  end
+end
+
+-- ====================================================================================
+-- DE MORGAN, second law over the relative complement (for x ranging over the universe u).
+--   member x (complement u (intersect a b))
+--     =[memberComplement]                       and (member x u) (not (member x (intersect a b)))
+--     =[memberIntersect under not under and, R] and (member x u) (not (and (member x a) (member x b)))
+--     =[notAnd under and, right]                and (member x u) (or (not (member x a)) (not (member x b)))
+--     =[andOrDistrib]                           or (and (member x u) (not (member x a))) (and (member x u) (not (member x b)))
+--     =[memberComplement under or, left]        or (member x (complement u a)) (and (member x u) (not (member x b)))
+--     =[memberComplement under or, right]       or (member x (complement u a)) (member x (complement u b))
+--     =[sym memberUnion]                        member x (union (complement u a) (complement u b)).
+-- The Boolean engine here is `notAnd` (second De Morgan) + `andOrDistrib` (distributing the common
+-- factor member x u over the or) — duals of ch101's deMorganUnion (notOr + andDeMorganBridge).
+-- ====================================================================================
+
+deMorganIntersect : (u : List Nat) -> (a : List Nat) -> (b : List Nat) -> (x : Nat)
+   -> Eq Bool
+        (member x (complement u (intersect a b)))
+        (member x (union (complement u a) (complement u b))) is
+  fn (u : List Nat) (a : List Nat) (b : List Nat) (x : Nat) is
+    trans Bool
+      (member x (complement u (intersect a b)))
+      (and (member x u) (not (member x (intersect a b))))
+      (member x (union (complement u a) (complement u b)))
+      (memberComplement x u (intersect a b))
+      (trans Bool
+        (and (member x u) (not (member x (intersect a b))))
+        (and (member x u) (not (and (member x a) (member x b))))
+        (member x (union (complement u a) (complement u b)))
+        -- rewrite member x (intersect a b) ~> and (member x a) (member x b) under not, in right of and.
+        (subst Bool (member x (intersect a b)) (and (member x a) (member x b))
+           (memberIntersect x a b)
+           (fn (w : Bool) is Eq Bool (and (member x u) (not (member x (intersect a b)))) (and (member x u) (not w)) end)
+           (refl (and (member x u) (not (member x (intersect a b))))))
+        (trans Bool
+          (and (member x u) (not (and (member x a) (member x b))))
+          (and (member x u) (or (not (member x a)) (not (member x b))))
+          (member x (union (complement u a) (complement u b)))
+          -- rewrite not (and _ _) ~> or (not _) (not _) (notAnd) in right of and.
+          (subst Bool (not (and (member x a) (member x b))) (or (not (member x a)) (not (member x b)))
+             (notAnd (member x a) (member x b))
+             (fn (w : Bool) is Eq Bool (and (member x u) (not (and (member x a) (member x b)))) (and (member x u) w) end)
+             (refl (and (member x u) (not (and (member x a) (member x b))))))
+          (trans Bool
+            (and (member x u) (or (not (member x a)) (not (member x b))))
+            (or (and (member x u) (not (member x a))) (and (member x u) (not (member x b))))
+            (member x (union (complement u a) (complement u b)))
+            -- distribute the common factor (member x u) over the or.
+            (andOrDistrib (member x u) (not (member x a)) (not (member x b)))
+            (trans Bool
+              (or (and (member x u) (not (member x a))) (and (member x u) (not (member x b))))
+              (or (member x (complement u a)) (and (member x u) (not (member x b))))
+              (member x (union (complement u a) (complement u b)))
+              -- rewrite and (member x u) (not (member x a)) ~> member x (complement u a) in left of or.
+              (subst Bool (and (member x u) (not (member x a))) (member x (complement u a))
+                 (symBool (member x (complement u a)) (and (member x u) (not (member x a)))
+                    (memberComplement x u a))
+                 (fn (w : Bool) is
+                    Eq Bool (or (and (member x u) (not (member x a))) (and (member x u) (not (member x b)))) (or w (and (member x u) (not (member x b)))) end)
+                 (refl (or (and (member x u) (not (member x a))) (and (member x u) (not (member x b))))))
+              (trans Bool
+                (or (member x (complement u a)) (and (member x u) (not (member x b))))
+                (or (member x (complement u a)) (member x (complement u b)))
+                (member x (union (complement u a) (complement u b)))
+                -- rewrite and (member x u) (not (member x b)) ~> member x (complement u b) in right of or.
+                (subst Bool (and (member x u) (not (member x b))) (member x (complement u b))
+                   (symBool (member x (complement u b)) (and (member x u) (not (member x b)))
+                      (memberComplement x u b))
+                   (fn (w : Bool) is
+                      Eq Bool (or (member x (complement u a)) (and (member x u) (not (member x b)))) (or (member x (complement u a)) w) end)
+                   (refl (or (member x (complement u a)) (and (member x u) (not (member x b))))))
+                (symBool (member x (union (complement u a) (complement u b)))
+                   (or (member x (complement u a)) (member x (complement u b)))
+                   (memberUnion x (complement u a) (complement u b))))))))
+  end
+end
+
+-- ====================================================================================
+-- SANITY (representation-agnostic: assert via Eq + refl)
+-- ====================================================================================
+
+oneList : List Nat is cons Nat (succ zero) (nil Nat) end
+twoThree : List Nat is
+  cons Nat (succ (succ zero)) (cons Nat (succ (succ (succ zero))) (nil Nat))
+end
+universe : List Nat is
+  cons Nat (succ zero)
+    (cons Nat (succ (succ zero))
+      (cons Nat (succ (succ (succ zero))) (nil Nat)))
+end
+
+-- EXCLUDED MIDDLE at a point: 1 ∈ universe, so 1 ∈ union [1] (complement universe [1]).
+unionComplementUExample : Eq Bool
+   (member (succ zero) (union oneList (complement universe oneList))) true is refl true end
+
+-- NON-CONTRADICTION at a point: nothing is in intersect [1] (complement universe [1]).
+intersectComplementUExample : Eq Bool
+   (member (succ zero) (intersect oneList (complement universe oneList))) false is refl false end
+
+-- SECOND DE MORGAN at a point: 2 ∈ complement u (intersect [1] [2,3]) iff 2 ∈ union of the
+-- complements (both true here — 2 ∉ intersect [1] [2,3] = ∅, and 2 ∉ [1] so 2 ∈ complement u [1]).
+deMorganIntersectExample : Eq Bool
+   (member (succ (succ zero)) (complement universe (intersect oneList twoThree)))
+   (member (succ (succ zero)) (union (complement universe oneList) (complement universe twoThree)))
+   is refl true end

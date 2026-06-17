@@ -1,0 +1,2410 @@
+-- Chapter 69 — Guarded recursive TYPES via `gfix` (CLOCKS-DESIGN / R-COIND, the E2
+-- converse substrate). `dfix` (ch62) is the VALUE-level guarded fixpoint — it recurses
+-- a value of a FIXED code. The bisimilar ⟹ path converse needs the TYPE-level dual: a
+-- self-referential CODE, the guarded stream `Str^g κ A = A × ▹κ (Str^g κ A)`. That is
+-- `gfix`, the guarded fixpoint of a type operator:
+--
+--   gfix : (k : Clock) -> (UF -> UF) -> UF        with   gfix k F ≡ F (gfix k F)
+--
+-- The defining equation is a BOUNDED conversion (core/conv.go convGfix) with a progress
+-- guard: it unfolds once, and only when the operator F makes head progress (a guarded
+-- operator like `λX. A × ▹κ X` does), so an unguarded `λX. X` can never loop the checker.
+-- The head is neutral in eval — no divergence. With `gfix` the guarded stream, its
+-- constructor `consG`, and its observations `headG`/`tailG` all type-check and COMPUTE.
+
+-- The guarded-stream type operator X ↦ A × ▹κ X (the recursive occurrence guarded by ▹κ).
+gStrF : (k : Clock) -> (A : UF) -> (UF -> UF) is
+  fn (k : Clock) (A : UF) is
+    fn (X : UF) is sigmaF A (fn (w : El A) is Later k X end) end
+  end
+end
+
+-- The guarded stream itself: the guarded fixpoint of that operator. By convGfix,
+-- `El (gStr k A)` converts to `El (A × ▹κ (gStr k A))` — the fixpoint equation holds
+-- definitionally, which is what lets the constructor and observations below type-check.
+gStr : (k : Clock) -> (A : UF) -> UF is
+  fn (k : Clock) (A : UF) is gfix k (gStrF k A) end
+end
+
+-- `consG`: a head and a DELAYED tail make a guarded stream. The body is a plain inner
+-- pair at type `El (sigmaF A (λ_. Later k (gStr k A)))`, which convGfix makes convertible
+-- to the declared `El (gStr k A)` — the fixpoint unfolding, witnessed on the nose.
+consG : (k : Clock) -> (A : UF) -> (h : El A) -> (t : El (Later k (gStr k A)))
+   -> El (gStr k A) is
+  fn (k : Clock) (A : UF) (h : El A) (t : El (Later k (gStr k A))) is
+    pairF A (fn (w : El A) is Later k (gStr k A) end) h t
+  end
+end
+
+-- `headG`: observe the head (fstF, again through the gfix conversion on the argument type).
+headG : (k : Clock) -> (A : UF) -> (s : El (gStr k A)) -> El A is
+  fn (k : Clock) (A : UF) (s : El (gStr k A)) is
+    fstF A (fn (w : El A) is Later k (gStr k A) end) s
+  end
+end
+
+-- `tailG`: observe the DELAYED rest (sndF).
+tailG : (k : Clock) -> (A : UF) -> (s : El (gStr k A)) -> El (Later k (gStr k A)) is
+  fn (k : Clock) (A : UF) (s : El (gStr k A)) is
+    sndF A (fn (w : El A) is Later k (gStr k A) end) s
+  end
+end
+
+-- head of a cons is its head, by `refl`: fstF β-reduces on the pairF intro. The
+-- observation COMPUTES through the guarded-recursive-type fold.
+headConsG : (k : Clock) -> (A : UF) -> (h : El A) -> (t : El (Later k (gStr k A)))
+   -> Eq (El A) (headG k A (consG k A h t)) h is
+  fn (k : Clock) (A : UF) (h : El A) (t : El (Later k (gStr k A))) is refl end
+end
+
+-- tail of a cons is its delayed tail, by `refl`: sndF β-reduces on the pairF intro.
+tailConsG : (k : Clock) -> (A : UF) -> (h : El A) -> (t : El (Later k (gStr k A)))
+   -> Eq (El (Later k (gStr k A))) (tailG k A (consG k A h t)) t is
+  fn (k : Clock) (A : UF) (h : El A) (t : El (Later k (gStr k A))) is refl end
+end
+
+-- A guarded-recursive PRODUCER closes the loop with `dfix`: the constant guarded stream
+-- `a, a, a, …` is the guarded fixpoint whose delayed tail is the recursive call. `dfix`
+-- supplies the `▹κ (gStr k A)` tail, `consG` packs it with the head — productive by typing.
+repeatG : (k : Clock) -> (A : UF) -> (a : El A) -> El (gStr k A) is
+  fn (k : Clock) (A : UF) (a : El A) is
+    dfix k (gStr k A) (fn (rest : El (Later k (gStr k A))) is consG k A a rest end)
+  end
+end
+
+-- The producer's GUARDED-FIXPOINT UNFOLDING, by `refl`: `repeatG` is definitionally its
+-- own one-step unfolding `consG a (next (repeatG …))` — head `a`, tail the delayed self.
+-- (convDfix fires because the `dfix` is at the top; observing it through `headG`/`fstF`
+-- needs `force` to cash the delayed tail, the E2-converse step.)
+repeatUnfoldG : (k : Clock) -> (A : UF) -> (a : El A)
+   -> Eq (El (gStr k A))
+        (repeatG k A a)
+        (consG k A a (next k (gStr k A) (repeatG k A a))) is
+  fn (k : Clock) (A : UF) (a : El A) is refl end
+end
+
+-- fmapF-OVER-LATER (CLOCKS-DESIGN step 5). The stream functor is `SF X = A × X`; its
+-- functorial action `sfmap g` maps the carrier of one observation. Once ▹ is clock-
+-- explicit, that action lifts under the later via `lmap` — the map the guarded-stream
+-- corecursor needs to push a function through a delayed observation. The seed `SF`'s
+-- carrier code `S` is recovered as the `sigmaF` parameter (the cont.24 typing snag).
+
+-- The stream-functor map on the carrier: relabel the tail-slot by g, keep the head.
+sfmap : (A : UF) -> (S : UF) -> (S2 : UF) -> (g : El S -> El S2)
+   -> El (sigmaF A (fn (w : El A) is S end)) -> El (sigmaF A (fn (w : El A) is S2 end)) is
+  fn (A : UF) (S : UF) (S2 : UF) (g : El S -> El S2) is
+    fn (p : El (sigmaF A (fn (w : El A) is S end))) is
+      pairF A (fn (w : El A) is S2 end)
+        (fstF A (fn (w : El A) is S end) p)
+        (g (sndF A (fn (w : El A) is S end) p))
+    end
+  end
+end
+
+-- fmapF over the later: `lmap` of the functor map, on a `next` of a `pairF` intro,
+-- COMPUTES — `lmap κ (sfmap g) (next κ (h, x)) ~> next κ (h, g x)`, by `refl` (lmap fires,
+-- then sfmap's fstF/sndF β-reduce on the pair). The functor action commutes with ▹κ.
+fmapOverLater : (k : Clock) -> (A : UF) -> (S : UF) -> (S2 : UF) -> (g : El S -> El S2)
+   -> (h : El A) -> (x : El S)
+   -> Eq (El (Later k (sigmaF A (fn (w : El A) is S2 end))))
+        (lmap k (sigmaF A (fn (w : El A) is S end)) (sigmaF A (fn (w : El A) is S2 end))
+           (sfmap A S S2 g)
+           (next k (sigmaF A (fn (w : El A) is S end))
+             (pairF A (fn (w : El A) is S end) h x)))
+        (next k (sigmaF A (fn (w : El A) is S2 end))
+           (pairF A (fn (w : El A) is S2 end) h (g x))) is
+  fn (k : Clock) (A : UF) (S : UF) (S2 : UF) (g : El S -> El S2) (h : El A) (x : El S) is refl end
+end
+
+-- THE DEPENDENT FORCE `forceD` (CLOCK-IRRELEVANCE-DESIGN step 1). Plain `force` needs a
+-- clock-CLOSED payload; a guarded stream's tail `▹κ (gStr κ A)` is clock-VARYING (the
+-- type mentions κ), so cashing it needs `forceD : (A : Clock -> UF) -> (∀κ. ▹κ (A κ)) ->
+-- ∀κ. (A κ)`, which fires on a `next` on the bound clock with a payload that MAY mention
+-- κ. Sound by clock-INERTNESS: `Clock` has no eliminator, so the payload can never inspect
+-- κ — parametricity by construction.
+
+-- The force-next coherence for `forceD`, by `refl`: forcing a delayed clock-VARYING value
+-- gives it back. `x j : El (A j)` genuinely depends on the clock j, yet `forceD` cashes it.
+forceDNext : (A : Clock -> UF) -> (x : (k : Clock) -> El (A k)) -> (k : Clock)
+   -> Eq (El (A k)) (forceD A (fn (j : Clock) is next j (A j) (x j) end) k) (x k) is
+  fn (A : Clock -> UF) (x : (k : Clock) -> El (A k)) (k : Clock) is refl end
+end
+
+-- A GLOBAL guarded stream `(k : Clock) -> El (gStr k A)` is the clock-quantified guarded
+-- stream — the bridge to the coinductive `Str A`. Its head is observed at any clock (k0).
+gheadG : (A : UF) -> (s : (k : Clock) -> El (gStr k A)) -> El A is
+  fn (A : UF) (s : (k : Clock) -> El (gStr k A)) is headG k0 A (s k0) end
+end
+
+-- Its TAIL is the DEPENDENT force of the per-clock delayed tails — the observation guarded
+-- recursion could not do (the tail type `gStr κ A` is clock-varying, so only `forceD`
+-- applies). `gtailG` turns a global stream into the global stream of its tails.
+gtailG : (A : UF) -> (s : (k : Clock) -> El (gStr k A)) -> (k : Clock) -> El (gStr k A) is
+  fn (A : UF) (s : (k : Clock) -> El (gStr k A)) is
+    forceD (fn (j : Clock) is gStr j A end) (fn (j : Clock) is tailG j A (s j) end)
+  end
+end
+
+-- head of a global cons is its head, by `refl` (gheadG at k0, headG/fstF β on the pair).
+gheadCons : (A : UF) -> (h : El A) -> (t : (k : Clock) -> El (Later k (gStr k A)))
+   -> Eq (El A) (gheadG A (fn (j : Clock) is consG j A h (t j) end)) h is
+  fn (A : UF) (h : El A) (t : (k : Clock) -> El (Later k (gStr k A))) is refl end
+end
+
+-- tail of a global cons is its delayed rest, CASHED by `forceD`, by `refl` — the E2-
+-- converse observation on the genuinely clock-VARYING guarded-stream type. `tailG`/`sndF`
+-- expose the `next`, `forceD` strips it across all clocks, recovering the global rest.
+gtailCons : (A : UF) -> (h : El A) -> (rest : (k : Clock) -> El (gStr k A)) -> (k : Clock)
+   -> Eq (El (gStr k A))
+        (gtailG A (fn (j : Clock) is consG j A h (next j (gStr j A) (rest j)) end) k)
+        (rest k) is
+  fn (A : UF) (h : El A) (rest : (k : Clock) -> El (gStr k A)) (k : Clock) is refl end
+end
+
+-- THE INDEXED guarded-recursive type fixpoint `gfixF` (CLOCK-IRRELEVANCE-DESIGN step 3,
+-- the `Bisim` former). `gfix` recurses a SINGLE code; `gfixF` recurses a FAMILY `El D ->
+-- UF` indexed by D, so the recursive occurrence may sit at a DIFFERENT index — exactly
+-- what bisimilarity needs (it recurses on the stream TAILS, not the same pair). Equation
+-- `gfixF k D Φ d ≡ Φ (gfixF k D Φ) d`, a bounded conversion (convGfixF) with a progress
+-- guard so an unguarded `Φ = λR. R` cannot loop the checker.
+
+-- The indexed fixpoint-unfolding, by `refl`, for ANY operator Φ and index d.
+gfixFUnfold : (k : Clock) -> (D : UF) -> (Phi : (El D -> UF) -> (El D -> UF)) -> (d : El D)
+   -> Eq UF (gfixF k D Phi d) (Phi (gfixF k D Phi) d) is
+  fn (k : Clock) (D : UF) (Phi : (El D -> UF) -> (El D -> UF)) (d : El D) is refl end
+end
+
+-- The `Bisim`-shaped use: an operator whose recursive occurrence is at a STEPPED index
+-- `gstep d` and guarded by ▹κ. `gfixF` unfolds to a guarded structure whose tail recurses
+-- at the new index — the indexed guarded corecursion bisimilarity is built from. refl.
+gfixFStep : (k : Clock) -> (D : UF) -> (A : UF) -> (gstep : El D -> El D) -> (d : El D)
+   -> Eq UF
+        (gfixF k D
+          (fn (R : El D -> UF) is fn (e : El D) is
+             sigmaF A (fn (w : El A) is Later k (R (gstep e)) end) end end) d)
+        (sigmaF A (fn (w : El A) is Later k
+          (gfixF k D
+            (fn (R : El D -> UF) is fn (e : El D) is
+               sigmaF A (fn (w : El A) is Later k (R (gstep e)) end) end end)
+            (gstep d)) end)) is
+  fn (k : Clock) (D : UF) (A : UF) (gstep : El D -> El D) (d : El D) is refl end
+end
+
+-- `laterApp`: the universe-level ▹κ application (CLOCK-IRRELEVANCE-DESIGN, the Bisim
+-- construction). `lmap` lifts an `El A -> El B` function through a delayed value; bisimilarity's
+-- recursive occurrence is UF-VALUED (a relation), so it needs `laterApp : (El A -> UF) ->
+-- ▹κ A -> UF` to sit under ▹κ. `laterApp k A f (next k A x) ~> Later k (f x)`, by `refl`.
+laterAppNext : (k : Clock) -> (A : UF) -> (f : El A -> UF) -> (x : El A)
+   -> Eq UF (laterApp k A f (next k A x)) (Later k (f x)) is
+  fn (k : Clock) (A : UF) (f : El A -> UF) (x : El A) is refl end
+end
+
+-- THE BISIMILARITY SHAPE, abstractly: a guarded relation by `gfixF` whose recursive
+-- (UF-valued) occurrence is at a STEPPED, DELAYED index `step e : ▹κ D` and sits under ▹κ
+-- via `laterApp`. `Φ R e = (P e) × laterApp k D R (step e)` — a head-condition P paired with
+-- the delayed bisimilarity of the stepped index. Bisimilarity over streams instantiates
+-- D = stream pair, P = head-path, step = delayed tail pair. The fixpoint unfolds, by `refl`.
+gRelStep : (k : Clock) -> (D : UF) -> (P : El D -> UF) -> (step : El D -> El (Later k D)) -> (d : El D)
+   -> Eq UF
+        (gfixF k D
+          (fn (R : El D -> UF) is fn (e : El D) is
+             sigmaF (P e) (fn (_w : El (P e)) is laterApp k D R (step e) end) end end) d)
+        (sigmaF (P d) (fn (_w : El (P d)) is laterApp k D
+          (gfixF k D
+            (fn (R : El D -> UF) is fn (e : El D) is
+               sigmaF (P e) (fn (_w : El (P e)) is laterApp k D R (step e) end) end end))
+          (step d) end)) is
+  fn (k : Clock) (D : UF) (P : El D -> UF) (step : El D -> El (Later k D)) (d : El D) is refl end
+end
+
+-- THE CONCRETE BISIMILARITY over guarded streams, instantiating `gRelStep` (D = stream
+-- PAIR, P = head-path, step = the delayed tail pair). This is the relation the E2 converse
+-- builds a `pathF` from. Index `Dpair` is a pair of guarded streams.
+Dpair : (k : Clock) -> (A : UF) -> UF is
+  fn (k : Clock) (A : UF) is sigmaF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) end
+end
+
+-- The two stream projections of a pair.
+Sfst : (k : Clock) -> (A : UF) -> El (Dpair k A) -> El (gStr k A) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) is
+    fstF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) d
+  end
+end
+
+Ssnd : (k : Clock) -> (A : UF) -> El (Dpair k A) -> El (gStr k A) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) is
+    sndF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) d
+  end
+end
+
+-- The `step` of bisimilarity: the ▹κ-DELAYED pair of the two tails. The two delayed tails
+-- `tailG (fst d)` and `tailG (snd d)` are zipped into a delayed pair by `lap` of `lmap`
+-- (the applicative structure of ▹κ) — the indexed guarded recursion descends to the tails.
+gstepPair : (k : Clock) -> (A : UF) -> El (Dpair k A) -> El (Later k (Dpair k A)) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) is
+    lap k (gStr k A) (Dpair k A)
+      (lmap k (gStr k A) (piF (gStr k A) (fn (_b : El (gStr k A)) is Dpair k A end))
+         (fn (a : El (gStr k A)) is fn (b : El (gStr k A)) is
+            pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) a b end end)
+         (tailG k A (Sfst k A d)))
+      (tailG k A (Ssnd k A d))
+  end
+end
+
+-- BISIMILARITY of guarded streams, by `gfixF`: `Bisim d = (head (fst d) = head (snd d)) ×
+-- ▹κ (Bisim (tail-pair d))`. The head-equality is a `pathF`; the recursive (UF-valued)
+-- occurrence is put under ▹κ at the delayed tail-pair index via `laterApp`. The bisimilarity
+-- relation the converse turns into a `pathF (Str A)`.
+gBisim : (k : Clock) -> (A : UF) -> El (Dpair k A) -> UF is
+  fn (k : Clock) (A : UF) is
+    gfixF k (Dpair k A)
+      (fn (R : El (Dpair k A) -> UF) is fn (d : El (Dpair k A)) is
+        sigmaF (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))
+          (fn (_p : El (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))) is
+             laterApp k (Dpair k A) R (gstepPair k A d) end)
+       end end)
+  end
+end
+
+-- THE BISIMILARITY UNFOLDING, by `refl` (convGfixF): `gBisim` is definitionally its
+-- one-step unfolding — equal heads (a `pathF`) AND the delayed bisimilarity of the tails.
+-- This is the coinductive characterisation the `Bisim ≃ pathF (Str A)` proof recurses on.
+gBisimUnfold : (k : Clock) -> (A : UF) -> (d : El (Dpair k A))
+   -> Eq UF
+        (gBisim k A d)
+        (sigmaF (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))
+          (fn (_p : El (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))) is
+             laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d) end)) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) is refl end
+end
+
+-- THE DEPENDENT guarded application `lapD` (the path-assembly combinator). `lap` applies a
+-- delayed function with a NON-dependent codomain; `lapD` applies a delayed DEPENDENT
+-- function, its result TYPE given by `laterApp`: `lapD k A B (next k (piF A B) f) (next k A
+-- x) ~> next k (B x) (f x)`, by `refl`. The piece the converse's path-assembly recursion
+-- uses to apply the delayed recursive path-builder to the delayed tail index.
+lapDNext : (k : Clock) -> (A : UF) -> (B : El A -> UF) -> (f : (x : El A) -> El (B x)) -> (x : El A)
+   -> Eq (El (Later k (B x)))
+        (lapD k A B (next k (piF A B) f) (next k A x))
+        (next k (B x) (f x)) is
+  fn (k : Clock) (A : UF) (B : El A -> UF) (f : (x : El A) -> El (B x)) (x : El A) is refl end
+end
+
+-- THE COINDUCTIVE DESTRUCTORS of bisimilarity (the inputs the converse path-assembly
+-- consumes). Since `gBisim k A d` unfolds (convGfixF) to `(head-path) × ▹κ (tail-bisim)`,
+-- an element projects: `bisimHead` is the head-equality `pathF`, `bisimTail` the delayed
+-- bisimilarity of the tails. These observe the relation the same way head/tail observe a stream.
+bisimHead : (k : Clock) -> (A : UF) -> (d : El (Dpair k A))
+   -> El (gBisim k A d) -> El (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d))) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) (b : El (gBisim k A d)) is
+    fstF (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))
+      (fn (_p : El (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))) is
+         laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d) end)
+      b
+  end
+end
+
+bisimTail : (k : Clock) -> (A : UF) -> (d : El (Dpair k A))
+   -> El (gBisim k A d) -> El (laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d)) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) (b : El (gBisim k A d)) is
+    sndF (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))
+      (fn (_p : El (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d)))) is
+         laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d) end)
+      b
+  end
+end
+
+-- THE ENDPOINT-REPAIR primitive verified through observation: `hcomp` over a guarded
+-- stream acts COMPONENTWISE — observing the head of an hcomp'd stream is the hcomp of the
+-- heads. By `refl`: hcomp over `gStr` unfolds the gfix type to its `sigmaF` and the
+-- structural-Σ Kan rule (A5a) fires to a `pairF`, whose `fstF` (= headG) is exactly the
+-- head-component hcomp. This is what lets the converse repair a path's endpoint over a
+-- guarded stream while keeping the head observation coherent.
+hcompHeadG : (k : Clock) -> (A : UF) -> (phi : F)
+   -> (u : I -> holds phi -> El (gStr k A)) -> (u0 : El (gStr k A))
+   -> Eq (El A)
+        (headG k A (hcomp (gStr k A) phi u u0))
+        (hcomp A phi (fn (i : I) (h : holds phi) is headG k A (u i h) end) (headG k A u0)) is
+  fn (k : Clock) (A : UF) (phi : F) (u : I -> holds phi -> El (gStr k A)) (u0 : El (gStr k A)) is refl end
+end
+
+-- And the TAIL commutes too (the other Σ component): observing the delayed tail of an
+-- hcomp'd guarded stream is the hcomp of the delayed tails. With `hcompHeadG`, hcomp over a
+-- guarded stream is FULLY componentwise — the repair acts on head and tail independently.
+hcompTailG : (k : Clock) -> (A : UF) -> (phi : F)
+   -> (u : I -> holds phi -> El (gStr k A)) -> (u0 : El (gStr k A))
+   -> Eq (El (Later k (gStr k A)))
+        (tailG k A (hcomp (gStr k A) phi u u0))
+        (hcomp (Later k (gStr k A)) phi (fn (i : I) (h : holds phi) is tailG k A (u i h) end) (tailG k A u0)) is
+  fn (k : Clock) (A : UF) (phi : F) (u : I -> holds phi -> El (gStr k A)) (u0 : El (gStr k A)) is refl end
+end
+
+-- THE CUBICAL E2-CONVERSE KAN ENABLER over the BISIMILARITY RELATION (`hcompBisimHead`,
+-- telos-4/M7). `gBisim k A d` is built by the INDEXED fixpoint `gfixF` (the `Bisim`
+-- former), NOT the single-code `gfix` that `gStr` uses — so the previously-shipped
+-- hcomp-over-gfix enabler did NOT reach it (`unfoldGfixType` only knew `gfix`, 2 args).
+-- This is the cubical route the plan named: `hcomp`/Kan filling over the `gfixF`-typed
+-- relation, the building block a total neutral converter would compose from. The kernel
+-- now unfolds an APPLIED `gfixF k D Φ d` one step too (the SAME convGfixF equation
+-- `gfixF k D Φ d ≡ Φ (gfixF k D Φ) d`, made available to eval's Kan rules, fired ONLY on
+-- a productive/`Later`-guarded code so NbE terminates). So `hcomp` over `gBisim k A d`
+-- unfolds the relation to its `sigmaF` body — `(head-path) × ▹κ (tail-bisim)` — and the
+-- structural-Σ Kan rule (A5a/b) fires COMPONENTWISE. Observing the HEAD-PATH component
+-- (`bisimHead`) of an hcomp'd bisimilarity element is exactly the hcomp of the head-path
+-- components, BY REFL — the same componentwise law `hcompHeadG` proves for `gStr`, now
+-- for the `gfixF`-built relation. This certifies the Kan-filling over `gBisim` COMPUTES
+-- (a genuine reduction, not a stuck term): the cubical converse's open-box machinery acts
+-- on the head exactly as endpoint-repair needs. (The tail component lands under ▹κ — the
+-- irreducibly-coinductive residue the plan characterised, carried productively, never
+-- re-unfolded.)
+hcompBisimHead : (k : Clock) -> (A : UF) -> (d : El (Dpair k A)) -> (phi : F)
+   -> (u : I -> holds phi -> El (gBisim k A d)) -> (u0 : El (gBisim k A d))
+   -> Eq (El (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d))))
+        (bisimHead k A d (hcomp (gBisim k A d) phi u u0))
+        (hcomp (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d))) phi
+           (fn (i : I) (h : holds phi) is bisimHead k A d (u i h) end)
+           (bisimHead k A d u0)) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) (phi : F)
+     (u : I -> holds phi -> El (gBisim k A d)) (u0 : El (gBisim k A d)) is refl end
+end
+
+-- NEGATIVE PROBE (must be REJECTED if uncommented): the Kan enabler is load-bearing —
+-- the componentwise law is FALSE if the head-system is replaced by the constant `u0`
+-- system (`hcomp A φ (λi h. bisimHead u0)(bisimHead u0)`), which is NOT the hcomp of the
+-- genuine wall observations unless `u` is degenerate. So claiming `bisimHead (hcomp …)`
+-- equals that wrong hcomp is a real type error — confirming the unfold computes to the
+-- ACTUAL head-component composition (the open box's real walls), not an arbitrary neutral.
+-- hcompBisimHeadNeg : (k : Clock) -> (A : UF) -> (d : El (Dpair k A)) -> (phi : F)
+--    -> (u : I -> holds phi -> El (gBisim k A d)) -> (u0 : El (gBisim k A d))
+--    -> Eq (El (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d))))
+--         (bisimHead k A d (hcomp (gBisim k A d) phi u u0))
+--         (hcomp (pathF A (headG k A (Sfst k A d)) (headG k A (Ssnd k A d))) phi
+--            (fn (i : I) (h : holds phi) is bisimHead k A d u0 end)
+--            (bisimHead k A d u0)) is
+--   fn (k : Clock) (A : UF) (d : El (Dpair k A)) (phi : F)
+--      (u : I -> holds phi -> El (gBisim k A d)) (u0 : El (gBisim k A d)) is refl end
+-- end
+
+-- THE TAIL ANALOGUE OF `hcompBisimHead` (`hcompBisimTail`, telos-4/M7) — the SECOND
+-- component of the Kan-filling over `gBisim`, completing the componentwise repair the
+-- E2 converse composes from. `hcompBisimHead` certified the HEAD-PATH component of an
+-- hcomp'd bisimilarity element is the hcomp of the head-paths (the new gfixF Kan rule
+-- firing the structural-Σ split on the FIRST projection); this lemma certifies the SAME
+-- for the SECOND projection — observing the DELAYED tail-bisimilarity (`bisimTail`) of an
+-- hcomp'd `gBisim` element is exactly the hcomp of the delayed tail-bisimilarities, BY
+-- REFL. The extended `unfoldGfixType` unfolds `gBisim k A d` to its `sigmaF` body
+-- `(head-path) × ▹κ (tail-bisim)`, and the structural-Σ Kan rule (A5a/b) fires on BOTH
+-- Σ components; `hcompBisimHead` reads the `fstF`, `hcompBisimTail` the `sndF`. With both
+-- landed, `hcomp` over the `gfixF`-built relation `gBisim` is FULLY COMPONENTWISE — the
+-- open-box repair acts on the head-path and the delayed tail-bisim INDEPENDENTLY, exactly
+-- as the converter's endpoint-repair needs (the head repaired definitionally by the new
+-- gfixF Kan rule, the delayed tail-bisim carried under ▹κ — the irreducibly-coinductive
+-- residue, but now its hcomp-behaviour is a genuine REDUCTION, not a stuck term). This is
+-- the Kan substrate over the bisimilarity relation COMPLETED on both projections: the tail
+-- repair the total converter would compose with the head repair fires by the same Σ Kan
+-- rule, certifying the cubical machinery reaches the delayed tail-bisim component too.
+hcompBisimTail : (k : Clock) -> (A : UF) -> (d : El (Dpair k A)) -> (phi : F)
+   -> (u : I -> holds phi -> El (gBisim k A d)) -> (u0 : El (gBisim k A d))
+   -> Eq (El (laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d)))
+        (bisimTail k A d (hcomp (gBisim k A d) phi u u0))
+        (hcomp (laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d)) phi
+           (fn (i : I) (h : holds phi) is bisimTail k A d (u i h) end)
+           (bisimTail k A d u0)) is
+  fn (k : Clock) (A : UF) (d : El (Dpair k A)) (phi : F)
+     (u : I -> holds phi -> El (gBisim k A d)) (u0 : El (gBisim k A d)) is refl end
+end
+
+-- NEGATIVE PROBE (must be REJECTED if uncommented): the TAIL commute is load-bearing —
+-- the componentwise law is FALSE if the tail-system is replaced by the constant `u0`
+-- system (`hcomp … (λi h. bisimTail u0)(bisimTail u0)`), which is NOT the hcomp of the
+-- genuine wall observations unless `u` is degenerate. So claiming `bisimTail (hcomp …)`
+-- equals that wrong hcomp is a real type error — confirming the unfold computes to the
+-- ACTUAL tail-component composition (the open box's real walls), not an arbitrary neutral.
+-- hcompBisimTailNeg : (k : Clock) -> (A : UF) -> (d : El (Dpair k A)) -> (phi : F)
+--    -> (u : I -> holds phi -> El (gBisim k A d)) -> (u0 : El (gBisim k A d))
+--    -> Eq (El (laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d)))
+--         (bisimTail k A d (hcomp (gBisim k A d) phi u u0))
+--         (hcomp (laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d)) phi
+--            (fn (i : I) (h : holds phi) is bisimTail k A d u0 end)
+--            (bisimTail k A d u0)) is
+--   fn (k : Clock) (A : UF) (d : El (Dpair k A)) (phi : F)
+--      (u : I -> holds phi -> El (gBisim k A d)) (u0 : El (gBisim k A d)) is refl end
+-- end
+
+-- THE SLOT-COHERENCE, discharged on the PRODUCTIVE case (the E2-converse's remaining obstacle).
+-- A corecursive proof over `gBisim` must fill `bisimTail`'s codomain slot
+-- `laterApp k (Dpair k A) (gBisim k A) (gstepPair k A d)`, but the natural recursive call —
+-- `lapD` over a delayed tail — produces a DIFFERENTLY-SHAPED `laterApp` neutral (base `gStr`
+-- not `Dpair`, arg `tailG s` not `gstepPair d`). Two `laterApp` neutrals agree only on a
+-- `next`. The resolution: on a pair of CONS-BUILT streams (the shape productive corecursion
+-- emits), the slot COMPUTES. With tails `next k _ ra` / `next k _ rb`, `gstepPair` runs:
+-- `tailG (consG ..) ~> next ..` (tailGCons), then `lmap`/`lap` fire on those `next` intros
+-- (lmapNext/lapNext) to `next k (Dpair k A) (pairF .. ra rb)`, at which point
+-- `laterApp k _ (gBisim k A) (next k _ p) ~> Later k (gBisim k A p)` (laterAppNext). So the
+-- slot definitionally equals `Later k (gBisim (pairF ra rb))` — the delayed bisimilarity of
+-- the literal tail pair, EXACTLY what a `next`-guarded recursive call inhabits. By `refl`:
+-- the four ι-rules chain with no neutral left, collapsing the slot mismatch on the case that
+-- matters. (The general neutral case is the propositional residue, bridged by the path.)
+bisimTailSlotCons : (k : Clock) -> (A : UF)
+   -> (a : El A) -> (ra : El (gStr k A)) -> (b : El A) -> (rb : El (gStr k A))
+   -> Eq UF
+        (laterApp k (Dpair k A) (gBisim k A)
+           (gstepPair k A
+              (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                 (consG k A a (next k (gStr k A) ra))
+                 (consG k A b (next k (gStr k A) rb)))))
+        (Later k
+           (gBisim k A
+              (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))) is
+  fn (k : Clock) (A : UF) (a : El A) (ra : El (gStr k A)) (b : El A) (rb : El (gStr k A)) is refl end
+end
+
+-- THE SLOT-COHERENCE, GENERALIZED OFF CONS-FORM to the DELAYED-TAIL level (`bisimTailSlotNext`).
+-- `bisimTailSlotCons` collapsed the slot only on a pair of CONS-BUILT streams. But the slot
+-- `laterApp k Dpair gBisim (gstepPair …)` reads `gstepPair` ONLY through the two DELAYED tails
+-- it zips (`tailG (Sfst d)` / `tailG (Ssnd d)`); the heads, and whether `d` is cons-built at all,
+-- are irrelevant. The real precondition is that those delayed tails are `next`-INTROS (`next k _
+-- u` / `next k _ v`) — the shape productive corecursion emits at the tails, NOT the shape of the
+-- whole stream. This lemma states the coherence at exactly that level: zip two delayed tails given
+-- as `next u` / `next v` (the `gstepPair` body, written inline so it mentions NO `d`, `Sfst`,
+-- `Ssnd`, or `consG`), and the slot COMPUTES to `Later k (gBisim (pair u v))` BY REFL — the same
+-- four-ι chain (lmapNext ▸ lapNext ▸ laterAppNext, with the leading tailGCons of the cons lemma
+-- DROPPED because the tails arrive already as `next`s). So the slot-coherence's true frontier is
+-- "delayed tails are `next`", strictly more general than "streams are `consG`-built": `u`, `v` are
+-- ARBITRARY present streams (no head, no `consG`, no projection). The genuinely NEUTRAL residue is
+-- the case where a tail is a stuck `▹κ` (a `sndF` spine, NOT a `next`) — there is then NO present
+-- pair `(u, v) : Dpair` underneath, so the RHS `gBisim (pair u v)` is not even constructible; that
+-- residue is irreducibly coinductive (carried by the productive `gluePathTail` route, never a
+-- definitional reduction). `bisimTailSlotCons` is this lemma specialized at `u := ra`, `v := rb`
+-- with the tails supplied by `tailGCons` on the cons projections.
+bisimTailSlotNext : (k : Clock) -> (A : UF) -> (u : El (gStr k A)) -> (v : El (gStr k A))
+   -> Eq UF
+        (laterApp k (Dpair k A) (gBisim k A)
+           (lap k (gStr k A) (Dpair k A)
+              (lmap k (gStr k A) (piF (gStr k A) (fn (_b : El (gStr k A)) is Dpair k A end))
+                 (fn (x : El (gStr k A)) is fn (y : El (gStr k A)) is
+                    pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) x y end end)
+                 (next k (gStr k A) u))
+              (next k (gStr k A) v)))
+        (Later k
+           (gBisim k A
+              (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) u v))) is
+  fn (k : Clock) (A : UF) (u : El (gStr k A)) (v : El (gStr k A)) is refl end
+end
+
+-- COHERENCE BETWEEN THE TWO SLOT LEMMAS, by `refl`: on cons-built streams the generalized
+-- delayed-tail slot IS the cons slot. `gstepPair` of a pair of `consG a (next ra)` / `consG b
+-- (next rb)` reduces (tailGCons on each projection) to exactly the zip `bisimTailSlotNext` takes
+-- at `u := ra`, `v := rb` — so `bisimTailSlotCons k A a ra b rb` and `bisimTailSlotNext k A ra rb`
+-- have DEFINITIONALLY EQUAL statements (both `≡ Later k (gBisim (pair ra rb))`). This certifies
+-- the generalization SUBSUMES the cons lemma: every place `bisimTailSlotCons` fired (e.g.
+-- `bisimStepLater`'s `bisimTail`-into-`lap` slot), `bisimTailSlotNext` fires identically, now
+-- without requiring the surrounding stream to be `consG`-built.
+bisimTailSlotConsViaNext : (k : Clock) -> (A : UF)
+   -> (a : El A) -> (ra : El (gStr k A)) -> (b : El A) -> (rb : El (gStr k A))
+   -> Eq UF
+        (laterApp k (Dpair k A) (gBisim k A)
+           (gstepPair k A
+              (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                 (consG k A a (next k (gStr k A) ra))
+                 (consG k A b (next k (gStr k A) rb)))))
+        (Later k
+           (gBisim k A
+              (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))) is
+  fn (k : Clock) (A : UF) (a : El A) (ra : El (gStr k A)) (b : El A) (rb : El (gStr k A)) is refl end
+end
+
+-- THE STREAM-η COHERENCE (every guarded stream IS its head consed onto its tail). By `refl`,
+-- via inner-Σ η (convSigmaEta): `gStr k A` unfolds (convGfix) to `sigmaF A (λ_. ▹κ gStr)`, and
+-- a guarded stream `s` of that Σ-type is definitionally `pairF (fstF s) (sndF s) = consG (headG
+-- s) (tailG s)`. This is the law that rewrites a GENERAL stream into cons-form, the bridge
+-- between `congConsG` (which assembles a path between CONS-built streams) and the converse's
+-- real endpoints `Sfst d`/`Ssnd d` (general streams). It does NOT make the path endpoints
+-- definitional on its own — `tailG s` is a NEUTRAL `▹κ`, not a `next`, so the productive-case
+-- assembly still needs the recursion to supply the tail as a `next` (and the boundary residue
+-- the hcomp-repair). But it certifies the η-expansion the converse rewrites along is exact.
+streamEta : (k : Clock) -> (A : UF) -> (s : El (gStr k A))
+   -> Eq (El (gStr k A)) s (consG k A (headG k A s) (tailG k A s)) is
+  fn (k : Clock) (A : UF) (s : El (gStr k A)) is refl end
+end
+
+-- THE LMAP-PAPP COMMUTE on a `next` intro (the mechanism behind the productive-case path
+-- assembly). The converse builds a stream path by observing a DELAYED tail-path `▹κ pathF`
+-- at each interval point `i` — i.e. `lmap (λq. papp q i) tp`. On a NEUTRAL `tp` this stays a
+-- stuck `lmap` (the obstacle the design records). But on a `next`-intro `tp = next k _ p`
+-- (the shape productive corecursion emits) it COMPUTES: `lmap k _ _ (λq. papp q i0) (next k _
+-- p) ~> next k _ (papp .. p i0) ~> next k _ ra` (lmapNext then the papp i0-boundary). So the
+-- delayed tail observed at the start endpoint is definitionally the start tail. By `refl`.
+lmapPappNextI0 : (k : Clock) -> (A : UF) -> (ra : El (gStr k A)) -> (rb : El (gStr k A))
+   -> (p : El (pathF (gStr k A) ra rb))
+   -> Eq (El (Later k (gStr k A)))
+        (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+           (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i0 end)
+           (next k (pathF (gStr k A) ra rb) p))
+        (next k (gStr k A) ra) is
+  fn (k : Clock) (A : UF) (ra : El (gStr k A)) (rb : El (gStr k A))
+     (p : El (pathF (gStr k A) ra rb)) is refl end
+end
+
+-- THE PRODUCTIVE-CASE PATH ASSEMBLY (the converse's corecursion STEP). Given a head-path `hp`
+-- and a delayed tail-path supplied as a `next`-intro `next k _ p` (what the guarded recursive
+-- call yields — productive), build a path between the two CONS-built streams. The body is a
+-- single `pabs` over `gStr`: at interval point `i`, cons the head observed along `hp` onto the
+-- delayed tail observed along the delayed path (`lmap (λq. papp q i) (next .. p)`). Its
+-- endpoints are DEFINITIONAL — no Kan repair — precisely because the tail arrives as a `next`:
+--   i0: consG (papp hp i0) (lmap .. (next p)) ~> consG a (next ra)   (papp-boundary + lmapPappNextI0)
+--   i1: consG (papp hp i1) (lmap .. (next p)) ~> consG b (next rb)
+-- so `pabs`'s forced endpoints match the declared `pathF` type on the nose. This is the path
+-- congruence `consG`-cong for guarded streams, sidestepping hcomp endpoint-repair on exactly
+-- the productive case the slot-coherence (`bisimTailSlotCons`) already collapsed. The general
+-- NEUTRAL-tail case is the residue the hcomp-repair path still carries; here the productive
+-- corecursion step type-checks definitionally — the converse's recursion body is in hand.
+congConsG : (k : Clock) -> (A : UF) -> (a : El A) -> (b : El A) -> (hp : El (pathF A a b))
+   -> (ra : El (gStr k A)) -> (rb : El (gStr k A)) -> (p : El (pathF (gStr k A) ra rb))
+   -> El (pathF (gStr k A)
+            (consG k A a (next k (gStr k A) ra))
+            (consG k A b (next k (gStr k A) rb))) is
+  fn (k : Clock) (A : UF) (a : El A) (b : El A) (hp : El (pathF A a b))
+     (ra : El (gStr k A)) (rb : El (gStr k A)) (p : El (pathF (gStr k A) ra rb)) is
+    pabs (gStr k A)
+      (fn (i : I) is
+         consG k A
+           (papp A a b hp i)
+           (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+              (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i end)
+              (next k (pathF (gStr k A) ra rb) p))
+       end)
+  end
+end
+
+-- The GLOBAL coinductive stream `Str A = Nu (λX. A × X)` and its observations (re-declared
+-- here, as ch66 — each listing checks standalone; `Nu`/`out`/`unfold`/`fmapF` are ambient
+-- builtins). `head`/`tail` observe via the single coalgebra `out`, projecting the inner Σ.
+Str : UF -> UF is
+  fn (A : UF) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end
+end
+
+head : (A : UF) -> El (Str A) -> El A is
+  fn (A : UF) (s : El (Str A)) is
+    fstF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+tail : (A : UF) -> El (Str A) -> El (Str A) is
+  fn (A : UF) (s : El (Str A)) is
+    sndF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+-- THE BRIDGE, one direction: `split : Str A -> ∀κ. gStr κ A` (CLOCK-IRRELEVANCE-DESIGN step 2).
+-- The coinductive `Str A = Nu (λX. A × X)` is the GLOBAL object; `gStr κ A` is its κ-local
+-- shadow. `splitFn` projects the global stream to its guarded shadow by GUARDED CORECURSION:
+-- a `dfix` at the FUNCTION type `piF (Str A) (λ_. gStr k A)` (a fibrant code — `El (piF A B)`
+-- is the real Pi), whose body conses the head `head s` onto the DELAYED recursive call on the
+-- tail. The recursion `self : ▹κ (Str A -> gStr k A)` is applied to the delayed tail `next
+-- (tail s)` by `lap` (the ▹κ applicative), so the recursive occurrence sits under `next` —
+-- productive by the guard, no termination check. This is the `Str ≃ ∀κ. gStr` gate's easy half.
+-- It is kept at the FUNCTION level (a `dfix` at top) so its defining equation computes —
+-- observing the APPLIED `split s` is stuck for the same reason `repeatG`'s head is (convDfix
+-- unfolds a `dfix` only at the top of a comparison, never buried under `headG`/application).
+splitFn : (A : UF) -> (k : Clock) -> El (piF (Str A) (fn (_s : El (Str A)) is gStr k A end)) is
+  fn (A : UF) (k : Clock) is
+    dfix k (piF (Str A) (fn (_s : El (Str A)) is gStr k A end))
+      (fn (self : El (Later k (piF (Str A) (fn (_s : El (Str A)) is gStr k A end)))) is
+         fn (s : El (Str A)) is
+           consG k A (head A s)
+             (lap k (Str A) (gStr k A) self (next k (Str A) (tail A s)))
+         end
+       end)
+  end
+end
+
+-- `split` is the applied projection (a guarded stream per clock).
+split : (A : UF) -> (k : Clock) -> El (Str A) -> El (gStr k A) is
+  fn (A : UF) (k : Clock) (s : El (Str A)) is splitFn A k s end
+end
+
+-- FINDING — the bridge half is OPAQUE under observation, the `repeatG` wall again. One might
+-- hope to prove `splitFn`'s unfolding `splitFn ≡ λs. consG (head s) (lap (next splitFn) (next
+-- (tail s)))` by `refl` (the `dfix` is at the top, so convDfix would fire). But `Eq` at a Pi
+-- type FUNEXT-reduces to the pointwise `(s) -> Eq … (splitFn s) (consG …)`, and `splitFn s` is
+-- a `dfix` buried under APPLICATION — convDfix does not unfold it (it fires only at the top of
+-- a comparison, never under an eliminator/application). So NO computing coherence about a
+-- `dfix`-corecursor is provable: every equation funext-collapses to the stuck applied form.
+-- This is exactly why `repeatG` ships without a head lemma. CONSEQUENCE for the `Str ≃ ∀κ.
+-- gStr` bridge: the round-trip coherences CANNOT be read off `split` by `dfix`-observation;
+-- they must be obtained the productive way — observe via the global `gheadG`/`gtailG` (the
+-- `forceD`-cash, which strips a `next` across all clocks and DOES compute, cf. `gtailCons`),
+-- against streams presented in cons-form. `split` stands as the constructed bridge term
+-- (type-correct, productive by the ▹κ guard); its observational theory rides the forceD layer,
+-- not dfix unfolding. The same productive discipline the converse's `congConsG` already uses.
+
+-- THE BRIDGE, the COMPUTING direction: `glue : (∀κ. gStr κ A) -> Str A` (CLOCK-IRRELEVANCE-
+-- DESIGN step 2). Where `split` (the dfix side) is opaque under observation, `glue` is built on
+-- the Nu side — by the anamorphism `unfold` — so its observations COMPUTE (the coinductive ι
+-- `out (unfold F S c s) ~> fmapF F (unfold F S c) (c s)`, never the dfix wall). The global
+-- guarded stream `∀κ. gStr κ A = (c : Clock) -> El (gStr c A)` gets a fibrant code via `fib
+-- Clock` (Clock : U embeds into UF; `El (fib Clock) ≡ Clock`), so it can be `unfold`'s carrier.
+GStrAll : (A : UF) -> UF is
+  fn (A : UF) is piF (fib Clock) (fn (c : El (fib Clock)) is gStr c A end) end
+end
+
+-- The coalgebra: observe the global stream's head (`gheadG`, at k0) and its tail (`gtailG`, the
+-- forceD-cash of the per-clock delayed tails) — the productive observations the dfix wall forced
+-- us onto. `unfold` corecurses Str A from this single observation.
+glue : (A : UF) -> El (GStrAll A) -> El (Str A) is
+  fn (A : UF) (g : El (GStrAll A)) is
+    unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+      (GStrAll A)
+      (fn (g2 : El (GStrAll A)) is
+         pairF A (fn (w : El A) is GStrAll A end)
+           (gheadG A g2)
+           (gtailG A g2)
+       end)
+      g
+  end
+end
+
+-- `glue` PRESERVES THE HEAD, by `refl`: `head (glue g) ≡ gheadG g`. `out (glue g)` fires the
+-- coinductive ι to `fmapF StreamF (unfold …) (coalg g)`; the stream functor's `fmapF` keeps the
+-- head slot, so `fstF` (= head) reads off `gheadG g`. The Nu side computes where the dfix side stuck.
+glueHead : (A : UF) -> (g : El (GStrAll A))
+   -> Eq (El A) (head A (glue A g)) (gheadG A g) is
+  fn (A : UF) (g : El (GStrAll A)) is refl end
+end
+
+-- `glue` PRESERVES THE TAIL, by `refl`: `tail (glue g) ≡ glue (gtailG g)`. `out (glue g)` fires
+-- the ι; `fmapF` maps the recursive (tail) slot by `unfold … coalg`, so `sndF` (= tail) reads off
+-- `unfold … (gtailG g) = glue (gtailG g)`. Together with `glueHead`, `glue` is a stream
+-- homomorphism that COMPUTES — the bridge half usable in the round-trip coherences.
+glueTail : (A : UF) -> (g : El (GStrAll A))
+   -> Eq (El (Str A)) (tail A (glue A g)) (glue A (gtailG A g)) is
+  fn (A : UF) (g : El (GStrAll A)) is refl end
+end
+
+-- ROUND-TRIP, the head coherence on a CONS-FORM global stream, by `refl` — the first
+-- assembled piece of step 2's `glue`-side round-trip. For a global stream presented in
+-- cons-form `g = λκ. consG h (t κ)` (NOT via `split`'s dfix — that route is opaque),
+-- `glue g`'s head computes all the way to `h`: `head (glue g) ≡ gheadG g` (glueHead) then
+-- `gheadG (λκ. consG h (t κ)) ≡ h` (gheadCons), both definitional, so the composite is one
+-- `refl`. This is exactly "compose glueHead with gheadCons" — the bridge half made usable.
+glueConsHead : (A : UF) -> (h : El A) -> (t : (k : Clock) -> El (Later k (gStr k A)))
+   -> Eq (El A) (head A (glue A (fn (j : Clock) is consG j A h (t j) end))) h is
+  fn (A : UF) (h : El A) (t : (k : Clock) -> El (Later k (gStr k A))) is refl end
+end
+
+-- ROUND-TRIP, the tail coherence on a cons-form global stream whose tail is a DELAYED rest:
+-- `tail (glue (λκ. consG h (next (rest κ)))) ≡ glue rest`. By glueTail the LHS is `glue
+-- (gtailG g)`; by gtailCons `gtailG g k ≡ rest k` pointwise (forceD cashes the next). The
+-- composite asks `glue (gtailG g) ≡ glue rest`, i.e. `glue` applied to two POINTWISE-equal
+-- global streams — refl iff `gtailG g` and `rest` are definitionally equal as functions.
+glueConsTail : (A : UF) -> (h : El A) -> (rest : (k : Clock) -> El (gStr k A))
+   -> Eq (El (Str A))
+        (tail A (glue A (fn (j : Clock) is consG j A h (next j (gStr j A) (rest j)) end)))
+        (glue A rest) is
+  fn (A : UF) (h : El A) (rest : (k : Clock) -> El (gStr k A)) is refl end
+end
+
+-- THE PATH-LEVEL ANALOGUE OF `glue` (`gluePath`) — the combinator that DODGES the dfix-under-
+-- application wall the SAME WAY `glue` does, and the key to tying off `conv`. Where `glue :
+-- (∀κ. gStr κ A) -> Str A` builds a global STREAM from per-clock guarded streams via the Nu-side
+-- `unfold` (so its observations COMPUTE, never the dfix wall), `gluePath` builds a global PATH
+-- `pathF (Str A)(glue s)(glue t)` from a per-clock family of guarded-stream PATHS
+-- `p : ∀κ. pathF (gStr κ A)(s κ)(t κ)`. The construction is the path-level mirror of `glue`:
+-- observe the per-clock path family at each interval point `i` — `λκ. papp (p κ) i : ∀κ. gStr κ A`
+-- — and `glue` THAT pointwise. So `gluePath p = pabs (Str A) (λi. glue (λκ. papp (p κ) i))`.
+-- ENDPOINTS DEFINITIONAL: at `i0` the inner observation `λκ. papp (p κ) i0 ~> λκ. s κ` by the
+-- path boundary `papp X x y q i0 ~> x` (definitional for ANY path), so the forced endpoint is
+-- `glue (λκ. s κ) ≡ glue s` on the nose (dually `glue t` at `i1`) — exactly the declared `pathF`
+-- type. The recursion the converse needs lives INSIDE the per-clock `p κ` (built productively by
+-- `congConsGLater`/`bisimStepLater`, a `pabs`, never a dfix); `gluePath` only `glue`s it pointwise,
+-- and `glue` rides the `unfold`/`out` layer (computes), so the whole assembly NEVER observes a dfix
+-- under application. This is the global tail-path combinator `gConverseGen`'s `conv` is built from:
+-- the per-clock converse yields `∀κ. pathF (gStr κ A)(s κ)(t κ)`, `gluePath` carries it to the
+-- global `pathF (Str A)(glue s)(glue t)` — the interpolant-coalgebra route, presented as `glue`'s
+-- pointwise lift rather than a fresh Nu coalgebra (the same `unfold` engine, one dimension up).
+gluePath : (A : UF)
+   -> (s : (k : Clock) -> El (gStr k A)) -> (t : (k : Clock) -> El (gStr k A))
+   -> (p : (k : Clock) -> El (pathF (gStr k A) (s k) (t k)))
+   -> El (pathF (Str A) (glue A s) (glue A t)) is
+  fn (A : UF)
+     (s : (k : Clock) -> El (gStr k A)) (t : (k : Clock) -> El (gStr k A))
+     (p : (k : Clock) -> El (pathF (gStr k A) (s k) (t k))) is
+    pabs (Str A)
+      (fn (i : I) is
+         glue A (fn (k : Clock) is papp (gStr k A) (s k) (t k) (p k) i end)
+       end)
+  end
+end
+
+-- `gluePath` HITS THE LEFT ENDPOINT, by `refl` — `papp (gluePath p) i0 ≡ glue s`. The `pabs` β at
+-- `i0` is `glue (λκ. papp (p κ) i0)`, and `papp … (p κ) i0 ~> s κ` (path boundary), so the inner
+-- function reduces to `λκ. s κ` (η on the binder) and the whole thing to `glue s`. Load-bearing:
+-- it certifies the global path `gluePath p` has the RIGHT left endpoint `glue s` definitionally,
+-- so `gluePath` feeds `bisimToPathStr`/`gConverseGen`'s tail slot ON THE NOSE (no Kan repair).
+gluePathI0 : (A : UF)
+   -> (s : (k : Clock) -> El (gStr k A)) -> (t : (k : Clock) -> El (gStr k A))
+   -> (p : (k : Clock) -> El (pathF (gStr k A) (s k) (t k)))
+   -> Eq (El (Str A))
+        (papp (Str A) (glue A s) (glue A t) (gluePath A s t p) i0)
+        (glue A s) is
+  fn (A : UF)
+     (s : (k : Clock) -> El (gStr k A)) (t : (k : Clock) -> El (gStr k A))
+     (p : (k : Clock) -> El (pathF (gStr k A) (s k) (t k))) is refl end
+end
+
+-- `gluePath` HITS THE RIGHT ENDPOINT, by `refl` — `papp (gluePath p) i1 ≡ glue t` (dual of
+-- `gluePathI0`, `papp … (p κ) i1 ~> t κ`). Together the two pins confirm `gluePath` is a genuine
+-- path between the glued endpoints, not a coincidentally-typed neutral.
+gluePathI1 : (A : UF)
+   -> (s : (k : Clock) -> El (gStr k A)) -> (t : (k : Clock) -> El (gStr k A))
+   -> (p : (k : Clock) -> El (pathF (gStr k A) (s k) (t k)))
+   -> Eq (El (Str A))
+        (papp (Str A) (glue A s) (glue A t) (gluePath A s t p) i1)
+        (glue A t) is
+  fn (A : UF)
+     (s : (k : Clock) -> El (gStr k A)) (t : (k : Clock) -> El (gStr k A))
+     (p : (k : Clock) -> El (pathF (gStr k A) (s k) (t k))) is refl end
+end
+
+-- THE TAIL-PATH VIA `gluePath`, presented at the SHAPE `gConverseGen`'s `conv` demands — the
+-- payoff. `gConverseGen` needs a `conv : (∀κ. gBisim κ A (pair (gtailG ra κ)(gtailG rb κ))) ->
+-- pathF (Str A)(glue (gtailG ra))(glue (gtailG rb))`. `gluePathTail` builds exactly that path from
+-- a PER-CLOCK family of tail-paths `tp : ∀κ. pathF (gStr κ A)(gtailG ra κ)(gtailG rb κ)` (what the
+-- per-clock converse `bisimStepLater` yields once it has consumed the per-clock bisim) — by
+-- `gluePath` at `s := gtailG ra`, `t := gtailG rb`. The endpoints `glue (gtailG ra)`/`glue (gtailG
+-- rb)` are DEFINITIONAL (gluePathI0/I1), and they are EXACTLY `tail (glue ra)`/`tail (glue rb)`
+-- (glueTail, `gConverseGenTailComputes`). So the tail-path no longer needs the recursive `self`
+-- applied (the dfix-under-application wall): the recursion is already DISCHARGED inside the
+-- per-clock `tp κ` (a productive `pabs`), and `gluePath` carries it to the global path through the
+-- computing `unfold`/`out` layer. This is the combinator that replaces `conv bgt` with a
+-- dfix-free, computing global tail-path — the precise structure the plan's interpolant-coalgebra
+-- route calls for, presented as `glue`'s pointwise lift.
+gluePathTail : (A : UF)
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (tp : (k : Clock) -> El (pathF (gStr k A) (gtailG A ra k) (gtailG A rb k)))
+   -> El (pathF (Str A) (glue A (gtailG A ra)) (glue A (gtailG A rb))) is
+  fn (A : UF)
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A))
+     (tp : (k : Clock) -> El (pathF (gStr k A) (gtailG A ra k) (gtailG A rb k))) is
+    gluePath A (gtailG A ra) (gtailG A rb) tp
+  end
+end
+
+-- THE CONVERSE'S RECURSION BODY, REALIZED on the productive case (bisimHead ▸ congConsG). The
+-- E2 converse `gBisim d -> pathF (gStr) (Sfst d) (Ssnd d)` recurses: observe the head-equality,
+-- recurse (guarded) on the tails, cons the two with `congConsG`. Here that body is assembled
+-- END-TO-END for a pair of CONS-built streams `d = (consG a (next ra), consG b (next rb))` —
+-- the shape productive corecursion emits — CONSUMING a real bisimilarity witness `b : gBisim d`
+-- and the recursively-obtained delayed tail-path `p` (supplied as the guarded recursive call's
+-- result). `bisimHead b` extracts the head-path `pathF A a b` (its type `pathF A (headG (Sfst
+-- d))(headG (Ssnd d))` computes to `pathF A a b` by headGCons on the cons-projections), and
+-- `congConsG` conses it onto `p`. The output type `pathF (gStr) (consG a (next ra))(consG b
+-- (next rb))` is `pathF (gStr) (Sfst d)(Ssnd d)` ON THE NOSE (Sfst/Ssnd β on the pair). So the
+-- converse's step is a definitional term on the productive case — no Kan repair, no dfix wall.
+bisimStepPath : (k : Clock) -> (A : UF)
+   -> (a : El A) -> (ra : El (gStr k A)) -> (b : El A) -> (rb : El (gStr k A))
+   -> (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+   -> (p : El (pathF (gStr k A) ra rb))
+   -> El (pathF (gStr k A)
+            (Sfst k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb))))
+            (Ssnd k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb))))) is
+  fn (k : Clock) (A : UF) (a : El A) (ra : El (gStr k A)) (b : El A) (rb : El (gStr k A))
+     (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+     (p : El (pathF (gStr k A) ra rb)) is
+    congConsG k A a b
+      (bisimHead k A
+         (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+            (consG k A a (next k (gStr k A) ra))
+            (consG k A b (next k (gStr k A) rb)))
+         bs)
+      ra rb p
+  end
+end
+
+-- THE DELAYED-TAIL consG-CONGRUENCE (`congConsGLater`) — the GENERALISATION of `congConsG` that
+-- closes the per-clock corecursion. `congConsG` required the tail-path as a PRESENT `p` (then
+-- wrapped it in `next` itself); but a guarded recursive call yields the tail-path DELAYED — a
+-- `▹κ (pathF gStr ra rb)`, NOT a present path. `congConsGLater` accepts exactly that delayed
+-- path `dp` and builds the cons-path, observing `dp` at each interval point `i` by `lmap (λq.
+-- papp q i) dp`. Its endpoints are DEFINITIONAL by construction: the i0/i1 boundary of the
+-- `pabs` is `consG a/b (lmap (λq. papp q i0/i1) dp)` — the very streams the declared `pathF`
+-- type names, with NO requirement that `dp` be a literal `next`. `congConsG` is the special
+-- case `dp = next k _ p` (then `lmap (λq. papp q i0) (next p) ~> next ra` by `lmapPappNextI0`,
+-- collapsing the endpoints to the cons-of-next form `congConsG` declares). This is the
+-- productive corecursion step's path constructor: the recursion hands it a delayed path, it
+-- conses on the nose, no Kan repair — the form the slot-coherence (`bisimTailSlotCons`) feeds.
+congConsGLater : (k : Clock) -> (A : UF) -> (a : El A) -> (b : El A) -> (hp : El (pathF A a b))
+   -> (ra : El (gStr k A)) -> (rb : El (gStr k A))
+   -> (dp : El (Later k (pathF (gStr k A) ra rb)))
+   -> El (pathF (gStr k A)
+            (consG k A a (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i0 end) dp))
+            (consG k A b (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i1 end) dp))) is
+  fn (k : Clock) (A : UF) (a : El A) (b : El A) (hp : El (pathF A a b))
+     (ra : El (gStr k A)) (rb : El (gStr k A))
+     (dp : El (Later k (pathF (gStr k A) ra rb))) is
+    pabs (gStr k A)
+      (fn (i : I) is
+         consG k A
+           (papp A a b hp i)
+           (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+              (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i end)
+              dp)
+       end)
+  end
+end
+
+-- THE COMPLETE PRODUCTIVE CORECURSION STEP (`bisimStepLater`) — the per-clock E2 converse's body,
+-- now driven END-TO-END by BOTH coinductive destructors plus the delayed recursive converter. This
+-- is the wiring the design called for: `bisimHead`/`bisimTail` ▸ slot-coherence ▸ `congConsGLater`.
+-- For a cons-built pair `d = (consG a (next ra), consG b (next rb))`, given a REAL bisimilarity
+-- witness `bs : gBisim d` and the DELAYED recursive converter `rec : ▹κ (gBisim (pairF ra rb) ->
+-- pathF gStr ra rb)` (what the guarded fixpoint's `self` supplies):
+--   * `bisimHead bs` extracts the head-path (`pathF A a b` by `headGCons` on the projections);
+--   * `bisimTail bs` extracts the delayed tail-bisimilarity — and HERE the slot-coherence does its
+--     work: `bisimTail`'s codomain `laterApp k Dpair gBisim (gstepPair d)` DEFINITIONALLY equals
+--     `Later k (gBisim (pairF ra rb))` on the cons-form (`bisimTailSlotCons`), so it is directly a
+--     `▹κ (gBisim (pairF ra rb))` with NO explicit cast — exactly `lap`'s argument type;
+--   * `lap rec (bisimTail bs)` applies the delayed converter to the delayed tail-bisim, yielding
+--     the delayed tail-path `▹κ (pathF gStr ra rb)`;
+--   * `congConsGLater` conses the head-path onto that delayed tail-path.
+-- The whole body type-checks DEFINITIONALLY — no Kan endpoint-repair, no dfix wall — the productive
+-- corecursion step is a closed term. Its output endpoints are the cons-of-(lmap-observed delayed
+-- path) form `congConsGLater` declares; feeding this step a guarded fixpoint (whose delayed `self`
+-- is `rec`) is the per-clock `gBisim d -> pathF (gStr) (Sfst d)(Ssnd d)` converse, modulo the
+-- general endpoint-repair for a NEUTRAL (non-cons) `d` (the residue the hcomp/ptrans tools carry).
+bisimStepLater : (k : Clock) -> (A : UF)
+   -> (a : El A) -> (ra : El (gStr k A)) -> (b : El A) -> (rb : El (gStr k A))
+   -> (rec : El (Later k
+            (piF (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+               (fn (_w : El (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb)))
+                  is pathF (gStr k A) ra rb end))))
+   -> (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+   -> El (pathF (gStr k A)
+            (consG k A a (lmap k
+               (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i0 end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  rec
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs))))
+            (consG k A b (lmap k
+               (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i1 end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  rec
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs))))) is
+  fn (k : Clock) (A : UF) (a : El A) (ra : El (gStr k A)) (b : El A) (rb : El (gStr k A))
+     (rec : El (Later k
+            (piF (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+               (fn (_w : El (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb)))
+                  is pathF (gStr k A) ra rb end))))
+     (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb))))) is
+    congConsGLater k A a b
+      (bisimHead k A
+         (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+            (consG k A a (next k (gStr k A) ra))
+            (consG k A b (next k (gStr k A) rb)))
+         bs)
+      ra rb
+      (lap k
+         (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+         (pathF (gStr k A) ra rb)
+         rec
+         (bisimTail k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))
+            bs))
+  end
+end
+
+-- PATH TRANSITIVITY at `gStr` (via the ambient `pathJ`) — the composition the endpoint-repair
+-- is built from. `ptransG x y z p q` glues `p : x ≡ y` to `q : y ≡ z`, by path induction on `q`.
+ptransG : (k : Clock) -> (A : UF) -> (x : El (gStr k A)) -> (y : El (gStr k A)) -> (z : El (gStr k A))
+   -> El (pathF (gStr k A) x y) -> El (pathF (gStr k A) y z) -> El (pathF (gStr k A) x z) is
+  fn (k : Clock) (A : UF) (x : El (gStr k A)) (y : El (gStr k A)) (z : El (gStr k A))
+     (p : El (pathF (gStr k A) x y)) (q : El (pathF (gStr k A) y z)) is
+    pathJ (gStr k A) y
+      (fn (w : El (gStr k A)) (r : El (pathF (gStr k A) y w)) is pathF (gStr k A) x w end)
+      p z q
+  end
+end
+
+-- THE ENDPOINT-REPAIR combinator for guarded-stream paths (the converse's slide-the-endpoints
+-- tool, the cubical-repair the neutral-self assembly needs, here via `ptransG` rather than raw
+-- `hcomp` — the landed `hcompHeadG`/`hcompTailG` certify the raw-hcomp form is componentwise,
+-- but `ptransG` gives the repair DIRECTLY and computes). Given a path `q : x' ≡ y'` with the
+-- WRONG (neutral, approximate) endpoints and two correction paths `sx : x ≡ x'`, `sy : y' ≡ y`,
+-- it produces the path with the RIGHT endpoints `x ≡ y` — the double-composition `sx · q · sy`.
+-- This is exactly the shape the closed converse needs: `congConsG` with the neutral recursive
+-- self builds a `q` whose endpoints are `consG a (lmap (λr.papp r i0) self)` (neutral), and the
+-- correction paths re-aim them at the real `Sfst d`/`Ssnd d`.
+repairEndpointsG : (k : Clock) -> (A : UF)
+   -> (x : El (gStr k A)) -> (x2 : El (gStr k A)) -> (y2 : El (gStr k A)) -> (y : El (gStr k A))
+   -> (sx : El (pathF (gStr k A) x x2))
+   -> (q : El (pathF (gStr k A) x2 y2))
+   -> (sy : El (pathF (gStr k A) y2 y))
+   -> El (pathF (gStr k A) x y) is
+  fn (k : Clock) (A : UF)
+     (x : El (gStr k A)) (x2 : El (gStr k A)) (y2 : El (gStr k A)) (y : El (gStr k A))
+     (sx : El (pathF (gStr k A) x x2))
+     (q : El (pathF (gStr k A) x2 y2))
+     (sy : El (pathF (gStr k A) y2 y)) is
+    ptransG k A x x2 y sx (ptransG k A x2 y2 y q sy)
+  end
+end
+
+-- ▹κ PRESERVES PATHS (`next` is a path morphism): a present path `p : x ≡ y` lifts to a path
+-- `next x ≡ next y` in `Later k X`, by `refl` on the endpoints. Body: `pabs (Later k X) (λi.
+-- next (papp p i))`; at i0 `next (papp p i0) ~> next x` (papp boundary under `next`), at i1
+-- `next y`, so the forced endpoints match on the nose. The companion to `lmap`/`lap` at the
+-- PATH level — the tool the per-clock converse uses to lift a recursive tail-path under ▹κ.
+laterPathNext : (k : Clock) -> (X : UF) -> (x : El X) -> (y : El X)
+   -> (p : El (pathF X x y))
+   -> El (pathF (Later k X) (next k X x) (next k X y)) is
+  fn (k : Clock) (X : UF) (x : El X) (y : El X) (p : El (pathF X x y)) is
+    pabs (Later k X)
+      (fn (i : I) is next k X (papp X x y p i) end)
+  end
+end
+
+-- KAN-OVER-Nu, the global endpoint-repair enabler (core/eval.go): `out` commutes with an
+-- hcomp over the coinductive `Str A = Nu StreamF`, so observing the HEAD of a composed stream
+-- is the hcomp of the heads — by `refl`. `out (hcomp (Str) φ u u0) ~> hcomp (StreamF (Str)) φ
+-- (out∘walls)(out u0)`, then the structural-Σ Kan rule splits it, and `fstF` (= head) reads off
+-- `hcomp A φ (head∘walls)(head u0)`. The global-side dual of `hcompHeadG` for guarded streams —
+-- the tool the converse uses to repair a Str-path's endpoints (Nu has no type-unfolding, so the
+-- repair rides the observation, not a definitional type equality).
+hcompHeadStr : (A : UF) -> (phi : F)
+   -> (u : (i : I) -> holds phi -> El (Str A)) -> (u0 : El (Str A))
+   -> Eq (El A)
+        (head A (hcomp (Str A) phi u u0))
+        (hcomp A phi (fn (i : I) (h : holds phi) is head A (u i h) end) (head A u0)) is
+  fn (A : UF) (phi : F) (u : (i : I) -> holds phi -> El (Str A)) (u0 : El (Str A)) is refl end
+end
+
+-- Likewise the TAIL of a composed stream is the (delayed-free, global) hcomp of the tails — the
+-- recursive Nu position composed by hcomp over `Str A` again, by `refl`. With `hcompHeadStr`,
+-- hcomp over `Str A` is FULLY componentwise on observations: the global endpoint-repair acts on
+-- head and tail independently, exactly as `hcompHeadG`/`hcompTailG` do per-clock for `gStr`.
+hcompTailStr : (A : UF) -> (phi : F)
+   -> (u : (i : I) -> holds phi -> El (Str A)) -> (u0 : El (Str A))
+   -> Eq (El (Str A))
+        (tail A (hcomp (Str A) phi u u0))
+        (hcomp (Str A) phi (fn (i : I) (h : holds phi) is tail A (u i h) end) (tail A u0)) is
+  fn (A : UF) (phi : F) (u : (i : I) -> holds phi -> El (Str A)) (u0 : El (Str A)) is refl end
+end
+
+-- PATH TRANSITIVITY at `Str` (global, via the ambient `pathJ`) — the GLOBAL-side composition,
+-- dual to `ptransG` for guarded streams. `ptransStr x y z p q` glues `p : x ≡ y` to `q : y ≡ z`.
+ptransStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A)) -> (z : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y z) -> El (pathF (Str A) x z) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (z : El (Str A))
+     (p : El (pathF (Str A) x y)) (q : El (pathF (Str A) y z)) is
+    pathJ (Str A) y
+      (fn (w : El (Str A)) (r : El (pathF (Str A) y w)) is pathF (Str A) x w end)
+      p z q
+  end
+end
+
+-- THE GLOBAL ENDPOINT-REPAIR for Str paths (the converse's slide-the-endpoints tool at the
+-- coinductive level, the dual of `repairEndpointsG`). Given a path `q : x' ≡ y'` with the
+-- approximate endpoints an interpolant-construction produces, and corrections `sx : x ≡ x'`,
+-- `sy : y' ≡ y`, it returns the path with the RIGHT endpoints `x ≡ y` (`sx · q · sy`). With
+-- KAN-OVER-Nu landed, the observations of such a repaired path COMPUTE (head/tail commute with
+-- the underlying hcomp), so the global converse can build an approximate Str-path between
+-- interpolant endpoints and re-aim it at the real `s`/`t` — the head-correction is the bisim
+-- head-path, the tail-correction the (global, delay-free) recursive tail-path.
+repairEndpointsStr : (A : UF)
+   -> (x : El (Str A)) -> (x2 : El (Str A)) -> (y2 : El (Str A)) -> (y : El (Str A))
+   -> (sx : El (pathF (Str A) x x2))
+   -> (q : El (pathF (Str A) x2 y2))
+   -> (sy : El (pathF (Str A) y2 y))
+   -> El (pathF (Str A) x y) is
+  fn (A : UF) (x : El (Str A)) (x2 : El (Str A)) (y2 : El (Str A)) (y : El (Str A))
+     (sx : El (pathF (Str A) x x2))
+     (q : El (pathF (Str A) x2 y2))
+     (sy : El (pathF (Str A) y2 y)) is
+    ptransStr A x x2 y sx (ptransStr A x2 y2 y q sy)
+  end
+end
+
+-- THE PRODUCTIVE GLOBAL CONVERSE (the Str-level dual of `congConsG`/`bisimStepPath`): path-
+-- connected SEEDS give path-connected `unfold`-streams. Given a stream coalgebra `c : S ->
+-- StreamF S` and a seed-path `ps : s0 ≡ t0`, the streams `unfold StreamF S c s0` and `unfold
+-- StreamF S c t0` are path-equal — by `pabs` over `λi. unfold … (papp ps i)`, endpoints
+-- DEFINITIONAL (the papp boundary `papp ps i0 ~> s0` lines the corecursor up on the nose). So
+-- on the productive (unfold-presented) case the global converse closes WITHOUT repair — exactly
+-- as `congConsG` closes the per-clock case for cons-built streams. The general case (arbitrary
+-- `s`/`t : Str A`, not in unfold-form) needs the interpolant + `repairEndpointsStr` to re-aim
+-- the endpoints, the head/tail observations now computing through KAN-OVER-Nu.
+unfoldSeedPath : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> (s0 : El S) -> (t0 : El S) -> (ps : El (pathF S s0 t0))
+   -> El (pathF (Str A)
+            (unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c s0)
+            (unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c t0)) is
+  fn (A : UF) (S : UF)
+     (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s0 : El S) (t0 : El S) (ps : El (pathF S s0 t0)) is
+    pabs (Str A)
+      (fn (i : I) is
+         unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c
+           (papp S s0 t0 ps i)
+       end)
+  end
+end
+
+-- FINAL-COALGEBRA η (coinductive uniqueness; core/eval.go `tryUnfoldEta`), by `refl`: every
+-- stream IS the `unfold` of its own `out`. `unfold StreamF (Str A) (out StreamF) s ~> s` — the
+-- anamorphism into the FINAL coalgebra at carrier `Nu F` with coalgebra `out` is the identity
+-- (both `id` and `unfold (out)` are coalgebra morphisms into the final coalgebra, hence equal).
+-- The DUAL of Kan-over-Nu's observation rule and the negative-type η for coinductives: it lets a
+-- stream reconstructed from its observations bottom out definitionally — the law the global E2
+-- converse's endpoints rely on. Confluent with `out`-on-unfold (both routes give `out s`, via
+-- this η on the recursive position + inner-Σ η).
+nuEta : (A : UF) -> (s : El (Str A))
+   -> Eq (El (Str A))
+        (unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) (Str A)
+           (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)) s)
+        s is
+  fn (A : UF) (s : El (Str A)) is refl end
+end
+
+-- STREAM CONS `consStr` — prepend a head `h` onto a stream `ts`, the ONE-LEVEL coinductive
+-- constructor: `consStr h ts = nuCons StreamF (pairF h ts)`. Unlike the earlier deep `unfold`
+-- prepend (whose tail was `ts` REBUILT from its heads, only bisimilar), `nuCons` reconstructs
+-- from ONE layer of observation, so BOTH observations compute to the literal inputs by β
+-- (`out (nuCons x) ~> x`) — head AND full tail. This is what makes the coinductive η definitional.
+consStr : (A : UF) -> (h : El A) -> (ts : El (Str A)) -> El (Str A) is
+  fn (A : UF) (h : El A) (ts : El (Str A)) is
+    nuCons (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+      (pairF A (fn (w : El A) is Str A end) h ts)
+  end
+end
+
+-- `consStr` PRESERVES THE HEAD, by `refl` (constructor β `out (nuCons (h,ts)) ~> (h,ts)`, fstF).
+headConsStr : (A : UF) -> (h : El A) -> (ts : El (Str A))
+   -> Eq (El A) (head A (consStr A h ts)) h is
+  fn (A : UF) (h : El A) (ts : El (Str A)) is refl end
+end
+
+-- `consStr` PRESERVES THE FULL TAIL, by `refl` — `tail (consStr h ts) ≡ ts` (β `out (nuCons
+-- (h,ts)) ~> (h,ts)`, sndF). With the one-level constructor the prepend is EXACT, not rebuilt:
+-- the deep-`unfold` version could only manage `head (tail …) ≡ head ts`; `nuCons` gives the
+-- whole tail. This is the β half of the coinductive constructor.
+tailConsStr : (A : UF) -> (h : El A) -> (ts : El (Str A))
+   -> Eq (El (Str A)) (tail A (consStr A h ts)) ts is
+  fn (A : UF) (h : El A) (ts : El (Str A)) is refl end
+end
+
+-- THE COINDUCTIVE η, by `refl`: a stream IS the cons of its head and tail —
+-- `consStr (head s) (tail s) ≡ s`. `consStr (head s)(tail s) = nuCons (pairF (head s)(tail s)) =
+-- nuCons (out s)` (inner-Σ η `pairF (fst p)(snd p) ≡ p` on `out s`) `≡ s` (the one-level nuCons-η
+-- `nuCons (out s) ~> s`). This is the law the global E2 converse needed — and it is now
+-- DEFINITIONAL (the dual of the datatype constructor's η, bounded, terminating), NOT a postulate.
+consEtaStr : (A : UF) -> (s : El (Str A))
+   -> Eq (El (Str A)) (consStr A (head A s) (tail A s)) s is
+  fn (A : UF) (s : El (Str A)) is refl end
+end
+
+-- PATH REVERSAL at `Str` (interval reversal `ineg`), the helper the repair needs.
+symStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y x) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (p : El (pathF (Str A) x y)) is
+    pabs (Str A) (fn (i : I) is papp (Str A) x y p (ineg i) end)
+  end
+end
+
+-- THE CONVERSE, CLOSED MODULO cons-η — a CONDITIONAL theorem isolating the single remaining
+-- principle. Given (i) a head-path `hp : head s ≡ head t`, (ii) a tail-path `tp : tail s ≡ tail
+-- t` (the two observations a global bisimilarity supplies — the converse of ch66's headPath/
+-- tailPath), and (iii) the cons-η AS A PATH for each stream `es : consStr (head s)(tail s) ≡ s`,
+-- `et : consStr (head t)(tail t) ≡ t` (the ONLY non-definitional piece — see `headTailConsStr`),
+-- the path `s ≡ t` is ASSEMBLED: cons the two observations into a path between the cons-forms
+-- (`pabs (λi. consStr (papp hp i)(papp tp i))`, endpoints definitional), then `repairEndpointsStr`
+-- re-aims the endpoints onto `s`/`t` using the cons-η paths. This PROVES the global substrate is
+-- COMPLETE: bisimilarity-is-path holds the moment cons-η is supplied. cons-η is exactly the
+-- coinductive principle the dfix/Nu conversion cannot give definitionally (both routes' single
+-- obstacle); everything else — consStr, the repair tools, Kan-over-Nu, Nu-η — is landed.
+converseFromConsEta : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+   -> (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t)))
+     (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+     (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t)) is
+    repairEndpointsStr A
+      s
+      (consStr A (head A s) (tail A s))
+      (consStr A (head A t) (tail A t))
+      t
+      (symStr A (consStr A (head A s) (tail A s)) s es)
+      (pabs (Str A)
+         (fn (i : I) is
+            consStr A (papp A (head A s) (head A t) hp i)
+              (papp (Str A) (tail A s) (tail A t) tp i)
+          end))
+      et
+  end
+end
+
+-- THE E2 CONVERSE, CLOSED (bisimilarity ⟹ path, the global stream level). Given the two
+-- observations a bisimilarity supplies — a head-path `head s ≡ head t` and a tail-path `tail s ≡
+-- tail t` (the exact converse of ch66's `headPath`/`tailPath`) — the streams are PATH-EQUAL.
+-- This discharges `converseFromConsEta` by supplying its cons-η corrections as `preflF`: the
+-- coinductive η `consStr (head s)(tail s) ≡ s` (`consEtaStr`) is now DEFINITIONAL (via the
+-- `nuCons` one-level constructor's β+η), so `preflF (Str A) s : pathF (Str A) s s` ALSO has type
+-- `pathF (Str A) (consStr (head s)(tail s)) s` on the nose. So bisimilarity-is-path holds with NO
+-- postulate and NO dfix-observation: cons the observations into a path between cons-forms, and the
+-- endpoints are already `s`/`t` because cons-η computes. The bidirectional correspondence
+-- `pathF (Str A) s t ↔ (head-path × tail-path)` (ch66 forward, this converse) is COMPLETE.
+bisimToPathStr : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t))) is
+    converseFromConsEta A s t hp tp
+      (preflF (Str A) s)
+      (preflF (Str A) t)
+  end
+end
+
+-- LABELLED-TRANSITION TRACE SEMANTICS (E3 — the bisimulation machinery the distributed track
+-- consumes). A transition system is a coalgebra `c : S -> A × S` (emit an observation in `A`,
+-- step to a next state); `traceOf c` corecurses the infinite observation stream of a state — the
+-- behaviour of the process. (`unfold` IS this corecursor; named here for the E3 reading. A
+-- process calculus instantiates A := the observation type `fib (Option Proc)`, S := `fib Proc`,
+-- c := the `reduce`-coalgebra, embedding the OUTER `Proc` into the fibrant world via `fib`.)
+traceOf : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> El S -> El (Str A) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end))) (s : El S) is
+    unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c s
+  end
+end
+
+-- (For a CONCRETE coalgebra the trace's head/tail COMPUTE — `head (traceOf c s) ~> fst (c s)`,
+-- `tail (traceOf c s) ~> traceOf c (snd (c s))` — by the out-on-unfold ι (fmapF destructures the
+-- step pair). For an ABSTRACT `c`/`s` the pair `c s` is a neutral, so fmapF stays stuck; the
+-- observation lemmas hold where a process calculus instantiates the coalgebra, not abstractly.)
+
+-- TRACE BISIMULATION ⟹ TRACE EQUALITY (E3, from the closed E2 converse `bisimToPathStr`): two
+-- states whose traces have a path between their HEAD observations and a path between their TAIL
+-- traces are TRACE-EQUAL (`pathF (Str A)`). This is the bisimulation principle for an LTS — the
+-- distributed track's correctness currency: two processes that observably agree step-by-step are
+-- PATH-EQUAL as behaviours, computing, no postulate. Instantiated at the `reduce`-coalgebra it
+-- gives "bisimilar processes have equal traces".
+bisimTrace : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> (s : El S) -> (t : El S)
+   -> (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+   -> (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t))))
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c t)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s : El S) (t : El S)
+     (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+     (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t)))) is
+    bisimToPathStr A (traceOf A S c s) (traceOf A S c t) hp tp
+  end
+end
+
+-- CONCRETE TRACE — the canonical coalgebra `out` gives the IDENTITY trace, by `refl` (via the
+-- final-coalgebra η): `traceOf (out StreamF) s = unfold StreamF (Str A) (out StreamF) s ≡ s`. So
+-- the trace machinery COMPUTES on a concrete coalgebra (where the earlier abstract `traceHead`/
+-- `traceTail` were stuck on the neutral `c s`): observing a stream as its own LTS recovers it.
+-- Witnesses that `traceOf` + `bisimTrace` are usable once a real coalgebra (the `reduce` step)
+-- is supplied — the E3 machinery is grounded, not vacuous.
+traceOutId : (A : UF) -> (s : El (Str A))
+   -> Eq (El (Str A))
+        (traceOf A (Str A)
+           (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)) s)
+        s is
+  fn (A : UF) (s : El (Str A)) is refl end
+end
+
+-- THE PER-CLOCK → GLOBAL HEAD BRIDGE (`gBisimHeadGlue`) — the FIRST connective tying the
+-- per-clock guarded converse (`bisimStepLater`'s `gBisim` witness) to the CLOSED global
+-- converse `bisimToPathStr`, which consumes a head-path `head s ≡ head t` and a tail-path.
+-- This lemma supplies the HEAD half PRODUCTIVELY (no dfix-observation, no Kan repair): on a
+-- pair of CONS-BUILT global guarded streams `gs = λκ. consG a (next (ra κ))`, `gt = λκ. consG
+-- b (next (rb κ))` — the shape productive corecursion emits — a per-clock bisimilarity witness
+-- `bsf : (k:Clock) -> gBisim k A (pair (gs k)(gt k))` extracts, at k0, the head-equality
+-- `bisimHead k0 A d (bsf k0) : pathF A (headG (Sfst d))(headG (Ssnd d))`. By `Sfst`/`Ssnd` β on
+-- the pair and `headConsG` on the cons-projections, that type COMPUTES to `pathF A a b`; and the
+-- glued global streams' heads COMPUTE to the same `a`/`b` — `head (glue gs) ≡ gheadG gs ≡ headG
+-- k0 (gs k0) ≡ a` (glueHead ▸ gheadG-def ▸ headConsG). So `bisimHead k0 …` inhabits
+-- `pathF A (head (glue gs))(head (glue gt))` ON THE NOSE — the exact `hp` argument of
+-- `bisimToPathStr A (glue gs)(glue gt)`. By `refl`: the per-clock head observation IS the global
+-- head-path, all definitional through the forceD-free head projection (gheadG = headG at k0).
+-- This is the productive head step the converse needs; the TAIL half (the genuinely clock-VARYING
+-- observation) is the next obstacle — it must `forceD`-cash the delayed tail-bisimilarity through
+-- `gtailG`/`glueTail`, where the recursion descends.
+gBisimHeadGlue : (A : UF)
+   -> (a : El A) -> (ra : (k : Clock) -> El (gStr k A))
+   -> (b : El A) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) (ra k)))
+               (consG k A b (next k (gStr k A) (rb k))))))
+   -> El (pathF A
+            (head A (glue A (fn (j : Clock) is
+               consG j A a (next j (gStr j A) (ra j)) end)))
+            (head A (glue A (fn (j : Clock) is
+               consG j A b (next j (gStr j A) (rb j)) end)))) is
+  fn (A : UF)
+     (a : El A) (ra : (k : Clock) -> El (gStr k A))
+     (b : El A) (rb : (k : Clock) -> El (gStr k A))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) (ra k)))
+               (consG k A b (next k (gStr k A) (rb k)))))) is
+    bisimHead k0 A
+      (pairF (gStr k0 A) (fn (_s : El (gStr k0 A)) is gStr k0 A end)
+         (consG k0 A a (next k0 (gStr k0 A) (ra k0)))
+         (consG k0 A b (next k0 (gStr k0 A) (rb k0))))
+      (bsf k0)
+  end
+end
+
+-- THE TAIL-HALF FORCE-CASH (`gBisimForceTail`) — the next connective the TAIL-half per-clock→
+-- global bridge needs, and the discharge of the plan's KEY RISK. The per-clock converse's
+-- coinductive descent produces the DELAYED tail-bisimilarity `∀κ. ▹κ (gBisim κ A (pair (ra κ)
+-- (rb κ)))` — a delayed witness whose TYPE is genuinely clock-VARYING (the index `pair (ra κ)
+-- (rb κ)` mentions κ AND the relation `gBisim κ` is built by `gfixF`, so its code varies with
+-- the clock). Plain `force` needs a clock-CLOSED payload and CANNOT cash it; `forceD` can,
+-- precisely because its family argument `A : Clock -> UF` accepts a clock-varying code. The
+-- RISK the plan flagged was that this code is `gfixF`-built (UF-valued under the indexed
+-- fixpoint), so the `Clock -> UF` family `λκ. gBisim κ A (pair (ra κ)(rb κ))` might not be a
+-- clean `forceD` argument. It IS: `gBisim κ A d : UF` for every clock, so the family inhabits
+-- `Clock -> UF` on the nose, and `forceD` cashes the delayed bisimilarity across all clocks —
+-- recovering the per-clock global bisimilarity `∀κ. gBisim κ A (pair (ra κ)(rb κ))` that the
+-- tail-path assembly consumes. This is the tail-half analogue of `gtailG`'s `forceD`-cash of
+-- the delayed STREAM tail, now at the BISIMILARITY family — the observation guarded recursion
+-- cannot do (the relation's type is clock-varying, so only `forceD` applies).
+gBisimForceTail : (A : UF)
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bt : (k : Clock) -> El (Later k
+            (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k)))))
+   -> (k : Clock)
+   -> El (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))) is
+  fn (A : UF)
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A))
+     (bt : (k : Clock) -> El (Later k
+            (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))) is
+    forceD (fn (j : Clock) is
+              gBisim j A (pairF (gStr j A) (fn (_s : El (gStr j A)) is gStr j A end) (ra j) (rb j)) end)
+      bt
+  end
+end
+
+-- THE FORCE-CASH COHERENCE (`gBisimForceTailNext`), by `refl` — the load-bearing computation
+-- of `gBisimForceTail`, mirroring `forceDNext`/`gtailCons`. Cashing a `next`-built delayed
+-- bisimilarity recovers the underlying witness at every clock: `forceD (λκ. gBisim κ …)
+-- (λκ. next κ … (bw κ)) k ≡ bw k`. This is the productive shape the corecursion emits — the
+-- guarded recursive call yields the delayed tail-bisim as a `next` on the bound clock, and
+-- `forceD`'s clock-β (`tryForceDIota`: probe at the fresh-clock sentinel, strip the `next`,
+-- re-apply at the real clock) fires through it. Soundness is by CLOCK-INERTNESS: `gBisim κ`'s
+-- code may mention κ but `Clock` has no eliminator, so the payload can never inspect the clock
+-- and the sentinel probe is representative. With this the tail bridge `gBisimTailGlue` can
+-- `forceD`-cash the per-clock delayed tail-bisimilarity into the global bisimilarity that
+-- feeds `bisimToPathStr`'s `tp` slot — the exact tail-half analogue of `gtailCons`.
+gBisimForceTailNext : (A : UF)
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bw : (k : Clock) -> El
+            (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+   -> (k : Clock)
+   -> Eq (El (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+        (gBisimForceTail A ra rb
+           (fn (j : Clock) is
+              next j (gBisim j A (pairF (gStr j A) (fn (_s : El (gStr j A)) is gStr j A end) (ra j) (rb j)))
+                (bw j) end)
+           k)
+        (bw k) is
+  fn (A : UF)
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A))
+     (bw : (k : Clock) -> El
+            (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+     (k : Clock) is refl end
+end
+
+-- THE TAIL-HALF PER-CLOCK → GLOBAL BRIDGE (`gBisimTailGlue`) — the second connective tying the
+-- per-clock guarded converse to the CLOSED global converse `bisimToPathStr`, supplying its `tp`
+-- (tail-path) arg. The tail half is the genuinely clock-VARYING observation (cf. `gBisimHeadGlue`,
+-- the forceD-FREE head half). The documented chain, ALL definitional on cons-form:
+--   (1) `λκ. bisimTail κ A d (bsf κ)` — `bisimTail`'s codomain `laterApp κ Dpair gBisim (gstepPair
+--       d)` DEFINITIONALLY equals `Later κ (gBisim κ A (pair (ra κ)(rb κ)))` by `bisimTailSlotCons`
+--       (the tailGCons ▸ lmapNext/lapNext ▸ laterAppNext chain, refl), so it is directly the `bt`
+--       arg `gBisimForceTail` wants — the delayed tail-bisimilarity, NO explicit cast;
+--   (2) `gBisimForceTail A ra rb (λκ. bisimTail …)` — `forceD`-cashes that delayed bisim to the
+--       GLOBAL tail-pair bisimilarity `∀κ. gBisim κ A (pair (ra κ)(rb κ))` (clock-INERTNESS sound);
+--   (3) the recursive global converter `conv` turns that cashed global tail-bisim into the tail
+--       path `pathF (Str A) (glue ra)(glue rb)` — and HERE step 3 closes DEFINITIONALLY: by
+--       `glueTail` (`tail (glue gs) ≡ glue (gtailG gs)`) ▸ `gtailCons` (`gtailG gs κ ≡ ra κ`) the
+--       glued tail is `glue ra` ON THE NOSE (cf. `glueConsTail`, refl), so `conv`'s output type
+--       `pathF (Str A) (glue ra)(glue rb)` IS `pathF (Str A) (tail (glue gs))(tail (glue gt))` —
+--       NO Str-level congConsGLater needed, the cons-form forceD-cash collapses it. The recursive
+--       converter `conv` is a hypothesis (NOT a closed term) for the same reason `bisimStepLater`
+--       takes `rec`: the converse on ARBITRARY global guarded-stream tails is coinductive (the dfix
+--       wall blocks a closed productive term for general tails); the tail-half descent supplies it.
+gBisimTailGlue : (A : UF)
+   -> (a : El A) -> (ra : (k : Clock) -> El (gStr k A))
+   -> (b : El A) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) (ra k)))
+               (consG k A b (next k (gStr k A) (rb k))))))
+   -> (conv : (bgt : (k : Clock) -> El (gBisim k A
+                 (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+              -> El (pathF (Str A) (glue A ra) (glue A rb)))
+   -> El (pathF (Str A)
+            (tail A (glue A (fn (j : Clock) is
+               consG j A a (next j (gStr j A) (ra j)) end)))
+            (tail A (glue A (fn (j : Clock) is
+               consG j A b (next j (gStr j A) (rb j)) end)))) is
+  fn (A : UF)
+     (a : El A) (ra : (k : Clock) -> El (gStr k A))
+     (b : El A) (rb : (k : Clock) -> El (gStr k A))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) (ra k)))
+               (consG k A b (next k (gStr k A) (rb k))))))
+     (conv : (bgt : (k : Clock) -> El (gBisim k A
+                 (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+              -> El (pathF (Str A) (glue A ra) (glue A rb))) is
+    conv
+      (gBisimForceTail A ra rb
+        (fn (k : Clock) is
+           bisimTail k A
+             (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                (consG k A a (next k (gStr k A) (ra k)))
+                (consG k A b (next k (gStr k A) (rb k))))
+             (bsf k)
+         end))
+  end
+end
+
+-- THE PER-CLOCK → GLOBAL E2 CONVERSE, CLOSED on cons-built streams (`gBisimToPathGlue`) — the
+-- M7 HEADLINE. Composes the HEAD bridge (`gBisimHeadGlue`, forceD-free) and the TAIL bridge
+-- (`gBisimTailGlue`, forceD-cash + recursive descent) into `bisimToPathStr`, the already-CLOSED
+-- global converse. Given a per-clock guarded bisimilarity `bsf : (k:Clock) -> gBisim κ A (pair (gs
+-- κ)(gt κ))` on a pair of CONS-built global guarded streams `gs = λκ. consG a (next (ra κ))`,
+-- `gt = λκ. consG b (next (rb κ))` — the shape productive corecursion emits — PLUS the recursive
+-- global converter `conv` on the tails (the coinductive descent, a hypothesis for the dfix-wall
+-- reason `bisimStepLater` takes `rec`), it builds the path `glue gs ≡ glue gt` between the GLUED
+-- global streams. The HEAD-path is `gBisimHeadGlue` (`bisimHead k0`, definitional through glueHead
+-- ▸ gheadG ▸ headConsG); the TAIL-path is `gBisimTailGlue` (bisimTail ▸ bisimTailSlotCons ▸
+-- gBisimForceTail ▸ conv, re-aimed by glueTail/gtailCons). Both feed `bisimToPathStr` ON THE NOSE.
+-- This is bisimilarity-is-path carried from the PER-CLOCK guarded relation (`gBisim κ`, the gfixF-
+-- built coinductive characterisation) to the GLOBAL coinductive stream `Str A` (via the computing
+-- bridge `glue`), NOT dfix-observed — the E2 converse at the guarded layer, COMPUTING, no postulate.
+gBisimToPathGlue : (A : UF)
+   -> (a : El A) -> (ra : (k : Clock) -> El (gStr k A))
+   -> (b : El A) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) (ra k)))
+               (consG k A b (next k (gStr k A) (rb k))))))
+   -> (conv : (bgt : (k : Clock) -> El (gBisim k A
+                 (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+              -> El (pathF (Str A) (glue A ra) (glue A rb)))
+   -> El (pathF (Str A)
+            (glue A (fn (j : Clock) is consG j A a (next j (gStr j A) (ra j)) end))
+            (glue A (fn (j : Clock) is consG j A b (next j (gStr j A) (rb j)) end))) is
+  fn (A : UF)
+     (a : El A) (ra : (k : Clock) -> El (gStr k A))
+     (b : El A) (rb : (k : Clock) -> El (gStr k A))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) (ra k)))
+               (consG k A b (next k (gStr k A) (rb k))))))
+     (conv : (bgt : (k : Clock) -> El (gBisim k A
+                 (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+              -> El (pathF (Str A) (glue A ra) (glue A rb))) is
+    bisimToPathStr A
+      (glue A (fn (j : Clock) is consG j A a (next j (gStr j A) (ra j)) end))
+      (glue A (fn (j : Clock) is consG j A b (next j (gStr j A) (rb j)) end))
+      (gBisimHeadGlue A a ra b rb bsf)
+      (gBisimTailGlue A a ra b rb bsf conv)
+  end
+end
+
+
+
+
+-- THE PER-CLOCK → GLOBAL E2 CONVERSE on ARBITRARY global streams (`gConverseGen`) — the
+-- cons-form-FREE generalization of `gBisimToPathGlue`, and the load-bearing structural step
+-- toward tying off `conv`. `gBisimToPathGlue` only handled CONS-built streams `gs = λκ. consG
+-- a (next (ra κ))` because its HEAD bridge (`gBisimHeadGlue`) and TAIL bridge (`gBisimTailGlue`)
+-- both pinned the streams in cons-form. Two facts lift the restriction:
+--   (1) the head observation generalizes — `head (glue ra) ≡ gheadG ra ≡ headG k0 (ra k0)`
+--       (glueHead ▸ gheadG-def, refl, for ANY global `ra`), and `bisimHead k0 A (pair (ra k0)
+--       (rb k0)) (bsf k0)` has codomain `pathF A (headG k0 (ra k0))(headG k0 (rb k0))` (Sfst/Ssnd
+--       β) = `pathF A (head (glue ra))(head (glue rb))` ON THE NOSE — no cons needed;
+--   (2) the tail observation generalizes — `tail (glue ra) ≡ glue (gtailG ra)` (glueTail, refl,
+--       for ANY global `ra`), so the recursive converter `conv`'s output `pathF (Str A)(glue
+--       (gtailG ra))(glue (gtailG rb))` IS `pathF (Str A)(tail (glue ra))(tail (glue rb))` ON
+--       THE NOSE — again no cons-form.
+-- So given a per-clock guarded bisimilarity `bsf : ∀κ. gBisim κ A (pair (ra κ)(rb κ))` (head
+-- source), the CASHED global tail-bisim `bgt : ∀κ. gBisim κ A (pair (gtailG ra κ)(gtailG rb κ))`
+-- (the slot-coherence/`gBisimForceTail` output — supplied here, the residue that is cons-form
+-- on the productive case), and the recursive global converter `conv` on the tails, the GLOBAL
+-- path `glue ra ≡ glue rb` is assembled via `bisimToPathStr`, feeding the head/tail paths ON
+-- THE NOSE. This is the converse on ARBITRARY global guarded streams; `gBisimToPathGlue` is its
+-- cons-form instance (where `bgt` is `gBisimForceTail`-cashed from `bsf`'s delayed tail). The
+-- ONLY remaining gap to the fully-closed `gConverse` is the recursive `self` for `conv` (the
+-- dfix-under-application wall: `self` applied to the cashed tail-bisim won't unfold) and the
+-- general (non-cons) tail-bisim extraction (the slot-coherence neutral) — `bgt` localizes both.
+gConverseGen : (A : UF)
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+   -> (bgt : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (gtailG A ra k) (gtailG A rb k))))
+   -> (conv : (bg : (k : Clock) -> El (gBisim k A
+                 (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                    (gtailG A ra k) (gtailG A rb k))))
+              -> El (pathF (Str A) (glue A (gtailG A ra)) (glue A (gtailG A rb))))
+   -> El (pathF (Str A) (glue A ra) (glue A rb)) is
+  fn (A : UF)
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+     (bgt : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (gtailG A ra k) (gtailG A rb k))))
+     (conv : (bg : (k : Clock) -> El (gBisim k A
+                 (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                    (gtailG A ra k) (gtailG A rb k))))
+              -> El (pathF (Str A) (glue A (gtailG A ra)) (glue A (gtailG A rb)))) is
+    bisimToPathStr A (glue A ra) (glue A rb)
+      (bisimHead k0 A
+         (pairF (gStr k0 A) (fn (_s : El (gStr k0 A)) is gStr k0 A end) (ra k0) (rb k0))
+         (bsf k0))
+      (conv bgt)
+  end
+end
+
+-- LOAD-BEARING COMPUTATION PIN for `gConverseGen` (the head observation computes), by `refl`.
+-- On cons-built streams the head-path argument's TYPE `pathF A (head (glue ra))(head (glue rb))`
+-- reduces to `pathF A a b` — confirming `bisimHead k0` supplies the genuine head equality, not a
+-- coincidentally-typed neutral. `head (glue (λκ. consG a (next (ra κ)))) ≡ gheadG (λκ. consG a …)
+-- ≡ a` (glueHead ▸ gheadCons), so the declared head-path codomain IS `pathF A a b`.
+gConverseGenHeadComputes : (A : UF)
+   -> (a : El A) -> (ra : (k : Clock) -> El (gStr k A))
+   -> (b : El A) -> (rb : (k : Clock) -> El (gStr k A))
+   -> Eq UF
+        (pathF A
+           (head A (glue A (fn (j : Clock) is consG j A a (next j (gStr j A) (ra j)) end)))
+           (head A (glue A (fn (j : Clock) is consG j A b (next j (gStr j A) (rb j)) end))))
+        (pathF A a b) is
+  fn (A : UF)
+     (a : El A) (ra : (k : Clock) -> El (gStr k A))
+     (b : El A) (rb : (k : Clock) -> El (gStr k A)) is refl end
+end
+
+-- LOAD-BEARING TAIL PIN for `gConverseGen` (the tail observation computes to the recursive
+-- converter's output), by `refl`. `tail (glue ra) ≡ glue (gtailG ra)` (glueTail) for ANY global
+-- `ra`, so the tail-path slot `pathF (Str A)(tail (glue ra))(tail (glue rb))` IS `pathF (Str A)
+-- (glue (gtailG ra))(glue (gtailG rb))` — exactly `conv`'s output type, ON THE NOSE, with NO
+-- cons-form restriction. This is the fact that lets `gConverseGen` drop the cons restriction
+-- `gBisimToPathGlue` carried, and it is what makes the recursion well-typed: `conv` (= the
+-- recursive `self`) consumes the tail-pair bisim and returns precisely the tail slot.
+gConverseGenTailComputes : (A : UF)
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> Eq UF
+        (pathF (Str A)
+           (tail A (glue A ra))
+           (tail A (glue A rb)))
+        (pathF (Str A) (glue A (gtailG A ra)) (glue A (gtailG A rb))) is
+  fn (A : UF)
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A)) is refl end
+end
+
+-- NEGATIVE PROBE (must be REJECTED if uncommented): the head pin is load-bearing — a WRONG
+-- head endpoint does NOT type. `pathF A a b` is NOT `pathF A b a` unless a ≡ b, so claiming the
+-- glued-head path type equals `pathF A b a` is a genuine type error (confirms the head
+-- observation computes to the RIGHT endpoints `a`/`b`, not an arbitrary neutral).
+-- gConverseGenHeadNeg : (A : UF)
+--    -> (a : El A) -> (ra : (k : Clock) -> El (gStr k A))
+--    -> (b : El A) -> (rb : (k : Clock) -> El (gStr k A))
+--    -> Eq UF
+--         (pathF A
+--            (head A (glue A (fn (j : Clock) is consG j A a (next j (gStr j A) (ra j)) end)))
+--            (head A (glue A (fn (j : Clock) is consG j A b (next j (gStr j A) (rb j)) end))))
+--         (pathF A b a) is
+--   fn (A : UF)
+--      (a : El A) (ra : (k : Clock) -> El (gStr k A))
+--      (b : El A) (rb : (k : Clock) -> El (gStr k A)) is refl end
+-- end
+
+-- THE DFIX-FREE PER-CLOCK → GLOBAL E2 CONVERSE (`gConverseViaGluePath`) — `gConverseGen` with the
+-- recursive `conv`/`bgt` hypotheses RETIRED, replaced by the productive `gluePathTail`. This is the
+-- payoff of `gluePath`: where `gConverseGen` carried a recursive global converter `conv : (∀κ.
+-- gBisim …(tail-pair)) -> pathF (Str A)(glue (gtailG ra))(glue (gtailG rb))` (whose only honest
+-- inhabitant was a `dfix`-built `self`, blocked by the dfix-under-application wall — `self bgt` =
+-- `(dfix …) bgt` never unfolds), this term consumes the per-clock tail-PATH family `tp : ∀κ. pathF
+-- (gStr κ A)(gtailG ra κ)(gtailG rb κ)` DIRECTLY. That family is what the per-clock converse
+-- (`bisimStepLater`/`congConsGLater`) emits PRODUCTIVELY — the recursion lives inside each `tp κ`
+-- (a `pabs`, never observed as a dfix), so the global assembly NEVER sees a dfix under application.
+--
+-- The two slots feed `bisimToPathStr A (glue ra)(glue rb)` ON THE NOSE, for ARBITRARY global
+-- guarded streams `ra`/`rb`:
+--   * HEAD — `bisimHead k0 A (pair (ra k0)(rb k0)) (bsf k0) : pathF A (headG k0 (ra k0))(headG k0
+--     (rb k0))`, which IS `pathF A (head (glue ra))(head (glue rb))` by glueHead ▸ gheadG (refl,
+--     `gConverseGenHeadComputes`); the same head bridge `gConverseGen` uses.
+--   * TAIL — `gluePathTail A ra rb tp : pathF (Str A)(glue (gtailG ra))(glue (gtailG rb))`, which IS
+--     `pathF (Str A)(tail (glue ra))(tail (glue rb))` by glueTail (refl, `gConverseGenTailComputes`)
+--     — the `tp` slot of `bisimToPathStr`, with NO recursive `conv`, NO `bgt`, NO dfix.
+-- So the GLOBAL recursion is fully discharged: the only remaining input is the PER-CLOCK tail-path
+-- family `tp` (the per-clock converse's output) and the per-clock head bisimilarity `bsf` (for the
+-- head). This CLOSES the per-clock → global E2 converse with the dfix wall removed entirely; the
+-- sole residue is the per-clock production of `tp` from `bsf`'s delayed tail-bisim (the slot-
+-- coherence on neutral tails — `bisimTailSlotCons` off cons-form), which is now the single frontier.
+gConverseViaGluePath : (A : UF)
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+   -> (tp : (k : Clock) -> El (pathF (gStr k A) (gtailG A ra k) (gtailG A rb k)))
+   -> El (pathF (Str A) (glue A ra) (glue A rb)) is
+  fn (A : UF)
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+     (tp : (k : Clock) -> El (pathF (gStr k A) (gtailG A ra k) (gtailG A rb k))) is
+    bisimToPathStr A (glue A ra) (glue A rb)
+      (bisimHead k0 A
+         (pairF (gStr k0 A) (fn (_s : El (gStr k0 A)) is gStr k0 A end) (ra k0) (rb k0))
+         (bsf k0))
+      (gluePathTail A ra rb tp)
+  end
+end
+
+-- LOAD-BEARING TAIL PIN for `gConverseViaGluePath` (the productive tail slot lands ON THE NOSE),
+-- by `refl`. `gluePathTail A ra rb tp` has declared type `pathF (Str A)(glue (gtailG ra))(glue
+-- (gtailG rb))`, and `bisimToPathStr`'s `tp` slot wants `pathF (Str A)(tail (glue ra))(tail (glue
+-- rb))`; by glueTail (`tail (glue ra) ≡ glue (gtailG ra)`, refl) these are DEFINITIONALLY equal, so
+-- `gluePathTail`'s output feeds the converse with no cast — the dfix-free replacement for `conv bgt`
+-- type-checks. This confirms the glue/gluePath layer commutes the per-clock tail-path into the
+-- global tail slot definitionally.
+gConverseViaGluePathTailComputes : (A : UF)
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> Eq UF
+        (pathF (Str A) (tail A (glue A ra)) (tail A (glue A rb)))
+        (pathF (Str A) (glue A (gtailG A ra)) (glue A (gtailG A rb))) is
+  fn (A : UF)
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A)) is refl end
+end
+
+-- NEGATIVE PROBE (must be REJECTED if uncommented): the tail slot is load-bearing — a SWAPPED
+-- tail endpoint does NOT type. `pathF (Str A)(glue (gtailG ra))(glue (gtailG rb))` is NOT `pathF
+-- (Str A)(glue (gtailG rb))(glue (gtailG ra))` unless the two tails coincide, so claiming the glued
+-- tail-path type equals the swapped one is a genuine type error (confirms `gluePathTail` lands at
+-- the RIGHT endpoints, not an arbitrary neutral the converse would silently accept).
+-- gConverseViaGluePathTailNeg : (A : UF)
+--    -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+--    -> Eq UF
+--         (pathF (Str A) (tail A (glue A ra)) (tail A (glue A rb)))
+--         (pathF (Str A) (glue A (gtailG A rb)) (glue A (gtailG A ra))) is
+--   fn (A : UF)
+--      (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A)) is refl end
+-- end
+
+-- THE INDEX-POLYMORPHIC PER-CLOCK CONVERTER TYPE (`ConvTy`) — the per-clock E2 converse as a
+-- function indexed by the stream PAIR, so a guarded fixpoint's recursive `self` descends to a
+-- DIFFERENT index (the tail-pair) than it was called at. `ConvTy k A = (d : Dpair) -> gBisim d
+-- -> pathF (gStr) (Sfst d)(Ssnd d)`: given a pair `d` and a bisimilarity witness over it, the
+-- guarded-stream path between the two projections. This is the type the plan's `tpFix` lives at
+-- (`piF (gBisim κ (pair X Y))(λ_. pathF (gStr κ A) X Y)`, here written index-first so `self`
+-- can be applied to the delayed tail-pair index by `lapD`). A guarded fixpoint `dfix k (ConvTy
+-- k A) (λself. body)` would BE the per-clock converse; `self : ▹κ (El (ConvTy k A))` is the
+-- delayed recursive converter, consumed UNDER the delay (never applied at the conversion top —
+-- so the dfix wall is never hit), descending to the tail-pair index where the recursion lives.
+ConvTy : (k : Clock) -> (A : UF) -> UF is
+  fn (k : Clock) (A : UF) is
+    piF (Dpair k A)
+      (fn (d : El (Dpair k A)) is
+         piF (gBisim k A d)
+           (fn (_w : El (gBisim k A d)) is
+              pathF (gStr k A) (Sfst k A d) (Ssnd k A d) end)
+       end)
+  end
+end
+
+-- THE PRODUCTIVE CORECURSION STEP DRIVEN BY THE INDEX-POLY `self` (`tpStepFromSelf`) — the body
+-- a guarded fixpoint at `ConvTy` runs on the productive (cons-form) case, with the recursive
+-- `rec` argument DERIVED from the index-poly `self` rather than supplied as a hypothesis. This
+-- is the increment that wires the per-clock guarded fixpoint's `self` into `bisimStepLater`: it
+-- shows the productive recursion DESCENDS to the tail-pair index and COMPUTES its recursive-call
+-- type definitionally, with `self` consumed strictly under the delay (never at conversion top).
+--
+-- For a CONS-built pair `d = (consG a (next ra), consG b (next rb))` — the shape productive
+-- corecursion emits — the recursive call is built by ONE dependent guarded application:
+--
+--   `lapD k Dpair Cod self (gstepPair d)`   where Cod d2 = gBisim d2 -> pathF (gStr)(Sfst d2)(Ssnd d2)
+--
+-- applies the delayed converter `self` to the DELAYED tail-pair index `gstepPair d : ▹κ Dpair`.
+-- Its result type is `laterApp k Dpair Cod (gstepPair d)` — and HERE the slot-coherence
+-- (`bisimTailSlotCons`/`bisimTailSlotNext`) does its work: on the cons-form, `gstepPair d`
+-- reduces to a `next`-intro of the tail-pair `(ra, rb)` (tailGCons ▸ lmapNext/lapNext), so
+-- `laterApp k Dpair Cod (next …)` fires (laterAppNext) to `Later k (Cod (pair ra rb)) = Later k
+-- (gBisim (pair ra rb) -> pathF (gStr) ra rb)` — EXACTLY `bisimStepLater`'s `rec` argument type,
+-- with NO cast. So the delayed index-poly `self`, applied to the delayed tail index, IS the
+-- delayed tail-pair converter `bisimStepLater` consumes. The body is then `bisimStepLater`
+-- (`bisimHead`/`bisimTail` ▸ slot-coherence ▸ `congConsGLater`), consuming a REAL bisimilarity
+-- witness `bs`. The whole step type-checks DEFINITIONALLY — no Kan repair, no dfix wall, the
+-- recursion consumed under the delay. This is the dfix body's productive core: feeding it the
+-- fixpoint's `self` is the per-clock converse on the productive case.
+tpStepFromSelf : (k : Clock) -> (A : UF)
+   -> (a : El A) -> (ra : El (gStr k A)) -> (b : El A) -> (rb : El (gStr k A))
+   -> (self : El (Later k (ConvTy k A)))
+   -> (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+   -> El (pathF (gStr k A)
+            (consG k A a (lmap k
+               (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i0 end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  (lapD k (Dpair k A)
+                     (fn (d2 : El (Dpair k A)) is
+                        piF (gBisim k A d2)
+                          (fn (_w : El (gBisim k A d2)) is
+                             pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                     self
+                     (gstepPair k A
+                        (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                           (consG k A a (next k (gStr k A) ra))
+                           (consG k A b (next k (gStr k A) rb)))))
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs))))
+            (consG k A b (lmap k
+               (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i1 end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  (lapD k (Dpair k A)
+                     (fn (d2 : El (Dpair k A)) is
+                        piF (gBisim k A d2)
+                          (fn (_w : El (gBisim k A d2)) is
+                             pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                     self
+                     (gstepPair k A
+                        (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                           (consG k A a (next k (gStr k A) ra))
+                           (consG k A b (next k (gStr k A) rb)))))
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs))))) is
+  fn (k : Clock) (A : UF) (a : El A) (ra : El (gStr k A)) (b : El A) (rb : El (gStr k A))
+     (self : El (Later k (ConvTy k A)))
+     (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb))))) is
+    bisimStepLater k A a ra b rb
+      (lapD k (Dpair k A)
+         (fn (d2 : El (Dpair k A)) is
+            piF (gBisim k A d2)
+              (fn (_w : El (gBisim k A d2)) is
+                 pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+         self
+         (gstepPair k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+      bs
+  end
+end
+
+-- THE GLOBAL CONVERSE FROM ANY TOTAL PER-CLOCK CONVERTER (`gConverseFromConv`) — the precise
+-- residue isolation. GIVEN any total per-clock converter `conv : ∀κ. ConvTy κ A` (whatever
+-- its construction), the global converse `glue ra ≡ glue rb` CLOSES with NO dfix unfolding and
+-- NO extra coherence: the per-clock tail-path `tp κ := conv κ (tailpair κ)(btf κ)` lands at
+-- type `pathF (gStr κ A)(gtailG ra κ)(gtailG rb κ)` ON THE NOSE (the converter's codomain at the
+-- tail-pair index), exactly the slot `gConverseViaGluePath` demands. `gConverseViaGluePath` only
+-- needs that TYPE (the recursion already lives inside each productive `tp κ`, and `gluePath`
+-- carries it to the global path through the computing `unfold`/`out` layer — never observing a
+-- dfix under application). So the ENTIRE remaining E2 per-clock→global converse reduces to a
+-- SINGLE obligation: construct the total `conv : ∀κ. ConvTy κ A`. `tpStepFromSelf` is its
+-- productive corecursion step (the cons-form body, computing); the only thing missing is
+-- closing that step into a TOTAL function over arbitrary (neutral, non-cons) `d` — the
+-- irreducibly-coinductive neutral residue characterised by `bisimTailSlotNext` (for neutral
+-- tails there is no present pair under the delay, so the slot stays stuck and the cons-form
+-- body cannot be made total by any sound definitional reduction). This term certifies the
+-- residue is the SOLE frontier: everything downstream of `conv` is closed and computing.
+gConverseFromConv : (A : UF)
+   -> (conv : (k : Clock) -> El (ConvTy k A))
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+   -> (btf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (gtailG A ra k) (gtailG A rb k))))
+   -> El (pathF (Str A) (glue A ra) (glue A rb)) is
+  fn (A : UF)
+     (conv : (k : Clock) -> El (ConvTy k A))
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+     (btf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (gtailG A ra k) (gtailG A rb k)))) is
+    gConverseViaGluePath A ra rb bsf
+      (fn (k : Clock) is
+         conv k
+           (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+              (gtailG A ra k) (gtailG A rb k))
+           (btf k)
+       end)
+  end
+end
+
+-- =====================================================================================
+-- ENDPOINT-REPAIR OF THE CONVERTER BODY (telos-4/M7, cont.50) — the cubical assembly that
+-- turns `tpStepFromSelf`'s APPROXIMATE path (whose endpoints are `lmap`/`lap`-of-neutral, NOT
+-- `Sfst d`/`Ssnd d` on the nose) into a path with the REAL cons-form endpoints, GIVEN two
+-- correction paths. This composes the landed pieces (`repairEndpointsG` + the productive
+-- `tpStepFromSelf`) into the per-clock converter body modulo exactly the two correction paths
+-- over the neutral delayed-tail; it ISOLATES the remaining E2-converse frontier to those two
+-- paths, with everything around them computing and definitional.
+-- =====================================================================================
+
+-- THE FIXED-HEAD consG-CONGRUENCE (`congConsGTail`) — the lift of a delayed-tail path to a
+-- guarded-stream path with a FIXED head. Where `congConsGLater` varies BOTH head and tail (a
+-- head-path `hp` + a delayed tail-path), the endpoint-repair needs the special case where the
+-- head is constant (`a`) and ONLY the tail moves: from a tail-path `tp : pathF (Later k gStr)
+-- t1 t2` it builds `pathF (gStr) (consG a t1) (consG a t2)`, endpoints DEFINITIONAL by the
+-- `pabs`/`consG` boundary. This is the shape each correction path takes — sliding a neutral
+-- delayed tail (`lmap (λr.…) NL`) onto the real `next ra` keeps the head `a` fixed, so the
+-- correction is a pure tail-congruence. (A `congConsGLater` with `hp := preflF a` would also
+-- do, but `congConsGTail` states the constant-head case directly and computes.)
+congConsGTail : (k : Clock) -> (A : UF) -> (a : El A)
+   -> (t1 : El (Later k (gStr k A))) -> (t2 : El (Later k (gStr k A)))
+   -> (tp : El (pathF (Later k (gStr k A)) t1 t2))
+   -> El (pathF (gStr k A) (consG k A a t1) (consG k A a t2)) is
+  fn (k : Clock) (A : UF) (a : El A)
+     (t1 : El (Later k (gStr k A))) (t2 : El (Later k (gStr k A)))
+     (tp : El (pathF (Later k (gStr k A)) t1 t2)) is
+    pabs (gStr k A)
+      (fn (i : I) is consG k A a (papp (Later k (gStr k A)) t1 t2 tp i) end)
+  end
+end
+
+-- THE LMAP-BOUNDARY COLLAPSE (`lmapBoundaryI0`/`lmapBoundaryI1`) — observing the neutral
+-- delayed tail-path `NL : ▹κ (pathF gStr ra rb)` at an interval ENDPOINT collapses the `lmap`
+-- function to a CONSTANT, by `refl`. `tpStepFromSelf`'s left endpoint observes `NL` at `i0` via
+-- `lmap (λq. papp q i0) NL`; but the path boundary `papp (gStr) ra rb q i0 ~> ra` fires for ANY
+-- path `q` (even a neutral, even UNDER the `lmap` binder), so `λq. papp q i0 ≡ λq. ra` and the
+-- whole observation is `lmap (λq. ra) NL` — `lmap` of the CONSTANT function at `ra`. (Dually at
+-- `i1`: `lmap (λq. rb) NL`.) This is what reduces the correction-path obligation to its minimal
+-- form: the correction path need only relate `next ra` to `lmap (const ra) NL`, with the
+-- interval-dependent `papp` already discharged. NOTE the residue is GENUINE: `lmap (const ra) NL
+-- ≢ next ra` for a neutral `NL` (that would be `lmap`-of-const = `next`-of-const, which fires
+-- ONLY on a `next` intro — verified STUCK on neutral `NL`); so this collapse exposes, but does
+-- NOT close, the correction path — it is the irreducibly-coinductive delayed-tail residue.
+lmapBoundaryI0 : (k : Clock) -> (A : UF) -> (ra : El (gStr k A)) -> (rb : El (gStr k A))
+   -> (NL : El (Later k (pathF (gStr k A) ra rb)))
+   -> Eq (El (Later k (gStr k A)))
+        (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+           (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i0 end) NL)
+        (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+           (fn (q : El (pathF (gStr k A) ra rb)) is ra end) NL) is
+  fn (k : Clock) (A : UF) (ra : El (gStr k A)) (rb : El (gStr k A))
+     (NL : El (Later k (pathF (gStr k A) ra rb))) is refl end
+end
+
+lmapBoundaryI1 : (k : Clock) -> (A : UF) -> (ra : El (gStr k A)) -> (rb : El (gStr k A))
+   -> (NL : El (Later k (pathF (gStr k A) ra rb)))
+   -> Eq (El (Later k (gStr k A)))
+        (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+           (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i1 end) NL)
+        (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+           (fn (q : El (pathF (gStr k A) ra rb)) is rb end) NL) is
+  fn (k : Clock) (A : UF) (ra : El (gStr k A)) (rb : El (gStr k A))
+     (NL : El (Later k (pathF (gStr k A) ra rb))) is refl end
+end
+
+-- THE ENDPOINT-REPAIRED CONVERTER BODY (`repairConvBody`) — the composition lemma (Option C of
+-- the M7 increment). GIVEN the two correction tail-paths over the neutral delayed dfix-self,
+-- this assembles the per-clock converter body on the cons-form case with the REAL endpoints
+-- `Sfst d ≡ Ssnd d` (here `consG a (next ra) ≡ consG b (next rb)`), DEFINITIONALLY — no further
+-- coherence, no Kan repair beyond `repairEndpointsG`/`ptransG`, all computing.
+--
+-- The middle path is `tpStepFromSelf k A a ra b rb self bs` — the productive corecursion step,
+-- driven by the index-poly delayed `self`, whose endpoints are the NEUTRAL
+-- `consG a/b (lmap (λq. papp q i0/i1) NL)`, `NL = lap (lapD self (gstepPair (cons-pair)))
+-- (bisimTail bs)` a stuck delayed path (the `self`-output is neutral, never a `next`). The two
+-- correction paths slide those neutral endpoints onto the real cons-form endpoints:
+--   * LEFT (`sxTail`): `next ra ≡ lmap (λq. ra) NL` — lifted to `pathF (gStr) (consG a (next ra))
+--     (consG a (lmap (λq. ra) NL))` by `congConsGTail`; the latter is `tpStepFromSelf`'s left
+--     endpoint ON THE NOSE (`lmapBoundaryI0`: `lmap (λq. papp q i0) NL ≡ lmap (λq. ra) NL`).
+--   * RIGHT (`syTail`): `lmap (λq. rb) NL ≡ next rb` — lifted dually, the right endpoint
+--     (`lmapBoundaryI1`).
+-- `repairEndpointsG` glues `sx · (tpStepFromSelf) · sy` (double `ptransG`), landing
+-- `pathF (gStr) (consG a (next ra)) (consG b (next rb))`. The endpoint slots line up by REFL —
+-- the correction paths' lifted endpoints meet the approximate path's neutral endpoints through
+-- `lmapBoundaryI0`/`I1`. So GIVEN the two delayed-tail correction paths, the converter body is
+-- a closed computing term with the right endpoints; the entire remaining E2-converse frontier is
+-- ISOLATED to constructing `sxTail`/`syTail` (the head correction-path rides `hcompBisimHead`,
+-- the tail `hcompBisimTail`, both landed Kan substrate over `gBisim`). This is the precise
+-- residue: two paths in `Later k (gStr)` relating `next ra`/`next rb` to `lmap (const ra/rb) NL`
+-- over the neutral delayed dfix-self — the irreducibly-coinductive delayed-tail-bisim residue,
+-- to be filled by the cubical open-box over `gBisim` (NOT a definitional reduction; verified the
+-- bare `lmap (const) NL ≡ next` is STUCK on neutral `NL`).
+repairConvBody : (k : Clock) -> (A : UF)
+   -> (a : El A) -> (ra : El (gStr k A)) -> (b : El A) -> (rb : El (gStr k A))
+   -> (self : El (Later k (ConvTy k A)))
+   -> (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+   -> (sxTail : El (pathF (Later k (gStr k A))
+            (next k (gStr k A) ra)
+            (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is ra end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  (lapD k (Dpair k A)
+                     (fn (d2 : El (Dpair k A)) is
+                        piF (gBisim k A d2)
+                          (fn (_w : El (gBisim k A d2)) is
+                             pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                     self
+                     (gstepPair k A
+                        (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                           (consG k A a (next k (gStr k A) ra))
+                           (consG k A b (next k (gStr k A) rb)))))
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs)))))
+   -> (syTail : El (pathF (Later k (gStr k A))
+            (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is rb end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  (lapD k (Dpair k A)
+                     (fn (d2 : El (Dpair k A)) is
+                        piF (gBisim k A d2)
+                          (fn (_w : El (gBisim k A d2)) is
+                             pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                     self
+                     (gstepPair k A
+                        (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                           (consG k A a (next k (gStr k A) ra))
+                           (consG k A b (next k (gStr k A) rb)))))
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs)))
+            (next k (gStr k A) rb)))
+   -> El (pathF (gStr k A)
+            (consG k A a (next k (gStr k A) ra))
+            (consG k A b (next k (gStr k A) rb))) is
+  fn (k : Clock) (A : UF)
+     (a : El A) (ra : El (gStr k A)) (b : El A) (rb : El (gStr k A))
+     (self : El (Later k (ConvTy k A)))
+     (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+     (sxTail : El (pathF (Later k (gStr k A))
+            (next k (gStr k A) ra)
+            (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is ra end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  (lapD k (Dpair k A)
+                     (fn (d2 : El (Dpair k A)) is
+                        piF (gBisim k A d2)
+                          (fn (_w : El (gBisim k A d2)) is
+                             pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                     self
+                     (gstepPair k A
+                        (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                           (consG k A a (next k (gStr k A) ra))
+                           (consG k A b (next k (gStr k A) rb)))))
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs)))))
+     (syTail : El (pathF (Later k (gStr k A))
+            (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is rb end)
+               (lap k
+                  (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+                  (pathF (gStr k A) ra rb)
+                  (lapD k (Dpair k A)
+                     (fn (d2 : El (Dpair k A)) is
+                        piF (gBisim k A d2)
+                          (fn (_w : El (gBisim k A d2)) is
+                             pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                     self
+                     (gstepPair k A
+                        (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                           (consG k A a (next k (gStr k A) ra))
+                           (consG k A b (next k (gStr k A) rb)))))
+                  (bisimTail k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))
+                     bs)))
+            (next k (gStr k A) rb))) is
+    repairEndpointsG k A
+      (consG k A a (next k (gStr k A) ra))
+      (consG k A a (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+         (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i0 end)
+         (lap k
+            (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+            (pathF (gStr k A) ra rb)
+            (lapD k (Dpair k A)
+               (fn (d2 : El (Dpair k A)) is
+                  piF (gBisim k A d2)
+                    (fn (_w : El (gBisim k A d2)) is
+                       pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+               self
+               (gstepPair k A
+                  (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                     (consG k A a (next k (gStr k A) ra))
+                     (consG k A b (next k (gStr k A) rb)))))
+            (bisimTail k A
+               (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                  (consG k A a (next k (gStr k A) ra))
+                  (consG k A b (next k (gStr k A) rb)))
+               bs))))
+      (consG k A b (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+         (fn (q : El (pathF (gStr k A) ra rb)) is papp (gStr k A) ra rb q i1 end)
+         (lap k
+            (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+            (pathF (gStr k A) ra rb)
+            (lapD k (Dpair k A)
+               (fn (d2 : El (Dpair k A)) is
+                  piF (gBisim k A d2)
+                    (fn (_w : El (gBisim k A d2)) is
+                       pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+               self
+               (gstepPair k A
+                  (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                     (consG k A a (next k (gStr k A) ra))
+                     (consG k A b (next k (gStr k A) rb)))))
+            (bisimTail k A
+               (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                  (consG k A a (next k (gStr k A) ra))
+                  (consG k A b (next k (gStr k A) rb)))
+               bs))))
+      (consG k A b (next k (gStr k A) rb))
+      (congConsGTail k A a (next k (gStr k A) ra)
+         (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+            (fn (q : El (pathF (gStr k A) ra rb)) is ra end)
+            (lap k
+               (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+               (pathF (gStr k A) ra rb)
+               (lapD k (Dpair k A)
+                  (fn (d2 : El (Dpair k A)) is
+                     piF (gBisim k A d2)
+                       (fn (_w : El (gBisim k A d2)) is
+                          pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                  self
+                  (gstepPair k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))))
+               (bisimTail k A
+                  (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                     (consG k A a (next k (gStr k A) ra))
+                     (consG k A b (next k (gStr k A) rb)))
+                  bs)))
+         sxTail)
+      (tpStepFromSelf k A a ra b rb self bs)
+      (congConsGTail k A b
+         (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+            (fn (q : El (pathF (gStr k A) ra rb)) is rb end)
+            (lap k
+               (gBisim k A (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) ra rb))
+               (pathF (gStr k A) ra rb)
+               (lapD k (Dpair k A)
+                  (fn (d2 : El (Dpair k A)) is
+                     piF (gBisim k A d2)
+                       (fn (_w : El (gBisim k A d2)) is
+                          pathF (gStr k A) (Sfst k A d2) (Ssnd k A d2) end) end)
+                  self
+                  (gstepPair k A
+                     (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                        (consG k A a (next k (gStr k A) ra))
+                        (consG k A b (next k (gStr k A) rb)))))
+               (bisimTail k A
+                  (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+                     (consG k A a (next k (gStr k A) ra))
+                     (consG k A b (next k (gStr k A) rb)))
+                  bs)))
+         (next k (gStr k A) rb)
+         syTail)
+  end
+end
+
+-- =====================================================================================
+-- THE TWO CORRECTION TAIL-PATHS, CLOSED (telos-4/M7, cont.51) — the E2-converse frontier
+-- the open-box over `gBisim` was to fill. The two delayed-tail correction paths
+-- `repairConvBody` demanded are now DEFINITIONAL: the guard-group ι rule `lmap (const x) la
+-- ~> next x` (the ▹κ functor law that a CONSTANT map sends every delayed value to the
+-- constant delayed value — sound in the topos-of-trees/later model at every stage, fired by
+-- a constancy probe on `g`, see core/eval.go tryGuardIota) collapses the previously-stuck
+-- `lmap (λq. ra) NL ≡ next ra` for the NEUTRAL delayed dfix-self `NL`. So each correction
+-- path is now `preflF (next ra)` / `preflF (next rb)` — there is NO residue, no Kan open-box
+-- needed; the irreducibly-value-level coinductive residue the plan characterised as
+-- `lmap (const ra) NL ≢ next ra` is discharged by the functor law it always satisfied.
+-- =====================================================================================
+
+-- THE LEFT CORRECTION TAIL-PATH (`convSxTail`), by `refl` — `next ra ≡ lmap (λq. ra) NL`.
+-- The RHS reduces (lmap-const ι) to `next k (gStr) ra`, so this is a path from `next ra` to
+-- itself, witnessed by `preflF`. The papp-boundary already collapsed `λq. papp q i0` to the
+-- constant `λq. ra` (`lmapBoundaryI0`); the new functor ι then collapses `lmap (const ra) NL`
+-- to `next ra` regardless of `NL`'s neutrality. The exact slot `repairConvBody`'s `sxTail`.
+convSxTail : (k : Clock) -> (A : UF) -> (ra : El (gStr k A)) -> (rb : El (gStr k A))
+   -> (NL : El (Later k (pathF (gStr k A) ra rb)))
+   -> El (pathF (Later k (gStr k A))
+            (next k (gStr k A) ra)
+            (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is ra end) NL)) is
+  fn (k : Clock) (A : UF) (ra : El (gStr k A)) (rb : El (gStr k A))
+     (NL : El (Later k (pathF (gStr k A) ra rb))) is
+    preflF (Later k (gStr k A)) (next k (gStr k A) ra)
+  end
+end
+
+-- THE RIGHT CORRECTION TAIL-PATH (`convSyTail`), by `refl` — `lmap (λq. rb) NL ≡ next rb`
+-- (dual of `convSxTail` at the i1 boundary). The exact slot `repairConvBody`'s `syTail`.
+convSyTail : (k : Clock) -> (A : UF) -> (ra : El (gStr k A)) -> (rb : El (gStr k A))
+   -> (NL : El (Later k (pathF (gStr k A) ra rb)))
+   -> El (pathF (Later k (gStr k A))
+            (lmap k (pathF (gStr k A) ra rb) (gStr k A)
+               (fn (q : El (pathF (gStr k A) ra rb)) is rb end) NL)
+            (next k (gStr k A) rb)) is
+  fn (k : Clock) (A : UF) (ra : El (gStr k A)) (rb : El (gStr k A))
+     (NL : El (Later k (pathF (gStr k A) ra rb))) is
+    preflF (Later k (gStr k A)) (next k (gStr k A) rb)
+  end
+end
+
+-- THE CONS-FORM PER-CLOCK CONVERTER BODY, CLOSED WITH NO REPAIR (`convStepClosed`). With the
+-- two correction paths now `preflF`, `repairConvBody` would just re-aim `tpStepFromSelf`'s
+-- endpoints onto endpoints that ALREADY coincide — so the converter body IS `tpStepFromSelf`
+-- directly: its declared endpoints `consG a (lmap (λq.papp q i0) NL)` / `consG b (lmap (λq.papp
+-- q i1) NL)` now reduce (papp-boundary ▸ lmap-const ι) to `consG a (next ra)` = `Sfst d` /
+-- `consG b (next rb)` = `Ssnd d` ON THE NOSE. So the productive index-poly corecursion step,
+-- fed a guarded fixpoint's delayed `self`, lands `pathF (gStr) (Sfst d)(Ssnd d)` for the
+-- cons-form pair with no endpoint-repair, no Kan open-box, no dfix wall. This is the
+-- converter body on the productive case, computing — the E2-converse's corecursion step
+-- closed end-to-end.
+convStepClosed : (k : Clock) -> (A : UF)
+   -> (a : El A) -> (ra : El (gStr k A)) -> (b : El A) -> (rb : El (gStr k A))
+   -> (self : El (Later k (ConvTy k A)))
+   -> (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb)))))
+   -> El (pathF (gStr k A)
+            (consG k A a (next k (gStr k A) ra))
+            (consG k A b (next k (gStr k A) rb))) is
+  fn (k : Clock) (A : UF)
+     (a : El A) (ra : El (gStr k A)) (b : El A) (rb : El (gStr k A))
+     (self : El (Later k (ConvTy k A)))
+     (bs : El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (consG k A a (next k (gStr k A) ra))
+               (consG k A b (next k (gStr k A) rb))))) is
+    tpStepFromSelf k A a ra b rb self bs
+  end
+end
+
+-- =====================================================================================
+-- THE `Str ≃ ∀κ. gStr` BRIDGE — `glue`-HALF CONS-REACHABILITY (telos-4/M7, the STRATEGIC
+-- PIVOT; cont.52). The bridge has two maps: `glue : (∀κ. gStr) -> Str A` (the COMPUTING
+-- direction, Nu-side `unfold`, observations fire) and `split : Str A -> ∀κ. gStr` (the
+-- dfix-side projection, OPAQUE under observation — `Eq` at the Pi funext-collapses to
+-- `splitFn s`, a dfix under application that `convDfix` never unfolds). Empirically pinned:
+-- BOTH round-trip coherences through `split` are dfix-blocked — `gheadG (λκ. split s) ≢ head
+-- s` and `gheadG (λκ. split (glue g)) ≢ gheadG g` (TestSplitDfixWall). So the bridge's usable
+-- content is NOT a `split`-round-trip; it is `glue`'s CONS-REACHABILITY, obtained PRODUCTIVELY
+-- via the global `gheadG`/`gtailG`/`streamEta` layer (which computes, cf. `gtailCons`), never
+-- by observing `split`. The pivot's payload: every glue-presented stream is DEFINITIONALLY a
+-- glue of per-clock cons-form, so the cons-form converter is reached without `split`.
+-- =====================================================================================
+
+-- CONS-REACHABILITY OF THE GLUE-PRESENTATION (`glueConsEta`), by `refl` — the bridge's
+-- `glue`-half made cons-reachable WITHOUT `split`. By per-clock stream-η (`streamEta`, an
+-- inner-Σ η: `g κ ≡ consG (headG (g κ))(tailG (g κ))`) under the clock binder, the global
+-- guarded stream `g` is DEFINITIONALLY equal AS A FUNCTION to `λκ. consG (headG (g κ))(tailG
+-- (g κ))`; `glue` of definitionally-equal functions is definitionally equal. So `glue g ≡ glue
+-- (λκ. consG (headG (g κ))(tailG (g κ)))` — every glue-presented stream is the glue of a
+-- per-clock cons-form, REFL, dodging the dfix-opaque `split` entirely. This is the cons-
+-- reachability the pivot needs: `convStepClosed` (the cons-form per-clock converter) acts on
+-- exactly this presentation. (The residue: `tailG (g κ)` is a NEUTRAL `▹κ`, NOT a `next u` for
+-- present `u`; the forceD-SECTION `tailG (g κ) ≡ next (gtailG g κ)` is NOT definitional
+-- (TestForceDSectionStuck) — the irreducibly-coinductive residue cont.46 characterised, so the
+-- per-clock head is reached productively but the per-clock tail stays delayed-neutral.)
+glueConsEta : (A : UF) -> (g : El (GStrAll A))
+   -> Eq (El (Str A))
+        (glue A g)
+        (glue A (fn (k : Clock) is
+           consG k A (headG k A (g k)) (tailG k A (g k)) end)) is
+  fn (A : UF) (g : El (GStrAll A)) is refl end
+end
+
+-- THE CONS-ETA PRESENTATION PRESERVES THE HEAD, by `refl` — `head (glue (λκ. consG (headG (g
+-- κ))(tailG (g κ)))) ≡ gheadG g`. By `glueConsEta` the LHS is `head (glue g)`, then `glueHead`
+-- gives `gheadG g`; both definitional, so the composite is one `refl`. Certifies the cons-eta
+-- presentation's head is the original head — the productive head observation the converse's
+-- `bisimHead`/`gBisimHeadGlue` consume lands on the nose through the cons-eta presentation.
+glueConsEtaHead : (A : UF) -> (g : El (GStrAll A))
+   -> Eq (El A)
+        (head A (glue A (fn (k : Clock) is
+           consG k A (headG k A (g k)) (tailG k A (g k)) end)))
+        (gheadG A g) is
+  fn (A : UF) (g : El (GStrAll A)) is refl end
+end
+
+-- THE CONS-ETA PRESENTATION PRESERVES THE TAIL, by `refl` — `tail (glue (λκ. consG (headG (g
+-- κ))(tailG (g κ)))) ≡ glue (gtailG g)`. By `glueConsEta` the LHS is `tail (glue g)`, then
+-- `glueTail` gives `glue (gtailG g)`; both definitional. So the cons-eta presentation's tail is
+-- the forceD-cashed global tail `glue (gtailG g)` — a PRESENT global stream, the exact shape
+-- `gluePathTail`/`gConverseViaGluePath` step the tail onto. Together with `glueConsEtaHead`,
+-- the cons-eta presentation is a computing stream homomorphism on the glue-presentation, the
+-- `glue`-half of the `Str ≃ ∀κ. gStr` bridge as a productive (split-free) coherence.
+glueConsEtaTail : (A : UF) -> (g : El (GStrAll A))
+   -> Eq (El (Str A))
+        (tail A (glue A (fn (k : Clock) is
+           consG k A (headG k A (g k)) (tailG k A (g k)) end)))
+        (glue A (gtailG A g)) is
+  fn (A : UF) (g : El (GStrAll A)) is refl end
+end
+
+-- THE BRIDGE PAYOFF — THE FULL E2 CONVERSE ON ARBITRARY STREAMS, MODULO GLUE-PRESENTATION
+-- (`gConverseArbitrary`). Given ANY `s t : Str A` together with glue-presentation PATHS `ps :
+-- s ≡ glue ra`, `pt : glue rb ≡ t`, the per-clock head-bisim `bsf`, and the per-clock tail-PATH
+-- family `tp`, this assembles `pathF (Str A) s t`. The construction: `gConverseViaGluePath`
+-- closes the converse on the GLUE-PRESENTED streams `glue ra ≡ glue rb` (head via `bisimHead
+-- k0`, definitional through glueHead; tail via `gluePathTail`, definitional through glueTail —
+-- NO global dfix, the recursion lives inside each productive `tp κ`); `repairEndpointsStr` then
+-- re-aims that glue-stream path onto `s`/`t` by double-composition `ps · (glue-converse) · pt`
+-- (the global endpoint-slide, head/tail observations computing through KAN-OVER-Nu).
+--
+-- THIS IS THE PIVOT MADE PRECISE: the full E2 converse `bisimilar ⟹ pathF (Str A)` on ARBITRARY
+-- `s t` reduces to a SINGLE residual obligation — the glue-presentation paths `s ≡ glue ra`,
+-- `glue rb ≡ t` (every stream is glue-presented). Everything else is closed + computing. That
+-- residual obligation is exactly where the dfix wall sits: the natural witness `ra := λκ. split
+-- κ s` makes `glue (split s)`'s head/tail OPAQUE (dfix under application, TestSplitDfixWall), so
+-- the glue-presentation path cannot be built productively through `split`, and the forceD-section
+-- that would supply a non-dfix witness is non-definitional (the coinductive residue). So
+-- `gConverseArbitrary` is the conditional headline: the converse is CLOSED the moment a stream's
+-- glue-presentation is supplied; the bridge's remaining gap IS the glue-presentation existence,
+-- now isolated as the sole frontier with the entire converse machinery around it computing.
+gConverseArbitrary : (A : UF)
+   -> (s : El (Str A)) -> (t : El (Str A))
+   -> (ra : (k : Clock) -> El (gStr k A)) -> (rb : (k : Clock) -> El (gStr k A))
+   -> (ps : El (pathF (Str A) s (glue A ra)))
+   -> (pt : El (pathF (Str A) (glue A rb) t))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+   -> (tp : (k : Clock) -> El (pathF (gStr k A) (gtailG A ra k) (gtailG A rb k)))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (ra : (k : Clock) -> El (gStr k A)) (rb : (k : Clock) -> El (gStr k A))
+     (ps : El (pathF (Str A) s (glue A ra)))
+     (pt : El (pathF (Str A) (glue A rb) t))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end) (ra k) (rb k))))
+     (tp : (k : Clock) -> El (pathF (gStr k A) (gtailG A ra k) (gtailG A rb k))) is
+    repairEndpointsStr A s (glue A ra) (glue A rb) t
+      ps
+      (gConverseViaGluePath A ra rb bsf tp)
+      pt
+  end
+end
+
+-- =====================================================================================
+-- ROUTE (i): THE CUBICAL `Glue`-PRESENTATION OF `Str` AS A COMPUTING EQUIVALENCE
+-- (the A4/Glue-stratum bridge — 2026-06-16 cont.53). `gConverseArbitrary` (above) closed
+-- the full E2 converse MODULO TWO per-call path hypotheses `ps : s ≡ glue ra`, `pt : glue rb
+-- ≡ t` ("every `Str A` is glue-presented"). This block REPLACES those two hypotheses with a
+-- SINGLE structural obligation — `isEquiv (GStrAll A)(Str A) glue` — by routing the glue-
+-- presentation through the landed contractible-fibre tower (`Equiv`/`fiber`/`isContr`/
+-- `isEquiv`/`equivProof`, store/equiv.go, the SAME machinery that makes univalence compute).
+--
+-- THE CUBICAL IDEA. `glue : GStrAll A -> Str A` is the bridge's COMPUTING half (Nu-side
+-- `unfold`, observations compute, never the dfix wall). Present `Str A ≃ GStrAll A` as a
+-- genuine `Equiv` whose FORWARD map is `glue`. Then for EVERY `s : Str A` the equivalence's
+-- CONTRACTIBLE FIBRE at `s` — `equivProof glueEquiv s : isContr (fiber glue s)` — supplies, as
+-- its CENTRE, a pair `(ra , p : glue ra ≡ s)`: the glue-presentation, EXTRACTED rather than
+-- guessed. The forward map being `glue` definitionally (the `pairF` projection `equivFun` ≡
+-- `glue`) is what makes the fibre's path slot `pathF (Str A)(glue ra) s` — exactly the
+-- presentation the converse needs. This is route (i) made precise: the glue-presentation
+-- becomes a COMPUTING equivalence application (a sigmaF projection off the equivProof
+-- contractible-fibre data), sidestepping the dfix-opaque `split` entirely — the presentation
+-- is read off the fibre, not corecursed.
+--
+-- WHAT IS DISCHARGED vs WHAT REMAINS. Everything DOWNSTREAM of the obligation is closed +
+-- computing: the fibre extraction (`gluePresStream`/`gluePresPath`) projects through the
+-- equiv tower BY REFL, and `gConverseGluePresented` feeds it into `gConverseArbitrary`
+-- (symStr re-orients the `glue ra ≡ s` fibre-path to the `s ≡ glue ra` slot). The SOLE
+-- remaining obligation is `isEquiv (GStrAll A)(Str A) glue` (`glueIsEquivTy`). Via the landed
+-- `isoToEquiv` (uaprelude) that reduces to the two round-trip HOMOTOPIES `glue ∘ split ≡ id`
+-- and `split ∘ glue ≡ id` — BOTH of which are the dfix-observation wall (empirically pinned:
+-- `gheadG (λκ. split (glue g)) ≢ gheadG g` and `head (glue (λκ. split s)) ≢ head s`, the
+-- applied-`split` is a dfix under application). FINDING (this iteration): the EVAL-ι route —
+-- making applied `dfix` reduce `(dfix k A f) xs ~> (f (next k A (dfix k A f))) xs` — is
+-- NOT termination-sound: the corecursor's productivity is COINDUCTIVE (recursive occurrence
+-- under `next`), but the applicative `lap (next dfix)(next x) ~> next (dfix x)` β-applies the
+-- recursive `dfix` EAGERLY, so the normalizer diverges (verified: stack overflow on
+-- `splitFn s`). So `isEquiv glue` cannot be closed by a sound kernel reduction either — it is
+-- the genuine coinductive residue, now isolated as a SINGLE first-class `isContr`/`isEquiv`
+-- obligation (a contractibility-of-fibres statement) rather than two ad-hoc per-stream paths.
+-- =====================================================================================
+
+-- THE SOLE OBLIGATION, NAMED: `glue` is an equivalence. Once inhabited, every `Str A` is
+-- glue-presented (the contractible-fibre extraction below is all definitional).
+glueIsEquivTy : (A : UF) -> UF is
+  fn (A : UF) is isEquiv (GStrAll A) (Str A) (fn (g : El (GStrAll A)) is glue A g end) end
+end
+
+-- `Str A ≃ GStrAll A` packaged as a genuine `Equiv` whose forward map is `glue` — built as
+-- the explicit `pairF` so `equivFun glueEquiv ≡ glue` BY REFL (the sigmaF projection), which
+-- is what lets the fibre's path slot read `pathF (Str A)(glue ra) s` on the nose.
+glueEquiv : (A : UF) -> (pf : El (glueIsEquivTy A)) -> El (Equiv (GStrAll A) (Str A)) is
+  fn (A : UF) (pf : El (glueIsEquivTy A)) is
+    pairF (piF (GStrAll A) (fn (x : El (GStrAll A)) is Str A end))
+          (fn (f : El (piF (GStrAll A) (fn (x : El (GStrAll A)) is Str A end))) is
+             isEquiv (GStrAll A) (Str A) f end)
+          (fn (g : El (GStrAll A)) is glue A g end)
+          pf
+  end
+end
+
+-- The CENTRE of the contractible fibre of `glue` at `s` — `(equivProof pf) s` is `isContr
+-- (fiber glue s)`, a `sigmaF` whose first projection is the fibre centre. Projects by refl.
+glueFiberCenter : (A : UF) -> (pf : El (glueIsEquivTy A)) -> (s : El (Str A))
+   -> El (fiber (GStrAll A) (Str A) (fn (g : El (GStrAll A)) is glue A g end) s) is
+  fn (A : UF) (pf : El (glueIsEquivTy A)) (s : El (Str A)) is
+    fstF (fiber (GStrAll A) (Str A) (fn (g : El (GStrAll A)) is glue A g end) s)
+      (fn (c : El (fiber (GStrAll A) (Str A) (fn (g : El (GStrAll A)) is glue A g end) s)) is
+         piF (fiber (GStrAll A) (Str A) (fn (g : El (GStrAll A)) is glue A g end) s)
+             (fn (w : El (fiber (GStrAll A) (Str A) (fn (g : El (GStrAll A)) is glue A g end) s)) is
+                pathF (fiber (GStrAll A) (Str A) (fn (g : El (GStrAll A)) is glue A g end) s) c w end) end)
+      (pf s)
+  end
+end
+
+-- THE GLUE-PRESENTING STREAM: the fibre centre's first component — a `GStrAll A` (a per-clock
+-- guarded-stream family) whose `glue` is `s`. The presentation `ra`, EXTRACTED from the equiv
+-- (not corecursed via the dfix-opaque `split`). Projects by refl (`fiber` ≡ `sigmaF`).
+gluePresStream : (A : UF) -> (pf : El (glueIsEquivTy A)) -> (s : El (Str A)) -> El (GStrAll A) is
+  fn (A : UF) (pf : El (glueIsEquivTy A)) (s : El (Str A)) is
+    fstF (GStrAll A) (fn (x : El (GStrAll A)) is pathF (Str A) (glue A x) s end)
+      (glueFiberCenter A pf s)
+  end
+end
+
+-- THE GLUE-PRESENTATION PATH: the fibre centre's second component — `glue (gluePresStream s) ≡
+-- s`, the proof that the extracted stream's glue IS `s`. Projects by refl. This is the witness
+-- `gConverseArbitrary` needed as the hypothesis "every Str A is glue-presented", now PRODUCED
+-- (modulo `glueIsEquivTy`) rather than assumed.
+gluePresPath : (A : UF) -> (pf : El (glueIsEquivTy A)) -> (s : El (Str A))
+   -> El (pathF (Str A) (glue A (gluePresStream A pf s)) s) is
+  fn (A : UF) (pf : El (glueIsEquivTy A)) (s : El (Str A)) is
+    sndF (GStrAll A) (fn (x : El (GStrAll A)) is pathF (Str A) (glue A x) s end)
+      (glueFiberCenter A pf s)
+  end
+end
+
+-- THE HEADLINE — THE FULL E2 CONVERSE ON ARBITRARY STREAMS FROM A SINGLE OBLIGATION
+-- (`gConverseGluePresented`). Given `pf : isEquiv glue` (the SOLE obligation) and the per-clock
+-- bisimilarity data (`bsf` head-bisim, `tp` tail-path family for the EXTRACTED presentations),
+-- this assembles `pathF (Str A) s t` for ARBITRARY `s t : Str A` with NO per-call path
+-- hypotheses — the two `ps`/`pt` `gConverseArbitrary` demanded are now DERIVED from `pf` via
+-- the contractible-fibre extraction: `ra := gluePresStream pf s`, `rb := gluePresStream pf t`,
+-- `ps := symStr (gluePresPath pf s)` (the fibre path `glue ra ≡ s` reversed to `s ≡ glue ra`),
+-- `pt := gluePresPath pf t` (`glue rb ≡ t`). This is route (i)'s precise payoff: the converse
+-- on arbitrary streams reduces to ONE structural equivalence obligation, and everything around
+-- it computes. The residue `glueIsEquivTy` is the genuine coinductive wall (see the block
+-- header): NOT closable by a sound kernel reduction (the eval-ι applied-dfix route diverges via
+-- eager `lap`-β), so the E2 converse bottoms out at "glue is an equivalence" — a single honest
+-- `isEquiv` statement, which is the cleanest possible isolation of the remaining content.
+gConverseGluePresented : (A : UF)
+   -> (pf : El (glueIsEquivTy A))
+   -> (s : El (Str A)) -> (t : El (Str A))
+   -> (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (gluePresStream A pf s k) (gluePresStream A pf t k))))
+   -> (tp : (k : Clock) -> El (pathF (gStr k A)
+            (gtailG A (gluePresStream A pf s) k) (gtailG A (gluePresStream A pf t) k)))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (pf : El (glueIsEquivTy A))
+     (s : El (Str A)) (t : El (Str A))
+     (bsf : (k : Clock) -> El (gBisim k A
+            (pairF (gStr k A) (fn (_s : El (gStr k A)) is gStr k A end)
+               (gluePresStream A pf s k) (gluePresStream A pf t k))))
+     (tp : (k : Clock) -> El (pathF (gStr k A)
+            (gtailG A (gluePresStream A pf s) k) (gtailG A (gluePresStream A pf t) k))) is
+    gConverseArbitrary A s t
+      (gluePresStream A pf s) (gluePresStream A pf t)
+      (symStr A (glue A (gluePresStream A pf s)) s (gluePresPath A pf s))
+      (gluePresPath A pf t)
+      bsf
+      tp
+  end
+end

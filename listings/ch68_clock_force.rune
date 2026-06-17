@@ -1,0 +1,54 @@
+-- Chapter 68 — Clock quantification and `force` (CLOCKS-DESIGN / R-COIND, the E2 gate).
+-- Guarded recursion (ch62) gives PRODUCTIVE corecursion, but its result is trapped
+-- under `Later`: there is no sound `force : Later A -> A` (it would discharge the guard
+-- unconditionally and the normalizer would diverge). Coinduction = guarded recursion +
+-- CLOCK QUANTIFICATION. A clock `κ : Clock` is a pretype variable (no eliminator, like
+-- the interval), `∀κ. A` is an ordinary Pi over `Clock`, and the keystone is
+--
+--   force : (A : UF) -> ((k : Clock) -> El (Later k A)) -> ((k : Clock) -> El A)
+--
+-- the SOLE elimination of ▹, sound BECAUSE the value is parametric in the clock — a
+-- closed `∀κ. ▹κ A` cannot inspect κ, so the delay it announces is vacuous and may be
+-- discharged. Clock-indexing the `Later` is what keeps this type honest: the unsound
+-- `Later A -> A` is not inhabitable, because a `λκ. la` for a free `la : El(Later κ' A)`
+-- does not have type `(κ : Clock) -> El(Later κ A)` (the Later sits on the wrong clock).
+-- `force` COMPUTES by the clock-β / force-next coherence (it fires only on a `next` on
+-- the bound clock with a clock-closed payload):
+--
+--   force A (λκ. next κ A x)  ~>  λκ. x
+
+-- THE force-next COHERENCE, by `refl`: forcing a purely-delayed value gives the value
+-- back. `force A (λj. next j A x)` reduces to the constant clock function `λj. x`;
+-- applied to any clock `k` it is `x`. This is the iso `∀κ.▹κ A ≃ ∀κ.A` on a `next` intro.
+forceNext : (A : UF) -> (x : El A) -> (k : Clock)
+   -> Eq (El A) (force A (fn (j : Clock) is next j A x end) k) x is
+  fn (A : UF) (x : El A) (k : Clock) is refl end
+end
+
+-- `force` ESCAPES the later: a value `x : El A` wrapped into `∀κ. ▹κ A` (delayed on
+-- every clock) is cashed back out to `∀κ. A` — the operation guarded recursion could
+-- not do. This is the mechanism the E2 converse (bisimilar ⟹ path) stands on: a path
+-- is assembled corecursively under `▹κ` via `dfix`, quantified over κ, and `force`
+-- cashes it into an honest `pathF`.
+escape : (A : UF) -> (x : El A) -> (k : Clock) -> El A is
+  fn (A : UF) (x : El A) (k : Clock) is
+    force A (fn (j : Clock) is next j A x end) k
+  end
+end
+
+-- And the round trip `next` then `force` is the identity, by `refl`.
+escapeId : (A : UF) -> (x : El A) -> (k : Clock)
+   -> Eq (El A) (escape A x k) x is
+  fn (A : UF) (x : El A) (k : Clock) is refl end
+end
+
+-- `force` commutes with the functor map under the clock: forcing a `lmap`-ped delayed
+-- value is mapping the forced value. Here on a `next` intro both sides compute to
+-- `g x` on every clock — `lmap k A B g (next k A x) ~> next k B (g x)`, which force
+-- cashes to `g x`; the right side forces `next k A x` to `x` then applies `g`. refl.
+forceLmap : (A : UF) -> (B : UF) -> (g : El A -> El B) -> (x : El A) -> (k : Clock)
+   -> Eq (El B)
+        (force B (fn (j : Clock) is lmap j A B g (next j A x) end) k)
+        (g (force A (fn (j : Clock) is next j A x end) k)) is
+  fn (A : UF) (B : UF) (g : El A -> El B) (x : El A) (k : Clock) is refl end
+end

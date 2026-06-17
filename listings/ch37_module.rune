@@ -1,0 +1,30 @@
+-- Chapter 37 — Modules and namespaces (C6).
+-- A `module M is … end` block namespaces its definitions: each inner name is
+-- qualified as `M.name`, referenced with the dotted identifier (one token; `.1`/
+-- `.2` projections are unaffected). Modules are sugar over qualified-named
+-- definitions — no new core; a module is, semantically, a record of values you
+-- can also bundle as a Σ (ch27). This is the packaging the stdlib/ecosystem uses.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+module Logic is
+  not : Bool -> Bool is
+    fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+  end
+  and : Bool -> Bool -> Bool is
+    fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+  end
+end
+
+-- qualified references resolve across the namespace boundary.
+notTrue : Eq Bool (Logic.not true) false is refl false end
+andId : Eq Bool (Logic.and true false) false is refl false end
+
+-- modules compose: a downstream definition uses the namespaced operations.
+nand : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is Logic.not (Logic.and a b) end
+end
+nandFF : Eq Bool (nand false false) true is refl true end

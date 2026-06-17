@@ -1,0 +1,361 @@
+-- Chapter 100 — THE VERIFIED MAP IS A LAWFUL FUNCTOR over its values (M6 / telos-3 tiered-verified
+-- stdlib). Chapter 75 certified a finite Map over Nat keys with `lookup k (insert k v m) = some v`,
+-- and ch99 certified DELETE against `lookup`. The next stdlib increment is FUNCTORIALITY: a Map is
+-- a container of values, and `mapValues f` applies f to every stored value while preserving every
+-- key. The contract — exactly as for List (ch77) and Option (ch78) — is the NATURALITY law: how the
+-- functor action commutes with the observation `lookup`.
+--
+--   mapValues         apply f to every value, keys unchanged.
+--   optionMap         fmap on Option (the codomain of `lookup`).
+--   lookupMapValues   lookup k (mapValues f m) = optionMap f (lookup k m)   (NATURALITY / the
+--                       functor law: looking up after mapping = mapping the lookup).
+-- and the lookup-level functor laws:
+--   mapValuesIdLookup       lookup k (mapValues id m)       = lookup k m
+--   mapValuesComposeLookup  lookup k (mapValues (g∘f) m)    = lookup k (mapValues g (mapValues f m))
+--
+-- DESIGN — `mapValues f m` walks the association list (MapElim), rebuilding each `mkE k2 v2` as
+-- `mkE k2 (f v2)` (KEY PRESERVED). That key-preservation is the crux: at the `put` case `lookup`
+-- branches on `eqNat k k2`, and because `mapValues` leaves k2 untouched the guard is the SAME term
+-- on both sides — so one `BoolElim` over `eqNat k k2` lines up both `lookup`s, exactly the ch99
+-- single-guard idiom and the ch77 list-functor induction transposed onto Map/Entry.
+--
+-- Per the self-contained-listings convention, every primitive is redeclared BYTE-IDENTICAL to
+-- ch75: Bool, Nat, Option/none/some, Entry/mkE, Map/empty/put, eqNat, eqNatRefl, symBool, insert,
+-- lookup.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- a key/value entry and a map as a list of entries.
+data Entry : U -> U is
+  mkE : (V : U) -> Nat -> V -> Entry V
+end
+
+data Map : U -> U is
+  empty : (V : U) -> Map V
+| put   : (V : U) -> Entry V -> Map V -> Map V
+end
+
+-- DECIDABLE Nat equality: zero=zero, succ=succ recurse, mixed = false.
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- eqNat is REFLEXIVE: eqNat n n = true. base refl; step is the IH on the nose (eqNat (succ k)
+-- (succ k) ~> eqNat k k definitionally).
+eqNatRefl : (n : Nat) -> Eq Bool (eqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (eqNat x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (eqNat k k) true) is ih end)
+      n
+  end
+end
+
+symBool : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool b a is
+  fn (a : Bool) (b : Bool) (e : Eq Bool a b) is
+    subst Bool a b e (fn (z : Bool) is Eq Bool z a end) (refl a)
+  end
+end
+
+insert : (V : U) -> Nat -> V -> Map V -> Map V is
+  fn (V : U) (k : Nat) (v : V) (m : Map V) is put V (mkE V k v) m end
+end
+
+-- lookup: walk the entries; the first whose key equals `k` (by eqNat) wins.
+lookup : (V : U) -> Nat -> Map V -> Option V is
+  fn (V : U) (k : Nat) (m : Map V) is
+    MapElim V (fn (w : Map V) is Option V end)
+      (none V)
+      (fn (e : Entry V) (rest : Map V) (ih : Option V) is
+         EntryElim V (fn (w : Entry V) is Option V end)
+           (fn (k2 : Nat) (v2 : V) is
+              BoolElim (fn (b : Bool) is Option V end)
+                (some V v2)
+                ih
+                (eqNat k k2)
+            end)
+           e
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- optionMap — fmap on Option (REUSE of ch78's functor action, named for the law's codomain):
+-- `optionMap f (some v) ~> some (f v)`, `optionMap f none ~> none`. The codomain of `lookup`, so it
+-- is the functor that the naturality law maps the lookup through.
+-- ====================================================================================
+
+optionMap : (V : U) -> (W : U) -> (f : V -> W) -> Option V -> Option W is
+  fn (V : U) (W : U) (f : V -> W) (o : Option V) is
+    OptionElim V (fn (w : Option V) is Option W end)
+      (none W)
+      (fn (v : V) is some W (f v) end)
+      o
+  end
+end
+
+-- ====================================================================================
+-- mapValues — the FUNCTOR ACTION: apply f to every stored value, KEYS UNCHANGED. Walk the assoc-
+-- list (MapElim); at `put (mkE k2 v2) rest` rebuild the head as `put (mkE k2 (f v2)) ih` — the key
+-- k2 is preserved verbatim, only the value is transformed. The Map/Entry analog of ch77's list
+-- `map`.
+-- ====================================================================================
+
+mapValues : (V : U) -> (W : U) -> (f : V -> W) -> Map V -> Map W is
+  fn (V : U) (W : U) (f : V -> W) (m : Map V) is
+    MapElim V (fn (w : Map V) is Map W end)
+      (empty W)
+      (fn (e : Entry V) (rest : Map V) (ih : Map W) is
+         EntryElim V (fn (w : Entry V) is Map W end)
+           (fn (k2 : Nat) (v2 : V) is put W (mkE W k2 (f v2)) ih end)
+           e
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- THE NATURALITY LAW — lookupMapValues: lookup k (mapValues f m) = optionMap f (lookup k m).
+-- Induction on m.
+--   empty: lookup k (mapValues f empty) ~> lookup k empty ~> none W; optionMap f (lookup k empty)
+--     ~> optionMap f none ~> none W. refl.
+--   put (mkE k2 v2) rest: mapValues rebuilds the head as `put (mkE k2 (f v2)) (mapValues f rest)`,
+--     so the LHS lookup leads with the guard `eqNat k k2` (KEY PRESERVED — same k2). The RHS
+--     `optionMap f (lookup k (put (mkE k2 v2) rest))` leads with the SAME guard `eqNat k k2`. Branch
+--     once on it (BoolElim), motive abstracting the guard where it appears in BOTH lookups:
+--       eqNat k k2 = true: LHS ~> some W (f v2); RHS ~> optionMap f (some v2) ~> some W (f v2). refl.
+--       eqNat k k2 = false: LHS ~> lookup k (mapValues f rest); RHS ~> optionMap f (lookup k rest);
+--            related by the IH.
+--   The keys-unchanged property is exactly what makes the single guard `eqNat k k2` govern both
+--   sides — mapValues preserves the key, so lookup takes the same branch. Mirrors ch99's single-
+--   guard induction and ch77's list-functor proof.
+-- ====================================================================================
+
+lookupMapValues : (V : U) -> (W : U) -> (f : V -> W) -> (k : Nat) -> (m : Map V)
+   -> Eq (Option W) (lookup W k (mapValues V W f m)) (optionMap V W f (lookup V k m)) is
+  fn (V : U) (W : U) (f : V -> W) (k : Nat) (m : Map V) is
+    MapElim V
+      (fn (w : Map V) is
+         Eq (Option W) (lookup W k (mapValues V W f w)) (optionMap V W f (lookup V k w)) end)
+      -- empty: both ~> none W.
+      (refl (none W))
+      (fn (e : Entry V) (rest : Map V)
+          (ih : Eq (Option W) (lookup W k (mapValues V W f rest)) (optionMap V W f (lookup V k rest))) is
+         EntryElim V
+           (fn (w : Entry V) is
+              Eq (Option W)
+                (lookup W k (mapValues V W f (put V w rest)))
+                (optionMap V W f (lookup V k (put V w rest))) end)
+           (fn (k2 : Nat) (v2 : V) is
+              -- branch on eqNat k k2 (the head guard; same on both sides because mapValues keeps k2).
+              BoolElim
+                (fn (g : Bool) is
+                   Eq Bool (eqNat k k2) g
+                     -> Eq (Option W)
+                          (BoolElim (fn (b : Bool) is Option W end)
+                             (some W (f v2))
+                             (lookup W k (mapValues V W f rest))
+                             g)
+                          (optionMap V W f
+                             (BoolElim (fn (b : Bool) is Option V end)
+                                (some V v2)
+                                (lookup V k rest)
+                                g)) end)
+                -- eqNat k k2 = true: LHS some W (f v2); RHS optionMap f (some v2) ~> some W (f v2).
+                (fn (hg : Eq Bool (eqNat k k2) true) is refl (some W (f v2)) end)
+                -- eqNat k k2 = false: LHS lookup k (mapValues f rest); RHS optionMap f (lookup k rest)
+                -- = ih.
+                (fn (hg : Eq Bool (eqNat k k2) false) is ih end)
+                (eqNat k k2)
+                (refl (eqNat k k2)) end)
+           e
+       end)
+      m
+  end
+end
+
+-- ====================================================================================
+-- FUNCTOR LAW 1 (lookup-level) — mapValuesIdLookup: mapping the identity is observationally the
+-- identity. `lookup k (mapValues id m) = lookup k m`. Naturality at f = id gives `lookup k
+-- (mapValues id m) = optionMap id (lookup k m)`; `optionMap id` is the identity on Option (by case
+-- analysis, optionMapId), and trans closes it.
+-- ====================================================================================
+
+trans3 : (A : U) -> (x : A) -> (y : A) -> (z : A)
+   -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- optionMap id = id, by case analysis (OptionElim): some v ↦ some (id v) = some v; none ↦ none.
+optionMapId : (V : U) -> (o : Option V)
+   -> Eq (Option V) (optionMap V V (fn (z : V) is z end) o) o is
+  fn (V : U) (o : Option V) is
+    OptionElim V (fn (w : Option V) is Eq (Option V) (optionMap V V (fn (z : V) is z end) w) w end)
+      (refl (none V))
+      (fn (v : V) is refl (some V v) end)
+      o
+  end
+end
+
+mapValuesIdLookup : (V : U) -> (k : Nat) -> (m : Map V)
+   -> Eq (Option V) (lookup V k (mapValues V V (fn (z : V) is z end) m)) (lookup V k m) is
+  fn (V : U) (k : Nat) (m : Map V) is
+    trans3 (Option V)
+      (lookup V k (mapValues V V (fn (z : V) is z end) m))
+      (optionMap V V (fn (z : V) is z end) (lookup V k m))
+      (lookup V k m)
+      (lookupMapValues V V (fn (z : V) is z end) k m)
+      (optionMapId V (lookup V k m))
+  end
+end
+
+-- ====================================================================================
+-- FUNCTOR LAW 2 (lookup-level) — mapValuesComposeLookup: the functor respects composition.
+-- `lookup k (mapValues (g∘f) m) = lookup k (mapValues g (mapValues f m))`. Both sides reduce via
+-- naturality to an optionMap chain:
+--   LHS = optionMap (g∘f) (lookup k m)                          (lookupMapValues at g∘f)
+--   RHS = optionMap g (lookup k (mapValues f m)) = optionMap g (optionMap f (lookup k m))
+--                                                               (lookupMapValues twice)
+-- and `optionMap g (optionMap f o) = optionMap (g∘f) o` is the Option functor's composition law
+-- (optionMapCompose, by case analysis). trans assembles LHS = optionMap(g∘f)(lookup) =
+-- optionMap g (optionMap f (lookup)) = RHS.
+-- ====================================================================================
+
+-- optionMap g ∘ optionMap f = optionMap (g∘f), by case analysis (OptionElim).
+optionMapCompose : (V : U) -> (W : U) -> (X : U) -> (f : V -> W) -> (g : W -> X) -> (o : Option V)
+   -> Eq (Option X)
+        (optionMap W X g (optionMap V W f o))
+        (optionMap V X (fn (z : V) is g (f z) end) o) is
+  fn (V : U) (W : U) (X : U) (f : V -> W) (g : W -> X) (o : Option V) is
+    OptionElim V
+      (fn (w : Option V) is
+         Eq (Option X)
+           (optionMap W X g (optionMap V W f w))
+           (optionMap V X (fn (z : V) is g (f z) end) w) end)
+      (refl (none X))
+      (fn (v : V) is refl (some X (g (f v))) end)
+      o
+  end
+end
+
+-- symO — symmetry of Eq on Option, to flip a naturality fact for trans.
+symO : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (e : Eq A x y) is
+    subst A x y e (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+
+mapValuesComposeLookup : (V : U) -> (W : U) -> (X : U) -> (f : V -> W) -> (g : W -> X)
+   -> (k : Nat) -> (m : Map V)
+   -> Eq (Option X)
+        (lookup X k (mapValues V X (fn (z : V) is g (f z) end) m))
+        (lookup X k (mapValues W X g (mapValues V W f m))) is
+  fn (V : U) (W : U) (X : U) (f : V -> W) (g : W -> X) (k : Nat) (m : Map V) is
+    -- LHS = optionMap (g∘f) (lookup k m)                       [naturality at g∘f]
+    --     = optionMap g (optionMap f (lookup k m))             [optionMapCompose, flipped]
+    --     = optionMap g (lookup k (mapValues f m))             [naturality at f, flipped, under g]
+    --     = lookup k (mapValues g (mapValues f m))             [naturality at g, flipped]
+    trans3 (Option X)
+      (lookup X k (mapValues V X (fn (z : V) is g (f z) end) m))
+      (optionMap V X (fn (z : V) is g (f z) end) (lookup V k m))
+      (lookup X k (mapValues W X g (mapValues V W f m)))
+      -- step 1: naturality at g∘f.
+      (lookupMapValues V X (fn (z : V) is g (f z) end) k m)
+      (trans3 (Option X)
+        (optionMap V X (fn (z : V) is g (f z) end) (lookup V k m))
+        (optionMap W X g (optionMap V W f (lookup V k m)))
+        (lookup X k (mapValues W X g (mapValues V W f m)))
+        -- step 2: optionMapCompose flipped — optionMap (g∘f) o = optionMap g (optionMap f o).
+        (symO (Option X)
+          (optionMap W X g (optionMap V W f (lookup V k m)))
+          (optionMap V X (fn (z : V) is g (f z) end) (lookup V k m))
+          (optionMapCompose V W X f g (lookup V k m)))
+        -- step 3: rewrite optionMap f (lookup k m) back to lookup k (mapValues f m) under
+        -- optionMap g (naturality at f, flipped), then collapse the outer optionMap g via
+        -- naturality at g flipped.
+        (trans3 (Option X)
+          (optionMap W X g (optionMap V W f (lookup V k m)))
+          (optionMap W X g (lookup W k (mapValues V W f m)))
+          (lookup X k (mapValues W X g (mapValues V W f m)))
+          -- optionMap g (optionMap f (lookup k m)) = optionMap g (lookup k (mapValues f m)):
+          -- congruence of optionMap g over the flipped naturality at f.
+          (subst (Option W)
+            (optionMap V W f (lookup V k m))
+            (lookup W k (mapValues V W f m))
+            (symO (Option W)
+              (lookup W k (mapValues V W f m))
+              (optionMap V W f (lookup V k m))
+              (lookupMapValues V W f k m))
+            (fn (o : Option W) is
+               Eq (Option X)
+                 (optionMap W X g (optionMap V W f (lookup V k m)))
+                 (optionMap W X g o) end)
+            (refl (optionMap W X g (optionMap V W f (lookup V k m)))))
+          -- optionMap g (lookup k (mapValues f m)) = lookup k (mapValues g (mapValues f m)):
+          -- naturality at g (on the map `mapValues f m`), flipped.
+          (symO (Option X)
+            (lookup X k (mapValues W X g (mapValues V W f m)))
+            (optionMap W X g (lookup W k (mapValues V W f m)))
+            (lookupMapValues W X g k (mapValues V W f m)))))
+  end
+end
+
+-- ====================================================================================
+-- SANITY (representation-agnostic: assert via Eq + refl)
+-- ====================================================================================
+
+-- a concrete map { 1 -> 1, 2 -> 2 } over Nat values.
+mapOneTwo : Map Nat is
+  put Nat (mkE Nat (succ zero) (succ zero))
+    (put Nat (mkE Nat (succ (succ zero)) (succ (succ zero))) (empty Nat))
+end
+
+-- succ : Nat -> Nat, the value transform we map.
+succFn : Nat -> Nat is fn (n : Nat) is succ n end end
+
+-- lookup 1 (mapValues succ m) = some 2 (value at key 1 was 1, succ ~> 2; key unchanged).
+mapValuesAt1 : Eq (Option Nat)
+   (lookup Nat (succ zero) (mapValues Nat Nat succFn mapOneTwo))
+   (some Nat (succ (succ zero))) is
+  refl (some Nat (succ (succ zero)))
+end
+
+-- lookup 2 (mapValues succ m) = some 3 (value 2 ~> 3; key 2 unchanged).
+mapValuesAt2 : Eq (Option Nat)
+   (lookup Nat (succ (succ zero)) (mapValues Nat Nat succFn mapOneTwo))
+   (some Nat (succ (succ (succ zero)))) is
+  refl (some Nat (succ (succ (succ zero))))
+end
+
+-- a missing key stays missing: lookup 0 (mapValues succ m) = none.
+mapValuesMiss : Eq (Option Nat)
+   (lookup Nat zero (mapValues Nat Nat succFn mapOneTwo)) (none Nat) is
+  refl (none Nat)
+end

@@ -1,0 +1,67 @@
+-- Chapter 33 — A process calculus, as data (E1, the distributed substrate).
+-- The M7 distributed algebra is built on a process calculus embedded in Wootz.
+-- Syntax as a datatype (now WITH parallel composition — binary constructors
+-- work since the eliminator fix, ch34) and a small-step operational semantics as
+-- a TOTAL function (functional, since Rune has no indexed families). Channel
+-- synchronisation and bisimulation (R-CALC) are the labelled remainder; the
+-- syntax + interleaving reduction below compute and are certified by refl.
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Action : U is
+  send : Action
+| recv : Action
+| tau  : Action
+end
+
+-- Processes: termination, an action prefix, and PARALLEL composition.
+data Proc : U is
+  halt : Proc
+| act  : Action -> Proc -> Proc
+| par  : Proc -> Proc -> Proc
+end
+
+-- Interleaving small step: an action prefix fires; a parallel composition steps
+-- its left branch if it can, otherwise its right; halt is stuck. Totality is by
+-- construction (the eliminator's IHs iha = reduce a, ihb = reduce b).
+reduce : Proc -> Option Proc is
+  fn (q : Proc) is
+    ProcElim (fn (x : Proc) is Option Proc end)
+      (none Proc)
+      (fn (a : Action) (p : Proc) (ihp : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is
+         OptionElim Proc (fn (x : Option Proc) is Option Proc end)
+           (OptionElim Proc (fn (x : Option Proc) is Option Proc end)
+              (none Proc)
+              (fn (b2 : Proc) is some Proc (par a b2) end)
+              ihb)
+           (fn (a2 : Proc) is some Proc (par a2 b) end)
+           iha
+       end)
+      q
+  end
+end
+
+-- an action prefix fires.
+reduceAct : Eq (Option Proc) (reduce (act tau halt)) (some Proc halt) is
+  refl (some Proc halt)
+end
+
+-- parallel: the left branch steps first.
+reduceParLeft :
+    Eq (Option Proc) (reduce (par (act send halt) (act recv halt)))
+       (some Proc (par halt (act recv halt))) is
+  refl (some Proc (par halt (act recv halt)))
+end
+
+-- parallel: when the left is stuck (halt), the right branch steps.
+reduceParRight :
+    Eq (Option Proc) (reduce (par halt (act recv halt))) (some Proc (par halt halt)) is
+  refl (some Proc (par halt halt))
+end
+
+-- a fully halted parallel composition is stuck.
+reduceParDone : Eq (Option Proc) (reduce (par halt halt)) (none Proc) is refl (none Proc) end

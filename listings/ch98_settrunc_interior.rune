@@ -1,0 +1,108 @@
+-- Chapter 98 — The set-truncation DIM-2 INTERIOR (§F / R-HIT / A9, the M3 cubical
+-- tail). Chapter 57 made set truncation ‖A‖₀ statable, with the dim-2 path
+-- constructor `squash` (a path between paths) and the recursor `trunc0Rec`
+-- computing on the POINT constructor (`trunc0Rec … (inc a) ~> f a`). The interior
+-- — running the recursor along the `squash` SQUARE — was the honest-stuck tail.
+-- It now COMPUTES: this is the dim-2 analog of the circle's dim-1 loop rule
+-- (`circElim … (papp … loop i) ~> papp P b b l i`), lifted one dimension.
+--
+-- A squash 2-cell `squash A x y p q : p = q` (between two paths p, q : x = y in
+-- ‖A‖₀) is observed at TWO interval coordinates: i (outer, between the paths) and
+-- j (inner, along a path). The recursor into a set B sends that square to the
+-- corresponding square in B, BUILT FROM the set-witness `setB` and observed at the
+-- SAME coordinates. Writing `rec z = trunc0Rec A B setB f z` and `ap_rec p` for the
+-- recursor's action on a path (functoriality), the rule is:
+--
+--   trunc0Rec A B setB f
+--     (papp (Trunc0 A) x y (papp (pathF (Trunc0 A) x y) p q (squash A x y p q) i) j)
+--   ~>  papp B (rec x)(rec y)
+--          (papp (pathF B (rec x)(rec y)) (ap_rec p)(ap_rec q)
+--                (setB (rec x)(rec y)(ap_rec p)(ap_rec q)) i) j
+
+-- THE DIM-2 BETA, parametric in everything. The recursor along the squash square,
+-- observed at (i, j), equals the B-square (from setB) observed at (i, j) — by refl.
+-- This is the full interior reduction: the squash generator is consumed and the
+-- coherence is filled by setB definitionally.
+trunc0RecSquash : (A : UF) -> (B : UF)
+   -> (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+         -> El (pathF (pathF B x y) p q))
+   -> (f : El A -> El B)
+   -> (x : El (Trunc0 A)) -> (y : El (Trunc0 A))
+   -> (p : El (pathF (Trunc0 A) x y)) -> (q : El (pathF (Trunc0 A) x y))
+   -> (i : I) -> (j : I)
+   -> Eq (El B)
+        (trunc0Rec A B setB f
+           (papp (Trunc0 A) x y
+              (papp (pathF (Trunc0 A) x y) p q (squash A x y p q) i) j))
+        (papp B (trunc0Rec A B setB f x) (trunc0Rec A B setB f y)
+           (papp (pathF B (trunc0Rec A B setB f x) (trunc0Rec A B setB f y))
+              (pabs B (fn (k : I) is trunc0Rec A B setB f (papp (Trunc0 A) x y p k) end))
+              (pabs B (fn (k : I) is trunc0Rec A B setB f (papp (Trunc0 A) x y q k) end))
+              (setB (trunc0Rec A B setB f x) (trunc0Rec A B setB f y)
+                 (pabs B (fn (k : I) is trunc0Rec A B setB f (papp (Trunc0 A) x y p k) end))
+                 (pabs B (fn (k : I) is trunc0Rec A B setB f (papp (Trunc0 A) x y q k) end)))
+              i)
+           j) is
+  fn (A : UF) (B : UF)
+     (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+        -> El (pathF (pathF B x y) p q))
+     (f : El A -> El B)
+     (x : El (Trunc0 A)) (y : El (Trunc0 A))
+     (p : El (pathF (Trunc0 A) x y)) (q : El (pathF (Trunc0 A) x y))
+     (i : I) (j : I) is
+    refl
+  end
+end
+
+-- BOUNDARY j=i0 (the square's left edge): observing the interior at j=i0 reads off
+-- the LEFT endpoint of every path, so the recursor agrees with rec on x. Holds by
+-- refl — the dim-2 reduct and the point recursor line up on the nose at the edge.
+trunc0RecSquashJ0 : (A : UF) -> (B : UF)
+   -> (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+         -> El (pathF (pathF B x y) p q))
+   -> (f : El A -> El B)
+   -> (x : El (Trunc0 A)) -> (y : El (Trunc0 A))
+   -> (p : El (pathF (Trunc0 A) x y)) -> (q : El (pathF (Trunc0 A) x y))
+   -> (i : I)
+   -> Eq (El B)
+        (trunc0Rec A B setB f
+           (papp (Trunc0 A) x y
+              (papp (pathF (Trunc0 A) x y) p q (squash A x y p q) i) i0))
+        (trunc0Rec A B setB f x) is
+  fn (A : UF) (B : UF)
+     (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+        -> El (pathF (pathF B x y) p q))
+     (f : El A -> El B)
+     (x : El (Trunc0 A)) (y : El (Trunc0 A))
+     (p : El (pathF (Trunc0 A) x y)) (q : El (pathF (Trunc0 A) x y))
+     (i : I) is
+    refl
+  end
+end
+
+-- BOUNDARY i=i0 (the square's p-edge): observing the interior at i=i0 reads off the
+-- path p, so the recursor along the square equals the recursor along p — rec of the
+-- p-point at coordinate j. Holds by refl: the dim-2 rule's i=i0 edge is ap_rec p,
+-- whose β unfolds to exactly this.
+trunc0RecSquashI0 : (A : UF) -> (B : UF)
+   -> (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+         -> El (pathF (pathF B x y) p q))
+   -> (f : El A -> El B)
+   -> (x : El (Trunc0 A)) -> (y : El (Trunc0 A))
+   -> (p : El (pathF (Trunc0 A) x y)) -> (q : El (pathF (Trunc0 A) x y))
+   -> (j : I)
+   -> Eq (El B)
+        (trunc0Rec A B setB f
+           (papp (Trunc0 A) x y
+              (papp (pathF (Trunc0 A) x y) p q (squash A x y p q) i0) j))
+        (trunc0Rec A B setB f (papp (Trunc0 A) x y p j)) is
+  fn (A : UF) (B : UF)
+     (setB : (x : El B) -> (y : El B) -> (p : El (pathF B x y)) -> (q : El (pathF B x y))
+        -> El (pathF (pathF B x y) p q))
+     (f : El A -> El B)
+     (x : El (Trunc0 A)) (y : El (Trunc0 A))
+     (p : El (pathF (Trunc0 A) x y)) (q : El (pathF (Trunc0 A) x y))
+     (j : I) is
+    refl
+  end
+end

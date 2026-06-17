@@ -1,0 +1,578 @@
+-- Chapter 93 — The DUAL FACE of the min/max LATTICE on Nat (M6 / D-track stdlib): the
+-- order-theoretic MEET side. ch92 proved `max` the JOIN (least upper bound) — its associativity
+-- via `lteMaxL`/`lteMaxR`/`maxLub` + antisymmetry, and `maximum` a verified UPPER bound over
+-- lists. This chapter completes the lattice by proving the EXACT DUAL for `min`, the MEET
+-- (greatest lower bound):
+--   - the GLB lemmas `lteMinL`/`lteMinR`/`minGlb` (dual to ch92's `lteMaxL`/`lteMaxR`/`maxLub`):
+--     `min a b` is a lower bound of both a and b, and the GREATEST such — the reusable
+--     order-theoretic core,
+--   - `minAssoc` (the dual of ch92's `maxAssoc`), by antisymmetry of two `lte`-bounds, each
+--     assembled from `minGlb` + `lteMinL`/`lteMinR` + `lteTrans` — mirroring `maxAssoc` exactly,
+--   - `minimumOf`, the MEET fold over a NON-EMPTY list (`min`'s unit is a TOP element, not zero,
+--     so we carry the HEAD as the seed: `minimumOf (cons x xs) = foldr min x xs`), with its
+--     LOWER-BOUND spec `minimumLB`: every member is bounded BELOW by the minimum (dual to ch92's
+--     `maximumUB`).
+--
+-- The order primitives (`Bool`, `Nat`, `List`, `lte`, `or`, `lteRefl`, `lteAntisym`, `lteTotal`,
+-- `lteTrans`, `min`, `eqNat`, `mem`, …) are redeclared VERBATIM from ch65/ch80/ch82/ch83/ch92
+-- per the self-contained-listings convention.
+--
+-- DESIGN. `min a b = BoolElim _ a b (lte a b)` (the smaller; verbatim ch92). The GLB lemmas
+-- branch on `lte a b` with a motive abstracting the Bool being scrutinised, exactly the dual of
+-- the `max` join lemmas: where `max` selected the larger branch, `min` selects the smaller, so
+-- the witnesses swap (`lteRefl` vs the order fact). `minAssoc` is then the verbatim dual of
+-- `maxAssoc`: two `lte`-bounds threaded through `minGlb` + `lteMinL`/`lteMinR` + `lteTrans`,
+-- closed by `lteAntisym`.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- lte a b = (a <= b), verbatim from ch65/ch80/ch82/ch83.
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+-- or a b = Boolean disjunction (ch83).
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- SYMMETRY of the ambient equality (ch03), redeclared verbatim.
+sym : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+
+-- REFLEXIVITY (ch65), redeclared verbatim.
+lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end)
+      n
+  end
+end
+
+-- ANTISYMMETRY (ch82), redeclared verbatim.
+lteAbsurdNat : (a : Nat) -> (b : Nat) -> Eq Bool false true -> Eq Nat a b is
+  fn (a : Nat) (b : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Nat a b
+         | false -> Eq Nat a a
+         end
+       end)
+      (refl a)
+  end
+end
+
+lteAntisym : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b a) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b x) true
+           -> Eq Nat x b end)
+      (fn (b : Nat) is
+         NatElim
+           (fn (y : Nat) is
+              Eq Bool (lte zero y) true -> Eq Bool (lte y zero) true
+                -> Eq Nat zero y end)
+           (fn (hab : Eq Bool (lte zero zero) true)
+               (hba : Eq Bool (lte zero zero) true) is
+              refl zero end)
+           (fn (b' : Nat)
+               (ihb : Eq Bool (lte zero b') true -> Eq Bool (lte b' zero) true
+                        -> Eq Nat zero b') is
+              fn (hab : Eq Bool (lte zero (succ b')) true)
+                 (hba : Eq Bool false true) is
+                lteAbsurdNat zero (succ b') hba end
+            end)
+           b
+       end)
+      (fn (a' : Nat)
+          (ih : (b : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b a') true
+                  -> Eq Nat a' b) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (lte (succ a') y) true -> Eq Bool (lte y (succ a')) true
+                  -> Eq Nat (succ a') y end)
+             (fn (hab : Eq Bool false true)
+                 (hba : Eq Bool (lte zero (succ a')) true) is
+                lteAbsurdNat (succ a') zero hab end)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' (succ a')) true
+                          -> Eq Nat (succ a') b') is
+                fn (hab : Eq Bool (lte a' b') true)
+                   (hba : Eq Bool (lte b' a') true) is
+                  subst Nat a' b' (ih b' hab hba)
+                    (fn (z : Nat) is Eq Nat (succ a') (succ z) end)
+                    (refl (succ a'))
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TOTALITY (ch83), redeclared verbatim.
+lteTotal : (a : Nat) -> (b : Nat)
+   -> Eq Bool (or (lte a b) (lte b a)) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> Eq Bool (or (lte x b) (lte b x)) true end)
+      (fn (b : Nat) is refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> Eq Bool (or (lte a' b) (lte b a')) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (or (lte (succ a') y) (lte y (succ a'))) true end)
+             (refl true)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (or (lte (succ a') b') (lte b' (succ a'))) true) is
+                ih b'
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TRANSITIVITY (ch80), redeclared verbatim — the GLB bounds thread the order through it.
+lteAbsurd : (a : Nat) -> (c : Nat) -> Eq Bool false true -> Eq Bool (lte a c) true is
+  fn (a : Nat) (c : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> (c : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b c) true
+           -> Eq Bool (lte x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (hab : Eq Bool (lte zero b) true) (hbc : Eq Bool (lte b c) true) is
+         refl true end)
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> (c : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b c) true
+                  -> Eq Bool (lte a' c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                (c : Nat)
+                  -> Eq Bool (lte (succ a') y) true -> Eq Bool (lte y c) true
+                  -> Eq Bool (lte (succ a') c) true end)
+             (fn (c : Nat)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (lte zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             (fn (b' : Nat)
+                 (ihb : (c : Nat)
+                          -> Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' c) true
+                          -> Eq Bool (lte (succ a') c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (z : Nat) is
+                       Eq Bool (lte (succ a') (succ b')) true
+                         -> Eq Bool (lte (succ b') z) true
+                         -> Eq Bool (lte (succ a') z) true end)
+                    (fn (hab : Eq Bool (lte a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    (fn (c' : Nat)
+                        (ihc : Eq Bool (lte (succ a') (succ b')) true
+                                 -> Eq Bool (lte (succ b') c') true
+                                 -> Eq Bool (lte (succ a') c') true) is
+                       fn (hab : Eq Bool (lte a' b') true)
+                          (hbc : Eq Bool (lte b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- The OTHER totality disjunct (ch84 yLeX): `lte a b = false` forces `lte b a = true`.
+yLeX : (x : Nat) -> (y : Nat)
+   -> Eq Bool (lte x y) false -> Eq Bool (lte y x) true is
+  fn (x : Nat) (y : Nat) (heq : Eq Bool (lte x y) false) is
+    subst Bool (lte x y) false heq
+      (fn (z : Bool) is Eq Bool (or z (lte y x)) true end)
+      (lteTotal x y)
+  end
+end
+
+-- ====================================================================================
+-- THE MEET
+-- ====================================================================================
+
+-- min picks the smaller by branching on the comparison (BoolElim), verbatim ch65/ch92.
+min : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    BoolElim (fn (x : Bool) is Nat end) a b (lte a b)
+  end
+end
+
+-- ====================================================================================
+-- THE GLB LEMMAS — the dual of ch92's lteMaxL / lteMaxR / maxLub.
+-- ====================================================================================
+
+-- min a b <= a, always (the LEFT lower bound). Branch on lte a b: when true, min a b ~> a and
+-- a <= a is lteRefl; when false, min a b ~> b and b <= a is the OTHER disjunct (yLeX). Dual to
+-- ch92's lteMaxL (which used the witnesses the other way round).
+lteMinL : (a : Nat) -> (b : Nat) -> Eq Bool (lte (min a b) a) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte (BoolElim (fn (x : Bool) is Nat end) a b p) a) true end)
+      -- lte a b = true: min ~> a; a <= a by lteRefl.
+      (fn (hab : Eq Bool (lte a b) true) is lteRefl a end)
+      -- lte a b = false: min ~> b; b <= a is the OTHER disjunct (yLeX).
+      (fn (hab : Eq Bool (lte a b) false) is yLeX a b hab end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- min a b <= b, always (the RIGHT lower bound). Branch on lte a b: when true, min a b ~> a and
+-- a <= b is the witness hab itself; when false, min a b ~> b and b <= b is lteRefl. Dual to
+-- ch92's lteMaxR.
+lteMinR : (a : Nat) -> (b : Nat) -> Eq Bool (lte (min a b) b) true is
+  fn (a : Nat) (b : Nat) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte (BoolElim (fn (x : Bool) is Nat end) a b p) b) true end)
+      -- lte a b = true: min ~> a; the witness is hab itself.
+      (fn (hab : Eq Bool (lte a b) true) is hab end)
+      -- lte a b = false: min ~> b; b <= b by lteRefl.
+      (fn (hab : Eq Bool (lte a b) false) is lteRefl b end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- minGlb: if c <= a and c <= b then c <= min a b (min is the GREATEST lower bound). Branch on
+-- lte a b: min a b is whichever of a, b is selected, and the matching premise discharges it.
+-- Dual to ch92's maxLub.
+minGlb : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte c a) true -> Eq Bool (lte c b) true -> Eq Bool (lte c (min a b)) true is
+  fn (a : Nat) (b : Nat) (c : Nat)
+     (hca : Eq Bool (lte c a) true) (hcb : Eq Bool (lte c b) true) is
+    BoolElim
+      (fn (p : Bool) is
+         Eq Bool (lte a b) p
+           -> Eq Bool (lte c (BoolElim (fn (x : Bool) is Nat end) a b p)) true end)
+      -- lte a b = true: min ~> a; c <= a is hca.
+      (fn (hab : Eq Bool (lte a b) true) is hca end)
+      -- lte a b = false: min ~> b; c <= b is hcb.
+      (fn (hab : Eq Bool (lte a b) false) is hcb end)
+      (lte a b)
+      (refl (lte a b))
+  end
+end
+
+-- ====================================================================================
+-- ASSOCIATIVITY of min — the verbatim dual of ch92's maxAssoc.
+-- ====================================================================================
+
+-- min a (min b c) <= min (min a b) c. By minGlb on the two factors of the RHS:
+--   min a (min b c) <= min a b   : it is <= a (lteMinL) and <= b (lteMinR then lteMinL), minGlb;
+--   min a (min b c) <= c         : <= min b c (lteMinR) <= c (lteMinR), trans.
+minAssocLe1 : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte (min a (min b c)) (min (min a b) c)) true is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    minGlb (min a b) c (min a (min b c))
+      -- min a (min b c) <= min a b : <= a and <= b, then minGlb.
+      (minGlb a b (min a (min b c))
+         -- min a (min b c) <= a (lteMinL).
+         (lteMinL a (min b c))
+         -- min a (min b c) <= min b c (lteMinR) <= b (lteMinL).
+         (lteTrans (min a (min b c)) (min b c) b
+            (lteMinR a (min b c))
+            (lteMinL b c)))
+      -- min a (min b c) <= min b c (lteMinR) <= c (lteMinR).
+      (lteTrans (min a (min b c)) (min b c) c
+         (lteMinR a (min b c))
+         (lteMinR b c))
+  end
+end
+
+-- min (min a b) c <= min a (min b c), the mirror image.
+minAssocLe2 : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Bool (lte (min (min a b) c) (min a (min b c))) true is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    minGlb a (min b c) (min (min a b) c)
+      -- min (min a b) c <= min a b (lteMinL) <= a (lteMinL), trans.
+      (lteTrans (min (min a b) c) (min a b) a
+         (lteMinL (min a b) c)
+         (lteMinL a b))
+      -- min (min a b) c <= min b c : <= b and <= c, then minGlb.
+      (minGlb b c (min (min a b) c)
+         -- min (min a b) c <= min a b (lteMinL) <= b (lteMinR), trans.
+         (lteTrans (min (min a b) c) (min a b) b
+            (lteMinL (min a b) c)
+            (lteMinR a b))
+         -- min (min a b) c <= c (lteMinR).
+         (lteMinR (min a b) c))
+  end
+end
+
+-- ASSOCIATIVITY of min, by antisymmetry of the two bounds. The dual of ch92's maxAssoc.
+minAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (min a (min b c)) (min (min a b) c) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    lteAntisym (min a (min b c)) (min (min a b) c)
+      (minAssocLe1 a b c)
+      (minAssocLe2 a b c)
+  end
+end
+
+-- ====================================================================================
+-- minimum FOLD over a NON-EMPTY List Nat
+-- ====================================================================================
+
+-- min's unit is a TOP element, not zero, so there is no neutral seed to fold from nil. We carry
+-- the HEAD as the seed: minimumOf (cons x xs) = foldr min x xs. Encode it as a function of a
+-- seed and the list, then expose the cons-form. `minFold s xs = foldr min s xs` folds min over
+-- xs with seed s.
+minFold : Nat -> List Nat -> Nat is
+  fn (s : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      s
+      (fn (x : Nat) (rest : List Nat) (ih : Nat) is min x ih end)
+      xs
+  end
+end
+
+-- minimumOf over a non-empty list, presented as head + tail (so there is always a seed). The
+-- top-level entry consumes the head as the seed of the fold over the tail.
+minimumOf : Nat -> List Nat -> Nat is
+  fn (x : Nat) (xs : List Nat) is minFold x xs end
+end
+
+-- COMPUTATION RULES — the fold's defining equations, by refl.
+minFoldNil : (s : Nat) -> Eq Nat (minFold s (nil Nat)) s is
+  fn (s : Nat) is refl s end
+end
+
+minFoldCons : (s : Nat) -> (x : Nat) -> (xs : List Nat)
+   -> Eq Nat (minFold s (cons Nat x xs)) (min x (minFold s xs)) is
+  fn (s : Nat) (x : Nat) (xs : List Nat) is refl (min x (minFold s xs)) end
+end
+
+-- ====================================================================================
+-- minimumLB — the LOWER-BOUND spec (dual to ch92's maximumUB).
+-- ====================================================================================
+
+-- Boolean Nat equality, verbatim from ch92/ch75.
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (y : Nat) is Bool end) true (fn (m : Nat) (ih2 : Bool) is false end) n end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (m : Nat) (ih2 : Bool) is ih m end) n end
+       end)
+      a
+  end
+end
+
+-- mem x xs : x occurs in xs (a Bool), verbatim ch92.
+mem : Nat -> List Nat -> Bool is
+  fn (x : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (y : Nat) (rest : List Nat) (ih : Bool) is or (eqNat x y) ih end)
+      xs
+  end
+end
+
+-- When eqNat x y = true, x = y (decidable equality is sound), verbatim ch92.
+eqNatSound : (x : Nat) -> (y : Nat) -> Eq Bool (eqNat x y) true -> Eq Nat x y is
+  fn (x : Nat) is
+    NatElim
+      (fn (w : Nat) is (y : Nat) -> Eq Bool (eqNat w y) true -> Eq Nat w y end)
+      -- x = zero.
+      (fn (y : Nat) is
+         NatElim
+           (fn (u : Nat) is Eq Bool (eqNat zero u) true -> Eq Nat zero u end)
+           (fn (h : Eq Bool true true) is refl zero end)
+           (fn (m : Nat) (ihm : Eq Bool (eqNat zero m) true -> Eq Nat zero m) is
+              fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat zero (succ m)
+                     | false -> Eq Nat zero zero
+                     end
+                   end)
+                  (refl zero) end
+            end)
+           y end)
+      -- x = succ k.
+      (fn (k : Nat) (ih : (y : Nat) -> Eq Bool (eqNat k y) true -> Eq Nat k y) is
+         fn (y : Nat) is
+           NatElim
+             (fn (u : Nat) is Eq Bool (eqNat (succ k) u) true -> Eq Nat (succ k) u end)
+             -- y = zero: eqNat (succ k) zero ~> false; absurd.
+             (fn (h : Eq Bool false true) is
+                subst Bool false true h
+                  (fn (z : Bool) is
+                     case z of
+                     | true  -> Eq Nat (succ k) zero
+                     | false -> Eq Nat (succ k) (succ k)
+                     end
+                   end)
+                  (refl (succ k)) end)
+             -- y = succ m: eqNat (succ k) (succ m) ~> eqNat k m; IH then congSucc.
+             (fn (m : Nat) (ihm : Eq Bool (eqNat (succ k) m) true -> Eq Nat (succ k) m) is
+                fn (h : Eq Bool (eqNat k m) true) is
+                  subst Nat k m (ih m h)
+                    (fn (z : Nat) is Eq Nat (succ k) (succ z) end)
+                    (refl (succ k)) end
+              end)
+             y end
+       end)
+      x
+  end
+end
+
+-- The lower-bound congruence: from minFold s rest <= x conclude min y (minFold s rest) <= x
+-- (compose lteMinR with trans). The dual of ch92's lteMaxOfTail.
+lteMinOfTail : (x : Nat) -> (y : Nat) -> (s : Nat) -> (rest : List Nat)
+   -> Eq Bool (lte (minFold s rest) x) true
+   -> Eq Bool (lte (min y (minFold s rest)) x) true is
+  fn (x : Nat) (y : Nat) (s : Nat) (rest : List Nat)
+     (h : Eq Bool (lte (minFold s rest) x) true) is
+    lteTrans (min y (minFold s rest)) (minFold s rest) x
+      (lteMinR y (minFold s rest))
+      h
+  end
+end
+
+-- minFoldLB: every member of xs is bounded BELOW by the seeded fold `minFold s xs`. Induction on
+-- xs. At nil, membership is `false = true`, absurd. At cons y rest, `mem x ~> or (eqNat x y)
+-- (mem x rest)`; case on eqNat x y: if true, x = y and min y (minFold s rest) <= y by lteMinL
+-- (after rewriting y back to x); if false, membership collapses to `mem x rest`, the IH gives
+-- minFold s rest <= x, and lteMinR (via lteMinOfTail) lowers it through the head `min y _`. The
+-- dual of ch92's maximumUB.
+minFoldLB : (s : Nat) -> (xs : List Nat) -> (x : Nat)
+   -> Eq Bool (mem x xs) true -> Eq Bool (lte (minFold s xs) x) true is
+  fn (s : Nat) (xs : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         (x : Nat) -> Eq Bool (mem x w) true -> Eq Bool (lte (minFold s w) x) true end)
+      -- nil: mem x nil ~> false; the premise is false = true, absurd.
+      (fn (x : Nat) (h : Eq Bool false true) is lteAbsurd (minFold s (nil Nat)) x h end)
+      (fn (y : Nat) (rest : List Nat)
+          (ih : (x : Nat) -> Eq Bool (mem x rest) true
+                  -> Eq Bool (lte (minFold s rest) x) true) is
+         fn (x : Nat) is
+           -- mem x (cons y rest) ~> or (eqNat x y) (mem x rest). Case on eqNat x y, abstracting
+           -- its branch equation so the disjunction reduces in each arm. The goal head is
+           -- `min y (minFold s rest)` (minFoldCons).
+           BoolElim
+             (fn (e : Bool) is
+                Eq Bool (eqNat x y) e
+                  -> Eq Bool (or e (mem x rest)) true
+                  -> Eq Bool (lte (min y (minFold s rest)) x) true end)
+             -- eqNat x y = true: x = y. lteMinL y _ gives `lte (min y _) y = true`; rewrite the
+             -- TRAILING y back to x.
+             (fn (heq : Eq Bool (eqNat x y) true) (hmem : Eq Bool true true) is
+                subst Nat y x (sym Nat x y (eqNatSound x y heq))
+                  (fn (z : Nat) is Eq Bool (lte (min y (minFold s rest)) z) true end)
+                  (lteMinL y (minFold s rest)) end)
+             -- eqNat x y = false: membership ~> mem x rest. IH + lteMinR (via lteMinOfTail).
+             (fn (heq : Eq Bool (eqNat x y) false) (hmem : Eq Bool (mem x rest) true) is
+                lteMinOfTail x y s rest (ih x hmem) end)
+             (eqNat x y)
+             (refl (eqNat x y))
+         end
+       end)
+      xs
+  end
+end
+
+-- minimumLB: the minimum of a non-empty list (head x, tail xs) is a lower bound of every member
+-- of its TAIL. The top-level spec, an instance of minFoldLB with the seed = head.
+minimumLB : (x : Nat) -> (xs : List Nat) -> (m : Nat)
+   -> Eq Bool (mem m xs) true -> Eq Bool (lte (minimumOf x xs) m) true is
+  fn (x : Nat) (xs : List Nat) (m : Nat) (h : Eq Bool (mem m xs) true) is
+    minFoldLB x xs m h
+  end
+end
+
+-- ====================================================================================
+-- SANITY
+-- ====================================================================================
+
+one : Nat is succ zero end
+two : Nat is succ (succ zero) end
+three : Nat is succ (succ (succ zero)) end
+
+-- min 2 3 = 2, the canonical refl.
+minTwoThree : Eq Nat (min two three) two is refl two end
+
+-- minimumOf 3 [1,2] = 1 (i.e. minimum of [3,1,2] = 1, head 3 seeded over the tail [1,2]).
+oneTwo : List Nat is
+  cons Nat one
+    (cons Nat two (nil Nat))
+end
+
+minExample : Eq Nat (minimumOf three oneTwo) one is refl one end

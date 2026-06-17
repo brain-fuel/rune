@@ -1,0 +1,321 @@
+-- Chapter 89 — THE PERMUTATION ALGEBRA, continued: adjacent-head TRANSPOSITION and the APPEND
+-- CONGRUENCE. ch88 began a reusable permutation algebra with a CONS-congruence (`permCons`); here
+-- we add the two structural laws that turn it into the toolkit certified merge/quicksort
+-- permutation proofs are assembled from:
+--   (1) permSwap  : (x y : Nat) -> (zs : List Nat)
+--          -> Permutation (cons x (cons y zs)) (cons y (cons x zs))
+--       — swapping the two HEAD elements is a permutation. At each key k,
+--       `count k (cons x (cons y zs))` computes to `bump (eqNat k x) (bump (eqNat k y) (count k zs))`
+--       and the swapped side to `bump (eqNat k y) (bump (eqNat k x) (count k zs))`; the two
+--       conditional +1 increments COMMUTE, which is EXACTLY `bumpSwap` (ch85). So `permSwap k` IS
+--       `bumpSwap (eqNat k y) (eqNat k x) (count k zs)` — note the orientation: `bumpSwap cx cy n :
+--       Eq (bump cy (bump cx n)) (bump cx (bump cy n))`, so with `cx := eqNat k y`, `cy := eqNat k x`
+--       its statement reads `bump (eqNat k x) (bump (eqNat k y) n) = bump (eqNat k y) (bump (eqNat k x) n)`,
+--       which is the goal on the nose.
+--   (2) appendCount : (k : Nat) -> (xs us : List Nat)
+--          -> Eq Nat (count k (append xs us)) (add (count k xs) (count k us))
+--       — `count k` is a HOMOMORPHISM from (List, append) to (Nat, +): the occurrences in a
+--       concatenation are the sum of the occurrences in the parts. The BRIDGE lemma. By induction
+--       on xs; the cons step pushes the head's `bump` past the recursive `add` via `bumpAddL`
+--       (`bump c (add m n) = add (bump c m) n`, definitional in both Bool cases).
+--   (3) permAppCong : (xs ys us vs : List Nat)
+--          -> Permutation xs ys -> Permutation us vs
+--          -> Permutation (append xs us) (append ys vs)
+--       — APPEND is a permutation CONGRUENCE: concatenating permuted halves gives permuted wholes.
+--       At each key k, `appendCount` rewrites both sides to sums, then `addCong` combines the two
+--       hypotheses `p k` / `q k`. The left-congruence `permAppL` is the `vs := us` specialisation.
+--
+-- Per the self-contained-listings convention, `Bool`, `Nat`, `List`, `eqNat`, `count`, `bump`,
+-- `bumpSwap` (ch85), `Permutation` / `permCons` (ch87/ch88), and `append` (ch73, polymorphic) are
+-- redeclared VERBATIM. `add` is the ch63 Nat addition; `addCong`/`bumpAddL` are new bridge lemmas.
+-- No admits, holes, or postulates.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- DECIDABLE Nat equality (verbatim from ch75/ch85).
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is
+         NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) n
+       end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is ihk j end) n
+         end
+       end)
+      m
+  end
+end
+
+-- Nat addition, recursing on the FIRST argument (verbatim from ch63): add zero n ~> n,
+-- add (succ m) n ~> succ (add m n).
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end)
+      b
+      (fn (k : Nat) (ih : Nat) is succ ih end)
+      a
+  end
+end
+
+-- OCCURRENCE COUNT (verbatim from ch85).
+count : Nat -> List Nat -> Nat is
+  fn (k : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (y : Nat) (ys : List Nat) (ih : Nat) is
+         BoolElim (fn (b : Bool) is Nat end) (succ ih) ih (eqNat k y)
+       end)
+      xs
+  end
+end
+
+bump : Bool -> Nat -> Nat is
+  fn (c : Bool) (n : Nat) is BoolElim (fn (b : Bool) is Nat end) (succ n) n c end
+end
+
+bumpSwap : (cx : Bool) -> (cy : Bool) -> (n : Nat)
+   -> Eq Nat (bump cy (bump cx n)) (bump cx (bump cy n)) is
+  fn (cx : Bool) (cy : Bool) (n : Nat) is
+    BoolElim
+      (fn (cyv : Bool) is Eq Nat (bump cyv (bump cx n)) (bump cx (bump cyv n)) end)
+      (BoolElim
+         (fn (bx : Bool) is Eq Nat (succ (bump bx n)) (bump bx (succ n)) end)
+         (refl (succ (succ n)))
+         (refl (succ n))
+         cx)
+      (refl (bump cx n))
+      cy
+  end
+end
+
+-- append, IDENTICAL to ch73 (polymorphic; left-unit `append A nil ys ~> ys` is definitional).
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (x : A) (rest : List A) (ih : List A) is cons A x ih end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- PERMUTATION as a NAMED PREDICATE + the cons-congruence (ch87/ch88), verbatim
+-- ====================================================================================
+
+Permutation : List Nat -> List Nat -> U is
+  fn (xs : List Nat) (ys : List Nat) is
+    (k : Nat) -> Eq Nat (count k xs) (count k ys)
+  end
+end
+
+permCons : (x : Nat) -> (xs : List Nat) -> (ys : List Nat)
+   -> Permutation xs ys -> Permutation (cons Nat x xs) (cons Nat x ys) is
+  fn (x : Nat) (xs : List Nat) (ys : List Nat) (p : Permutation xs ys) is
+    fn (k : Nat) is
+      subst Nat (count k xs) (count k ys) (p k)
+        (fn (n : Nat) is
+           Eq Nat (bump (eqNat k x) (count k xs)) (bump (eqNat k x) n) end)
+        (refl (bump (eqNat k x) (count k xs)))
+    end
+  end
+end
+
+-- ====================================================================================
+-- (1) ADJACENT-HEAD TRANSPOSITION IS A PERMUTATION
+-- ====================================================================================
+
+-- permSwap: swapping the two head elements keeps the multiset of occurrences. At key k each side
+-- computes (ListElim ι, twice; BoolElim) to a pair of conditional increments differing only in
+-- their order, equated by `bumpSwap`. With cx := eqNat k y and cy := eqNat k x, `bumpSwap cx cy n`
+-- has type `Eq Nat (bump (eqNat k x) (bump (eqNat k y) n)) (bump (eqNat k y) (bump (eqNat k x) n))`
+-- — exactly the goal at n := count k zs.
+permSwap : (x : Nat) -> (y : Nat) -> (zs : List Nat)
+   -> Permutation (cons Nat x (cons Nat y zs)) (cons Nat y (cons Nat x zs)) is
+  fn (x : Nat) (y : Nat) (zs : List Nat) is
+    fn (k : Nat) is
+      bumpSwap (eqNat k y) (eqNat k x) (count k zs)
+    end
+  end
+end
+
+-- ====================================================================================
+-- (2) THE BRIDGE: count IS AN APPEND-HOMOMORPHISM
+-- ====================================================================================
+
+-- bumpAddL: the head increment slides out of a sum. Both Bool cases are definitional —
+-- bump true (add m n) = succ (add m n) = add (succ m) n = add (bump true m) n, and
+-- bump false (add m n) = add m n = add (bump false m) n.
+bumpAddL : (c : Bool) -> (m : Nat) -> (n : Nat)
+   -> Eq Nat (bump c (add m n)) (add (bump c m) n) is
+  fn (c : Bool) (m : Nat) (n : Nat) is
+    BoolElim (fn (b : Bool) is Eq Nat (bump b (add m n)) (add (bump b m) n) end)
+      (refl (add (succ m) n))
+      (refl (add m n))
+      c
+  end
+end
+
+-- symmetry / transitivity of Eq Nat, by Leibniz transport (ch03 idiom).
+symNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat b a is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat z a end) (refl a)
+  end
+end
+
+transNat : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat a b -> Eq Nat b c -> Eq Nat a c is
+  fn (a : Nat) (b : Nat) (c : Nat) (e1 : Eq Nat a b) (e2 : Eq Nat b c) is
+    subst Nat b c e2 (fn (z : Nat) is Eq Nat a z end) e1
+  end
+end
+
+-- appendCount: count k (append xs us) = add (count k xs) (count k us). count is a monoid
+-- homomorphism (List,append,nil) -> (Nat,+,0). By induction on xs. nil: append nil us ~> us and
+-- add (count k nil) (count k us) = add zero (count k us) ~> count k us, both refl. cons x rest:
+-- LHS ~> bump (eqNat k x) (count k (append rest us)); rewrite by the IH to bump c (add (count k
+-- rest) (count k us)); then bumpAddL slides the bump into the left summand, matching the goal
+-- add (bump c (count k rest)) (count k us) = add (count k (cons x rest)) (count k us).
+appendCount : (k : Nat) -> (xs : List Nat) -> (us : List Nat)
+   -> Eq Nat (count k (append Nat xs us)) (add (count k xs) (count k us)) is
+  fn (k : Nat) (xs : List Nat) (us : List Nat) is
+    ListElim Nat
+      (fn (w : List Nat) is
+         Eq Nat (count k (append Nat w us)) (add (count k w) (count k us)) end)
+      (refl (count k us))
+      (fn (x : Nat) (rest : List Nat)
+          (ih : Eq Nat (count k (append Nat rest us)) (add (count k rest) (count k us))) is
+         subst Nat (add (count k rest) (count k us)) (count k (append Nat rest us))
+           (symNat (count k (append Nat rest us)) (add (count k rest) (count k us)) ih)
+           (fn (n : Nat) is
+              Eq Nat
+                (bump (eqNat k x) n)
+                (add (bump (eqNat k x) (count k rest)) (count k us)) end)
+           (bumpAddL (eqNat k x) (count k rest) (count k us))
+       end)
+      xs
+  end
+end
+
+-- ====================================================================================
+-- (3) APPEND IS A PERMUTATION CONGRUENCE
+-- ====================================================================================
+
+-- addCong: + respects Eq in both arguments. Pointwise transport: rewrite the left summand by ea,
+-- then the right by eb.
+addCong : (a : Nat) -> (a2 : Nat) -> (b : Nat) -> (b2 : Nat)
+   -> Eq Nat a a2 -> Eq Nat b b2 -> Eq Nat (add a b) (add a2 b2) is
+  fn (a : Nat) (a2 : Nat) (b : Nat) (b2 : Nat) (ea : Eq Nat a a2) (eb : Eq Nat b b2) is
+    subst Nat b b2 eb
+      (fn (n : Nat) is Eq Nat (add a b) (add a2 n) end)
+      (subst Nat a a2 ea
+         (fn (m : Nat) is Eq Nat (add a b) (add m b) end)
+         (refl (add a b)))
+  end
+end
+
+-- permAppCong: append is a congruence for Permutation. At each key k, appendCount rewrites both
+-- sides of the goal to sums of part-counts; the two halves' hypotheses (p k : count k xs = count k
+-- ys, q k : count k us = count k vs) combine by addCong; the two appendCount equalities re-aim the
+-- ends onto the actual count-of-append terms. We thread it with subst on both appendCount facts.
+permAppCong : (xs : List Nat) -> (ys : List Nat) -> (us : List Nat) -> (vs : List Nat)
+   -> Permutation xs ys -> Permutation us vs
+   -> Permutation (append Nat xs us) (append Nat ys vs) is
+  fn (xs : List Nat) (ys : List Nat) (us : List Nat) (vs : List Nat)
+     (p : Permutation xs ys) (q : Permutation us vs) is
+    fn (k : Nat) is
+      -- count k (append xs us) = add (count k xs)(count k us)   [appendCount]
+      --                        = add (count k ys)(count k vs)   [addCong (p k)(q k)]
+      --                        = count k (append ys vs)         [sym appendCount]
+      transNat
+        (count k (append Nat xs us))
+        (add (count k ys) (count k vs))
+        (count k (append Nat ys vs))
+        (transNat
+           (count k (append Nat xs us))
+           (add (count k xs) (count k us))
+           (add (count k ys) (count k vs))
+           (appendCount k xs us)
+           (addCong (count k xs) (count k ys) (count k us) (count k vs) (p k) (q k)))
+        (symNat (count k (append Nat ys vs)) (add (count k ys) (count k vs))
+           (appendCount k ys vs))
+    end
+  end
+end
+
+-- LEFT CONGRUENCE: the vs := us specialisation, with the right half reflexive.
+permAppL : (xs : List Nat) -> (ys : List Nat) -> (us : List Nat)
+   -> Permutation xs ys -> Permutation (append Nat xs us) (append Nat ys us) is
+  fn (xs : List Nat) (ys : List Nat) (us : List Nat) (p : Permutation xs ys) is
+    permAppCong xs ys us us p (fn (k : Nat) is refl (count k us) end)
+  end
+end
+
+-- ====================================================================================
+-- SANITY: the new laws, concretely
+-- ====================================================================================
+
+threeOneTwo : List Nat is
+  cons Nat (succ (succ (succ zero)))
+    (cons Nat (succ zero)
+      (cons Nat (succ (succ zero)) (nil Nat)))
+end
+
+oneTwo : List Nat is
+  cons Nat (succ zero) (cons Nat (succ (succ zero)) (nil Nat))
+end
+
+-- Transposing the first two heads of [3,1,2] gives a permutation [3,1,2] ~ [1,3,2].
+permSwapExample : Permutation
+   (cons Nat (succ (succ (succ zero))) (cons Nat (succ zero) (cons Nat (succ (succ zero)) (nil Nat))))
+   (cons Nat (succ zero) (cons Nat (succ (succ (succ zero))) (cons Nat (succ (succ zero)) (nil Nat)))) is
+  permSwap (succ (succ (succ zero))) (succ zero)
+    (cons Nat (succ (succ zero)) (nil Nat))
+end
+
+-- count is an append-homomorphism, here for key 1 over [3,1,2] ++ [1,2].
+appendCountExample : Eq Nat
+   (count (succ zero) (append Nat threeOneTwo oneTwo))
+   (add (count (succ zero) threeOneTwo) (count (succ zero) oneTwo)) is
+  appendCount (succ zero) threeOneTwo oneTwo
+end
+
+-- append is a congruence: from [3,1,2] ~ [3,1,2] and [1,2] ~ [1,2] (both reflexive), the
+-- concatenation [3,1,2]++[1,2] ~ [3,1,2]++[1,2] — and more usefully, permAppL lifts any left
+-- permutation through a fixed right segment.
+permAppCongExample : Permutation
+   (append Nat threeOneTwo oneTwo)
+   (append Nat threeOneTwo oneTwo) is
+  permAppCong threeOneTwo threeOneTwo oneTwo oneTwo
+    (fn (k : Nat) is refl (count k threeOneTwo) end)
+    (fn (k : Nat) is refl (count k oneTwo) end)
+end
+
+-- permAppL: swapping the heads of the left segment, then appending [1,2], stays a permutation.
+permAppLExample : Permutation
+   (append Nat
+      (cons Nat (succ (succ (succ zero))) (cons Nat (succ zero) (cons Nat (succ (succ zero)) (nil Nat))))
+      oneTwo)
+   (append Nat
+      (cons Nat (succ zero) (cons Nat (succ (succ (succ zero))) (cons Nat (succ (succ zero)) (nil Nat))))
+      oneTwo) is
+  permAppL
+    (cons Nat (succ (succ (succ zero))) (cons Nat (succ zero) (cons Nat (succ (succ zero)) (nil Nat))))
+    (cons Nat (succ zero) (cons Nat (succ (succ (succ zero))) (cons Nat (succ (succ zero)) (nil Nat))))
+    oneTwo
+    permSwapExample
+end

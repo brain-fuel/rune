@@ -1,0 +1,143 @@
+package store
+
+import "goforge.dev/rune/v3/core"
+
+// The cubical path builtin group (§F phase 2): inner paths given COMPUTATIONAL
+// content as interval functions. An inner path p : El (pathF A x y) is morally a
+// function I -> El A pinned at the endpoints (p i0 = x, p i1 = y); these two
+// operations make that real, shipped as a fifth builtin group on its own hash
+// space so the fibrant group (and ch09–ch10 hashes) stay untouched.
+//
+//	pabs : (A : UF) -> (f : (i : I) -> El A) -> El (pathF A (f i0) (f i1))
+//	papp : (A : UF) -> (x y : El A) -> El (pathF A x y) -> (i : I) -> El A
+//
+// pabs is a canonical path intro (a permanently neutral head, like a datatype
+// constructor); papp COMPUTES (core.PathInfo / the evaluator's tryPathIota):
+//
+//	papp A _ _ (pabs A' f)    i   ~>  f i     β: applying an abstraction
+//	papp A x x (preflF A' x') i   ~>  x'      reflexivity is the constant path
+//	papp A x y  p             i0  ~>  x       boundary: a path at i0 is its left end
+//	papp A x y  p             i1  ~>  y       boundary: a path at i1 is its right end
+//
+// The boundary rules fire for ANY path p (even a neutral variable) — the
+// defining property of the path type, definitional. What does NOT compute yet:
+// pathJ over a non-refl path (needs Kan transport, phase 3) and the path LAWS as
+// definitional equalities (they are paths, provable). No hash-format bump: no
+// new core constructor exists. The group's member types reference the fibrant
+// and interval groups by their registered hashes, so AddPath takes them.
+
+var pathNames = [2]string{"pabs", "papp"}
+
+type pathEntry struct {
+	hashes [2]core.Hash
+}
+
+// AddPath registers the cubical path builtin group against the already-
+// registered fibrant (fib) and interval (iv) groups, binding its names and
+// returning the member hashes in pathNames order.
+func (s *Store) AddPath(fib [10]core.Hash, iv [6]core.Hash) [2]core.Hash {
+	tys := pathTypes(fib, iv)
+
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'P'})
+	for _, ty := range tys {
+		th := core.HashTerm(ty)
+		g.Write(th[:])
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	var hs [2]core.Hash
+	for i := range hs {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, 'p'})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		copy(hs[i][:], h.Sum(nil))
+	}
+
+	for i, ty := range tys {
+		s.defs[hs[i]] = Def{Type: ty}
+		s.names[pathNames[i]] = hs[i]
+	}
+	s.pa = &pathEntry{hashes: hs}
+	return hs
+}
+
+// PathRoleOf implements core.PathInfo.
+func (s *Store) PathRoleOf(h core.Hash) core.PathRole {
+	if s.pa == nil {
+		return core.PRoleNone
+	}
+	switch h {
+	case s.pa.hashes[0]:
+		return core.PRoleAbs
+	case s.pa.hashes[1]:
+		return core.PRoleApp
+	}
+	return core.PRoleNone
+}
+
+// PathHash implements core.PathInfo: the reverse lookup, for the structural Kan
+// rules to CONSTRUCT pabs/papp sub-terms (R-BOX pathF hcomp).
+func (s *Store) PathHash(role core.PathRole) (core.Hash, bool) {
+	if s.pa == nil {
+		return core.Hash{}, false
+	}
+	switch role {
+	case core.PRoleAbs:
+		return s.pa.hashes[0], true
+	case core.PRoleApp:
+		return s.pa.hashes[1], true
+	}
+	return core.Hash{}, false
+}
+
+// PathHashes returns the registered group's hashes (and whether it exists).
+func (s *Store) PathHashes() ([2]core.Hash, bool) {
+	if s.pa == nil {
+		return [2]core.Hash{}, false
+	}
+	return s.pa.hashes, true
+}
+
+// PathNames returns the surface names of the group members, in hash order.
+func PathNames() [2]string { return pathNames }
+
+// pathTypes builds the two member types, referencing the fibrant group
+// (UF = fib[0], El = fib[1], pathF = fib[4]) and the interval (I = iv[0],
+// i0 = iv[1], i1 = iv[2]) by their registered hashes. Scope names are display
+// hints only and are not hashed.
+func pathTypes(fib [10]core.Hash, iv [6]core.Hash) [2]core.Tm {
+	v := func(i int) core.Tm { return core.Var{Idx: i} }
+	pi := func(name string, dom core.Tm, cod core.Tm) core.Tm {
+		return core.Pi{Dom: dom, Cod: core.Scope{Name: name, Body: cod}}
+	}
+	app := func(f core.Tm, xs ...core.Tm) core.Tm {
+		for _, x := range xs {
+			f = core.App{Fn: f, Arg: x, Icit: core.Expl}
+		}
+		return f
+	}
+	uf := core.Tm(core.Ref{Hash: fib[0]})
+	el := func(x core.Tm) core.Tm { return app(core.Ref{Hash: fib[1]}, x) }
+	pathF := core.Tm(core.Ref{Hash: fib[4]})
+	ivTy := core.Tm(core.Ref{Hash: iv[0]})
+	i0 := core.Tm(core.Ref{Hash: iv[1]})
+	i1 := core.Tm(core.Ref{Hash: iv[2]})
+
+	// pabs : (A : UF) -> (f : (i : I) -> El A) -> El (pathF A (f i0) (f i1))
+	pabsTy := pi("A", uf,
+		pi("f", pi("i", ivTy, el(v(1))), // under i: A = 1
+			el(app(pathF, v(1), app(v(0), i0), app(v(0), i1))))) // [f, A]: A=1, f=0
+
+	// papp : (A : UF) -> (x : El A) -> (y : El A) -> El (pathF A x y) -> (i : I) -> El A
+	pappTy := pi("A", uf,
+		pi("x", el(v(0)),
+			pi("y", el(v(1)),
+				pi("p", el(app(pathF, v(2), v(1), v(0))), // [y, x, A]: A=2, x=1, y=0
+					pi("i", ivTy,
+						el(v(4))))))) // [i, p, y, x, A]: A = 4
+
+	return [2]core.Tm{pabsTy, pappTy}
+}

@@ -1,0 +1,276 @@
+-- Chapter 70 — Process traces: wiring the closed E2 converse into the process calculus (E3).
+-- ch33/ch38 gave the process calculus (E1) — syntax `Proc` + a total small-step `reduce`. ch69
+-- closed the E2 converse (bisimilarity ⟹ path for the coinductive `Str`) and the trace machinery
+-- `traceOf` (an LTS coalgebra corecurses a state's observation stream). This chapter GROUNDS that
+-- machinery on the real `reduce` coalgebra: a process's behaviour IS the stream of its successive
+-- reduction observations, and the trace's observations COMPUTE (where the abstract `traceHead`/
+-- `traceTail` of ch69 were stuck on a neutral coalgebra). The outer `Proc` crosses into the
+-- fibrant world via `fib` (`El (fib X) ≡ X` for a small outer type).
+
+-- The process calculus (E1), as in ch33.
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Action : U is
+  send : Action
+| recv : Action
+| tau  : Action
+end
+
+data Proc : U is
+  halt : Proc
+| act  : Action -> Proc -> Proc
+| par  : Proc -> Proc -> Proc
+end
+
+-- Interleaving small step (ch33): an action prefix fires to its continuation; a parallel
+-- composition steps left if it can, else right; halt is stuck.
+reduce : Proc -> Option Proc is
+  fn (q : Proc) is
+    ProcElim (fn (x : Proc) is Option Proc end)
+      (none Proc)
+      (fn (a : Action) (p : Proc) (ihp : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is
+         OptionElim Proc (fn (x : Option Proc) is Option Proc end)
+           (OptionElim Proc (fn (x : Option Proc) is Option Proc end)
+              (none Proc)
+              (fn (b2 : Proc) is some Proc (par a b2) end)
+              ihb)
+           (fn (a2 : Proc) is some Proc (par a2 b) end)
+           iha
+       end)
+      q
+  end
+end
+
+-- The NEXT state of a step: the reduced process if it stepped, else `halt` (a stuck process
+-- traces a constant `none` tail). This is the state-transition half of the coalgebra.
+nextState : Proc -> Proc is
+  fn (p : Proc) is
+    OptionElim Proc (fn (x : Option Proc) is Proc end)
+      halt
+      (fn (p2 : Proc) is p2 end)
+      (reduce p)
+  end
+end
+
+-- The coinductive stream `Str A = Nu (λX. A × X)` and its observations (ch66), and the trace
+-- corecursor `traceOf` (ch69) — re-declared standalone (each listing checks in a fresh session).
+Str : UF -> UF is
+  fn (A : UF) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end
+end
+
+head : (A : UF) -> El (Str A) -> El A is
+  fn (A : UF) (s : El (Str A)) is
+    fstF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+tail : (A : UF) -> El (Str A) -> El (Str A) is
+  fn (A : UF) (s : El (Str A)) is
+    sndF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+traceOf : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> El S -> El (Str A) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end))) (s : El S) is
+    unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c s
+  end
+end
+
+-- THE PROCESS COALGEBRA: observe the next reduction result, step to the next state. The outer
+-- `Proc`/`Option Proc` are embedded as fibrant codes `fib Proc`/`fib (Option Proc)` (their `El`
+-- is the outer type on the nose), so the coalgebra lands in the stream functor over the
+-- observation type `fib (Option Proc)`.
+procCoalg : El (fib Proc)
+   -> El (sigmaF (fib (Option Proc)) (fn (w : El (fib (Option Proc))) is fib Proc end)) is
+  fn (p : El (fib Proc)) is
+    pairF (fib (Option Proc)) (fn (w : El (fib (Option Proc))) is fib Proc end)
+      (reduce p)
+      (nextState p)
+  end
+end
+
+-- A process's BEHAVIOUR is the trace of its reduction observations.
+traceProc : El (fib Proc) -> El (Str (fib (Option Proc))) is
+  fn (p : El (fib Proc)) is
+    traceOf (fib (Option Proc)) (fib Proc) procCoalg p
+  end
+end
+
+-- THE TRACE OBSERVES, by `refl` — grounding the E3 machinery on a CONCRETE coalgebra. The first
+-- observation of `act tau halt`'s behaviour is its reduction `some halt`: `head (traceProc (act
+-- tau halt)) ≡ reduce (act tau halt) ≡ some halt`. The `out`-on-unfold ι fires because the
+-- coalgebra produces a CONCRETE pair (no longer a neutral), `fmapF` keeps the head slot, `fstF`
+-- reads it. This is the observation the abstract `traceHead` could not compute.
+traceHeadAct : Eq (El (fib (Option Proc)))
+     (head (fib (Option Proc)) (traceProc (act tau halt)))
+     (some Proc halt) is
+  refl (some Proc halt)
+end
+
+-- The SECOND observation: after firing, `act tau halt` becomes `halt`, which is stuck — so the
+-- next observation is `none`. `head (tail (traceProc (act tau halt))) ≡ reduce halt ≡ none`. By
+-- `refl`: the trace genuinely steps the process and re-observes. The behaviour is `some halt,
+-- none, none, …` — the process runs once then idles, exactly the operational semantics.
+traceHeadTailAct : Eq (El (fib (Option Proc)))
+     (head (fib (Option Proc)) (tail (fib (Option Proc)) (traceProc (act tau halt))))
+     (none Proc) is
+  refl (none Proc)
+end
+
+-- ===== The closed E2 converse chain (from ch69), needed for the process bisimulation below.
+-- consStr (one-level coinductive constructor nuCons), its cons-η, path composition + repair,
+-- and the converse bisimToPathStr + the LTS bisimTrace — re-declared standalone.
+
+ptransStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A)) -> (z : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y z) -> El (pathF (Str A) x z) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (z : El (Str A))
+     (p : El (pathF (Str A) x y)) (q : El (pathF (Str A) y z)) is
+    pathJ (Str A) y
+      (fn (w : El (Str A)) (r : El (pathF (Str A) y w)) is pathF (Str A) x w end)
+      p z q
+  end
+end
+
+repairEndpointsStr : (A : UF)
+   -> (x : El (Str A)) -> (x2 : El (Str A)) -> (y2 : El (Str A)) -> (y : El (Str A))
+   -> (sx : El (pathF (Str A) x x2))
+   -> (q : El (pathF (Str A) x2 y2))
+   -> (sy : El (pathF (Str A) y2 y))
+   -> El (pathF (Str A) x y) is
+  fn (A : UF) (x : El (Str A)) (x2 : El (Str A)) (y2 : El (Str A)) (y : El (Str A))
+     (sx : El (pathF (Str A) x x2))
+     (q : El (pathF (Str A) x2 y2))
+     (sy : El (pathF (Str A) y2 y)) is
+    ptransStr A x x2 y sx (ptransStr A x2 y2 y q sy)
+  end
+end
+
+consStr : (A : UF) -> (h : El A) -> (ts : El (Str A)) -> El (Str A) is
+  fn (A : UF) (h : El A) (ts : El (Str A)) is
+    nuCons (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+      (pairF A (fn (w : El A) is Str A end) h ts)
+  end
+end
+
+consEtaStr : (A : UF) -> (s : El (Str A))
+   -> Eq (El (Str A)) (consStr A (head A s) (tail A s)) s is
+  fn (A : UF) (s : El (Str A)) is refl end
+end
+
+symStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y x) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (p : El (pathF (Str A) x y)) is
+    pabs (Str A) (fn (i : I) is papp (Str A) x y p (ineg i) end)
+  end
+end
+
+converseFromConsEta : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+   -> (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t)))
+     (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+     (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t)) is
+    repairEndpointsStr A
+      s
+      (consStr A (head A s) (tail A s))
+      (consStr A (head A t) (tail A t))
+      t
+      (symStr A (consStr A (head A s) (tail A s)) s es)
+      (pabs (Str A)
+         (fn (i : I) is
+            consStr A (papp A (head A s) (head A t) hp i)
+              (papp (Str A) (tail A s) (tail A t) tp i)
+          end))
+      et
+  end
+end
+
+bisimToPathStr : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t))) is
+    converseFromConsEta A s t hp tp
+      (preflF (Str A) s)
+      (preflF (Str A) t)
+  end
+end
+
+bisimTrace : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> (s : El S) -> (t : El S)
+   -> (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+   -> (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t))))
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c t)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s : El S) (t : El S)
+     (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+     (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t)))) is
+    bisimToPathStr A (traceOf A S c s) (traceOf A S c t) hp tp
+  end
+end
+
+-- PROCESS BISIMULATION, via the closed E2 converse: two DISTINCT processes with the SAME
+-- behaviour are trace-equal. `act tau halt` and `act recv halt` differ syntactically (different
+-- action label), but `reduce` observes the CONTINUATION, not the label — both step to `some halt`
+-- and then to the stuck `halt` — so their behaviour streams coincide. `bisimTrace` turns that
+-- step-by-step agreement (head observations equal: `some halt`; tail traces equal: `traceProc
+-- halt`, both supplied as `preflF` since each side COMPUTES to the common value) into a genuine
+-- PATH `traceProc (act tau halt) ≡ traceProc (act recv halt)`. This is the E2/E3 currency on a
+-- real process calculus: observationally-equivalent processes are propositionally equal as
+-- behaviours — computing, no postulate. (The two traces are NOT `refl`-equal: they corecurse from
+-- distinct seeds; the equality is genuinely coinductive, discharged by `bisimToPathStr`.)
+procBisim : El (pathF (Str (fib (Option Proc)))
+     (traceProc (act tau halt))
+     (traceProc (act recv halt))) is
+  bisimTrace (fib (Option Proc)) (fib Proc) procCoalg (act tau halt) (act recv halt)
+    (preflF (fib (Option Proc)) (some Proc halt))
+    (preflF (Str (fib (Option Proc))) (traceProc halt))
+end
+
+-- PARAMETRIC BISIMULATION: the action LABEL is unobservable — for ANY actions `a`, `a'` and any
+-- continuation `p`, `act a p` and `act a' p` are trace-equal. `reduce (act a p) ≡ some p` for
+-- EVERY `a` (the act branch returns the continuation, dropping the label), so both behaviours are
+-- `some p` then `traceProc p`, agreeing for all `a`, `a'` — a UNIVERSALLY quantified bisimulation
+-- discharged once by `bisimTrace` (head/tail agreements are `preflF`, each side computing to the
+-- common `some p` / `traceProc p`). The first genuinely parametric process-equivalence theorem.
+procActLabelIrrelevant : (a : Action) -> (a2 : Action) -> (p : Proc)
+   -> El (pathF (Str (fib (Option Proc)))
+            (traceProc (act a p))
+            (traceProc (act a2 p))) is
+  fn (a : Action) (a2 : Action) (p : Proc) is
+    bisimTrace (fib (Option Proc)) (fib Proc) procCoalg (act a p) (act a2 p)
+      (preflF (fib (Option Proc)) (some Proc p))
+      (preflF (Str (fib (Option Proc))) (traceProc p))
+  end
+end
+
+-- STRUCTURAL BISIMULATION: two STRUCTURALLY DISSIMILAR processes with the same behaviour. The
+-- prefix `act tau (par halt halt)` and the parallel `par halt (act tau halt)` both reduce to
+-- `some (par halt halt)` (the prefix fires directly; the parallel steps its right branch since
+-- the left `halt` is stuck), then to the stuck `par halt halt` (`none` thereafter) — behaviour
+-- `some (par halt halt), none, none, …` for both. `bisimTrace` proves them path-equal: parallel
+-- composition with a stuck peer is behaviourally a prefix — a real process-algebra law, computing.
+procParPrefix : El (pathF (Str (fib (Option Proc)))
+     (traceProc (act tau (par halt halt)))
+     (traceProc (par halt (act tau halt)))) is
+  bisimTrace (fib (Option Proc)) (fib Proc) procCoalg
+    (act tau (par halt halt)) (par halt (act tau halt))
+    (preflF (fib (Option Proc)) (some Proc (par halt halt)))
+    (preflF (Str (fib (Option Proc))) (traceProc (par halt halt)))
+end

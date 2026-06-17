@@ -1,0 +1,36 @@
+-- Chapter 27 — Algebraic structures as Σ-records (D1 / the stdlib substrate).
+-- With Σ in the core (C1), a "structure" is just a value of a nested-Σ type: a
+-- bundle of operations AND the laws they satisfy. This is the substrate the
+-- typeclass layer (C2) and the verified numeric tower (D1) ride on — a Monoid is
+-- a record of (op, e, left-identity, right-identity), passed and projected like
+-- any value. (n-ary `record`/`class` sugar is a later increment; here it is the
+-- raw nested Σ it desugars to.)
+
+-- Monoid A : the bundle (op , e , lid , rid), right-nested Σ.
+Monoid : U -> U is
+  fn (A : U) is
+    Sig (A -> A -> A) (fn (op : A -> A -> A) is
+      Sig A (fn (e : A) is
+        Sig ((x : A) -> Eq A (op e x) x) (fn (lid : (x : A) -> Eq A (op e x) x) is
+          (x : A) -> Eq A (op x e) x
+        end)
+      end)
+    end)
+  end
+end
+
+-- The field projections, via the postfix `.1`/`.2` sugar — `m.1` is the first
+-- field (op), `m.2.1` the second (e), `m.2.2.1` the third (the left-identity
+-- law). This is the ergonomic record-access the nested Σ provides.
+mop : (A : U) -> Monoid A -> (A -> A -> A) is
+  fn (A : U) (m : Monoid A) is m.1 end
+end
+me : (A : U) -> Monoid A -> A is
+  fn (A : U) (m : Monoid A) is m.2.1 end
+end
+
+-- The bundled LAW projects out the same way and applies at any x — a monoid's
+-- left identity is the third field, used as a theorem.
+mLeftId : (A : U) -> (m : Monoid A) -> (x : A) -> Eq A (mop A m (me A m) x) x is
+  fn (A : U) (m : Monoid A) (x : A) is m.2.2.1 x end
+end

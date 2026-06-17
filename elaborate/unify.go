@@ -28,6 +28,16 @@ func (e *Elaborator) Unify(lvl int, a, b core.Val) error {
 		return e.Unify(lvl+1, m.Apply(a, v), m.Apply(b, v))
 	}
 
+	// η for pairs: if either side is a concrete pair, unify projections.
+	_, aPair := a.(core.VPair)
+	_, bPair := b.(core.VPair)
+	if aPair || bPair {
+		if err := e.Unify(lvl, m.Proj1(a), m.Proj1(b)); err != nil {
+			return err
+		}
+		return e.Unify(lvl, m.Proj2(a), m.Proj2(b))
+	}
+
 	// Flexible sides: try to solve. In the flex-flex case the two metas may
 	// have different spines; if solving one direction falls outside the pattern
 	// fragment (e.g. the right side mentions a variable the left spine lacks),
@@ -81,6 +91,17 @@ func (e *Elaborator) Unify(lvl int, a, b core.Val) error {
 			if x.Icit != y.Icit {
 				return fmt.Errorf("plicity mismatch: %s vs %s", icitName(x.Icit), icitName(y.Icit))
 			}
+			if x.Qty != y.Qty {
+				return fmt.Errorf("quantity mismatch: %s vs %s", qtyName(x.Qty), qtyName(y.Qty))
+			}
+			if err := e.Unify(lvl, x.Dom, y.Dom); err != nil {
+				return err
+			}
+			v := core.VVar(lvl)
+			return e.Unify(lvl+1, x.Cod(v), y.Cod(v))
+		}
+	case core.VSig:
+		if y, ok := b.(core.VSig); ok {
 			if x.Qty != y.Qty {
 				return fmt.Errorf("quantity mismatch: %s vs %s", qtyName(x.Qty), qtyName(y.Qty))
 			}
@@ -217,6 +238,14 @@ func (e *Elaborator) unifySpine(lvl int, p, q core.Neutral) error {
 				return err
 			}
 			return e.Unify(lvl, x.Arg, y.Arg)
+		}
+	case core.NFst:
+		if y, ok := q.(core.NFst); ok {
+			return e.unifySpine(lvl, x.P, y.P)
+		}
+	case core.NSnd:
+		if y, ok := q.(core.NSnd); ok {
+			return e.unifySpine(lvl, x.P, y.P)
 		}
 	}
 	return fmt.Errorf("spine mismatch")
@@ -380,6 +409,10 @@ func (e *Elaborator) renameSpine(id int, ren renaming, srcLvl int, n core.Neutra
 			return nil, err
 		}
 		return core.App{Fn: fn, Arg: arg, Icit: s.Icit}, nil
+	case core.NNatLit:
+		// A compressed numeral mentions no variable, so it renames to itself; it
+		// is its own meta-solution term (C7 / R-NUM).
+		return core.NatLit{N: s.N, Zero: s.Zero, Succ: s.Succ}, nil
 	default:
 		return nil, fmt.Errorf("unknown neutral in rename")
 	}

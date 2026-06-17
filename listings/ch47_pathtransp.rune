@@ -1,0 +1,64 @@
+-- Chapter 47 — Transporting a path: heterogeneous comp over pathF (§F / A3).
+-- Transport along a path LINE — a pathF type whose carrier/endpoints vary in the
+-- interval — is the base composition the whole inner identity layer rests on.
+-- CCHM reduces it to a `comp` over the carrier line with the two endpoints as a
+-- face-dispatching system:
+--
+--   transp (λi. pathF (A i) (a i) (b i)) p
+--     ~> pabs (A i1) (λj. comp (λi. A i) (for (ieq0 j) (ieq1 j))
+--                            (λi h. fsplit (A i) (ieq0 j) (ieq1 j)
+--                                          (λ_. a i) (λ_. b i) h)
+--                            (papp (A i0) (a i0) (b i0) p j))
+--
+-- The endpoint system needs a GENUINE per-face dispatch — `a i` on (j=0), `b i`
+-- on (j=1) — supplied by `fsplit`, the eliminator of `holds (for φ ψ)` that plain
+-- `holds φ -> El A` functions could not provide. Here the carrier A is fixed and
+-- the right endpoint moves along r; the boundary still computes on the nose.
+
+-- LEFT endpoint: the transported path still starts at a.
+pathTranspLeft : (A : UF) -> (a : El A) -> (b0 : El A) -> (b1 : El A)
+   -> (r : El (pathF A b0 b1)) -> (p : El (pathF A a b0))
+   -> Eq (El A)
+        (papp A a b1
+          (transp (fn (i : I) is pathF A a (papp A b0 b1 r i) end) p) i0)
+        a is
+  fn (A : UF) (a : El A) (b0 : El A) (b1 : El A)
+     (r : El (pathF A b0 b1)) (p : El (pathF A a b0)) is
+    refl a
+  end
+end
+
+-- RIGHT endpoint: the transported path ends at b1 (the moved endpoint, r @ i1).
+pathTranspRight : (A : UF) -> (a : El A) -> (b0 : El A) -> (b1 : El A)
+   -> (r : El (pathF A b0 b1)) -> (p : El (pathF A a b0))
+   -> Eq (El A)
+        (papp A a b1
+          (transp (fn (i : I) is pathF A a (papp A b0 b1 r i) end) p) i1)
+        b1 is
+  fn (A : UF) (a : El A) (b0 : El A) (b1 : El A)
+     (r : El (pathF A b0 b1)) (p : El (pathF A a b0)) is
+    refl b1
+  end
+end
+
+-- comp over a path line, ANY face: the heterogeneous A3 rule. The system carries
+-- THREE branches — the φ-walls plus the two endpoints — dispatched by nested
+-- fsplit; the boundary still computes (here on a constant line for a clean
+-- statement, with φ a free proper face).
+pathCompLeft : (A : UF) -> (a : El A) -> (b : El A) -> (phi : F)
+   -> (u : I -> holds phi -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El A) (papp A a b (comp (fn (i : I) is pathF A a b end) phi u u0) i0) a is
+  fn (A : UF) (a : El A) (b : El A) (phi : F)
+     (u : I -> holds phi -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl a
+  end
+end
+
+pathCompRight : (A : UF) -> (a : El A) -> (b : El A) -> (phi : F)
+   -> (u : I -> holds phi -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El A) (papp A a b (comp (fn (i : I) is pathF A a b end) phi u u0) i1) b is
+  fn (A : UF) (a : El A) (b : El A) (phi : F)
+     (u : I -> holds phi -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl b
+  end
+end
