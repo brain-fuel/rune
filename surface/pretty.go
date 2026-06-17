@@ -61,15 +61,129 @@ type printer struct {
 	// binding, so the round-trip contract is preserved.
 	natZero, natSucc core.Hash
 	foldNat          bool
+	// dec, when On, folds the REPL prelude's fraction/decimal results to their
+	// positional notation: a `frac a b` prints `a/b`, and a `rdec` prints a
+	// radix-point number with the repetend bracketed (1/3 -> 0.{3}). Display only.
+	dec DecConfig
+}
+
+// DecConfig carries the REPL prelude's fraction/decimal constructor hashes so the
+// printer can fold them to positional notation. On is false (and folding is off)
+// unless every hash resolved (e.g. a bare `--no-prelude` session).
+type DecConfig struct {
+	Frac, RDec, Wcons, Wnil, True core.Hash
+	On                            bool
 }
 
 // PrettyNat is PrettyWith with a registered `builtin nat` binding: saturated
 // applications succ (… (succ zero)) print as numerals.
 func PrettyNat(t core.Tm, refNames map[core.Hash]string, zero, succ core.Hash) string {
-	p := &printer{refNames: refNames, natZero: zero, natSucc: succ, foldNat: true}
+	return PrettyNatDec(t, refNames, zero, succ, DecConfig{})
+}
+
+// PrettyNatDec is PrettyNat that also folds the prelude's fraction/decimal results
+// to positional notation (frac a b -> a/b; rdec -> a radix-point number).
+func PrettyNatDec(t core.Tm, refNames map[core.Hash]string, zero, succ core.Hash, dc DecConfig) string {
+	p := &printer{refNames: refNames, natZero: zero, natSucc: succ, foldNat: true, dec: dc}
 	var sb strings.Builder
 	p.print(&sb, t, nil, precLow)
 	return sb.String()
+}
+
+// spineExpl peels a curried explicit application into (head, args-left-to-right).
+func spineExpl(t core.Tm) (core.Tm, []core.Tm) {
+	var args []core.Tm
+	for {
+		a, ok := t.(core.App)
+		if !ok || a.Icit != core.Expl {
+			return t, args
+		}
+		args = append([]core.Tm{a.Arg}, args...)
+		t = a.Fn
+	}
+}
+
+// wholeVal reads a Whole as an int: a folded succ-chain or a compressed NatLit.
+func (p *printer) wholeVal(t core.Tm) (int, bool) {
+	if n, ok := p.numeralOf(t); ok {
+		return n, true
+	}
+	if nl, ok := t.(core.NatLit); ok && nl.N.IsInt64() {
+		return int(nl.N.Int64()), true
+	}
+	return 0, false
+}
+
+// wlistVals reads a prelude WList (wcons/wnil over Whole) into its digit values.
+func (p *printer) wlistVals(t core.Tm) ([]int, bool) {
+	var ds []int
+	for {
+		if ref, ok := t.(core.Ref); ok && ref.Hash == p.dec.Wnil {
+			return ds, true
+		}
+		head, args := spineExpl(t)
+		ref, ok := head.(core.Ref)
+		if !ok || ref.Hash != p.dec.Wcons || len(args) != 2 {
+			return nil, false
+		}
+		d, ok := p.wholeVal(args[0])
+		if !ok {
+			return nil, false
+		}
+		ds = append(ds, d)
+		t = args[1]
+	}
+}
+
+func digitsStr(ds []int) string {
+	var sb strings.Builder
+	for _, d := range ds {
+		sb.WriteByte(byte('0' + d))
+	}
+	return sb.String()
+}
+
+// decimalStr folds a saturated `frac`/`rdec` application to positional notation,
+// returning ok=false for anything else (so it prints normally).
+func (p *printer) decimalStr(t core.Tm) (string, bool) {
+	if !p.dec.On {
+		return "", false
+	}
+	head, args := spineExpl(t)
+	ref, ok := head.(core.Ref)
+	if !ok {
+		return "", false
+	}
+	switch {
+	case ref.Hash == p.dec.Frac && len(args) == 2:
+		a, ok1 := p.wholeVal(args[0])
+		b, ok2 := p.wholeVal(args[1])
+		if !ok1 || !ok2 {
+			return "", false
+		}
+		return strconv.Itoa(a) + "/" + strconv.Itoa(b), true
+	case ref.Hash == p.dec.RDec && len(args) == 4:
+		ip, ok1 := p.wholeVal(args[0])
+		ds, ok2 := p.wlistVals(args[1])
+		rep, ok3 := p.wholeVal(args[2])
+		if !ok1 || !ok2 || !ok3 {
+			return "", false
+		}
+		termRef, ok4 := args[3].(core.Ref)
+		if !ok4 {
+			return "", false
+		}
+		terminating := termRef.Hash == p.dec.True
+		s := strconv.Itoa(ip)
+		if len(ds) == 0 {
+			return s, true // a whole number, e.g. 2
+		}
+		if terminating || rep >= len(ds) {
+			return s + "." + digitsStr(ds), true
+		}
+		return s + "." + digitsStr(ds[:rep]) + "{" + digitsStr(ds[rep:]) + "}", true
+	}
+	return "", false
 }
 
 // numeralOf recognizes a saturated succ-chain terminating in zero and returns
@@ -172,6 +286,11 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		// A saturated succ-chain over zero prints as a numeral (an atom).
 		if v, ok := p.numeralOf(x); ok {
 			sb.WriteString(strconv.Itoa(v))
+			return
+		}
+		// A prelude fraction/decimal result folds to positional notation.
+		if s, ok := p.decimalStr(x); ok {
+			sb.WriteString(s)
 			return
 		}
 		// A saturated binary application of an operator-named definition prints

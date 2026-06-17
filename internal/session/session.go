@@ -666,9 +666,24 @@ func (s *Session) ParseSrcExpr(src string) (surface.Exp, error) {
 // `builtin nat` binding, saturated succ-chains fold back to numerals.
 func (s *Session) Pretty(t core.Tm) string {
 	if s.nat != nil {
-		return surface.PrettyNat(t, s.refNames, s.refs[s.nat.Zero], s.refs[s.nat.Succ])
+		return surface.PrettyNatDec(t, s.refNames, s.refs[s.nat.Zero], s.refs[s.nat.Succ], s.decConfig())
 	}
 	return surface.PrettyWith(t, s.refNames)
+}
+
+// decConfig resolves the prelude's fraction/decimal constructor hashes so the
+// printer can fold them to positional notation (1/3, 0.{3}). It is On only when
+// every name resolves — a bare or non-prelude session leaves folding off.
+func (s *Session) decConfig() surface.DecConfig {
+	frac, ok1 := s.refs["frac"]
+	rdec, ok2 := s.refs["rdec"]
+	wcons, ok3 := s.refs["wcons"]
+	wnil, ok4 := s.refs["wnil"]
+	tru, ok5 := s.refs["true"]
+	return surface.DecConfig{
+		Frac: frac, RDec: rdec, Wcons: wcons, Wnil: wnil, True: tru,
+		On: ok1 && ok2 && ok3 && ok4 && ok5,
+	}
 }
 
 // Defs returns the session definitions in definition order.

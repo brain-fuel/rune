@@ -50,7 +50,7 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 		if err := loadPrelude(s); err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "prelude: Whole arithmetic loaded (+ - * // %, gcd; numerals are Whole, print as digits; Nat = {1,2,…}, Int/Rat in the libraries). `rune repl --no-prelude` for a bare session.")
+		fmt.Fprintln(out, "prelude: Whole arithmetic (+ - * // %, gcd) and fractions (`a / b`); pipe a fraction with `|>` into `to_radix` (exact, repetend bracketed: 1/3 |> to_radix = 0.{3}), `to_radix_sigplace n`, or `to_radix_sigfig n`. `rune repl --no-prelude` for a bare session.")
 	}
 	fmt.Fprintln(out, "type :help for commands, :quit to exit.")
 

@@ -199,3 +199,195 @@ end
 wholeOf : Nat -> Whole is
   fn (k : Nat) is k.1 end
 end
+
+-- ====================================================================
+-- Fractions and the decimal escape hatch, at the prompt. `|>` pipes a fraction
+-- into a radix conversion; the result is an exact (possibly repeating) or rounded
+-- positional decimal, which the REPL prints with a radix point:
+--   1/3                          -- 1/3
+--   3/4 |> to_radix              -- 0.75
+--   1/3 |> to_radix              -- 0.{3}        (exact; the repetend is bracketed)
+--   1/7 |> to_radix              -- 0.{142857}
+--   1/6 |> to_radix              -- 0.1{6}       (a non-repeating head, then a cycle)
+--   7/4 |> to_radix_sigplace 1   -- 1.8          (round to 1 decimal place)
+--   7/4 |> to_radix_sigfig 2     -- 1.8          (round to 2 significant figures)
+-- Every division below is LONG division (each step divides a small number), so
+-- nothing hits the calculator //'s fuel wall — `1/3 |> to_radix` is exact, never
+-- a blown expansion.
+-- ====================================================================
+
+data Frac : U is frac : Whole -> Whole -> Frac end
+fnum : Frac -> Whole is fn (f : Frac) is case f of | frac a b -> a end end end
+fden : Frac -> Whole is fn (f : Frac) is case f of | frac a b -> b end end end
+
+-- Exact division builds a fraction: `1 / 3` is one-third (a Frac, not a Whole).
+/ : Whole -> Whole -> Frac is fn (m : Whole) (n : Whole) is frac m n end end
+
+powTen : Whole -> Whole is
+  fn (n : Whole) is case n of | zero -> 1 | succ k with ih -> 10 * ih end end
+end
+
+data WList : U is wnil : WList | wcons : Whole -> WList -> WList end
+
+eqW : Whole -> Whole -> Bool is
+  fn (m : Whole) is
+    case m of
+    | zero -> fn (n : Whole) is case n of | zero -> true | succ j -> false end end
+    | succ k with ih -> fn (n : Whole) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+
+-- The low `count` digits of v, most significant first, zero-padded (the rounded
+-- fractional part). digitsOf 2 75 = [7,5]; digitsOf 2 5 = [0,5].
+digitsOf : Whole -> Whole -> WList is
+  fn (count : Whole) is
+    case count of
+    | zero -> fn (v : Whole) is wnil end
+    | succ k with ih -> fn (v : Whole) is wcons ((v // powTen k) % 10) (ih v) end
+    end
+  end
+end
+
+-- Long division to `count` fractional digits: (mantissa of those digits,
+-- remainder after them) — Frac reused as the pair (same shape). Each step divides
+-- rem*10 < den*10, so every // here is small.
+longDiv : Whole -> Whole -> Whole -> Frac is
+  fn (den : Whole) (count : Whole) is
+    case count of
+    | zero -> fn (rem : Whole) is frac 0 rem end
+    | succ k with ih -> fn (rem : Whole) is
+        let r10 : Whole = rem * 10 in
+        let rest : Frac = ih (r10 % den) in
+        frac ((r10 // den) * powTen k + fnum rest) (fden rest)
+      end
+    end
+  end
+end
+
+-- The EXACT decimal of a fraction: integer part, fractional digits, where the
+-- repetend begins, and whether it terminates. `rdec 0 [7,5] _ true` is 0.75;
+-- `rdec 0 [3] 0 false` is 0.{3}; `rdec 0 [1,6] 1 false` is 0.1{6}.
+data RDec : U is rdec : Whole -> WList -> Whole -> Bool -> RDec end
+
+-- Round a fraction to n decimal PLACES (round half up), as a terminating RDec:
+-- n long-division digits, plus a carry if the next digit is >= 5.
+roundTo : Whole -> Frac -> RDec is
+  fn (n : Whole) (f : Frac) is
+    let body  : Frac  = longDiv (fden f) n (fnum f % fden f) in
+    let nextd : Whole = (fden body * 10) // fden f in
+    let bump  : Whole = case leb 5 nextd of | true -> 1 | false -> 0 end in
+    let m     : Whole = (fnum f // fden f) * powTen n + fnum body + bump in
+    rdec (m // powTen n) (digitsOf n (m % powTen n)) 0 true
+  end
+end
+
+to_radix_sigplace : Whole -> Frac -> RDec is fn (n : Whole) (f : Frac) is roundTo n f end end
+
+-- Number of decimal digits of a whole (q < 10 has 1).
+numDigits : Whole -> Whole -> Whole is
+  fn (cap : Whole) is
+    case cap of
+    | zero -> fn (q : Whole) is 1 end
+    | succ c with ih -> fn (q : Whole) is
+        case leb 10 q of | false -> 1 | true -> succ (ih (q // 10)) end
+      end
+    end
+  end
+end
+
+-- Leading zeros after the point for |f| < 1: smallest z with num*10^(z+1) >= den
+-- (multiplication and comparison only — no division).
+leadingZeros : Whole -> Frac -> Whole is
+  fn (cap : Whole) (f : Frac) is
+    (case cap of
+     | zero -> fn (z : Whole) is z end
+     | succ c with ih -> fn (z : Whole) is
+         case leb (fden f) (fnum f * powTen (succ z)) of
+         | true  -> z
+         | false -> ih (succ z)
+         end
+       end
+     end : Whole -> Whole) 0
+  end
+end
+
+-- Decimal places for s SIGNIFICANT FIGURES: for |f| >= 1, s - (integer digits);
+-- for |f| < 1, s + (leading zeros after the point).
+sigPlaces : Whole -> Frac -> Whole is
+  fn (s : Whole) (f : Frac) is
+    case leb 1 (fnum f // fden f) of
+    | true  -> s - numDigits 64 (fnum f // fden f)
+    | false -> s + leadingZeros 64 f
+    end
+  end
+end
+
+to_radix_sigfig : Whole -> Frac -> RDec is
+  fn (s : Whole) (f : Frac) is roundTo (sigPlaces s f) f end
+end
+
+-- The fractional expansion produced by cycle-detecting long division: the digits,
+-- where the repetend begins, and whether it terminates (no repetend).
+data FBody : U is fbody : WList -> Whole -> Bool -> FBody end
+fbDigits : FBody -> WList is fn (b : FBody) is case b of | fbody d r t -> d end end end
+fbRep    : FBody -> Whole is fn (b : FBody) is case b of | fbody d r t -> r end end end
+fbTerm   : FBody -> Bool  is fn (b : FBody) is case b of | fbody d r t -> t end end end
+
+-- Append at the end: the seen-remainders list grows in position order.
+wsnoc : WList -> Whole -> WList is
+  fn (xs : WList) (x : Whole) is
+    case xs of
+    | wnil -> wcons x wnil
+    | wcons h t with ih -> wcons h ih
+    end
+  end
+end
+wmember : Whole -> WList -> Bool is
+  fn (x : Whole) (xs : WList) is
+    case xs of
+    | wnil -> false
+    | wcons h t with ih -> case eqW x h of | true -> true | false -> ih end
+    end
+  end
+end
+windex : Whole -> WList -> Whole is
+  fn (x : Whole) (xs : WList) is
+    case xs of
+    | wnil -> 0
+    | wcons h t with ih -> case eqW x h of | true -> 0 | false -> succ ih end
+    end
+  end
+end
+
+-- Long division with cycle detection. fuel bounds the loop (a cycle appears within
+-- `den` steps by pigeonhole); seen records remainders in position order so a recur
+-- gives the repetend's start.
+expand : Whole -> Whole -> Whole -> WList -> FBody is
+  fn (den : Whole) (fuel : Whole) is
+    case fuel of
+    | zero -> fn (rem : Whole) (seen : WList) is fbody wnil 0 true end
+    | succ fl with ih -> fn (rem : Whole) (seen : WList) is
+        case rem of
+        | zero -> fbody wnil 0 true
+        | succ rp ->
+            case wmember rem seen of
+            | true  -> fbody wnil (windex rem seen) false
+            | false ->
+                let r10  : Whole = rem * 10 in
+                let rest : FBody = ih (r10 % den) (wsnoc seen rem) in
+                fbody (wcons (r10 // den) (fbDigits rest)) (fbRep rest) (fbTerm rest)
+            end
+        end
+      end
+    end
+  end
+end
+
+-- The exact decimal of a fraction, repetend and all.
+to_radix : Frac -> RDec is
+  fn (f : Frac) is
+    let body : FBody = expand (fden f) (succ (fden f)) (fnum f % fden f) wnil in
+    rdec (fnum f // fden f) (fbDigits body) (fbRep body) (fbTerm body)
+  end
+end

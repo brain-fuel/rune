@@ -105,6 +105,46 @@ func TestREPLPrelude(t *testing.T) {
 	}
 }
 
+// TestREPLRadixAndSigfigs is the acceptance test that the fraction / radix /
+// significant-figure feature WORKS AT THE PROMPT (not just as listings): `/`
+// builds a fraction, `|>` pipes it into a conversion, and the result prints in
+// positional notation — exact (with the repetend bracketed) or rounded.
+func TestREPLRadixAndSigfigs(t *testing.T) {
+	script := []string{
+		"1/3",                       // a fraction prints as a/b
+		"3/4 |> to_radix",           // 0.75    (exact, terminating)
+		"1/3 |> to_radix",           // 0.{3}   (exact, repeating)
+		"1/6 |> to_radix",           // 0.1{6}  (non-repeating head + cycle)
+		"1/7 |> to_radix",           // 0.{142857}
+		"7/4 |> to_radix_sigplace 1", // 1.8    (round to 1 decimal place)
+		"7/4 |> to_radix_sigfig 1",  // 2       (round to 1 significant figure)
+		"7/4 |> to_radix_sigfig 2",  // 1.8
+		"7/4 |> to_radix_sigfig 3",  // 1.75
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"1/3 : Frac",
+		"0.75 : RDec",
+		"0.{3} : RDec",
+		"0.1{6} : RDec",
+		"0.{142857} : RDec",
+		"1.8 : RDec",
+		"2 : RDec",
+		"1.75 : RDec",
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}
+
 // TestREPLLargeArithAndAST guards two things: (1) the prelude registers +/*/-
 // for the bigint accel, so a large product like 4000*4000 returns its literal in
 // one step instead of materialising 16M succ nodes and overflowing the stack at
