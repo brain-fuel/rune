@@ -1,0 +1,189 @@
+-- Chapter 201 — THE RADIX ESCAPE HATCH: from exact fractions to decimals (telos-3).
+-- A fraction like 3/4 is EXACT but not in positional form. `to_radix` and its
+-- rounded variants are the escape hatch into a decimal (radix-point) number,
+-- piped with `|>`:
+--
+--   3/4 |> to_radix            -- 0.75   (exact, terminating)
+--   3/4 |> to_radix_sigplace 1 -- 0.8    (round to 1 decimal PLACE)
+--   7/4 |> to_radix            -- 1.75
+--   7/4 |> to_radix_sigplace 1 -- 1.8
+--   7/4 |> to_radix_sigfig 1   -- 2      (round to 1 significant FIGURE)
+--   7/4 |> to_radix_sigfig 2   -- 1.8
+--   7/4 |> to_radix_sigfig 3   -- 1.75
+--
+-- The fraction literal `3/4` is the C4 numeral injection (`builtin rat Frac
+-- fracOf`) + the `/` operator at Frac: `3 : Frac` is `fracOf 3`, and `3 / 4`
+-- divides. A Decimal is (mantissa, scale) meaning mantissa / 10^scale; `dec 75 2`
+-- IS 0.75. Each conversion is certified by refl. (Magnitudes only here — signs
+-- ride the prefix-minus surface sugar and the signed layer; the rounding is the
+-- content.)
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+-- Fast Nat arithmetic (accelerated so 10^k and the long-division loop don't peel).
++ : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end
+end
+builtin natAdd +
+* : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case m of | zero -> 0 | succ k with ih -> n + ih end end
+end
+builtin natMul *
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> 0 | succ k -> k end end end
+- : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end
+end
+builtin natMonus -
+
+-- Decidable order (Bool), by structural recursion.
+lt : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is case n of | zero -> false | succ j -> true end end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (n : Nat) is case n of | zero -> false | succ j -> ihk j end end
+       end)
+      m
+  end
+end
+
+-- Fuel-bounded Euclidean division (ch194), returning (quotient, remainder).
+data DivR : U is dr : Nat -> Nat -> DivR end
+quotOf : DivR -> Nat is fn (x : DivR) is case x of | dr q r -> q end end end
+remOf  : DivR -> Nat is fn (x : DivR) is case x of | dr q r -> r end end end
+
+divmod : Nat -> Nat -> Nat -> DivR is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> DivR end)
+      (fn (a : Nat) (b : Nat) is dr 0 a end)
+      (fn (f : Nat) (ih : Nat -> Nat -> DivR) is
+         fn (a : Nat) (b : Nat) is
+           case lt a b of
+           | true  -> dr 0 a
+           | false -> dr (succ (quotOf (ih (a - b) b))) (remOf (ih (a - b) b))
+           end
+         end
+       end)
+      fuel
+  end
+end
+
+-- Fuel bounds the division loop. NatElim over a literal peels eagerly, so fuel is
+-- kept tight (>= the largest quotient reached here, ~175); raise it for bigger
+-- magnitudes.
+fuelN : Nat is 512 end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is quotOf (divmod fuelN a b) end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is remOf (divmod fuelN a b) end end
+
+-- Round-half-up division: (a + floor(b/2)) // b.
+roundDiv : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is divN (a + divN b 2) b end end
+
+powTen : Nat -> Nat is
+  fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is 10 * ih end) n end
+end
+
+-- A fraction (magnitude): num / den.
+data Frac : U is frac : Nat -> Nat -> Frac end
+fnum : Frac -> Nat is fn (f : Frac) is case f of | frac a b -> a end end end
+fden : Frac -> Nat is fn (f : Frac) is case f of | frac a b -> b end end end
+
+fracOf : Nat -> Frac is fn (n : Nat) is frac n 1 end end
+builtin rat Frac fracOf
+
+-- Division at Frac: (a/b) / (c/d) = (a*d) / (b*c). With fracOf the literal `3/4`
+-- is `fracOf 3 / fracOf 4` = `frac 3 1 / frac 4 1` = `frac 3 4`.
+/ : Frac -> Frac -> Frac is
+  fn (x : Frac) (y : Frac) is frac (fnum x * fden y) (fden x * fnum y) end
+end
+
+-- A decimal: mantissa / 10^scale. `dec 75 2` is 0.75; `dec 2 0` is 2.
+data Decimal : U is dec : Nat -> Nat -> Decimal end
+
+-- Round a fraction to n decimal PLACES: round(num * 10^n / den) / 10^n.
+to_radix_sigplace : Nat -> Frac -> Decimal is
+  fn (n : Nat) (f : Frac) is dec (roundDiv (fnum f * powTen n) (fden f)) n end
+end
+
+-- The smallest scale k (0..fuel) at which num * 10^k is divisible by den — the
+-- terminating decimal's exact length.
+termScale : Nat -> Frac -> Nat is
+  fn (fuel : Nat) (f : Frac) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (k : Nat) is k end)
+      (fn (fl : Nat) (ih : Nat -> Nat) is
+         fn (k : Nat) is
+           case modN (fnum f * powTen k) (fden f) of
+           | zero -> k
+           | succ r -> ih (succ k)
+           end
+         end
+       end)
+      fuel 0
+  end
+end
+
+-- Exact terminating decimal (minimal scale). For a non-terminating fraction it
+-- bottoms out at the fuel bound (documented; the sigplace/sigfig variants are the
+-- general rounding tools).
+to_radix : Frac -> Decimal is
+  fn (f : Frac) is to_radix_sigplace (termScale 64 f) f end
+end
+
+-- Number of decimal digits in q (q < 10 has 1; else 1 + digits of q//10).
+numDigits : Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (q : Nat) is 1 end)
+      (fn (fl : Nat) (ih : Nat -> Nat) is
+         fn (q : Nat) is case lt q 10 of | true -> 1 | false -> succ (ih (divN q 10)) end end
+       end)
+      fuel
+  end
+end
+
+-- Leading zeros after the point for |f| < 1: smallest z with num*10^(z+1) >= den.
+leadingZeros : Nat -> Frac -> Nat is
+  fn (fuel : Nat) (f : Frac) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (z : Nat) is z end)
+      (fn (fl : Nat) (ih : Nat -> Nat) is
+         fn (z : Nat) is
+           case lt (fnum f * powTen (succ z)) (fden f) of
+           | true  -> ih (succ z)
+           | false -> z
+           end
+         end
+       end)
+      fuel 0
+  end
+end
+
+-- Decimal places needed for s significant figures: for |f| >= 1, s - (integer
+-- digits); for |f| < 1, s + (leading zeros after the point).
+sigPlaces : Nat -> Frac -> Nat is
+  fn (s : Nat) (f : Frac) is
+    case lt (divN (fnum f) (fden f)) 1 of
+    | false -> s - numDigits 64 (divN (fnum f) (fden f))
+    | true  -> s + leadingZeros 64 f
+    end
+  end
+end
+
+-- Round a fraction to s SIGNIFICANT FIGURES.
+to_radix_sigfig : Nat -> Frac -> Decimal is
+  fn (s : Nat) (f : Frac) is to_radix_sigplace (sigPlaces s f) f end
+end
+
+-- ====================================================================
+-- Certificates — the user's exact examples, by refl, using the `|>` UX.
+-- ====================================================================
+
+ex1 : Eq Decimal (3/4 |> to_radix)            (dec 75 2)  is refl (dec 75 2)  end
+ex2 : Eq Decimal (3/4 |> to_radix_sigplace 1) (dec 8 1)   is refl (dec 8 1)   end
+ex3 : Eq Decimal (7/4 |> to_radix)            (dec 175 2) is refl (dec 175 2) end
+ex4 : Eq Decimal (7/4 |> to_radix_sigplace 1) (dec 18 1)  is refl (dec 18 1)  end
+ex5 : Eq Decimal (7/4 |> to_radix_sigfig 1)   (dec 2 0)   is refl (dec 2 0)   end
+ex6 : Eq Decimal (7/4 |> to_radix_sigfig 2)   (dec 18 1)  is refl (dec 18 1)  end
+ex7 : Eq Decimal (7/4 |> to_radix_sigfig 3)   (dec 175 2) is refl (dec 175 2) end
