@@ -530,20 +530,20 @@ func (p *parser) parseMul() (Exp, error) {
 }
 
 // parseUnary parses a PREFIX minus before an application: `-e` desugars to the
-// type-directed `0 - e` (reusing the binary `-`/subtraction of the expected type,
-// so `-5 : Z` is `zsub (intOf 0) (intOf 5)` and `-3/4 : Frac` negates the
-// fraction). No new lowering machinery — the zero and the subtraction are both
-// resolved by the expected type. A bare `-` operand elsewhere is binary (handled
-// by parseAdd), so `a - b` is unaffected.
+// application `negate e`. `Whole` has no negatives, so a type-directed `0 - e`
+// would FLOOR (-1 monus to 0 — the `-1/3 = 0/3` bug); `negate` is a real sign flip
+// on a signed type (the prelude's signed Frac), so `-1/3` is `(negate 1)/3`, a
+// genuine -1/3. A bare `-` after a complete operand is binary subtraction (handled
+// by parseAdd), so `a - b` is unaffected. `negate` must be in scope (the prelude
+// provides it; a bare session must define it to use prefix minus).
 func (p *parser) parseUnary() (Exp, error) {
 	if p.peek().kind == tOp && p.peek().text == "-" {
-		neg := p.next()
+		p.next()
 		operand, err := p.parseUnary()
 		if err != nil {
 			return nil, err
 		}
-		zero := ENum{Val: new(big.Int), Pos: neg.pos}
-		return EApp{Fn: EApp{Fn: EVar{Name: "-"}, Arg: zero}, Arg: operand}, nil
+		return EApp{Fn: EVar{Name: "negate"}, Arg: operand}, nil
 	}
 	return p.parseApp()
 }

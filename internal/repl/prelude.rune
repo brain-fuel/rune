@@ -205,6 +205,8 @@ end
 -- into a radix conversion; the result is an exact (possibly repeating) or rounded
 -- positional decimal, which the REPL prints with a radix point:
 --   1/3                          -- 1/3
+--   -1/3                         -- -1/3      (fractions are SIGNED; prefix - negates)
+--   -1/3 |> to_radix             -- -0.{3}
 --   3/4 |> to_radix              -- 0.75
 --   1/3 |> to_radix              -- 0.{3}        (exact; the repetend is bracketed)
 --   1/7 |> to_radix              -- 0.{142857}
@@ -216,12 +218,32 @@ end
 -- a blown expansion.
 -- ====================================================================
 
-data Frac : U is frac : Whole -> Whole -> Frac end
-fnum : Frac -> Whole is fn (f : Frac) is case f of | frac a b -> a end end end
-fden : Frac -> Whole is fn (f : Frac) is case f of | frac a b -> b end end end
+-- A SIGNED fraction: (sign, |num|, |den|). The sign makes the whole tower handle
+-- negatives — `Whole` has none, so an unsigned fraction would floor -1/3 to 0/3.
+data Frac : U is frac : Bool -> Whole -> Whole -> Frac end
+fneg : Frac -> Bool  is fn (f : Frac) is case f of | frac s a b -> s end end end
+fnum : Frac -> Whole is fn (f : Frac) is case f of | frac s a b -> a end end end
+fden : Frac -> Whole is fn (f : Frac) is case f of | frac s a b -> b end end end
 
--- Exact division builds a fraction: `1 / 3` is one-third (a Frac, not a Whole).
-/ : Whole -> Whole -> Frac is fn (m : Whole) (n : Whole) is frac m n end end
+not  : Bool -> Bool is fn (b : Bool) is case b of | true -> false | false -> true end end end
+xorB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> not b | false -> b end end end
+
+-- A bare numeral at Frac is the positive whole-valued fraction n/1.
+fracOf : Whole -> Frac is fn (n : Whole) is frac false n 1 end end
+builtin rat Frac fracOf
+
+-- Division at Frac (the `1/3` of the prompt): (sa,a/b)/(sb,c/d) = (sa xor sb,
+-- a*d/b*c). With the injection, `1 / 3` is `fracOf 1 / fracOf 3` = frac false 1 3,
+-- and `-1 / 3` is `(negate (fracOf 1)) / fracOf 3` = frac true 1 3.
+/ : Frac -> Frac -> Frac is
+  fn (x : Frac) (y : Frac) is
+    frac (xorB (fneg x) (fneg y)) (fnum x * fden y) (fden x * fnum y)
+  end
+end
+
+-- Negation flips the sign (prefix `-` desugars to this). 0 stays unsigned in
+-- display, so `negate 0` reads back as 0.
+negate : Frac -> Frac is fn (f : Frac) is frac (not (fneg f)) (fnum f) (fden f) end end
 
 powTen : Whole -> Whole is
   fn (n : Whole) is case n of | zero -> 1 | succ k with ih -> 10 * ih end end
@@ -249,36 +271,41 @@ digitsOf : Whole -> Whole -> WList is
   end
 end
 
--- Long division to `count` fractional digits: (mantissa of those digits,
--- remainder after them) — Frac reused as the pair (same shape). Each step divides
--- rem*10 < den*10, so every // here is small.
-longDiv : Whole -> Whole -> Whole -> Frac is
+-- A plain pair, the (mantissa, remainder) of a long-division run.
+data P2 : U is p2 : Whole -> Whole -> P2 end
+p2m : P2 -> Whole is fn (x : P2) is case x of | p2 a b -> a end end end
+p2r : P2 -> Whole is fn (x : P2) is case x of | p2 a b -> b end end end
+
+-- Long division to `count` fractional digits: (mantissa of those digits, remainder
+-- after them). Each step divides rem*10 < den*10, so every // here is small.
+longDiv : Whole -> Whole -> Whole -> P2 is
   fn (den : Whole) (count : Whole) is
     case count of
-    | zero -> fn (rem : Whole) is frac 0 rem end
+    | zero -> fn (rem : Whole) is p2 0 rem end
     | succ k with ih -> fn (rem : Whole) is
         let r10 : Whole = rem * 10 in
-        let rest : Frac = ih (r10 % den) in
-        frac ((r10 // den) * powTen k + fnum rest) (fden rest)
+        let rest : P2 = ih (r10 % den) in
+        p2 ((r10 // den) * powTen k + p2m rest) (p2r rest)
       end
     end
   end
 end
 
--- The EXACT decimal of a fraction: integer part, fractional digits, where the
--- repetend begins, and whether it terminates. `rdec 0 [7,5] _ true` is 0.75;
--- `rdec 0 [3] 0 false` is 0.{3}; `rdec 0 [1,6] 1 false` is 0.1{6}.
-data RDec : U is rdec : Whole -> WList -> Whole -> Bool -> RDec end
+-- The EXACT decimal of a fraction: sign, integer part, fractional digits, where
+-- the repetend begins, and whether it terminates. `rdec false 0 [7,5] _ true` is
+-- 0.75; `rdec true 0 [3] 0 false` is -0.{3}; `rdec false 0 [1,6] 1 false` is 0.1{6}.
+data RDec : U is rdec : Bool -> Whole -> WList -> Whole -> Bool -> RDec end
 
 -- Round a fraction to n decimal PLACES (round half up), as a terminating RDec:
--- n long-division digits, plus a carry if the next digit is >= 5.
+-- n long-division digits of the magnitude, plus a carry if the next digit is >= 5,
+-- carrying the fraction's sign.
 roundTo : Whole -> Frac -> RDec is
   fn (n : Whole) (f : Frac) is
-    let body  : Frac  = longDiv (fden f) n (fnum f % fden f) in
-    let nextd : Whole = (fden body * 10) // fden f in
+    let body  : P2    = longDiv (fden f) n (fnum f % fden f) in
+    let nextd : Whole = (p2r body * 10) // fden f in
     let bump  : Whole = case leb 5 nextd of | true -> 1 | false -> 0 end in
-    let m     : Whole = (fnum f // fden f) * powTen n + fnum body + bump in
-    rdec (m // powTen n) (digitsOf n (m % powTen n)) 0 true
+    let m     : Whole = (fnum f // fden f) * powTen n + p2m body + bump in
+    rdec (fneg f) (m // powTen n) (digitsOf n (m % powTen n)) 0 true
   end
 end
 
@@ -384,10 +411,10 @@ expand : Whole -> Whole -> Whole -> WList -> FBody is
   end
 end
 
--- The exact decimal of a fraction, repetend and all.
+-- The exact decimal of a fraction, sign and repetend and all.
 to_radix : Frac -> RDec is
   fn (f : Frac) is
     let body : FBody = expand (fden f) (succ (fden f)) (fnum f % fden f) wnil in
-    rdec (fnum f // fden f) (fbDigits body) (fbRep body) (fbTerm body)
+    rdec (fneg f) (fnum f // fden f) (fbDigits body) (fbRep body) (fbTerm body)
   end
 end

@@ -2,7 +2,6 @@ package surface_test
 
 import (
 	"errors"
-	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -220,9 +219,9 @@ func TestPipeAndPrefixMinus(t *testing.T) {
 	bin := func(op string, l, r surface.Exp) surface.Exp {
 		return surface.EApp{Fn: surface.EApp{Fn: surface.EVar{Name: op}, Arg: l}, Arg: r}
 	}
-	// prefix `-e` is `0 - e`; the zero's Pos is the `-` token offset.
-	negAt := func(pos int, e surface.Exp) surface.Exp {
-		return bin("-", surface.ENum{Val: new(big.Int), Pos: pos}, e)
+	// prefix `-e` desugars to the application `negate e`.
+	neg := func(e surface.Exp) surface.Exp {
+		return surface.EApp{Fn: surface.EVar{Name: "negate"}, Arg: e}
 	}
 	cases := []struct {
 		src  string
@@ -236,12 +235,12 @@ func TestPipeAndPrefixMinus(t *testing.T) {
 		{"a + b |> f", app(v("f"), bin("+", v("a"), v("b")))},
 		// pipe RHS may be an application: (g y) x
 		{"x |> g y", app(app(v("g"), v("y")), v("x"))},
-		// prefix minus at start: 0 - x  (the `-` is at offset 0)
-		{"-x", negAt(0, v("x"))},
+		// prefix minus at start: `negate x`
+		{"-x", neg(v("x"))},
 		// binary minus is unaffected
 		{"a - b", bin("-", v("a"), v("b"))},
-		// prefix minus on the RHS of binary minus: a - (0 - b), the inner `-` at offset 4
-		{"a - -b", bin("-", v("a"), negAt(4, v("b")))},
+		// prefix minus on the RHS of binary minus: a - (negate b)
+		{"a - -b", bin("-", v("a"), neg(v("b")))},
 	}
 	for _, c := range cases {
 		got, err := surface.ParseExpr(c.src)

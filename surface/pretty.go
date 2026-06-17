@@ -154,29 +154,46 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 	if !ok {
 		return "", false
 	}
+	// A Bool flag arg is negative iff it is the `true` constructor.
+	isNeg := func(t core.Tm) bool {
+		r, ok := t.(core.Ref)
+		return ok && r.Hash == p.dec.True
+	}
 	switch {
-	case ref.Hash == p.dec.Frac && len(args) == 2:
-		a, ok1 := p.wholeVal(args[0])
-		b, ok2 := p.wholeVal(args[1])
+	case ref.Hash == p.dec.Frac && len(args) == 3:
+		neg := isNeg(args[0])
+		a, ok1 := p.wholeVal(args[1])
+		b, ok2 := p.wholeVal(args[2])
 		if !ok1 || !ok2 {
 			return "", false
 		}
-		return strconv.Itoa(a) + "/" + strconv.Itoa(b), true
-	case ref.Hash == p.dec.RDec && len(args) == 4:
-		ip, ok1 := p.wholeVal(args[0])
-		ds, ok2 := p.wlistVals(args[1])
-		rep, ok3 := p.wholeVal(args[2])
+		if a == 0 {
+			return "0", true // zero is unsigned
+		}
+		sign := ""
+		if neg {
+			sign = "-"
+		}
+		if b == 1 {
+			return sign + strconv.Itoa(a), true // a whole-valued fraction, e.g. -5
+		}
+		return sign + strconv.Itoa(a) + "/" + strconv.Itoa(b), true
+	case ref.Hash == p.dec.RDec && len(args) == 5:
+		neg := isNeg(args[0])
+		ip, ok1 := p.wholeVal(args[1])
+		ds, ok2 := p.wlistVals(args[2])
+		rep, ok3 := p.wholeVal(args[3])
 		if !ok1 || !ok2 || !ok3 {
 			return "", false
 		}
-		termRef, ok4 := args[3].(core.Ref)
-		if !ok4 {
-			return "", false
+		terminating := isNeg(args[4]) // the term flag is the `true` constructor
+		sign := ""
+		if neg && !(ip == 0 && len(ds) == 0) {
+			sign = "-" // zero is unsigned
 		}
-		terminating := termRef.Hash == p.dec.True
-		s := strconv.Itoa(ip)
+		s := sign + strconv.Itoa(ip)
 		if len(ds) == 0 {
-			return s, true // a whole number, e.g. 2
+			return s, true // a whole number, e.g. 2 or -5
 		}
 		if terminating || rep >= len(ds) {
 			return s + "." + digitsStr(ds), true

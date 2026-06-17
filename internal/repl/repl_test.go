@@ -120,6 +120,10 @@ func TestREPLRadixAndSigfigs(t *testing.T) {
 		"7/4 |> to_radix_sigfig 1",  // 2       (round to 1 significant figure)
 		"7/4 |> to_radix_sigfig 2",  // 1.8
 		"7/4 |> to_radix_sigfig 3",  // 1.75
+		"-1/3",                      // negatives: a signed fraction, not 0/3
+		"-1/3 |> to_radix",          // -0.{3}
+		"-3/4 |> to_radix",          // -0.75
+		"-7/4 |> to_radix_sigfig 2", // -1.8
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -137,6 +141,10 @@ func TestREPLRadixAndSigfigs(t *testing.T) {
 		"1.8 : RDec",
 		"2 : RDec",
 		"1.75 : RDec",
+		"-1/3 : Frac",
+		"-0.{3} : RDec",
+		"-0.75 : RDec",
+		"-1.8 : RDec",
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
