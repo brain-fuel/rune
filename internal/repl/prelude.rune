@@ -19,6 +19,12 @@ builtin nat Nat zero succ
   end
 end
 
+-- Accelerate `+` on closed literals: `4000 + 4000` takes one bigint step instead
+-- of building a succ-chain. Registration runs a differential gate (the unfolded
+-- body must equal bigint add on a battery of pairs), so this stays kernel-sound;
+-- it fires ONLY when both arguments are NatLit, leaving open terms to the proof.
+builtin natAdd +
+
 * : Nat -> Nat -> Nat is
   fn (m : Nat) (n : Nat) is
     case m of
@@ -27,6 +33,10 @@ end
     end
   end
 end
+
+-- Accelerate `*` likewise — this is what makes `4000 * 4000` instant instead of
+-- materialising 16 million succ nodes (and overflowing the stack at readback).
+builtin natMul *
 
 pred : Nat -> Nat is
   fn (n : Nat) is
@@ -46,6 +56,9 @@ end
     end
   end
 end
+
+-- Accelerate truncated subtraction (saturating monus) on closed literals.
+builtin natMonus -
 
 data Bool : U is
   true : Bool

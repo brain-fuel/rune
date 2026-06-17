@@ -171,14 +171,20 @@ func (p *parser) parseBuiltin() (Item, error) {
 	}
 }
 
-// builtinNames reads n identifiers after a builtin kind keyword.
+// builtinNames reads n names after a builtin kind keyword. Each name is an
+// identifier OR an operator — `builtin natMul *` accelerates the operator-named
+// definition `*`, exactly as `parseDef` admits an operator definition name (§3).
 func (p *parser) builtinNames(n int) ([]string, error) {
 	names := make([]string, n)
 	for i := range names {
-		id, err := p.expect(tIdent)
-		if err != nil {
-			return nil, err
+		id := p.peek()
+		if id.kind != tIdent && id.kind != tOp {
+			if id.kind == tEOF {
+				return nil, fmt.Errorf("%w: expected a builtin name", ErrIncomplete)
+			}
+			return nil, fmt.Errorf("expected a builtin name (identifier or operator), found %s at offset %d", id.kind, id.pos)
 		}
+		p.next()
 		names[i] = id.text
 	}
 	return names, nil

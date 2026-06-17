@@ -44,6 +44,27 @@ func TestParenDisambiguation(t *testing.T) {
 	}
 }
 
+// TestDebugCoreNamed pins the :ast renderer: the same structural tree as :core but
+// with NAMED binders (not unnamed Π/λ + bare de Bruijn indices). References would
+// print as their definition names; with no defs in scope the binder naming is what
+// this checks.
+func TestDebugCoreNamed(t *testing.T) {
+	cases := []struct {
+		src, want string
+	}{
+		{"(A : U) -> A", "(Π (A : U). A)"},                         // dependent binder, named
+		{"(A : U) -> (B : A) -> A", "(Π (A : U). (Π (B : A). A))"}, // nested, both named
+		{"(U : U)", "(U : U)"},                                     // ascription
+		{"U -> U", "(Π (x : U). U)"},                               // non-dependent: unused binder freshens to x
+	}
+	for _, c := range cases {
+		got := surface.DebugCoreNamed(resolveSrc(t, c.src), nil)
+		if got != c.want {
+			t.Errorf("%q: got %q, want %q", c.src, got, c.want)
+		}
+	}
+}
+
 // TestSeqEquivalence pins the §6 desugaring on concrete inputs, across both separators.
 func TestSeqEquivalence(t *testing.T) {
 	cases := []struct {

@@ -104,6 +104,37 @@ func TestREPLPrelude(t *testing.T) {
 	}
 }
 
+// TestREPLLargeArithAndAST guards two things: (1) the prelude registers +/*/-
+// for the bigint accel, so a large product like 4000*4000 returns its literal in
+// one step instead of materialising 16M succ nodes and overflowing the stack at
+// readback (the reported crash); (2) :ast renders the resolved core as a named
+// structural tree (the hashless :core).
+func TestREPLLargeArithAndAST(t *testing.T) {
+	script := []string{
+		"4000 * 4000", // accel: instant, was a stack overflow
+		"4000 + 4000",
+		"1000 - 1",
+		":ast 1 + 2",
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		"16000000 : Nat", // 4000 * 4000, accelerated
+		"8000 : Nat",     // 4000 + 4000
+		"999 : Nat",      // 1000 - 1
+		"((+ 1) 2)",      // :ast — names, not @hash; NatLits shown, not ?
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}
+
 // TestREPLRunShadow drives `:run` through a prelude session: the expression is
 // type checked by the kernel, then evaluated through the erased JS shadow under
 // node — calculation without a certificate. The BigInt shadow applies (the

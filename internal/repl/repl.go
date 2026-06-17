@@ -213,6 +213,8 @@ func runCommand(s *session.Session, cfg Config, line string, out io.Writer) erro
 		return loadFile(s, arg, out)
 	case ":core":
 		return showCore(s, arg, out)
+	case ":ast":
+		return showAST(s, arg, out)
 	case ":hash":
 		return showHash(s, arg, out)
 	case ":type", ":t":
@@ -241,6 +243,18 @@ func showCore(s *session.Session, arg string, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintln(out, surface.DebugCore(c))
+	return nil
+}
+
+// showAST renders the resolved core as a human-readable structural tree (:ast): the
+// same breakdown as :core, but references print as their definition NAMES and binders
+// as freshened names — the hashless twin of :core.
+func showAST(s *session.Session, arg string, out io.Writer) error {
+	c, err := resolveArg(s, arg)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out, surface.DebugCoreNamed(c, s.RefNames()))
 	return nil
 }
 
@@ -289,6 +303,7 @@ func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "  <expr>          resolve and pretty-print (no evaluation yet)")
 	fmt.Fprintln(out, "  <name> : T is e end   add a definition to the session")
 	fmt.Fprintln(out, "  :core <expr>    show the resolved core in explicit de Bruijn form")
+	fmt.Fprintln(out, "  :ast <expr>     show the resolved core as a named structural tree (hashless :core)")
 	fmt.Fprintln(out, "  :hash <expr>    show the content hash of the resolved core")
 	fmt.Fprintln(out, "  :type <expr>    (:t) type checking arrives in Phase 1")
 	fmt.Fprintln(out, "  :run <expr>    evaluate through the erased shadow (fast, computation only — no certificate)")

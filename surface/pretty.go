@@ -391,6 +391,168 @@ func debugCore(sb *strings.Builder, t core.Tm) {
 	}
 }
 
+// DebugCoreNamed renders a core term as the same explicit structural tree as
+// DebugCore, but HUMAN-READABLE: references print as their definition name (not a
+// @hash), binders carry a freshened name (not an unnamed λ/Π and bare de Bruijn
+// indices), and every node kind is shown — including NatLit (the number) and the
+// equality/Sigma formers DebugCore renders as `?`. It is the REPL's :ast view; like
+// :core it is a debug tree, not a sentence of the surface grammar. refNames maps a
+// definition's content hash to its display name (Session.RefNames()).
+func DebugCoreNamed(t core.Tm, refNames map[core.Hash]string) string {
+	var sb strings.Builder
+	debugCoreNamed(&sb, t, refNames, nil)
+	return sb.String()
+}
+
+func debugCoreNamed(sb *strings.Builder, t core.Tm, refs map[core.Hash]string, scope []string) {
+	rec := func(u core.Tm) { debugCoreNamed(sb, u, refs, scope) }
+	switch x := t.(type) {
+	case core.Var:
+		if x.Idx >= 0 && x.Idx < len(scope) {
+			sb.WriteString(scope[x.Idx])
+		} else {
+			sb.WriteString("#")
+			sb.WriteString(strconv.Itoa(x.Idx))
+		}
+	case core.Ref:
+		if n, ok := refs[x.Hash]; ok {
+			sb.WriteString(n)
+		} else {
+			sb.WriteString("@")
+			sb.WriteString(x.Hash.Short())
+		}
+	case core.Meta:
+		sb.WriteString("?m")
+		sb.WriteString(strconv.Itoa(x.ID))
+	case core.Univ:
+		sb.WriteString("U")
+		if x.Lvl > 0 {
+			sb.WriteString(strconv.Itoa(x.Lvl))
+		}
+	case core.Prop:
+		sb.WriteString("Prop")
+	case core.NatLit:
+		sb.WriteString(x.N.String())
+	case core.App:
+		sb.WriteByte('(')
+		rec(x.Fn)
+		sb.WriteByte(' ')
+		if x.Icit == core.Impl {
+			sb.WriteByte('{')
+			rec(x.Arg)
+			sb.WriteByte('}')
+		} else {
+			rec(x.Arg)
+		}
+		sb.WriteByte(')')
+	case core.Lam:
+		name := fresh(x.Body.Name, scope)
+		if x.Icit == core.Impl {
+			sb.WriteString("(λ {")
+			sb.WriteString(name)
+			sb.WriteString("}. ")
+		} else {
+			sb.WriteString("(λ ")
+			sb.WriteString(name)
+			sb.WriteString(". ")
+		}
+		debugCoreNamed(sb, x.Body.Body, refs, prepend(name, scope))
+		sb.WriteByte(')')
+	case core.Pi:
+		sb.WriteString("(Π ")
+		lb, rb := "(", ")"
+		if x.Icit == core.Impl {
+			lb, rb = "{", "}"
+		}
+		sb.WriteString(lb)
+		// the domain is in the OUTER scope; reserve the binder name for the codomain.
+		name := fresh(x.Cod.Name, scope)
+		sb.WriteString(name)
+		sb.WriteString(" : ")
+		rec(x.Dom)
+		sb.WriteString(rb)
+		sb.WriteString(". ")
+		debugCoreNamed(sb, x.Cod.Body, refs, prepend(name, scope))
+		sb.WriteByte(')')
+	case core.Sig:
+		sb.WriteString("(Σ (")
+		name := fresh(x.Cod.Name, scope)
+		sb.WriteString(name)
+		sb.WriteString(" : ")
+		rec(x.Dom)
+		sb.WriteString("). ")
+		debugCoreNamed(sb, x.Cod.Body, refs, prepend(name, scope))
+		sb.WriteByte(')')
+	case core.Pair:
+		sb.WriteString("(pair ")
+		rec(x.A)
+		sb.WriteByte(' ')
+		rec(x.B)
+		sb.WriteByte(')')
+	case core.Fst:
+		sb.WriteString("(fst ")
+		rec(x.P)
+		sb.WriteByte(')')
+	case core.Snd:
+		sb.WriteString("(snd ")
+		rec(x.P)
+		sb.WriteByte(')')
+	case core.Let:
+		sb.WriteString("(let ")
+		hint := fresh(x.Body.Name, scope)
+		sb.WriteString(hint)
+		if x.Ty != nil {
+			sb.WriteString(" : ")
+			rec(x.Ty)
+		}
+		sb.WriteString(" = ")
+		rec(x.Val)
+		sb.WriteString(" in ")
+		debugCoreNamed(sb, x.Body.Body, refs, prepend(hint, scope))
+		sb.WriteByte(')')
+	case core.Ann:
+		sb.WriteByte('(')
+		rec(x.Term)
+		sb.WriteString(" : ")
+		rec(x.Ty)
+		sb.WriteByte(')')
+	case core.Eq:
+		sb.WriteString("(Eq ")
+		rec(x.Ty)
+		sb.WriteByte(' ')
+		rec(x.L)
+		sb.WriteByte(' ')
+		rec(x.R)
+		sb.WriteByte(')')
+	case core.Refl:
+		sb.WriteString("(refl ")
+		rec(x.Tm)
+		sb.WriteByte(')')
+	case core.Cast:
+		sb.WriteString("(cast ")
+		rec(x.A)
+		sb.WriteByte(' ')
+		rec(x.B)
+		sb.WriteByte(' ')
+		rec(x.X)
+		sb.WriteByte(')')
+	case core.Subst:
+		sb.WriteString("(subst ")
+		rec(x.A)
+		sb.WriteByte(' ')
+		rec(x.X)
+		sb.WriteByte(' ')
+		rec(x.Y)
+		sb.WriteByte(' ')
+		rec(x.P)
+		sb.WriteByte(' ')
+		rec(x.Px)
+		sb.WriteByte(')')
+	default:
+		sb.WriteString("?")
+	}
+}
+
 // infixApp recognizes `Ref⁺ l r` — a saturated, explicit, binary application of
 // a definition whose display name is an infix operator — and returns the pieces
 // for infix printing.
