@@ -207,9 +207,63 @@ func (e *Elaborator) insertImplicits(c *Ctx, tm core.Tm, ty core.Val) (core.Tm, 
 			continue
 		}
 		m := e.freshMeta(c, "implicit argument")
+		// If the domain is a class constraint whose argument head is not yet a
+		// rigid type (an unsolved metavariable), POSTPONE: record the dictionary
+		// meta and retry instance search once the head is solved (ResolvePending).
+		if e.isClassConstraint(c, pi.Dom) {
+			e.pending = append(e.pending, pendingDict{meta: m, want: pi.Dom, c: c})
+		}
 		tm = core.App{Fn: tm, Arg: m, Icit: core.Impl}
 		ty = pi.Cod(e.Eval(c, m))
 	}
+}
+
+// isClassConstraint reports whether dom is shaped like a class application
+// `C … T` (a ref-headed application with at least one argument), regardless of
+// whether the last argument's head is rigid yet. Decides which inserted
+// implicits are worth retrying by instance search once their type is solved.
+func (e *Elaborator) isClassConstraint(c *Ctx, dom core.Val) bool {
+	t := e.M.Quote(c.Lvl(), dom)
+	nargs := 0
+	for {
+		if app, isApp := t.(core.App); isApp {
+			nargs++
+			t = app.Fn
+			continue
+		}
+		break
+	}
+	_, isRef := t.(core.Ref)
+	return isRef && nargs > 0
+}
+
+// ResolvePending retries every postponed typeclass-dictionary resolution. After
+// the value arguments of an overloaded use have solved its inferred type, the
+// class argument's head is rigid, so instance search now succeeds; the found
+// dictionary is unified with the placeholder meta. The constraint is ZONKED
+// first — Quote leaves solved metas folded, so the class argument's head only
+// becomes visible to instance search after substituting the solutions. Iterates
+// to a fixpoint (one resolution can solve metas that unblock another); left-over
+// entries whose head never became rigid stay ordinary unsolved metas (caught by
+// ErrUnsolved).
+func (e *Elaborator) ResolvePending() error {
+	for changed := true; changed; {
+		changed = false
+		var still []pendingDict
+		for _, p := range e.pending {
+			want := e.Eval(p.c, e.Zonk(p.c.Lvl(), e.M.Quote(p.c.Lvl(), p.want)))
+			if dict, ok := e.resolveClass(p.c, want); ok {
+				if err := e.Unify(p.c.Lvl(), e.Eval(p.c, p.meta), e.Eval(p.c, dict)); err != nil {
+					return err
+				}
+				changed = true
+			} else {
+				still = append(still, p)
+			}
+		}
+		e.pending = still
+	}
+	return nil
 }
 
 // classKey extracts the (class-former, last-argument-head) hashes from a class
@@ -852,6 +906,9 @@ func (e *Elaborator) ElabDef(d surface.Def) (ty, body core.Tm, err error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
 	}
+	if err := e.ResolvePending(); err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+	}
 	ty, body = e.Zonk(0, ty), e.Zonk(0, body)
 	if err := e.ErrUnsolved(d.Name); err != nil {
 		return nil, nil, err
@@ -902,6 +959,9 @@ func (e *Elaborator) ElabPartialDef(d surface.Def, selfHash core.Hash) (ty, body
 	e.Refs[d.Name] = selfHash
 	body, err = e.Check(c, d.Body, e.Eval(c, ty))
 	if err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+	}
+	if err := e.ResolvePending(); err != nil {
 		return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
 	}
 	ty, body = e.Zonk(0, ty), e.Zonk(0, body)

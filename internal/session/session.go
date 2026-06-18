@@ -792,6 +792,9 @@ func (s *Session) ElabExpr(e surface.Exp) (tm, ty core.Tm, err error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := el.ResolvePending(); err != nil {
+		return nil, nil, err
+	}
 	t = el.Zonk(0, t)
 	tyTm := el.Zonk(0, el.M.Quote(0, vty))
 	if err := el.ErrUnsolved("expression"); err != nil {

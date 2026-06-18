@@ -61,6 +61,24 @@ type Elaborator struct {
 	sr   quantity.Semiring
 	mult core.Qty
 	uses map[int]core.Qty
+
+	// pending holds class-constraint implicits whose dictionary could not be
+	// resolved at insertion time because the class argument's head was still an
+	// unsolved metavariable (e.g. an overloaded operator `+ : {A} -> {Add A} ->
+	// …` applied before A is known from its value arguments). Each records the
+	// inserted dictionary meta, the constraint type, and the context;
+	// ResolvePending retries instance search once the surrounding elaboration has
+	// solved the argument head, then unifies the meta with the found dictionary.
+	// This is what makes typeclass dispatch work from INFERRED (not just explicit)
+	// type arguments — the basis of overloaded arithmetic across the tower.
+	pending []pendingDict
+}
+
+// pendingDict is one postponed typeclass-dictionary resolution.
+type pendingDict struct {
+	meta core.Tm  // the contextual dictionary metavariable inserted in its place
+	want core.Val // the class constraint type (e.g. Add ?A)
+	c    *Ctx     // the context the meta and constraint live in
 }
 
 // New returns an Elaborator over globals g with the given name maps.
