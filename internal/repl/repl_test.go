@@ -121,6 +121,8 @@ func TestREPLTowerArithmetic(t *testing.T) {
 		"1/3 * 2",      // fraction times a (defaulted) whole numeral
 		"1/(3*2)",      // a whole product in the denominator (numerals stay whole)
 		"1/3 - 1/3",    // to zero
+		"2/4",          // a typed fraction reduces to lowest terms
+		"2/3 * 3/2",    // product reduces to a whole-valued fraction
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -137,6 +139,7 @@ func TestREPLTowerArithmetic(t *testing.T) {
 		"2/3 : Frac",  // 1/3 * 2
 		"1/6 : Frac",  // 1/(3*2)
 		"0 : Frac",    // 1/3 - 1/3
+		"1/2 : Frac",  // 2/4 reduced
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {

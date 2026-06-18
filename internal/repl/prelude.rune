@@ -271,12 +271,23 @@ xorB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> n
 fracOf : Whole -> Frac is fn (n : Whole) is frac false n 1 end end
 builtin rat Frac fracOf
 
+-- Put a fraction in lowest terms (divide numerator and denominator by their gcd),
+-- so EVERY fraction at the prompt reads back canonically: 2/4 is 1/2, 1/3 - 2/3 is
+-- -1/3 not -3/9, a whole-valued result like 3/3 is 1. (gcd 0 d = d, so a zero
+-- numerator lands at 0/1, which displays as 0.)
+reduce : Frac -> Frac is
+  fn (f : Frac) is
+    let g : Whole = gcd (fnum f) (fden f) in
+    frac (fneg f) (fnum f // g) (fden f // g)
+  end
+end
+
 -- Division at Frac (the `1/3` of the prompt): (sa,a/b)/(sb,c/d) = (sa xor sb,
--- a*d/b*c). With the injection, `1 / 3` is `fracOf 1 / fracOf 3` = frac false 1 3,
--- and `-1 / 3` is `(negate (fracOf 1)) / fracOf 3` = frac true 1 3.
+-- a*d/b*c), reduced. With the injection, `1 / 3` is `fracOf 1 / fracOf 3` = 1/3,
+-- and `-1 / 3` is `(negate (fracOf 1)) / fracOf 3` = -1/3.
 / : Frac -> Frac -> Frac is
   fn (x : Frac) (y : Frac) is
-    frac (xorB (fneg x) (fneg y)) (fnum x * fden y) (fden x * fnum y)
+    reduce (frac (xorB (fneg x) (fneg y)) (fnum x * fden y) (fden x * fnum y))
   end
 end
 
@@ -288,16 +299,8 @@ negate : Frac -> Frac is fn (f : Frac) is frac (not (fneg f)) (fnum f) (fden f) 
 -- is componentwise with sign xor; addition puts the operands over the common
 -- denominator b·d and, since fractions are SIGNED, either adds the magnitudes
 -- (like signs) or subtracts the smaller from the larger and takes the larger's
--- sign (unlike signs); subtraction is addition of the negation.
--- Put a fraction in lowest terms (divide numerator and denominator by their gcd),
--- so an arithmetic result reads back canonically: 1/3 - 2/3 is -1/3, not -3/9.
--- (gcd 0 d = d, so a zero result lands at 0/1, which displays as 0.)
-reduce : Frac -> Frac is
-  fn (f : Frac) is
-    let g : Whole = gcd (fnum f) (fden f) in
-    frac (fneg f) (fnum f // g) (fden f // g)
-  end
-end
+-- sign (unlike signs); subtraction is addition of the negation. Every result is
+-- reduced to lowest terms (`reduce`, defined with `/` above).
 mulF : Frac -> Frac -> Frac is
   fn (x : Frac) (y : Frac) is
     reduce (frac (xorB (fneg x) (fneg y)) (mulW (fnum x) (fnum y)) (mulW (fden x) (fden y)))
