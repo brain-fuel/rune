@@ -1,3 +1,11 @@
+-- SUPERSEDED (2026-06-17 consolidation): this chapter builds Rat on the RPair
+-- representation (a Nat-pair difference numerator). The CANONICAL rational is
+-- ch108's `Quot QPair QRel` (a genuine Z numerator), on which the whole
+-- downstream tower (field ch113-119, reals ch121-131) is built. RPair is
+-- retired per Rule 5; its division/floor content (floorQ, //, %, exact /) is
+-- ported to QPair. Kept here as the pedagogical first rational. See
+-- ref_docs/rune-numeric-tower.md section 4.
+--
 -- Chapter 13 — The rationals: where `/` first exists.
 -- The numeric tower (ref_docs/rune-numeric-tower.md) at its third rung.
 -- ℚ is triples (a, b, d) — meaning (a − b)/(d + 1), the +1 trick killing

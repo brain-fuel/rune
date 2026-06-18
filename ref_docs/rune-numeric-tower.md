@@ -123,25 +123,42 @@ computes). Operations by `qlift`, one respect proof each; negation is the
 swap. `//` and `%` defined by case analysis on signs over Nat's flooring
 engine, then lifted; the sign cases are where the F-convention is *earned*.
 
-**Rat** = `Quot RPair` where `rp a b d` denotes (a − b)/(d+1) — a signed
-numerator as a Nat pair and **the denominator stored off by one.**
-Equivalence is cross-multiplication, one Nat equation:
-`a₁·s₂ + b₂·s₁ = a₂·s₁ + b₁·s₂` (sᵢ = dᵢ+1). The +1 trick means: no
-positive-denominator Σ-type, no positivity proof obligation at any
-construction site, total constructors everywhere, and the relation needs no
-side conditions. Normalization (divide by gcd) is *not* part of the type —
-the quotient makes `1/2 = 2/4` by `qsound`, not by representation.
+**Rat** = `Quot QPair QRel` (CANONICAL as of the 2026-06-17 consolidation; the
+original `RPair` form below is superseded). A `QPair` is `qpair (n : Z) (d :
+Nat)` denoting `n / succ d`: the numerator is a genuine integer (ch107's `Z`,
+the difference quotient over `NatPair`), the denominator a Nat stored off by
+one (the +1 trick, structurally nonzero, no positivity proof, total
+constructors). Equivalence is cross-multiplication in the **Z ring**: `qpair a
+b ~ qpair c e  iff  zmul a (zden (qpair c e)) = zmul c (zden (qpair a b))`.
+Normalization (divide by gcd) is not part of the type; the quotient makes `1/2
+= 2/4` by `qsound`, not by representation.
 
-- `addQ`/`mulQ` by the textbook representative formulas; the denominator
-  arithmetic is the +1 trick paying rent: `(d₁+1)(d₂+1) − 1`.
-- **Division is multiplication by an equation-only flip** (as built in ch13):
-  `flip (rp a b d) = rp ((a∸b)·s) ((b∸a)·s) (Δ·Δ − 1)` with
-  `Δ = (a∸b)+(b∸a)`. When a ≠ b this is ±s/Δ scaled by Δ/Δ; when a = b the
-  numerator is 0 and the denominator 1 — so `flip 0 = 0` and `x / 0 = 0`
-  *fall out* rather than being decreed, and the respect proof needs no sign
-  or zero case analysis beyond one cancellation (`keyLemma`) and one
-  absurdity-from-zero. No order theory anywhere.
-- `floorQ`/`%` at Rat: see §7 C3 — parked on Euclidean uniqueness.
+The Z-valued numerator is the whole point: every well-definedness obligation
+collapses to a Z-ring identity (`zmulInterchange`, `zmulComm`, `zmulHom`),
+reusing the proven integer ring instead of re-deriving sign algebra on Nat
+pairs. The realized division of labor across the corpus:
+
+- **field laws** (`qadd`/`qmul`, commutativity/associativity/distributivity):
+  ch108, on QPair, by the representative formulas with one respect proof each.
+- **order** (`qle`, reflexivity/transitivity/antisymmetry/totality, `qaddMono`):
+  ch119, on QPair, lifted through QRel by cross-multiplication (`a/sb <= c/sd
+  iff zle (a*sd) (c*sb)`).
+- **division/floor** (`floorQ`, `//`, `%`, exact `/`): the canonical form lifts
+  ch12's `zfdiv` (flooring division on `Z`) over the Z-valued numerator, so
+  `floorQ` is essentially `zfdiv (qnum p) (zden p)` and the qlift respect proof
+  is `zfdiv`-respects-QRel, simpler than ch13's RPair sign-trick. Ported from
+  ch13 during the consolidation.
+- **`to_radix` / repeating-decimal display**: `qlift` of `digits` after
+  `reduce` (lowest terms), respect by reduce-to-lowest-terms canonicity.
+
+ORIGINAL RPair form (SUPERSEDED, Rule 5). Rat was first built (ch13) as `Quot
+RPair`, `rp a b d` denoting `(a − b)/(d+1)`, a Nat-pair difference numerator,
+with division as an equation-only `flip` and `floorQ` discharged by Euclidean
+uniqueness (`divUnique`/`floorUnique`, delivered there, not parked). That
+predates ch107's `Z` and ch108's QPair upgrade. Since the entire downstream
+tower (field ch113-119, reals ch121-131, matrices/det ch141-154) is built on
+QPair, QPair is the load-bearing rational and RPair is retired: ch13's
+division/floor content is ported to QPair, after which ch13 is repurposed.
 
 **Injections** are explicit, named, and one-directional: `intOf : Nat -> Int`,
 `ratOf : Int -> Rat`, composite `ratOfNat`. No coercion, no overloading escape
