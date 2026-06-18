@@ -105,6 +105,49 @@ func TestREPLPrelude(t *testing.T) {
 	}
 }
 
+// TestREPLTowerArithmetic is the acceptance test that `+ - *` are OVERLOADED
+// across the numeric tower: the same operators add/subtract/multiply wholes and
+// fractions, mixed with the fraction builder `/`, with the dictionary resolved
+// from the argument types (typeclass dispatch from inferred type arguments) and
+// numerals defaulting only after the surrounding type is known. Results are in
+// lowest terms.
+func TestREPLTowerArithmetic(t *testing.T) {
+	script := []string{
+		"1 + 1",        // Whole addition, the foundation
+		"1/3 - 2/3",    // fraction subtraction (signed), reduced
+		"(1/3) - (2/3)", // parenthesised, same
+		"1/3 + 2/3",    // sums to one whole
+		"2/3 + 1/6",    // common denominator
+		"1/3 * 2",      // fraction times a (defaulted) whole numeral
+		"1/(3*2)",      // a whole product in the denominator (numerals stay whole)
+		"1/3 - 1/3",    // to zero
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"2 : Whole",   // 1 + 1
+		"-1/3 : Frac", // 1/3 - 2/3 (and the parenthesised form)
+		"1 : Frac",    // 1/3 + 2/3
+		"5/6 : Frac",  // 2/3 + 1/6
+		"2/3 : Frac",  // 1/3 * 2
+		"1/6 : Frac",  // 1/(3*2)
+		"0 : Frac",    // 1/3 - 1/3
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "error") || strings.Contains(got, "mismatch") {
+		t.Errorf("unexpected error in tower arithmetic\n--- full output ---\n%s", got)
+	}
+}
+
 // TestREPLRadixAndSigfigs is the acceptance test that the fraction / radix /
 // significant-figure feature WORKS AT THE PROMPT (not just as listings): `/`
 // builds a fraction, `|>` pipes it into a conversion, and the result prints in

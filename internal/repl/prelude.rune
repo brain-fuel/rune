@@ -17,7 +17,12 @@ end
 
 builtin nat Whole zero succ
 
-+ : Whole -> Whole -> Whole is
+-- The Whole-level arithmetic kernels. These are NAMED (addW/mulW/subW) so the
+-- operators `+`/`-`/`*` below can be OVERLOADED across the tower (Whole and the
+-- signed fractions) by typeclass dispatch — `1 + 1` is Whole addition, `1/3 + 2/3`
+-- is fraction addition, the SAME symbol. The kernels carry the bigint acceleration.
+
+addW : Whole -> Whole -> Whole is
   fn (m : Whole) (n : Whole) is
     case m of
     | zero -> n
@@ -26,24 +31,24 @@ builtin nat Whole zero succ
   end
 end
 
--- Accelerate `+` on closed literals: `4000 + 4000` takes one bigint step instead
--- of building a succ-chain. Registration runs a differential gate (the unfolded
--- body must equal bigint add on a battery of pairs), so this stays kernel-sound;
--- it fires ONLY when both arguments are NatLit, leaving open terms to the proof.
-builtin natAdd +
+-- Accelerate addition on closed literals: `4000 + 4000` takes one bigint step
+-- instead of building a succ-chain. Registration runs a differential gate (the
+-- unfolded body must equal bigint add on a battery of pairs), so this stays
+-- kernel-sound; it fires ONLY when both arguments are NatLit.
+builtin natAdd addW
 
-* : Whole -> Whole -> Whole is
+mulW : Whole -> Whole -> Whole is
   fn (m : Whole) (n : Whole) is
     case m of
     | zero -> 0
-    | succ k with ih -> ih + n
+    | succ k with ih -> addW ih n
     end
   end
 end
 
--- Accelerate `*` likewise — this is what makes `4000 * 4000` instant instead of
--- materialising 16 million succ nodes (and overflowing the stack at readback).
-builtin natMul *
+-- Accelerate multiplication likewise — what makes `4000 * 4000` instant instead
+-- of materialising 16 million succ nodes (and overflowing the stack at readback).
+builtin natMul mulW
 
 pred : Whole -> Whole is
   fn (n : Whole) is
@@ -55,7 +60,7 @@ pred : Whole -> Whole is
 end
 
 -- Truncated subtraction: m - n stops at zero (Whole has nothing below it).
-- : Whole -> Whole -> Whole is
+subW : Whole -> Whole -> Whole is
   fn (m : Whole) (n : Whole) is
     case n of
     | zero -> m
@@ -65,12 +70,46 @@ end
 end
 
 -- Accelerate truncated subtraction (saturating monus) on closed literals.
-builtin natMonus -
+builtin natMonus subW
 
 data Bool : U is
   true : Bool
 | false : Bool
 end
+
+-- ====================================================================
+-- THE ARITHMETIC CLASS.  `+ - *` are overloaded across the numeric tower by a
+-- typeclass: a class is a type family, an instance is a value of it registered in
+-- the session, and an operator is a class-constrained function whose dictionary
+-- the elaborator resolves from the TYPE of its arguments. So the same `+` adds
+-- wholes or fractions and the dispatch is inferred, never written.
+--
+-- It is ONE class `Num` carrying all three operations as a Σ-record, NOT three
+-- one-method classes — `Add A`, `Sub A`, `Mul A` would each be `A -> A -> A`,
+-- hence HASH-IDENTICAL (identity is structure, not name), so their instances
+-- would collide on a single key. Bundling distinguishes them by position, not by
+-- a name the hash discards (the same reason Nat is a Σ, not bare Peano).
+-- (`/` stays the fraction builder at Frac; `// %` are integer-only at Whole.)
+-- ====================================================================
+Num : U -> U is
+  fn (A : U) is
+    Sig (A -> A -> A) (fn (_p : A -> A -> A) is
+      Sig (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) end)
+  end
+end
+mkNum : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> (A -> A -> A) -> Num A is
+  fn (A : U) (a : A -> A -> A) (s : A -> A -> A) (m : A -> A -> A) is
+    Pair (A -> A -> A) (fn (_p : A -> A -> A) is
+            Sig (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) end)
+      a (Pair (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) s m)
+  end
+end
+
+instance numWhole : Num Whole is mkNum Whole addW subW mulW end
+
++ : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.1) x y end end
+- : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.2.1) x y end end
+* : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.2.2) x y end end
 
 -- leb m n decides m <= n; recursion on m produces the comparison FUNCTION,
 -- so the induction hypothesis is "compare against k" awaiting its argument.
@@ -244,6 +283,44 @@ end
 -- Negation flips the sign (prefix `-` desugars to this). 0 stays unsigned in
 -- display, so `negate 0` reads back as 0.
 negate : Frac -> Frac is fn (f : Frac) is frac (not (fneg f)) (fnum f) (fden f) end end
+
+-- Fraction arithmetic — the Frac instances of the tower's `* + -`. Multiplication
+-- is componentwise with sign xor; addition puts the operands over the common
+-- denominator b·d and, since fractions are SIGNED, either adds the magnitudes
+-- (like signs) or subtracts the smaller from the larger and takes the larger's
+-- sign (unlike signs); subtraction is addition of the negation.
+-- Put a fraction in lowest terms (divide numerator and denominator by their gcd),
+-- so an arithmetic result reads back canonically: 1/3 - 2/3 is -1/3, not -3/9.
+-- (gcd 0 d = d, so a zero result lands at 0/1, which displays as 0.)
+reduce : Frac -> Frac is
+  fn (f : Frac) is
+    let g : Whole = gcd (fnum f) (fden f) in
+    frac (fneg f) (fnum f // g) (fden f // g)
+  end
+end
+mulF : Frac -> Frac -> Frac is
+  fn (x : Frac) (y : Frac) is
+    reduce (frac (xorB (fneg x) (fneg y)) (mulW (fnum x) (fnum y)) (mulW (fden x) (fden y)))
+  end
+end
+addF : Frac -> Frac -> Frac is
+  fn (x : Frac) (y : Frac) is
+    let ad : Whole = mulW (fnum x) (fden y) in
+    let cb : Whole = mulW (fnum y) (fden x) in
+    let bd : Whole = mulW (fden x) (fden y) in
+    reduce (case xorB (fneg x) (fneg y) of
+    | false -> frac (fneg x) (addW ad cb) bd
+    | true ->
+        case leb cb ad of
+        | true  -> frac (fneg x) (subW ad cb) bd
+        | false -> frac (fneg y) (subW cb ad) bd
+        end
+    end)
+  end
+end
+subF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is addF x (negate y) end end
+
+instance numFrac : Num Frac is mkNum Frac addF subF mulF end
 
 powTen : Whole -> Whole is
   fn (n : Whole) is case n of | zero -> 1 | succ k with ih -> 10 * ih end end
