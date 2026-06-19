@@ -287,6 +287,42 @@ func TestREPLResultRefs(t *testing.T) {
 	}
 }
 
+// TestREPLDivisionPromotes is the regression test that `/` PROMOTES Whole / Whole
+// to Frac (ℕ is not closed under division, exactly as − promotes to ℤ) — so it works
+// on bound Whole VALUES, not just bare numeral literals that inject to Frac. The bug:
+// `$3/5` (a referenced Whole result) failed with "expected Frac, got Whole" while the
+// literal `16/5` worked.
+func TestREPLDivisionPromotes(t *testing.T) {
+	script := []string{
+		"3 + 5",         // $1 ==> 8 : Whole  (a bound Whole)
+		"$1 / 5",        // bound Whole / numeral -> Frac
+		"$1 / $1",       // bound Whole / bound Whole -> Frac (= 1)
+		"16 / 5",        // both numerals still work
+		"(1/2) / (1/3)", // Frac / Frac still works
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		"8 : Whole",   // 3 + 5
+		"8/5 : Frac",  // $1 / 5
+		"1 : Frac",    // $1 / $1
+		"16/5 : Frac", // 16 / 5
+		"3/2 : Frac",  // (1/2) / (1/3)
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "mismatch") || strings.Contains(got, "got Whole") {
+		t.Errorf("division of a Whole value should promote to Frac, not type-error\n%s", got)
+	}
+}
+
 // TestREPLRadixAndSigfigs is the acceptance test that the fraction / radix /
 // significant-figure feature WORKS AT THE PROMPT (not just as listings): `/`
 // builds a fraction, `|>` pipes it into a conversion, and the result prints in
