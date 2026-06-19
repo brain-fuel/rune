@@ -50,7 +50,7 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 		if err := loadPrelude(s); err != nil {
 			return err
 		}
-		fmt.Fprintln(out, "prelude: `+ - *` are overloaded across the tower — whole and fraction arithmetic share the operators (1+1 = 2, 1/3 - 2/3 = -1/3, 1/3 * 2 = 2/3); `/` builds a fraction, `// %` and gcd are integer ops at Whole. Pipe a fraction with `|>` into `to_radix` (exact, repetend bracketed: 1/3 |> to_radix = 0.{3}), `to_radix_sigplace n`, or `to_radix_sigfig n`. `rune repl --no-prelude` for a bare session.")
+		fmt.Fprintln(out, "prelude: the numeric tower Whole < Int < Frac with overloaded `+ - *`. Subtraction PROMOTES — ℕ is not closed under it, so 2 - 5 = -3 : Int while 5 - 2 = 3 : Int; `monus` truncates at 0 and `minus a b (pf : b ≤ a)` stays Whole when provable. 1/3 - 2/3 = -1/3 : Frac. `/` builds a fraction; `divChecked a b` returns a Result (err on a zero divisor); `// %` and gcd are integer ops at Whole. Pipe a fraction with `|>` into `to_radix` (1/3 |> to_radix = 0.{3}), `to_radix_sigplace n`, or `to_radix_sigfig n`. `rune repl --no-prelude` for a bare session.")
 	}
 	fmt.Fprintln(out, "type :help for commands, :quit to exit.")
 
@@ -150,7 +150,10 @@ func runExpr(s *session.Session, e surface.Exp, out io.Writer) error {
 		return err
 	}
 	nf := s.NormalizeExpr(tm)
-	fmt.Fprintf(out, "%s : %s\n", s.Pretty(nf), s.Pretty(ty))
+	// Normalize the type too: an overloaded operator's result type can be a stuck
+	// projection of its (now-resolved) dictionary, e.g. `2 - 5` infers `Fst subWhole`
+	// which βδι-reduces to `Int`. Showing the reduced type is what the user means.
+	fmt.Fprintf(out, "%s : %s\n", s.Pretty(nf), s.Pretty(s.NormalizeExpr(ty)))
 	return nil
 }
 

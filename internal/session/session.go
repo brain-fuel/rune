@@ -680,8 +680,11 @@ func (s *Session) decConfig() surface.DecConfig {
 	wcons, ok3 := s.refs["wcons"]
 	wnil, ok4 := s.refs["wnil"]
 	tru, ok5 := s.refs["true"]
+	// Int / Result folding is optional extra polish: resolve when present, but do
+	// not gate `On` on them (a session may have fractions but no Int rung).
 	return surface.DecConfig{
 		Frac: frac, RDec: rdec, Wcons: wcons, Wnil: wnil, True: tru,
+		Int: s.refs["int"], Ok: s.refs["ok"], Err: s.refs["err"],
 		On: ok1 && ok2 && ok3 && ok4 && ok5,
 	}
 }

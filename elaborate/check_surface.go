@@ -247,23 +247,170 @@ func (e *Elaborator) isClassConstraint(c *Ctx, dom core.Val) bool {
 // entries whose head never became rigid stay ordinary unsolved metas (caught by
 // ErrUnsolved).
 func (e *Elaborator) ResolvePending() error {
-	for changed := true; changed; {
-		changed = false
+	// One sweep resolving every dictionary whose class argument is now rigid.
+	resolveDicts := func() (bool, error) {
+		prog := false
 		var still []pendingDict
 		for _, p := range e.pending {
-			want := e.Eval(p.c, e.Zonk(p.c.Lvl(), e.M.Quote(p.c.Lvl(), p.want)))
+			want := e.zonkVal(p.c, p.want)
 			if dict, ok := e.resolveClass(p.c, want); ok {
 				if err := e.Unify(p.c.Lvl(), e.Eval(p.c, p.meta), e.Eval(p.c, dict)); err != nil {
-					return err
+					return false, err
 				}
-				changed = true
+				prog = true
 			} else {
 				still = append(still, p)
 			}
 		}
 		e.pending = still
+		return prog, nil
 	}
-	return nil
+	// One sweep lowering every numeral whose expected type is now rigid (so it
+	// injects into the tower — Int, Frac — rather than defaulting to Whole).
+	lowerRigid := func() (bool, error) {
+		prog := false
+		var still []pendingNumeral
+		for _, pn := range e.pendingNum {
+			if e.isFlexibleMeta(pn.want) {
+				still = append(still, pn)
+				continue
+			}
+			tm, err := e.lowerNum(pn.c, pn.s, pn.want)
+			if err != nil {
+				return false, err
+			}
+			if err := e.Unify(pn.c.Lvl(), e.Eval(pn.c, pn.meta), e.Eval(pn.c, tm)); err != nil {
+				return false, err
+			}
+			prog = true
+		}
+		e.pendingNum = still
+		return prog, nil
+	}
+	fixpoint := func() error {
+		for {
+			d, err := resolveDicts()
+			if err != nil {
+				return err
+			}
+			n, err := lowerRigid()
+			if err != nil {
+				return err
+			}
+			if !d && !n {
+				return nil
+			}
+		}
+	}
+	if err := fixpoint(); err != nil {
+		return err
+	}
+	// Stalled: numerals whose type is still flexible must default to Whole — EXCEPT
+	// those a pending dictionary will yet determine (the result parameter of an
+	// overloaded `-`, say). Default one such numeral, then re-run the fixpoint (the
+	// default may pin a dictionary key, which pins another numeral's type, …).
+	for len(e.pendingNum) > 0 {
+		det := e.dictDeterminedMetas()
+		idx := 0
+		for i, pn := range e.pendingNum {
+			if id, ok := e.flexMetaID(pn.want); ok && det[id] {
+				continue // a pending dictionary will determine this numeral's type
+			}
+			idx = i
+			break
+		}
+		pn := e.pendingNum[idx]
+		e.pendingNum = append(e.pendingNum[:idx:idx], e.pendingNum[idx+1:]...)
+		tm, err := e.lowerNum(pn.c, pn.s, pn.want) // flexible want defaults to Whole
+		if err != nil {
+			return err
+		}
+		if err := e.Unify(pn.c.Lvl(), e.Eval(pn.c, pn.meta), e.Eval(pn.c, tm)); err != nil {
+			return err
+		}
+		if err := fixpoint(); err != nil {
+			return err
+		}
+	}
+	// Any dictionaries left have keys that never became rigid: their metas surface
+	// as unsolved (ErrUnsolved). A final sweep resolves whatever became resolvable.
+	for {
+		d, err := resolveDicts()
+		if err != nil {
+			return err
+		}
+		if !d {
+			return nil
+		}
+	}
+}
+
+// zonkVal substitutes solved metas into a value (Quote folds them, Zonk replaces
+// them, Eval rebuilds), exposing a now-rigid head for instance search.
+func (e *Elaborator) zonkVal(c *Ctx, v core.Val) core.Val {
+	return e.Eval(c, e.Zonk(c.Lvl(), e.M.Quote(c.Lvl(), v)))
+}
+
+// flexMetaID returns the unsolved metavariable heading v, if any.
+func (e *Elaborator) flexMetaID(v core.Val) (int, bool) {
+	id, _, ok := flexHead(e.M.Force(v))
+	if !ok {
+		return 0, false
+	}
+	if _, solved := e.metas.Solution(id); solved {
+		return 0, false
+	}
+	return id, true
+}
+
+// dictDeterminedMetas collects the metavariables that a pending dictionary will
+// SOLVE when it resolves: every meta in a class constraint except the one heading
+// its last argument (the search KEY, which must be solved from elsewhere — e.g. a
+// value argument). A numeral whose type is such a meta must NOT be defaulted: its
+// type is the result the instance fixes (the promoted Int of an overloaded `-`).
+func (e *Elaborator) dictDeterminedMetas() map[int]bool {
+	det := map[int]bool{}
+	for _, p := range e.pending {
+		t := e.M.Quote(p.c.Lvl(), e.zonkVal(p.c, p.want))
+		var args []core.Tm
+		for {
+			if app, isApp := t.(core.App); isApp {
+				args = append([]core.Tm{app.Arg}, args...)
+				t = app.Fn
+				continue
+			}
+			break
+		}
+		if _, isRef := t.(core.Ref); !isRef || len(args) == 0 {
+			continue
+		}
+		key := -1
+		last := args[len(args)-1]
+		if m, ok := last.(core.Meta); ok {
+			key = m.ID
+		}
+		for _, a := range args {
+			for _, id := range collectMetaIDs(a) {
+				if id != key {
+					det[id] = true
+				}
+			}
+		}
+	}
+	return det
+}
+
+// collectMetaIDs gathers metavariable ids occurring in a term (App spines and
+// their arguments — enough for the ref-headed class-constraint shapes here).
+func collectMetaIDs(t core.Tm) []int {
+	switch x := t.(type) {
+	case core.Meta:
+		return []int{x.ID}
+	case core.App:
+		return append(collectMetaIDs(x.Fn), collectMetaIDs(x.Arg)...)
+	default:
+		return nil
+	}
 }
 
 // classKey extracts the (class-former, last-argument-head) hashes from a class
@@ -531,6 +678,33 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 // is still reported. (The old binary-literal lowering — a numeral checked at a
 // `builtin bin` Pos/BN type — is retired; C7 / R-NUM, Decision 5.)
 func (e *Elaborator) elabNum(c *Ctx, s surface.ENum, want core.Val) (core.Tm, error) {
+	// If the expected type is still a flexible metavariable, POSTPONE the lowering:
+	// committing now would default it to Whole (unify natTy with the meta), but the
+	// surrounding elaboration may yet pin it to a tower type — e.g. `1 / (3 * 2)`,
+	// where the fraction builder pushes Frac into the product only after the
+	// numerals are seen. Record a placeholder meta and lower it in ResolvePending
+	// once the type is known (defaulting to Whole if it never gets pinned).
+	if e.isFlexibleMeta(want) {
+		m := e.freshMeta(c, "numeral")
+		e.pendingNum = append(e.pendingNum, pendingNumeral{meta: m, want: want, s: s, c: c})
+		return m, nil
+	}
+	return e.lowerNum(c, s, want)
+}
+
+// isFlexibleMeta reports whether v is headed by an unsolved metavariable.
+func (e *Elaborator) isFlexibleMeta(v core.Val) bool {
+	id, _, ok := flexHead(e.M.Force(v))
+	if !ok {
+		return false
+	}
+	_, solved := e.metas.Solution(id)
+	return !solved
+}
+
+// lowerNum lowers a numeral against a rigid (non-metavariable) expected type: the
+// `builtin nat` default, or a registered tower injection's codomain (Z, Frac …).
+func (e *Elaborator) lowerNum(c *Ctx, s surface.ENum, want core.Val) (core.Tm, error) {
 	tm, err := e.Num.Nat(s.Val)
 	if err != nil {
 		return nil, err

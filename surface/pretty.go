@@ -72,6 +72,7 @@ type printer struct {
 // unless every hash resolved (e.g. a bare `--no-prelude` session).
 type DecConfig struct {
 	Frac, RDec, Wcons, Wnil, True core.Hash
+	Int, Ok, Err                  core.Hash
 	On                            bool
 }
 
@@ -160,6 +161,29 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 		return ok && r.Hash == p.dec.True
 	}
 	switch {
+	case ref.Hash == p.dec.Int && len(args) == 2:
+		// int sign mag : a signed integer; magnitude 0 is unsigned.
+		a, ok := p.wholeVal(args[1])
+		if !ok {
+			return "", false
+		}
+		if a == 0 {
+			return "0", true
+		}
+		if isNeg(args[0]) {
+			return "-" + strconv.Itoa(a), true
+		}
+		return strconv.Itoa(a), true
+	case ref.Hash == p.dec.Ok && len(args) == 3:
+		// ok A E v : a successful Result — show the payload (the A E type args are
+		// the first two explicit arguments). Fall through if the payload is not a
+		// foldable numeric value.
+		if inner, ok := p.decimalStr(args[2]); ok {
+			return "ok " + inner, true
+		}
+		return "", false
+	case ref.Hash == p.dec.Err && len(args) == 3:
+		return "err", true
 	case ref.Hash == p.dec.Frac && len(args) == 3:
 		neg := isNeg(args[0])
 		a, ok1 := p.wholeVal(args[1])

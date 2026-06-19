@@ -78,38 +78,34 @@ data Bool : U is
 end
 
 -- ====================================================================
--- THE ARITHMETIC CLASS.  `+ - *` are overloaded across the numeric tower by a
--- typeclass: a class is a type family, an instance is a value of it registered in
--- the session, and an operator is a class-constrained function whose dictionary
--- the elaborator resolves from the TYPE of its arguments. So the same `+` adds
--- wholes or fractions and the dispatch is inferred, never written.
+-- THE ARITHMETIC CLASSES.  Operators are overloaded across the numeric tower by
+-- typeclass dispatch — a class is a type family, an instance is a value of it
+-- registered in the session, and an operator is a class-constrained function whose
+-- dictionary the elaborator resolves from the TYPE of its arguments.
 --
--- It is ONE class `Num` carrying all three operations as a Σ-record, NOT three
--- one-method classes — `Add A`, `Sub A`, `Mul A` would each be `A -> A -> A`,
--- hence HASH-IDENTICAL (identity is structure, not name), so their instances
--- would collide on a single key. Bundling distinguishes them by position, not by
--- a name the hash discards (the same reason Nat is a Σ, not bare Peano).
--- (`/` stays the fraction builder at Frac; `// %` are integer-only at Whole.)
+-- `Num` bundles the operations a level is CLOSED under — `+` and `*` (wholes,
+-- integers, and fractions are each closed under both). It is ONE Σ-record, not two
+-- one-method classes `Add A`/`Mul A`: those would each be `A -> A -> A`, hence
+-- HASH-IDENTICAL (identity is structure, not name), so their instances collide on a
+-- single key. Bundling distinguishes them by position (the Nat-vs-Whole-Σ trap).
+--
+-- Subtraction is NOT here: ℕ is not closed under it (2 − 5 has no whole answer), so
+-- `-` PROMOTES (Whole → Int) and gets its own result-typed class `Sub` below.
+-- (`/` likewise leaves ℕ for the rationals; `// %` are integer ops at Whole.)
 -- ====================================================================
 Num : U -> U is
-  fn (A : U) is
-    Sig (A -> A -> A) (fn (_p : A -> A -> A) is
-      Sig (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) end)
-  end
+  fn (A : U) is Sig (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) end
 end
-mkNum : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> (A -> A -> A) -> Num A is
-  fn (A : U) (a : A -> A -> A) (s : A -> A -> A) (m : A -> A -> A) is
-    Pair (A -> A -> A) (fn (_p : A -> A -> A) is
-            Sig (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) end)
-      a (Pair (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) s m)
+mkNum : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> Num A is
+  fn (A : U) (a : A -> A -> A) (m : A -> A -> A) is
+    Pair (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) a m
   end
 end
 
-instance numWhole : Num Whole is mkNum Whole addW subW mulW end
+instance numWhole : Num Whole is mkNum Whole addW mulW end
 
 + : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.1) x y end end
-- : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.2.1) x y end end
-* : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.2.2) x y end end
+* : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.2) x y end end
 
 -- leb m n decides m <= n; recursion on m produces the comparison FUNCTION,
 -- so the induction hypothesis is "compare against k" awaiting its argument.
@@ -142,7 +138,7 @@ divF : Whole -> Whole -> Whole -> Whole is
         | zero -> 0
         | succ k ->
             case leb b a of
-            | true -> succ (ih (a - b) b)
+            | true -> succ (ih (subW a b) b)
             | false -> 0
             end
         end
@@ -160,7 +156,7 @@ modF : Whole -> Whole -> Whole -> Whole is
         | zero -> a
         | succ k ->
             case leb b a of
-            | true -> ih (a - b) b
+            | true -> ih (subW a b) b
             | false -> a
             end
         end
@@ -323,7 +319,98 @@ addF : Frac -> Frac -> Frac is
 end
 subF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is addF x (negate y) end end
 
-instance numFrac : Num Frac is mkNum Frac addF subF mulF end
+instance numFrac : Num Frac is mkNum Frac addF mulF end
+
+-- ====================================================================
+-- THE INT RUNG (ℤ).  Whole is not closed under subtraction, so `-` PROMOTES into
+-- the signed integers. Int is sign+magnitude (a Bool sign, a Whole magnitude),
+-- normalised so zero is unsigned (no −0). `intOf` injects a whole; `builtin int`
+-- lets a bare numeral check at Int (so `(2-5) + 1` works — the `1` becomes an Int).
+-- ====================================================================
+data Int : U is int : Bool -> Whole -> Int end
+isign : Int -> Bool  is fn (i : Int) is case i of | int s m -> s end end end
+imag  : Int -> Whole is fn (i : Int) is case i of | int s m -> m end end end
+mkInt : Bool -> Whole -> Int is
+  fn (s : Bool) (m : Whole) is case m of | zero -> int false zero | succ k -> int s m end end
+end
+intOf : Whole -> Int is fn (n : Whole) is int false n end end
+builtin int Int intOf
+ineg : Int -> Int is fn (i : Int) is mkInt (not (isign i)) (imag i) end end
+-- signed addition: like signs add magnitudes; unlike signs subtract the smaller
+-- from the larger and take the larger's sign.
+iadd : Int -> Int -> Int is
+  fn (x : Int) (y : Int) is
+    case xorB (isign x) (isign y) of
+    | false -> mkInt (isign x) (addW (imag x) (imag y))
+    | true ->
+        case leb (imag y) (imag x) of
+        | true  -> mkInt (isign x) (subW (imag x) (imag y))
+        | false -> mkInt (isign y) (subW (imag y) (imag x))
+        end
+    end
+  end
+end
+isub : Int -> Int -> Int is fn (x : Int) (y : Int) is iadd x (ineg y) end end
+imul : Int -> Int -> Int is
+  fn (x : Int) (y : Int) is mkInt (xorB (isign x) (isign y)) (mulW (imag x) (imag y)) end
+end
+-- THE PROMOTION: whole minus whole, as a signed integer (sign by order of a, b).
+wsub : Whole -> Whole -> Int is
+  fn (a : Whole) (b : Whole) is
+    case leb b a of
+    | true  -> mkInt false (subW a b)
+    | false -> mkInt true (subW b a)
+    end
+  end
+end
+instance numInt : Num Int is mkNum Int iadd imul end
+
+-- ====================================================================
+-- SUBTRACTION, with PROMOTION.  `SubR R A` is the RELATION "an A subtracts to an
+-- R": its dictionary is just the operation `A -> A -> R`. Indexing the RESULT type
+-- R as a separate parameter (keyed by A, the last argument) makes the instances
+-- distinct AND lets the result type be a plain inferred type rather than a stuck
+-- projection — so `(2 - 5) + 1` composes. Whole − Whole promotes to Int, Int − Int
+-- stays Int, Frac − Frac stays Frac. `2 - 5` is `-3 : Int`, `5 - 2` is `3 : Int`,
+-- `1/3 - 2/3` is `-1/3 : Frac`. Whole − Whole has no whole answer, so `-` will not
+-- type-check at Whole — use `monus`/`minus` (below) for a whole result.
+-- ====================================================================
+SubR : U -> U -> U is fn (R : U) (A : U) is A -> A -> R end end
+instance subWhole : SubR Int  Whole is wsub end
+instance subInt   : SubR Int  Int   is isub end
+instance subFrac  : SubR Frac Frac  is subF end
+- : {R : U} -> {A : U} -> {d : SubR R A} -> A -> A -> R is
+  fn {R : U} {A : U} {d : SubR R A} (x : A) (y : A) is d x y end
+end
+
+-- ====================================================================
+-- PROVABLY-WHOLE subtraction.  When `b <= a` is in hand, a − b stays a Whole, no
+-- promotion: the proof is part of the TYPE. `monus` is the unconditional truncating
+-- whole subtraction (floors at 0) for when underflow is acceptable.
+-- ====================================================================
+Leq : Whole -> Whole -> U is fn (a : Whole) (b : Whole) is Eq Bool (leb a b) true end end
+minus : (a : Whole) -> (b : Whole) -> Leq b a -> Whole is
+  fn (a : Whole) (b : Whole) (_pf : Leq b a) is subW a b end
+end
+monus : Whole -> Whole -> Whole is fn (a : Whole) (b : Whole) is subW a b end end
+
+-- ====================================================================
+-- DIVISION, DEFENDED.  ℕ is not closed under division either; the fraction builder
+-- `/` climbs to ℚ. But x/0 is undefined at every rung, so a CHECKED division
+-- returns a Result: `ok` the (reduced) quotient, or `err` on a zero divisor.
+-- ====================================================================
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+divChecked : Whole -> Whole -> Result Frac Whole is
+  fn (a : Whole) (b : Whole) is
+    case b of
+    | zero   -> err Frac Whole 0
+    | succ k -> ok Frac Whole (reduce (frac false a b))
+    end
+  end
+end
 
 powTen : Whole -> Whole is
   fn (n : Whole) is case n of | zero -> 1 | succ k with ih -> 10 * ih end end
@@ -424,7 +511,7 @@ end
 sigPlaces : Whole -> Frac -> Whole is
   fn (s : Whole) (f : Frac) is
     case leb 1 (fnum f // fden f) of
-    | true  -> s - numDigits 64 (fnum f // fden f)
+    | true  -> subW s (numDigits 64 (fnum f // fden f))
     | false -> s + leadingZeros 64 f
     end
   end

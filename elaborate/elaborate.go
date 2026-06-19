@@ -71,7 +71,8 @@ type Elaborator struct {
 	// solved the argument head, then unifies the meta with the found dictionary.
 	// This is what makes typeclass dispatch work from INFERRED (not just explicit)
 	// type arguments — the basis of overloaded arithmetic across the tower.
-	pending []pendingDict
+	pending    []pendingDict
+	pendingNum []pendingNumeral
 }
 
 // pendingDict is one postponed typeclass-dictionary resolution.
@@ -79,6 +80,16 @@ type pendingDict struct {
 	meta core.Tm  // the contextual dictionary metavariable inserted in its place
 	want core.Val // the class constraint type (e.g. Add ?A)
 	c    *Ctx     // the context the meta and constraint live in
+}
+
+// pendingNumeral is one postponed numeral lowering: a numeral checked against a
+// flexible metavariable, whose tower type (Whole, Frac, …) is fixed only once the
+// surrounding elaboration pins the metavariable. ResolvePending lowers it then.
+type pendingNumeral struct {
+	meta core.Tm       // the placeholder meta standing in for the numeral term
+	want core.Val      // the expected type (a metavariable when recorded)
+	s    surface.ENum  // the numeral literal
+	c    *Ctx          // the context
 }
 
 // New returns an Elaborator over globals g with the given name maps.

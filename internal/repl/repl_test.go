@@ -85,7 +85,7 @@ func TestREPLPrelude(t *testing.T) {
 	wants := []string{
 		"2 : Whole",  // 1 + 1
 		"42 : Whole", // 6 * 7 and double 21
-		"0 : Whole",  // 5 - 7
+		"-2 : Int",   // 5 - 7 promotes to Int (Whole is not closed under subtraction)
 		"3 : Whole",  // 17 // 5
 		"6 : Whole",  // gcd 12 18
 		"defined double",
@@ -97,11 +97,11 @@ func TestREPLPrelude(t *testing.T) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
 		}
 	}
-	// 17 % 5 = 2 must appear AFTER 17 / 5's "3 : Whole" — both print "2 : Whole"
-	// only if 1+1 did too, so just check the count of value lines is right.
-	// Numerals bind to Whole (the tower's foundation), so results print as Whole.
-	if n := strings.Count(got, " : Whole"); n != 8 {
-		t.Errorf("expected 8 Whole value lines, got %d\n--- full output ---\n%s", n, got)
+	// Seven Whole value lines: 1+1, 6*7, 17//5, 17%5, gcd, double 21, 2+2. The
+	// eighth expression, 5-7, now promotes out of Whole to Int (ℕ is not closed
+	// under subtraction), so it is NOT counted here.
+	if n := strings.Count(got, " : Whole"); n != 7 {
+		t.Errorf("expected 7 Whole value lines, got %d\n--- full output ---\n%s", n, got)
 	}
 }
 
@@ -148,6 +148,49 @@ func TestREPLTowerArithmetic(t *testing.T) {
 	}
 	if strings.Contains(got, "error") || strings.Contains(got, "mismatch") {
 		t.Errorf("unexpected error in tower arithmetic\n--- full output ---\n%s", got)
+	}
+}
+
+// TestREPLIntTower is the acceptance test for the Int rung and PROMOTION: ℕ is
+// not closed under subtraction, so `-` climbs into the signed integers (2 − 5 =
+// −3 : Int), composes (the result is a first-class Int, not a stuck type), and
+// stays at Frac for fractions. A provable non-negative difference can stay Whole
+// (`minus` with `b ≤ a`); `monus` truncates; and division is defended by a Result.
+func TestREPLIntTower(t *testing.T) {
+	script := []string{
+		"2 - 5",                  // promotes: Whole − Whole = Int
+		"5 - 2",                  // 3, still Int (no truncation surprise)
+		"(2 - 5) + 1",            // the Int composes with +
+		"2 - 5 - 1",              // chained subtraction
+		"intOf 7",               // the Int injection
+		"1/3 - 2/3",              // fractions still subtract to Frac
+		"monus 2 5",              // truncating whole subtraction floors at 0
+		"minus 5 2 (refl true)",  // provable b ≤ a keeps the result Whole
+		"divChecked 7 2",         // checked division: ok
+		"divChecked 7 0",         // checked division: err on zero divisor
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		"-3 : Int",
+		"3 : Int",
+		"-2 : Int",
+		"-4 : Int",
+		"7 : Int",
+		"-1/3 : Frac",
+		"0 : Whole",            // monus 2 5
+		"3 : Whole",            // minus 5 2 (refl true)
+		"ok 7/2 : Result Frac Whole",
+		"err : Result Frac Whole",
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
 	}
 }
 
@@ -222,7 +265,7 @@ func TestREPLLargeArithAndAST(t *testing.T) {
 	for _, w := range []string{
 		"16000000 : Whole", // 4000 * 4000, accelerated
 		"8000 : Whole",     // 4000 + 4000
-		"999 : Whole",      // 1000 - 1
+		"999 : Int",        // 1000 - 1 promotes to Int (ℕ not closed under subtraction)
 		"10000002341234123412341234000000000000000 : Whole", // beyond int64, exact
 		"((+ 1) 2)", // :ast — names, not @hash; NatLits shown, not ?
 	} {
