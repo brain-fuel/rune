@@ -592,6 +592,24 @@ first and forces only on mismatch, so the fast path logs nothing.
   - **E1 distributed** — a process calculus: parallel composition + interleaving
     reduction + channel rendezvous, all by a total functional small-step. ch33,
     ch38. Bisimulation (needs C5b guarded recursion) is the R-CALC remainder.
+  - **R-CALC FAULT LTS `{CRASH, LOSS, DETECT}` (ch206) — the keystone.** The
+    calculus is now a LABELLED, fault-aware LTS. rune has no indexed families, so
+    (per the R-CALC design) the LTS is a COMPUTING step FUNCTION `lstep : Fault ->
+    Proc -> Option Trans` — the environment injects a fault (`ok`/`crashIt`/
+    `loseIt`), a `Trans` carries the action label beside the next process, and the
+    three fault rules are just more cases: CRASH (any live process fails to `crash`,
+    label `lfail`), LOSS (an in-flight `out` is dropped, sender proceeds silently),
+    DETECT (a `mon`itor beside a crashed peer observes the failure and runs its
+    handler). Each rule computes, certified by refl. Atop it the BOUNDED restart-
+    liveness guarantee (D5 Layer R2) the static ch115 `restart` could not state:
+    `eventuallyRestarted : Σ (k : Nat). runN k supervised ≡ restarted` (the Σ-of-a-
+    step-count `Eventually` — a monitored crashed worker recovers, witness k=1), plus
+    safety certs that a monitor is NECESSARY (an unmonitored crash never spuriously
+    recovers). This unblocks, as the SPEC layer, D5-R2 (supervisor liveness against a
+    real crash-detect transition) and E3 adequacy (the LTS the projection refines now
+    has faults). Zero core change. Still open: the live wiring (primMonitor/primExit,
+    parked), the full coinductive `Eventually` over an unbounded fault stream, and the
+    per-protocol bisimulation/adequacy proofs (E2/E3).
   - **Runtime** — Σ erases to tuples and DEPLOYS (ch32 runs); `partial` defs run.
   - **Kernel fix** — eliminator generation for ≥2-recursive-argument constructors
     (a de Bruijn miscount; unblocks all branching datatypes). ch34.

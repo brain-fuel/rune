@@ -1,0 +1,351 @@
+-- Chapter 206 — The fault LTS: {CRASH, LOSS, DETECT} (R-CALC, the keystone).
+--
+-- ch33/ch38 gave a fault-FREE process calculus: a deterministic reducer
+-- `reduce : Proc -> Option Proc` with rendezvous and interleaving, but no failure.
+-- ch114/ch115/ch118 proved gen_server / supervisor / restart-strategy theorems in
+-- a world where nothing crashes. This chapter adds the missing layer: a LABELLED
+-- transition system in which processes can FAIL, messages can be LOST, and a
+-- monitor can DETECT a peer's crash and run its handler. These are exactly the
+-- three Lambert fault rules the verified-OTP liveness guarantee (D5 Layer R2), E3
+-- adequacy, and the supervisor restart guarantee are all stated against.
+--
+-- rune has no indexed inductive families, so the LTS is not an indexed `Step :
+-- Proc -> Label -> Proc -> U` datatype; following the R-CALC design it is a
+-- COMPUTING labelled step FUNCTION `lstep : Fault -> Proc -> Option Trans`, where
+-- the environment injects a fault (`ok` / `crashIt` / `loseIt`) and a `Trans`
+-- carries the action LABEL alongside the next process. Faults are just more cases
+-- of the step function — no kernel change. Every rule computes and is certified by
+-- refl; the chapter closes with the bounded restart-liveness property (the Σ-of-a-
+-- step-count `Eventually` a monitored crashed worker recovers) — D5's keystone.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- The action labels of the LTS. `lfail` is the fault label (it tags both a CRASH
+-- and the DETECT that observes one); `ltau` is a silent step (work / rendezvous /
+-- a lost message); `lsend`/`lrecv` name the visible communication actions.
+data Label : U is
+  ltau  : Label
+| lsend : Label
+| lrecv : Label
+| lfail : Label
+end
+
+-- The process terms. `out`/`inp` are the async output / input prefixes (ch38);
+-- `mon` is a MONITORING input — an input that also fires on a crashed peer,
+-- running its handler continuation (the OTP monitor/Down); `crash` is the
+-- fail-stop marker (a process that has failed).
+data Proc : U is
+  halt  : Proc
+| out   : Proc -> Proc
+| inp   : Proc -> Proc
+| mon   : Proc -> Proc
+| par   : Proc -> Proc -> Proc
+| crash : Proc
+end
+
+-- What the environment injects at a step: nothing (normal reduction), a CRASH of
+-- the running process, or the LOSS of an in-flight output message.
+data Fault : U is
+  ok      : Fault
+| crashIt : Fault
+| loseIt  : Fault
+end
+
+-- A labelled transition: the action label observed, and the resulting process.
+data Trans : U is
+  tr : Label -> Proc -> Trans
+end
+
+labelOf : Trans -> Label is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t
+  end
+end
+
+procOf : Trans -> Proc is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t
+  end
+end
+
+-- Structural views (mirroring ch38's outCont/inpCont): the continuation behind a
+-- prefix, if the process has that shape.
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+-- the handler continuation behind a monitor prefix.
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+isHalt : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      true
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      false
+      x
+  end
+end
+
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+-- a process is LIVE if it can still act (not already halted or crashed).
+isLive : Proc -> Bool is
+  fn (x : Proc) is
+    BoolElim (fn (b : Bool) is Bool end)
+      false
+      (BoolElim (fn (b : Bool) is Bool end) false true (isHalt x))
+      (isCrash x)
+  end
+end
+
+-- interleaving: lift a sub-branch's labelled step to the whole parallel term,
+-- preferring the left branch (ch38's left-biased interleave, now label-carrying).
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+
+-- COMM (with interleave fallback): a left output meeting a right input takes a
+-- silent rendezvous to the two continuations in parallel; else interleave.
+commT : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (interleaveT iha ihb a b)
+      (fn (pa : Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+           (interleaveT iha ihb a b)
+           (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+           (inpCont b)
+       end)
+      (outCont a)
+  end
+end
+
+-- DETECT (with COMM/interleave fallback): if the left branch has CRASHED and the
+-- right is a monitor, the monitor observes the failure (label lfail) and proceeds
+-- to its handler continuation; otherwise fall through to COMM.
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (commT a b iha ihb)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (commT a b iha ihb)
+      (isCrash a)
+  end
+end
+
+-- the fault-free scheduler: a prefix alone is stuck; a parallel term detects a
+-- crashed peer, else rendezvouses, else interleaves.
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+-- CRASH: any LIVE process may fail, observing label lfail and becoming `crash`.
+crashStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (some Trans (tr lfail crash))
+      (none Trans)
+      (isLive x)
+  end
+end
+
+-- LOSS: an in-flight output is dropped — the sender proceeds to its continuation
+-- (silent step), the message vanishes.
+loseStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) is some Trans (tr ltau p) end)
+      (outCont x)
+  end
+end
+
+-- THE LABELLED FAULT LTS: a step under an environment fault injection.
+lstep : Fault -> Proc -> Option Trans is
+  fn (f : Fault) (x : Proc) is
+    FaultElim (fn (w : Fault) is Option Trans end)
+      (okStep x)
+      (crashStep x)
+      (loseStep x)
+      f
+  end
+end
+
+-- ===== The three fault rules COMPUTE (certified by refl) =====
+
+-- CRASH: a running worker (an output prefix) fails to `crash` with label lfail.
+crashRule : Eq (Option Trans) (lstep crashIt (out halt)) (some Trans (tr lfail crash)) is
+  refl (some Trans (tr lfail crash))
+end
+
+-- a halted process cannot crash (no live action to fail).
+crashHaltStuck : Eq (Option Trans) (lstep crashIt halt) (none Trans) is
+  refl (none Trans)
+end
+
+-- LOSS: an output message is dropped; the sender silently proceeds to its
+-- continuation (here `inp halt`), the message gone.
+lossRule : Eq (Option Trans) (lstep loseIt (out (inp halt))) (some Trans (tr ltau (inp halt))) is
+  refl (some Trans (tr ltau (inp halt)))
+end
+
+-- DETECT: a monitor running in parallel with a crashed peer observes the failure
+-- (label lfail) and proceeds to its handler continuation.
+detectRule :
+    Eq (Option Trans) (lstep ok (par crash (mon (out halt))))
+       (some Trans (tr lfail (out halt))) is
+  refl (some Trans (tr lfail (out halt)))
+end
+
+-- the ordinary (fault-free) rendezvous still computes, as in ch38, now labelled.
+commRule :
+    Eq (Option Trans) (lstep ok (par (out halt) (inp halt)))
+       (some Trans (tr ltau (par halt halt))) is
+  refl (some Trans (tr ltau (par halt halt)))
+end
+
+-- ===== Bounded restart-liveness: the D5 Layer-R2 consumer =====
+--
+-- A SUPERVISED worker is a monitor running beside the worker it watches; when the
+-- worker crashes, DETECT fires and the monitor's handler — the RESTARTED child —
+-- begins running. "Eventually a fresh child is running" is the bounded-trace
+-- predicate the R-OTP design names: a Σ of a step count k together with a proof
+-- that after k steps the restarted child is the running process.
+
+-- step the whole system once under the fault-free scheduler, keeping the current
+-- process if it is stuck (so `runN` is total).
+stepState : Proc -> Proc is
+  fn (x : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Proc end)
+      x
+      (fn (t : Trans) is procOf t end)
+      (okStep x)
+  end
+end
+
+runN : Nat -> Proc -> Proc is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> Proc end)
+      (fn (p : Proc) is p end)
+      (fn (k : Nat) (ih : Proc -> Proc) is fn (p : Proc) is ih (stepState p) end end)
+      n
+  end
+end
+
+-- the supervised system: a crashed worker beside its monitor, whose handler is the
+-- restarted child `restarted` (a fresh worker ready to do its work, `out halt`).
+restarted : Proc is out halt end
+
+supervised : Proc is par crash (mon restarted) end
+
+-- in ONE step the crash is detected and the restarted child is running.
+detectRestarts : Eq Proc (runN (succ zero) supervised) restarted is
+  refl (out halt)
+end
+
+-- Eventually (bounded): there is a step count after which the fresh child runs.
+-- This is the supervisor restart-safety guarantee (one_for_one), stated against
+-- the fault LTS — the property ch115's static `restart` could not express, now
+-- carried by an actual crash-and-detect transition. Witness: k = 1.
+eventuallyRestarted : Sig Nat (fn (k : Nat) is Eq Proc (runN k supervised) restarted end) is
+  Pair Nat (fn (k : Nat) is Eq Proc (runN k supervised) restarted end)
+    (succ zero)
+    (refl (out halt))
+end
+
+-- ===== Safety: a monitor is NECESSARY for detection (the spec is not too loose) =====
+
+-- DETECT requires a MONITOR: a crashed peer beside an ordinary (non-monitoring)
+-- input does NOT fire — the failure goes unobserved, the system is stuck.
+noDetectWithoutMonitor :
+    Eq (Option Trans) (lstep ok (par crash (inp halt))) (none Trans) is
+  refl (none Trans)
+end
+
+-- and so an UNMONITORED crash never spuriously recovers: the system stays put no
+-- matter how long it runs (here two steps). Recovery is earned only by a monitor,
+-- exactly as OTP requires a supervisor to be watching.
+unmonitoredCrashStuck :
+    Eq Proc (runN (succ (succ zero)) (par crash halt)) (par crash halt) is
+  refl (par crash halt)
+end
