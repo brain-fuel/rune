@@ -5,12 +5,12 @@
 package repl
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"goforge.dev/rune/v3/codegen"
@@ -41,8 +41,8 @@ func Run(in io.Reader, out io.Writer) error {
 // RunWith drives the REPL until EOF or :quit. It never returns an error for bad
 // user input — only for an I/O failure on the input stream or a broken prelude.
 func RunWith(in io.Reader, out io.Writer, cfg Config) error {
-	sc := bufio.NewScanner(in)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	rd := newLineReader(in, out)
+	defer rd.Close()
 	s := session.New()
 
 	fmt.Fprintln(out, "rune repl — expressions are type checked and normalized; definitions are checked and cached.")
@@ -54,19 +54,27 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 	}
 	fmt.Fprintln(out, "type :help for commands, :quit to exit.")
 
+	st := &replState{}
 	for {
-		fmt.Fprint(out, prompt)
-		line, ok := readLine(sc)
+		line, ok, err := rd.ReadLine(fmt.Sprintf("rune[%d]> ", st.lineNo+1))
+		if err != nil {
+			return err
+		}
 		if !ok {
 			fmt.Fprintln(out)
-			return sc.Err()
+			return nil
 		}
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" {
 			continue
 		}
+		// A non-blank submission claims the next line number (irb-style); a bare
+		// expression result is then named $N for that N (jshell-style), while defs
+		// and commands consume the number without producing a $N.
+		st.lineNo++
 		if strings.HasPrefix(trimmed, ":") {
-			if err := runCommand(s, cfg, trimmed, out); err != nil {
+			rd.AddHistory(line)
+			if err := runCommand(s, cfg, st, trimmed, out); err != nil {
 				if errors.Is(err, errQuit) {
 					return nil
 				}
@@ -78,7 +86,7 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 		// Accumulate lines until a complete top-level form parses (or the stream ends).
 		buf := line
 		for {
-			err := runForm(s, buf, out)
+			err := runForm(s, st, buf, out)
 			if err == nil {
 				break
 			}
@@ -86,30 +94,47 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 				fmt.Fprintln(out, "error:", err)
 				break
 			}
-			fmt.Fprint(out, contPrompt)
-			more, ok := readLine(sc)
+			more, ok, rerr := rd.ReadLine(contPrompt)
+			if rerr != nil {
+				return rerr
+			}
 			if !ok {
 				fmt.Fprintln(out)
 				fmt.Fprintln(out, "error: unexpected end of input")
-				return sc.Err()
+				return nil
 			}
 			buf += "\n" + more
 		}
+		rd.AddHistory(buf)
 	}
 }
 
-func readLine(sc *bufio.Scanner) (string, bool) {
-	if !sc.Scan() {
-		return "", false
-	}
-	return sc.Text(), true
+// replState carries the REPL's result numbering across the read loop. lineNo is the
+// irb-style entry counter (drives the prompt and the $N result id); lastResult is the
+// line number of the most recent expression result, recalled by a bare `$`.
+type replState struct {
+	lineNo     int
+	lastResult int
+}
+
+// resultRefRe matches a numbered result reference $N (jshell-style). It is rewritten
+// to the internal binding name __resN before parsing, since `$` is not a legal rune
+// identifier character — the numbering skin stays out of the core language.
+var resultRefRe = regexp.MustCompile(`\$(\d+)`)
+
+// expandResultRefs rewrites REPL result references into the internal names they were
+// bound under: `$N` -> `__resN`, and a bare `$` -> the last result (`__res<last>`).
+func expandResultRefs(src string, last int) string {
+	src = resultRefRe.ReplaceAllString(src, "__res$1")
+	return strings.ReplaceAll(src, "$", fmt.Sprintf("__res%d", last))
 }
 
 // runForm interprets a complete (or incomplete) input as either definitions or a bare
 // expression. The choice is by shape: a `name :` head is a definition (parsed as a
 // file), anything else is an expression. ErrIncomplete propagates so the caller can
 // prompt for continuation.
-func runForm(s *session.Session, src string, out io.Writer) error {
+func runForm(s *session.Session, st *replState, src string, out io.Writer) error {
+	src = expandResultRefs(src, st.lastResult)
 	if looksLikeDef(src) || looksLikeData(src) {
 		items, err := surface.ParseProgram(src)
 		if err != nil {
@@ -137,14 +162,14 @@ func runForm(s *session.Session, src string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return runExpr(s, e, out)
+	return runExpr(s, st, e, out)
 }
 
 // runExpr is the SINGLE dispatch point for "what to do with a complete expression".
 //
 // Phase 1: elaborate (bidirectional, annotation-guided), then normalize (full βδ
 // via NbE), then print `normal-form : type`.
-func runExpr(s *session.Session, e surface.Exp, out io.Writer) error {
+func runExpr(s *session.Session, st *replState, e surface.Exp, out io.Writer) error {
 	tm, ty, err := s.ElabExpr(e)
 	if err != nil {
 		return err
@@ -153,7 +178,11 @@ func runExpr(s *session.Session, e surface.Exp, out io.Writer) error {
 	// Normalize the type too: an overloaded operator's result type can be a stuck
 	// projection of its (now-resolved) dictionary, e.g. `2 - 5` infers `Fst subWhole`
 	// which βδι-reduces to `Int`. Showing the reduced type is what the user means.
-	fmt.Fprintf(out, "%s : %s\n", s.Pretty(nf), s.Pretty(s.NormalizeExprFolded(ty)))
+	n := st.lineNo
+	fmt.Fprintf(out, "$%d ==> %s : %s\n", n, s.Pretty(nf), s.Pretty(s.NormalizeExprFolded(ty)))
+	// Bind the result so later input can name it ($N, or a bare $ for the latest).
+	s.BindResult(fmt.Sprintf("__res%d", n), tm, ty)
+	st.lastResult = n
 	return nil
 }
 
@@ -186,7 +215,7 @@ func isIdentByte(b byte) bool {
 		(b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
 }
 
-func runCommand(s *session.Session, cfg Config, line string, out io.Writer) error {
+func runCommand(s *session.Session, cfg Config, st *replState, line string, out io.Writer) error {
 	cmd := line
 	arg := ""
 	if i := strings.IndexAny(line, " \t"); i >= 0 {
@@ -203,6 +232,7 @@ func runCommand(s *session.Session, cfg Config, line string, out io.Writer) erro
 		return nil
 	case ":reset":
 		s.Reset()
+		st.lineNo, st.lastResult = 0, 0
 		if !cfg.NoPrelude {
 			if err := loadPrelude(s); err != nil {
 				return err
@@ -303,7 +333,8 @@ func listDefs(s *session.Session, out io.Writer) {
 
 func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "commands:")
-	fmt.Fprintln(out, "  <expr>          resolve and pretty-print (no evaluation yet)")
+	fmt.Fprintln(out, "  <expr>          elaborate, normalize, and print as $N ==> value : type")
+	fmt.Fprintln(out, "  $N  /  $        recall the result of line N, or a bare $ for the latest")
 	fmt.Fprintln(out, "  <name> : T is e end   add a definition to the session")
 	fmt.Fprintln(out, "  :core <expr>    show the resolved core in explicit de Bruijn form")
 	fmt.Fprintln(out, "  :ast <expr>     show the resolved core as a named structural tree (hashless :core)")

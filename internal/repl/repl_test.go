@@ -244,6 +244,49 @@ func TestREPLDemotion(t *testing.T) {
 	}
 }
 
+// TestREPLResultRefs is the acceptance test for numbered, referenceable results —
+// the irb x jshell fusion. Every submitted form claims a line number N (irb-style,
+// shown in the prompt); a bare-expression result is named $N (jshell-style) and
+// bound so later input can recall it by $N or by a bare $ (the latest). Definitions
+// consume a number but produce no $N. `:reset` zeroes the counter.
+func TestREPLResultRefs(t *testing.T) {
+	script := []string{
+		"1 + 1",                                               // line 1 -> $1 ==> 2
+		"$1 + $1",                                             // recall $1 -> $2 ==> 4
+		"double : Whole -> Whole is fn (n : Whole) is n + n end end", // line 3: a def, no $3
+		"double $",                                            // bare $ = last result ($2 = 4) -> $4 ==> 8
+		"$ * 3",                                               // bare $ = $4 = 8 -> $5 ==> 24
+		":reset",                                              // line 6: clears + zeroes the counter
+		"2 + 2",                                               // numbering restarts -> $1 ==> 4
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		"$1 ==> 2 : Whole",  // first result is $1
+		"$2 ==> 4 : Whole",  // $1 + $1, recalling a prior result
+		"defined double",    // a def consumes line 3 but emits no $3
+		"$4 ==> 8 : Whole",  // double $ : bare $ recalled the last result (4)
+		"$5 ==> 24 : Whole", // $ * 3 : bare $ chained to the new last result (8)
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	// After :reset the counter restarts, so the next result is $1 again — and there
+	// must be exactly two "$1 ==> " lines in the whole session (before and after reset).
+	if n := strings.Count(got, "$1 ==> "); n != 2 {
+		t.Errorf("expected two $1 results (pre- and post-reset), got %d\n%s", n, got)
+	}
+	if !strings.Contains(got, "$1 ==> 4 : Whole") {
+		t.Errorf("post-reset result should renumber to $1 ==> 4\n%s", got)
+	}
+}
+
 // TestREPLRadixAndSigfigs is the acceptance test that the fraction / radix /
 // significant-figure feature WORKS AT THE PROMPT (not just as listings): `/`
 // builds a fraction, `|>` pipes it into a conversion, and the result prints in

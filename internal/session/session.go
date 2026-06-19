@@ -891,6 +891,16 @@ func (s *Session) AddData(d surface.DataDef) ([]string, error) {
 	return names, nil
 }
 
+// BindResult binds a REPL expression result under a synthesized name (e.g. the
+// internal name behind a $N reference) so later input can name it. It stores
+// (ty, tm) and registers the name for RESOLUTION ONLY — deliberately not in
+// refNames/byHash/order — so the binding resolves and unfolds without cluttering
+// :list or hijacking value pretty-printing. tm and ty must be zonked and meta-free,
+// which is exactly what ElabExpr returns.
+func (s *Session) BindResult(name string, tm, ty core.Tm) {
+	s.refs[name] = s.st.Add(name, ty, tm)
+}
+
 // bindName binds a session name to a stored hash (definition order preserved).
 func (s *Session) bindName(name string, h core.Hash) {
 	ty, _ := s.st.TypeOf(h)
