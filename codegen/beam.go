@@ -47,6 +47,9 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesIO(p) {
 		b.WriteString(beamIORuntime)
 	}
+	if usesOTP(p) {
+		b.WriteString(beamOTPRuntime)
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatBeam(&b, *p.Nat)
@@ -302,4 +305,72 @@ d_qind() -> fun(_A) -> fun(_R) -> fun(_P) -> fun(_H) -> fun(_Q) -> unit end end 
 // thunk, so `ap` forces it by applying unit.
 const beamIORuntime = `d_pureIO() -> fun(_A) -> fun(A) -> fun(_U) -> A end end end.
 d_bindIO() -> fun(_A) -> fun(_B) -> fun(M) -> fun(K) -> fun(_U) -> ap(ap(K, ap(M, unit)), unit) end end end end end.
+`
+
+// otpPrims are the live-runtime OTP primitives (D5 / R-OTP, Layer R0). A program
+// referencing any of them as a `foreign` axiom is given the real BEAM actor
+// runtime (beamOTPRuntime) — genuine processes, not a functional model. The names
+// are the contract: a listing must name its foreign axioms exactly these for the
+// host bindings below to apply.
+var otpPrims = map[string]bool{
+	"Pid":         true,
+	"primSpawn":   true,
+	"primSelf":    true,
+	"primSend":    true,
+	"primReceive": true,
+}
+
+// usesOTP reports whether the program references an OTP runtime primitive (a
+// `foreign` axiom erased to an IForeign accessor whose name is one of otpPrims).
+func usesOTP(p Program) bool {
+	var walk func(Ir) bool
+	walk = func(t Ir) bool {
+		switch x := t.(type) {
+		case IForeign:
+			return otpPrims[x.Name]
+		case ILam:
+			return walk(x.Body)
+		case IApp:
+			return walk(x.Fn) || walk(x.Arg)
+		case ILet:
+			return walk(x.Val) || walk(x.Body)
+		case IPair:
+			return walk(x.A) || walk(x.B)
+		case IFst:
+			return walk(x.P)
+		case ISnd:
+			return walk(x.P)
+		default:
+			return false
+		}
+	}
+	for _, d := range p.Defs {
+		if walk(d.Body) {
+			return true
+		}
+	}
+	return false
+}
+
+// beamOTPRuntime is the LIVE OTP runtime (D5 / R-OTP Layer R0) — the host bindings
+// for the `foreign` process primitives, mapping each onto a real BEAM construct
+// (the "near-free on BEAM" gift: spawn/!/receive/self ARE the Erlang runtime). It
+// is the host-accessor body the IForeign mechanism calls (ff_<name>/0), exactly as
+// the FFI conformance harness injects ff_hostId, but shipped WITH the compiler so an
+// OTP program deploys and runs unaided.
+//
+// Each op respects the IO-thunk erasure (IO A = `fun(_U) -> A`): the leading type
+// argument (M : U) erases to a unit slot (_M), and the final unit slot is the
+// world the runtime forces. A typed `Pid M` is the message it accepts (Gleam's
+// Subject), erased to a bare BEAM pid.
+//
+//	primSelf    M        ~> self()
+//	primSpawn   M body   ~> spawn a process running `body self()`; return its pid
+//	primSend    M p x    ~> p ! x  (async, fire-and-forget; FIFO per sender)
+//	primReceive M        ~> receive the next message (FIFO)
+const beamOTPRuntime = `ff_Pid() -> fun(_M) -> unit end.
+ff_primSelf() -> fun(_M) -> fun(_U) -> self() end end.
+ff_primSpawn() -> fun(_M) -> fun(B) -> fun(_U) -> spawn(fun() -> ap(ap(B, self()), unit) end) end end end.
+ff_primSend() -> fun(_M) -> fun(P) -> fun(X) -> fun(_U) -> begin P ! X, unit end end end end end.
+ff_primReceive() -> fun(_M) -> fun(_U) -> receive Msg -> Msg end end end.
 `

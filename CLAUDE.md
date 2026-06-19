@@ -512,9 +512,15 @@ first and forces only on mismatch, so the fast path logs nothing.
     `procParPrefix` — `act tau (par halt halt) ≃ par halt (act tau halt)` (parallel
     composition with a stuck peer is behaviourally a prefix), a process-algebra law on
     structurally dissimilar terms. Both via `bisimTrace`, computing. ch62/ch66/ch68/ch69/
-    ch70. (R-NUM/C7 remains the largest ready-to-build OUTER-core item — NatLit + accel +
-    hash bump 0x06 — deferred: it needs care since `nat` is a user `builtin` binding, not a
-    core primitive, so NatLit↔succ-chain defeq is non-trivial; not on the M7 critical path.)
+    ch70. (R-NUM/C7 is LANDED, not deferred — `NatLit{*big.Int}` compressed core numeral
+    + opt-in kernel-accel arithmetic + hash bump 0x05→0x06 + `builtin bin` retired, all green.
+    The NatLit↔succ-chain defeq is handled because `nat` is a user `builtin` binding: NatLit
+    carries the active Zero/Succ ctor hashes and is DEFINITIONALLY `succ^n zero` — Force peels
+    one layer on demand, QuoteUnfold short-circuits the canonical literal so a closed result
+    stays compact (`mul 1000000 1000000` reads back without materialising a succ-chain), and
+    the accel ι fires only when both args are literals so open-term reasoning is unchanged.
+    Accel registration is gated by a differential soundness check (the def's unfolded peeling
+    must agree with the bigint op). Only the n<2^63 int64 fast-lane is parked, no consumer.)
   **M0 VERTICAL SLICE — a DEPLOYED distributed protocol** (ch71): a sender ‖ receiver
   rendezvous (`protocol = par (out halt)(inp halt)`) that type-checks, CARRIES its
   certificate (`answerCorrect`/`finalCorrect`, refl), and DEPLOYS + RUNS on a real
@@ -622,6 +628,23 @@ first and forces only on mismatch, so the fast path logs nothing.
   EVAL-DESIGN §7, no-consumer tail); **D3–D6** (reals/ML-interop/OTP, need the
   contract-guard tier + BLAS); **E3/E4** distributed (the M7 tail). No hash-format
   bump beyond 0x06 unless a new core constructor is genuinely required.
+  - **D5 / R-OTP — LIVE BEAM RUNTIME (Layer R0+R1) LANDED.** The proven OTP tier
+    (gen_server ch114, supervisor ch115, restart strategies ch118, io_actor ch120)
+    now has a LIVE runtime, not just a functional model. The BEAM backend ships
+    `beamOTPRuntime` (codegen/beam.go): the `foreign` process primitives map onto
+    real Erlang — `primSpawn`→`spawn`, `primSelf`→`self()`, `primSend`→`P ! X`,
+    `primReceive`→`receive`; `Pid : U -> U` is the typed mailbox (Gleam `Subject(M)`
+    safety, erases to a bare pid). ch205 spawns a stateful worker, the client fires
+    three `bump`s + a `report`, the worker's `partial` receive loop (R-PART/C4) replies
+    the count, and the whole thing RUNS on escript to 3 (FIFO-deterministic), gated by
+    `TestListingsOTPLiveBeam`. The runtime ships WITH the compiler (Lambert's deployed
+    artifact; BEAM's own scheduler is the "near-free" gift — no hand-rolled scheduler).
+    PARKED (PARKING-LOT.md): `primMonitor`/`primExit` (DOWN/Reason fault detection),
+    the non-BEAM JS/Go cooperative scheduler shim, and Layer-R2 guarantee-transfer
+    (bisimulating live processes to the ch114/115 models — needs the R-CALC fault LTS,
+    E3/per-protocol). The verified-OTP supervisor LIVENESS guarantee still waits on
+    that fault LTS + E2; the models + the live runtime exist, the bridge between them
+    is the open research.
 
 ## Standing rules
 

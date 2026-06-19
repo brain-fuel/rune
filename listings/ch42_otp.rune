@@ -2,10 +2,10 @@
 -- Actors as a TYPED layer: process identities and the spawn/send/self
 -- primitives are foreign axioms whose effects are sequenced in the IO monad
 -- (C3). Actor programs type-check end-to-end against this interface — the
--- verified shape of an OTP gen_server's glue. The BEAM runtime that gives these
--- primitives meaning (and the supervision-tree behavioural proofs over the
--- process calculus, E1) are the R-OTP follow-up; here IO is inner (checks, does
--- not yet run).
+-- verified shape of an OTP gen_server's glue. This chapter shows the typed
+-- INTERFACE; ch205 gives the primitives a LIVE BEAM runtime (spawn/!/receive/self
+-- as genuine processes) and runs a looping actor end-to-end. The supervision-tree
+-- behavioural proofs over the process calculus (E1/E3) remain the R-OTP follow-up.
 
 data Unit : U is
   unit : Unit

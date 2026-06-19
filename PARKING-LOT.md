@@ -305,3 +305,22 @@ or a later-phase feature with no current consumer.
   rune-numeric-tower.md §2.
 
 - **pabsU-η (type-path η)** — LANDED (cont.21). `convPathUEta` (conv.go, mirrors the pathF `convPathEta`) adds `pabsU(λi. pappU p i) ≡ p`. No perturbation (full suite green). It unblocked BOTH `transportFId` (with honest castU, below) and `pathUJ` (path induction over a ua-path), which need it for the endpoint coherences of the transport line.
+
+- **D5 / R-OTP live runtime — the non-keystone tails (2026-06-19).** The live
+  BEAM runtime LANDED (Layer R0+R1: Pid + spawn/send/receive/self as real Erlang,
+  ch205 runs a looping actor on escript; codegen `beamOTPRuntime`). Parked, each
+  for a stated reason:
+  - **`primMonitor`/`primExit` (fault detection: DOWN/Reason).** No consumer until
+    a supervisor listing observes a crash; the supervisor models (ch115/ch118) are
+    still fault-free. Add with the first listing that crashes a child.
+  - **Non-BEAM cooperative scheduler shim (JS single-thread, Go goroutines+chan).**
+    Concurrency cannot give byte-identical cross-backend output without a
+    deterministic scheduler, so the cross-backend conformance corpus gains nothing;
+    BEAM is concurrency's natural home (Lambert's near-free gift). Build a shim only
+    when a non-BEAM deployment target demands live actors.
+  - **Layer-R2 guarantee-transfer (live processes ⊨ the ch114/115 models).** The
+    verified-OTP liveness guarantee (a crashed permanent child is eventually
+    restarted) needs the R-CALC fault LTS `{CRASH,LOSS,DETECT}` + E2 weak
+    bisimulation + E3 per-protocol adequacy — none of which exist yet. The proven
+    MODELS and the LIVE runtime both exist; the bisimulation BRIDGE between them is
+    the open research (R-OTP.md "needs-more-research").

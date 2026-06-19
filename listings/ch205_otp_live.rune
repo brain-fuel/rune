@@ -1,0 +1,77 @@
+-- Chapter 205 — OTP, LIVE on the BEAM (D5 / R-OTP, Layer R0+R1).
+--
+-- ch42 gave the TYPED interface (spawn/send/self as foreign axioms sequenced in
+-- the IO monad) but it only type-checked — the foreign accessors had no runtime.
+-- This chapter gives them MEANING: the BEAM backend ships `beamOTPRuntime`, the
+-- host bindings that map each primitive onto a real Erlang construct
+-- (spawn / `!` / receive / self). So this program does not model concurrency —
+-- it RUNS two genuine BEAM processes that exchange messages, and `rune run … erl`
+-- prints the answer.
+--
+-- The shape is a verified gen_server in miniature: a stateful worker that LOOPS
+-- over its mailbox (the R-PART/C4 `partial` receive loop — recursion driven by a
+-- received message, not a constructor sub-term), and a client that fires three
+-- `bump`s and a `report`, then blocks for the reply. FIFO delivery (one sender,
+-- one receiver) makes the observed total deterministic: 3.
+--
+-- Typed mailboxes (`Pid M` ~ Gleam's `Subject(M)`): `primSend M p x` type-checks
+-- only when `x : M` and `p : Pid M`, so a worker that expects `Msg` cannot be sent
+-- a `Nat` and vice versa — the message-type discipline is enforced by the checker,
+-- the effects by the runtime.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- The live-runtime primitives (Layer R0). `Pid` is a typed process address; the
+-- four ops are effectful (IO), their meaning supplied by the BEAM host bindings.
+foreign Pid : U -> U end
+foreign primSelf    : (M : U) -> IO (Pid M) end
+foreign primSpawn   : (M : U) -> (Pid M -> IO Unit) -> IO (Pid M) end
+foreign primSend    : (M : U) -> Pid M -> M -> IO Unit end
+foreign primReceive : (M : U) -> IO M end
+
+-- The worker's mailbox alphabet: bump the count, or report it to a reply address.
+data Msg : U is
+  bump    : Msg
+| report : Pid Nat -> Msg
+end
+
+-- The stateful receive loop (R-PART / C4): receive one message and either keep
+-- looping with a new state, or answer the reporter and stop. Not structurally
+-- recursive (it recurses on the NEXT message), so it is a `partial` def — total
+-- checking stays sound (the head is neutral in the kernel), the body runs through
+-- codegen.
+partial serve : Nat -> IO Unit is
+  fn (s : Nat) is
+    bindIO Msg Unit (primReceive Msg) (fn (m : Msg) is
+      MsgElim (fn (x : Msg) is IO Unit end)
+        (serve (succ s))
+        (fn (rp : Pid Nat) is primSend Nat rp s end)
+        m
+    end)
+  end
+end
+
+-- The client: spawn the worker, fire three increments and a report carrying our
+-- own address, then block for the total. `bindIO` (C3) threads the effects.
+main : IO Nat is
+  bindIO (Pid Nat) Nat (primSelf Nat) (fn (me : Pid Nat) is
+    bindIO (Pid Msg) Nat (primSpawn Msg (fn (selfp : Pid Msg) is serve zero end)) (fn (w : Pid Msg) is
+      bindIO Unit Nat (primSend Msg w bump) (fn (u1 : Unit) is
+        bindIO Unit Nat (primSend Msg w bump) (fn (u2 : Unit) is
+          bindIO Unit Nat (primSend Msg w bump) (fn (u3 : Unit) is
+            bindIO Unit Nat (primSend Msg w (report me)) (fn (u4 : Unit) is
+              primReceive Nat
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

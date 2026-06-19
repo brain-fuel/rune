@@ -388,6 +388,47 @@ func TestListingsEmitAndExecute(t *testing.T) {
 	}
 }
 
+// TestListingsOTPLiveBeam is the D5 / R-OTP LIVE-runtime gate (Layer R0+R1): the
+// OTP process primitives are not a functional model — they RUN as genuine BEAM
+// processes. ch205 spawns a stateful worker, the client fires three `bump`s and a
+// `report` carrying its own address, and the worker's looped mailbox drain
+// (a `partial` receive loop) replies with the count. The whole thing executes on
+// escript through `spawn`/`!`/`receive`/`self` (codegen.Beam ships beamOTPRuntime),
+// and the FIFO-deterministic answer is 3. BEAM-only: the concurrency primitives
+// have a real runtime on the BEAM (their natural home); the non-BEAM cooperative
+// scheduler shim is parked (PARKING-LOT.md), so this is not in the cross-backend
+// JS conformance corpus.
+func TestListingsOTPLiveBeam(t *testing.T) {
+	if _, err := exec.LookPath("escript"); err != nil {
+		t.Skip("escript not in PATH")
+	}
+	s := loadListing(t, "ch205_otp_live.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Beam{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "ch205.erl")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// stdout only — escript prints compile warnings (unused helpers) to stderr.
+	got, err := exec.Command("escript", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("escript run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ (succ (succ zero))"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("live OTP actor on BEAM printed %q, want %q", got, want)
+	}
+}
+
 // TestCongConsGLaterGeneralizesCongConsG pins the per-clock E2-converse increment
 // (telos-4/M7): `congConsGLater` — the DELAYED-tail consG-congruence — is a strict
 // generalization of `congConsG`. The guarded recursive call yields the tail-path
