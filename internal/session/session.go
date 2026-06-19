@@ -685,7 +685,11 @@ func (s *Session) decConfig() surface.DecConfig {
 	return surface.DecConfig{
 		Frac: frac, RDec: rdec, Wcons: wcons, Wnil: wnil, True: tru,
 		Int: s.refs["int"], Ok: s.refs["ok"], Err: s.refs["err"],
-		On: ok1 && ok2 && ok3 && ok4 && ok5,
+		DivByZero:   s.refs["divByZero"],
+		NotIntegral: s.refs["notIntegral"],
+		Negative:    s.refs["negative"],
+		NotCounting: s.refs["notCounting"],
+		On:          ok1 && ok2 && ok3 && ok4 && ok5,
 	}
 }
 
@@ -856,6 +860,14 @@ func (s *Session) normalizerNoAccel() *core.Machine { return s.newNormalizer(fal
 // fast path.
 func (s *Session) NormalizeExpr(t core.Tm) core.Tm {
 	return s.newNormalizer(true).NormalizeUnfold(t)
+}
+
+// NormalizeExprFolded reduces redexes (incl. stuck projections like `Fst subWhole`)
+// but leaves top-level definition references FOLDED — so a type displays with its
+// names intact (`Result Nat ArithErr`, not `Result (Sig Whole …) ArithErr`) while a
+// resolved-dictionary projection still collapses to the underlying type.
+func (s *Session) NormalizeExprFolded(t core.Tm) core.Tm {
+	return s.newNormalizer(true).Normalize(t)
 }
 
 // AddData elaborates and stores a datatype declaration, binding the former,

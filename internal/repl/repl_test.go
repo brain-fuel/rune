@@ -185,8 +185,8 @@ func TestREPLIntTower(t *testing.T) {
 		"-1/3 : Frac",
 		"0 : Whole",            // monus 2 5
 		"3 : Whole",            // minus 5 2 (refl true)
-		"ok 7/2 : Result Frac Whole",
-		"err : Result Frac Whole",
+		"ok 7/2 : Result Frac ArithErr",
+		"err: cannot divide 7 by 0 : Result Frac ArithErr",
 	} {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
@@ -195,10 +195,12 @@ func TestREPLIntTower(t *testing.T) {
 }
 
 // TestREPLDemotion is the acceptance test for the checked DESCENT down the tower:
-// `3/1` is `3 : Frac` (a rational that happens to be whole), and `toWhole`/`toInt`
-// demote it only when it is integral (denominator 1) — and `toWhole` only when
-// non-negative — returning a Result (err otherwise). The implicit climb up is met
-// by an explicit, checked climb down.
+// `3/1` is `3 : Frac` (a rational that happens to be whole), and `toWhole`/`toInt`/
+// `toNat` demote it only when it is integral (denominator 1) — `toWhole`/`toNat`
+// only when non-negative, and `toNat` only when nonzero (a counting number) —
+// returning a `Result A ArithErr`. The failure branch is the DISCRIMINATED UNION
+// `ArithErr`, each variant carrying its operands and folded to a message at the
+// print boundary. The implicit climb up is met by an explicit, checked climb down.
 func TestREPLDemotion(t *testing.T) {
 	script := []string{
 		"3/1",                  // a whole-valued fraction stays Frac (no implicit demotion)
@@ -206,9 +208,14 @@ func TestREPLDemotion(t *testing.T) {
 		"toWhole (6/2)",        // reduces first: ok 3
 		"toWhole (1/3)",        // not integral: err
 		"toWhole (0/5)",        // zero is whole: ok 0
-		"toInt (6/2)",          // ok 3 : Result Int Whole
+		"toInt (6/2)",          // ok 3 : Result Int ArithErr
 		"toInt ((2/3) - (8/3))", // integral negative: ok -2 (Int holds the sign)
 		"toWhole ((2/3) - (8/3))", // negative: err (no whole answer)
+		"toNat (6/2)",          // counting number: ok 3
+		"toNat (0/5)",          // zero is not a counting number: err
+		"toNat (1/3)",          // not integral: err
+		"toNat ((2/3) - (8/3))", // negative: err
+		"divChecked 5 (monus 1 1)", // a computed-zero denominator: divByZero carries it
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -218,12 +225,18 @@ func TestREPLDemotion(t *testing.T) {
 	}
 	got := out.String()
 	for _, w := range []string{
-		"3 : Frac",                     // 3/1
-		"ok 3 : Result Whole Whole",    // toWhole (3/1) and (6/2)
-		"err : Result Whole Whole",     // toWhole (1/3) and the negative
-		"ok 0 : Result Whole Whole",    // toWhole (0/5)
-		"ok 3 : Result Int Whole",      // toInt (6/2)
-		"ok -2 : Result Int Whole",     // toInt of an integral negative
+		"3 : Frac",                              // 3/1
+		"ok 3 : Result Whole ArithErr",          // toWhole (3/1) and (6/2)
+		"err: 1/3 is not an integer : Result Whole ArithErr", // toWhole (1/3)
+		"ok 0 : Result Whole ArithErr",          // toWhole (0/5)
+		"ok 3 : Result Int ArithErr",            // toInt (6/2)
+		"ok -2 : Result Int ArithErr",           // toInt of an integral negative
+		"err: -2 is negative : Result Whole ArithErr", // toWhole of a negative
+		"ok 3 : Result Nat ArithErr",            // toNat (6/2)
+		"err: 0 is not a counting number : Result Nat ArithErr", // toNat (0/5)
+		"err: 1/3 is not an integer : Result Nat ArithErr",      // toNat (1/3)
+		"err: -2 is negative : Result Nat ArithErr",             // toNat negative
+		"err: cannot divide 5 by 0 : Result Frac ArithErr",      // computed-zero divisor
 	} {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)

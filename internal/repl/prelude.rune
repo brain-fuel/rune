@@ -403,11 +403,27 @@ data Result : U -> U -> U is
   ok  : (A : U) -> (E : U) -> A -> Result A E
 | err : (A : U) -> (E : U) -> E -> Result A E
 end
-divChecked : Whole -> Whole -> Result Frac Whole is
+
+-- ArithErr — a DISCRIMINATED UNION of the ways an arithmetic operation can fail,
+-- each variant CARRYING the operands that explain it (the Idris2 / Lean4 / Haskell
+-- spirit: an error is structured DATA, not a string). The human-readable message is
+-- the Show boundary — here the REPL's pretty-printer, which folds each variant to a
+-- sentence (`divByZero 7 0` -> "cannot divide 7 by 0"), so the operands need not be
+-- re-parsed out of a baked f-string. Room is left for further faults: add a
+-- constructor and a renderer arm. `divByZero a b` covers the `b = (1-1)` case — the
+-- zero denominator is carried, whatever expression produced it.
+data ArithErr : U is
+  divByZero   : Whole -> Whole -> ArithErr   -- a / 0  — carries (numerator, denominator)
+| notIntegral : Frac  -> ArithErr            -- demotion of a value with denominator > 1
+| negative    : Frac  -> ArithErr            -- demotion of a negative value to Whole / Nat
+| notCounting : Frac  -> ArithErr            -- demotion of zero to a counting number (Nat)
+end
+
+divChecked : Whole -> Whole -> Result Frac ArithErr is
   fn (a : Whole) (b : Whole) is
     case b of
-    | zero   -> err Frac Whole 0
-    | succ k -> ok Frac Whole (reduce (frac false a b))
+    | zero   -> err Frac ArithErr (divByZero a b)
+    | succ k -> ok Frac ArithErr (reduce (frac false a b))
     end
   end
 end
@@ -421,34 +437,60 @@ end
 -- demotes implicitly because it is dynamically typed; here, where the type is a
 -- static commitment, the divisibility check is made explicit and returns a Result.)
 -- ====================================================================
-toInt : Frac -> Result Int Whole is
+toInt : Frac -> Result Int ArithErr is
   fn (f : Frac) is
     let r : Frac = reduce f in
     case fden r of
-    | zero   -> err Int Whole 0
+    | zero   -> err Int ArithErr (notIntegral f)
     | succ k ->
         case k of
-        | succ j -> err Int Whole 0                          -- denominator >= 2: not integral
-        | zero   -> ok Int Whole (mkInt (fneg r) (fnum r))   -- denominator 1: the integer
+        | succ j -> err Int ArithErr (notIntegral f)         -- denominator >= 2: not integral
+        | zero   -> ok Int ArithErr (mkInt (fneg r) (fnum r)) -- denominator 1: the integer
         end
     end
   end
 end
-toWhole : Frac -> Result Whole Whole is
+toWhole : Frac -> Result Whole ArithErr is
   fn (f : Frac) is
     let r : Frac = reduce f in
     case fden r of
-    | zero   -> err Whole Whole 0
+    | zero   -> err Whole ArithErr (notIntegral f)
     | succ k ->
         case k of
-        | succ j -> err Whole Whole 0           -- denominator >= 2: not integral
+        | succ j -> err Whole ArithErr (notIntegral f)   -- denominator >= 2: not integral
         | zero   ->
             case fnum r of
-            | zero   -> ok Whole Whole 0         -- zero is whole (any sign)
+            | zero   -> ok Whole ArithErr 0              -- zero is whole (any sign)
             | succ n ->
                 case fneg r of
-                | false -> ok Whole Whole (fnum r)   -- positive integer
-                | true  -> err Whole Whole 0         -- negative: no whole answer
+                | false -> ok Whole ArithErr (fnum r)    -- positive integer
+                | true  -> err Whole ArithErr (negative f) -- negative: no whole answer
+                end
+            end
+        end
+    end
+  end
+end
+-- toNat descends to the COUNTING numbers {1,2,3,…} (the positive-whole Σ, Nat): it
+-- additionally rejects zero, since zero is not a counting number. The ok payload is
+-- built from the pattern variable `succ n` (not `fnum r`), so `isPos (succ n)`
+-- computes to `true` and the nonzero proof is `refl true`.
+toNat : Frac -> Result Nat ArithErr is
+  fn (f : Frac) is
+    let r : Frac = reduce f in
+    case fden r of
+    | zero   -> err Nat ArithErr (notIntegral f)
+    | succ k ->
+        case k of
+        | succ j -> err Nat ArithErr (notIntegral f)   -- denominator >= 2: not integral
+        | zero   ->
+            case fnum r of
+            | zero   -> err Nat ArithErr (notCounting f) -- zero: integral, but not a counting number
+            | succ n ->
+                case fneg r of
+                | true  -> err Nat ArithErr (negative f) -- negative: no counting answer
+                | false -> ok Nat ArithErr
+                    (Pair Whole (fn (m : Whole) is Eq Bool (isPos m) true end) (succ n) (refl true))
                 end
             end
         end

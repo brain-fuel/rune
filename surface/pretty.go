@@ -73,7 +73,9 @@ type printer struct {
 type DecConfig struct {
 	Frac, RDec, Wcons, Wnil, True core.Hash
 	Int, Ok, Err                  core.Hash
-	On                            bool
+	// ArithErr variant hashes: the Result error payload is folded to a message.
+	DivByZero, NotIntegral, Negative, NotCounting core.Hash
+	On                                            bool
 }
 
 // PrettyNat is PrettyWith with a registered `builtin nat` binding: saturated
@@ -105,12 +107,17 @@ func spineExpl(t core.Tm) (core.Tm, []core.Tm) {
 }
 
 // wholeVal reads a Whole as an int: a folded succ-chain or a compressed NatLit.
+// A Nat (the positive-whole Σ) IS its first projection, so a Pair folds to the
+// value carried in its first component.
 func (p *printer) wholeVal(t core.Tm) (int, bool) {
 	if n, ok := p.numeralOf(t); ok {
 		return n, true
 	}
 	if nl, ok := t.(core.NatLit); ok && nl.N.IsInt64() {
 		return int(nl.N.Int64()), true
+	}
+	if pr, ok := t.(core.Pair); ok {
+		return p.wholeVal(pr.A)
 	}
 	return 0, false
 }
@@ -186,6 +193,11 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 		}
 		return "", false
 	case ref.Hash == p.dec.Err && len(args) == 3:
+		// err A E e : a failed Result — render the ArithErr payload as a message
+		// (the Show boundary). Fall back to a bare "err" for any other payload.
+		if msg, ok := p.arithErrStr(args[2]); ok {
+			return "err: " + msg, true
+		}
 		return "err", true
 	case ref.Hash == p.dec.Frac && len(args) == 3:
 		neg := isNeg(args[0])
@@ -226,6 +238,42 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 			return s + "." + digitsStr(ds), true
 		}
 		return s + "." + digitsStr(ds[:rep]) + "{" + digitsStr(ds[rep:]) + "}", true
+	}
+	return "", false
+}
+
+// arithErrStr renders an ArithErr value (a Result's error payload) as a human
+// message — the Show boundary for the prelude's arithmetic-error union. Each
+// constructor carries its operands; the message reads them back out. Returns
+// ok=false for anything that is not a recognised, foldable ArithErr.
+func (p *printer) arithErrStr(t core.Tm) (string, bool) {
+	if !p.dec.On {
+		return "", false
+	}
+	head, args := spineExpl(t)
+	ref, ok := head.(core.Ref)
+	if !ok {
+		return "", false
+	}
+	switch {
+	case ref.Hash == p.dec.DivByZero && len(args) == 2:
+		n, ok1 := p.wholeVal(args[0])
+		d, ok2 := p.wholeVal(args[1])
+		if ok1 && ok2 {
+			return "cannot divide " + strconv.Itoa(n) + " by " + strconv.Itoa(d), true
+		}
+	case ref.Hash == p.dec.NotIntegral && len(args) == 1:
+		if s, ok := p.decimalStr(args[0]); ok {
+			return s + " is not an integer", true
+		}
+	case ref.Hash == p.dec.Negative && len(args) == 1:
+		if s, ok := p.decimalStr(args[0]); ok {
+			return s + " is negative", true
+		}
+	case ref.Hash == p.dec.NotCounting && len(args) == 1:
+		if s, ok := p.decimalStr(args[0]); ok {
+			return s + " is not a counting number", true
+		}
 	}
 	return "", false
 }
