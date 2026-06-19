@@ -149,10 +149,12 @@ func (m *Machine) quoteSpine(lvl int, n Neutral, quoteVal func(int, Val) Tm) Tm 
 	case NNatLit:
 		// A compressed numeral quotes back to a NatLit term (not its peeled
 		// chain): Quote keeps the un-forced spine, so a literal stays a literal.
-		// Under QuoteUnfold the spine is reached only when the value was NOT
-		// forced (Force unfolds NNatLit one layer); a top-level NormalizeUnfold
-		// of a literal therefore folds it through the unary chain. Quoting the
-		// spine itself preserves the compact form.
+		// Under QuoteUnfold the canonical top-level literal is caught by the
+		// forceToNatLit short-circuit (see QuoteUnfold) and never reaches here;
+		// this case preserves the compact form for a literal sitting as the head
+		// of a still-neutral spine (e.g. a generalized `builtin nat` chain, or a
+		// literal nested under another neutral). Either way no succ^n chain is
+		// materialised — NormalizeUnfold of a closed literal stays compact.
 		return NatLit{N: s.N, Zero: s.Zero, Succ: s.Succ}
 	default:
 		panic("core.Quote: unknown Neutral constructor")

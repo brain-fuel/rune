@@ -57,12 +57,12 @@ func litValue(t *testing.T, s *Session, src string) int64 {
 }
 
 // litValueFast reads the result by FOLDED normalization (Normalize, not
-// NormalizeUnfold), which keeps an accel-produced literal compact instead of
-// materialising its succ-chain — so it can read a huge accel result (e.g.
-// mul 4096 4096) without blowing the stack. The accel ι fires during eval at the
-// registered head, so the head needs no δ-unfold; the literal it yields quotes
-// back compactly. (The unfold-quote materialisation of a literal is the documented
-// remaining C7 display step — see the report.)
+// NormalizeUnfold). The accel ι fires during eval at the registered head, so the
+// literal it yields quotes back compactly. Both reader modes now stay compact on a
+// huge accel result — the QuoteUnfold short-circuit (core/quote.go) keeps the
+// UNFOLD path compact too, so `litValue` (NormalizeUnfold) reads `mul 4096 4096`
+// and `mul 1000000 1000000` without materialising any succ-chain. litValueFast is
+// retained as the folded reader the differential gate pairs against NormalizeUnfold.
 func litValueFast(t *testing.T, s *Session, src string) int64 {
 	t.Helper()
 	return litValueWith(t, s, src, func(tm core.Tm) core.Tm {
@@ -166,6 +166,15 @@ func TestNatAccelFiresLargeNoBlowup(t *testing.T) {
 	got := litValueFast(t, s, "mul 4096 4096")
 	if got != 4096*4096 {
 		t.Fatalf("mul 4096 4096 = %d, want %d", got, 4096*4096)
+	}
+	// The UNFOLD reader (NormalizeUnfold via NormalizeExpr) must ALSO stay compact:
+	// the QuoteUnfold short-circuit keeps a canonical literal from materialising its
+	// succ-chain, so a result no succ-chain could ever hold reads back promptly.
+	if got := litValue(t, s, "mul 4096 4096"); got != 4096*4096 {
+		t.Fatalf("mul 4096 4096 (unfold) = %d, want %d", got, 4096*4096)
+	}
+	if got := litValue(t, s, "mul 1000000 1000000"); got != 1000000*1000000 {
+		t.Fatalf("mul 1e6 1e6 (unfold) = %d, want %d", got, 1000000*1000000)
 	}
 }
 
