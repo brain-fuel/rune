@@ -1,0 +1,184 @@
+-- Chapter 208 — A general LTS bisimulation library (E3, the reusable API).
+--
+-- ch69 closed the E2 converse (bisimilarity ⟹ path for the coinductive `Str`);
+-- ch70 grounded it on the process calculus; ch206/ch207 added the fault LTS and
+-- per-protocol adequacy. Each instance re-derived the same machinery against its
+-- own coalgebra. This chapter PACKAGES that machinery as a backend-agnostic
+-- library: a labelled transition system is a COALGEBRA `c : El S -> El (A × S)`
+-- (a state emits an observation and steps), its behaviour is the coinductive
+-- observation stream `traceOf c`, and two states are BISIMILAR when their traces
+-- are path-equal — proven from a head-observation agreement plus a tail-trace
+-- agreement (`traceBisim`). The headline addition over ch70 is the API surface:
+-- trace-bisimilarity is an EQUIVALENCE (reflexive / symmetric / transitive), and
+-- the "computing bisimulation" corollary (`bisimByCompute`) discharges the whole
+-- obligation by `refl` whenever the two states' observations definitionally
+-- coincide — the shape every concrete E3 protocol proof uses.
+
+-- ===== The stream functor and its observations (ch66/ch69) =====
+
+Str : UF -> UF is
+  fn (A : UF) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end
+end
+
+head : (A : UF) -> El (Str A) -> El A is
+  fn (A : UF) (s : El (Str A)) is
+    fstF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+tail : (A : UF) -> El (Str A) -> El (Str A) is
+  fn (A : UF) (s : El (Str A)) is
+    sndF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+-- ===== The LTS = a coalgebra; its behaviour = the trace =====
+--
+-- A labelled transition system over observation alphabet A with state space S is a
+-- coalgebra: each state emits one observation and a successor state. (A pair
+-- `A × S` is the non-dependent `sigmaF A (λ_. S)`.) `traceOf` corecurses the
+-- infinite observation stream — the canonical behaviour of a state.
+traceOf : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> El S -> El (Str A) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end))) (s : El S) is
+    unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c s
+  end
+end
+
+-- ===== The E2 converse machinery, generic (ch69/ch70) =====
+
+ptransStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A)) -> (z : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y z) -> El (pathF (Str A) x z) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (z : El (Str A))
+     (p : El (pathF (Str A) x y)) (q : El (pathF (Str A) y z)) is
+    pathJ (Str A) y
+      (fn (w : El (Str A)) (r : El (pathF (Str A) y w)) is pathF (Str A) x w end)
+      p z q
+  end
+end
+
+repairEndpointsStr : (A : UF)
+   -> (x : El (Str A)) -> (x2 : El (Str A)) -> (y2 : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x x2) -> El (pathF (Str A) x2 y2) -> El (pathF (Str A) y2 y)
+   -> El (pathF (Str A) x y) is
+  fn (A : UF) (x : El (Str A)) (x2 : El (Str A)) (y2 : El (Str A)) (y : El (Str A))
+     (sx : El (pathF (Str A) x x2)) (q : El (pathF (Str A) x2 y2)) (sy : El (pathF (Str A) y2 y)) is
+    ptransStr A x x2 y sx (ptransStr A x2 y2 y q sy)
+  end
+end
+
+consStr : (A : UF) -> (h : El A) -> (ts : El (Str A)) -> El (Str A) is
+  fn (A : UF) (h : El A) (ts : El (Str A)) is
+    nuCons (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+      (pairF A (fn (w : El A) is Str A end) h ts)
+  end
+end
+
+symStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y x) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (p : El (pathF (Str A) x y)) is
+    pabs (Str A) (fn (i : I) is papp (Str A) x y p (ineg i) end)
+  end
+end
+
+converseFromConsEta : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+   -> (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t)))
+     (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+     (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t)) is
+    repairEndpointsStr A
+      s (consStr A (head A s) (tail A s)) (consStr A (head A t) (tail A t)) t
+      (symStr A (consStr A (head A s) (tail A s)) s es)
+      (pabs (Str A)
+         (fn (i : I) is
+            consStr A (papp A (head A s) (head A t) hp i)
+              (papp (Str A) (tail A s) (tail A t) tp i)
+          end))
+      et
+  end
+end
+
+-- bisimilarity ⟹ path, on the coinductive stream itself.
+bisimToPathStr : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t))) is
+    converseFromConsEta A s t hp tp (preflF (Str A) s) (preflF (Str A) t)
+  end
+end
+
+-- ===== THE LIBRARY API =====
+
+-- traceBisim: the general LTS bisimulation principle. For ANY coalgebra `c` and
+-- states s, t: a head-observation agreement and a tail-trace agreement establish
+-- that the two states' behaviours are PATH-EQUAL. This is the reusable entry point
+-- every E3 protocol proof targets.
+traceBisim : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> (s : El S) -> (t : El S)
+   -> (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+   -> (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t))))
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c t)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s : El S) (t : El S)
+     (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+     (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t)))) is
+    bisimToPathStr A (traceOf A S c s) (traceOf A S c t) hp tp
+  end
+end
+
+-- Trace-bisimilarity is an EQUIVALENCE (it is path equality on Str A, which is one;
+-- the library states the three laws explicitly so downstream code can rely on them).
+
+traceBisimRefl : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end))) -> (s : El S)
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c s)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end))) (s : El S) is
+    preflF (Str A) (traceOf A S c s)
+  end
+end
+
+traceBisimSym : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end))) -> (s : El S) -> (t : El S)
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c t))
+   -> El (pathF (Str A) (traceOf A S c t) (traceOf A S c s)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s : El S) (t : El S) (p : El (pathF (Str A) (traceOf A S c s) (traceOf A S c t))) is
+    symStr A (traceOf A S c s) (traceOf A S c t) p
+  end
+end
+
+traceBisimTrans : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> (s : El S) -> (t : El S) -> (u : El S)
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c t))
+   -> El (pathF (Str A) (traceOf A S c t) (traceOf A S c u))
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c u)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s : El S) (t : El S) (u : El S)
+     (p : El (pathF (Str A) (traceOf A S c s) (traceOf A S c t)))
+     (q : El (pathF (Str A) (traceOf A S c t) (traceOf A S c u))) is
+    ptransStr A (traceOf A S c s) (traceOf A S c t) (traceOf A S c u) p q
+  end
+end
+
+-- The COMPUTING-bisimulation pattern (the shape every concrete protocol proof
+-- uses) is just `traceBisim … (preflF …) (preflF …)`: when the two states' head
+-- observations and tail traces DEFINITIONALLY coincide (each side computes to a
+-- common value), conversion makes `preflF h : pathF A (head s) (head t)` and
+-- likewise for the tail, so the whole obligation discharges by `refl` with no
+-- manual coinduction. ch70 (process bisimulation) and ch209 (adequacy) are the
+-- consumers exercising this against concrete coalgebras; the library above is the
+-- backend-agnostic surface they target.

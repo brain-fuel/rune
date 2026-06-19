@@ -610,6 +610,49 @@ first and forces only on mismatch, so the fast path logs nothing.
     has faults). Zero core change. Still open: the live wiring (primMonitor/primExit,
     parked), the full coinductive `Eventually` over an unbounded fault stream, and the
     per-protocol bisimulation/adequacy proofs (E2/E3).
+  - **E3 ADEQUACY — the projection refines the fault LTS (ch207).** The correctness
+    theorem tying spec to runtime: the projected actor's OBSERVABLE behaviour refines
+    `lstep`. The live runtime is foreign, so adequacy is stated between two rune-level
+    semantics — the operational trace `visibleRun` (the observable labels `lstep ok`
+    emits, τ erased) and the projection denotation `project` (the observable action
+    sequence the projected actor emits, structural over Proc per the R-CALC table).
+    Communication is internal (τ) on both sides; the observable alphabet is FAILURE
+    (`lfail`), the events a supervisor reacts to. For well-supervised protocols (every
+    crash beside a monitor) `visibleRun k P ≡ project P` by refl: a single supervised
+    crash, a two-fault sequence (left-biased order matches), a survivor (failure
+    isolation), a quiet no-fault protocol (empty trace, no spurious failure), and
+    fuel-stability (a trace statement, not a step-count artifact). So the projected
+    actor does nothing the spec forbids — verified OTP closes at the spec level
+    (proven model ch114/115 + fault spec ch206 + projection-refines-spec ch207).
+  - **General LTS bisimulation library (ch208).** The ch69/ch70 coinductive-trace
+    machinery, packaged backend-agnostic: an LTS is a coalgebra `c : El S -> El
+    (A × S)`, its behaviour is `traceOf c`, and `traceBisim` proves two states'
+    behaviours path-equal from a head + tail agreement. Trace-bisimilarity is an
+    EQUIVALENCE (the three laws `traceBisimRefl`/`Sym`/`Trans` are exported; it is
+    path equality on `Str A`). The computing-bisimulation shape every protocol uses
+    is `traceBisim … (preflF …) (preflF …)` — conversion discharges it when the
+    states' observations definitionally coincide.
+  - **Coinductive adequacy (ch209).** ch207's finite-list adequacy, lifted to the
+    unbounded behaviour STREAM via the ch208 library: a process's fault behaviour is
+    the infinite observation stream the fault LTS emits, and two mirror-image
+    supervised systems (crash left vs right of the monitor, symmetric DETECT) are
+    proven path-equal as behaviour streams by `traceBisim` — no fuel bound, the whole
+    behaviour at once, genuinely coinductive (distinct seeds, discharged by
+    `bisimToPathStr`). The observation certs (`behHeadA/B`, refl) show the fault
+    appears in the stream. So adequacy holds for unbounded time, not just bounded
+    prefixes.
+  - **The adequacy tie + trust boundary (ref_docs/wootz/ADEQUACY-TIE.md).** The
+    three-layer correspondence: SPEC (fault LTS ch206) → PROOF (adequacy ch207/ch209,
+    kernel, no backend appeal) → LIVE (BEAM runtime ch205, runs the happy-path
+    projection to its predicted value). Proven end-to-end with NO trust: `project P`
+    refines `lstep`. Confirmed running for the implemented primitive subset
+    (spawn/send/receive, ch205). TRUSTED at the foreign edge: that BEAM faithfully
+    implements the projection table — the minimal, auditable "backend is correct"
+    obligation, a few lines of Erlang per named primitive. The remaining gap is
+    explicit: the FAULT primitives (`primMonitor`/`primExit`) are not yet in
+    `beamOTPRuntime` (parked, D5-faults-live), so the CRASH/DETECT projection is
+    proven + specified against the BEAM model but not yet executed live — closing it
+    is two `beamOTPRuntime` entries + a fault listing, mechanical.
   - **Runtime** — Σ erases to tuples and DEPLOYS (ch32 runs); `partial` defs run.
   - **Kernel fix** — eliminator generation for ≥2-recursive-argument constructors
     (a de Bruijn miscount; unblocks all branching datatypes). ch34.

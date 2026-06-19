@@ -1,0 +1,329 @@
+-- Chapter 209 — Coinductive adequacy: fault behaviour as a stream (E3).
+--
+-- ch207 proved adequacy as FINITE list equality (`visibleRun k P ≡ project P`) for
+-- concrete protocols. This chapter lifts adequacy to the COINDUCTIVE level: a
+-- process's fault behaviour is the infinite OBSERVATION STREAM the fault LTS emits
+-- (the visible label at each step), built with the ch208 LTS library, and two
+-- processes are behaviourally equal when their streams are PATH-equal — proven by
+-- the general `traceBisim` (no fuel bound, the whole unbounded behaviour at once).
+-- The headline result: two STRUCTURALLY DIFFERENT supervised systems — one whose
+-- monitor handler is `halt`, one whose handler is `par halt halt` — have the SAME
+-- fault behaviour (detect once, then quiescent), discharged as a two-level
+-- bisimulation. This is the coinductive analogue of ch207's adequacy: the runtime
+-- observation stream is determined by the spec, for unbounded behaviour.
+--
+-- A minimal calculus suffices (only halt/mon/par/crash — the fault fragment); the
+-- communication prefixes (ch206/ch207) are silent (τ) and contribute nothing
+-- observable, so they are elided here.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Label : U is
+  ltau  : Label
+| lfail : Label
+end
+
+data Proc : U is
+  halt  : Proc
+| mon   : Proc -> Proc
+| par   : Proc -> Proc -> Proc
+| crash : Proc
+end
+
+data Trans : U is
+  tr : Label -> Proc -> Trans
+end
+
+labelOf : Trans -> Label is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t
+  end
+end
+
+procOf : Trans -> Proc is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t
+  end
+end
+
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+
+-- DETECT a crashed peer (on EITHER side) beside a monitor: run the monitor's
+-- handler, label lfail. The detect is symmetric so a crash left or right of its
+-- monitor is observed identically — the property that lets two mirror-image
+-- supervised systems collapse to the SAME post-recovery state.
+detectWith : Proc -> Option Trans -> Option Trans is
+  fn (peer : Proc) (fallback : Option Trans) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      fallback
+      (fn (h : Proc) is some Trans (tr lfail h) end)
+      (monCont peer)
+  end
+end
+
+-- the fault-free scheduler: DETECT (symmetric), else interleave; lone prefixes /
+-- halt / crash are stuck.
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+         BoolElim (fn (w : Bool) is Option Trans end)
+           (detectWith b (interleaveT iha ihb a b))
+           (BoolElim (fn (w : Bool) is Option Trans end)
+              (detectWith a (interleaveT iha ihb a b))
+              (interleaveT iha ihb a b)
+              (isCrash b))
+           (isCrash a)
+       end)
+      (none Trans)
+      x
+  end
+end
+
+-- the visible observation at a state: a failure step is observable (`some lfail`),
+-- a silent step or a stuck state is `none`.
+visObs : Proc -> Option Label is
+  fn (x : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Label end)
+      (none Label)
+      (fn (t : Trans) is
+         LabelElim (fn (w : Label) is Option Label end)
+           (none Label)          -- ltau : silent
+           (some Label lfail)    -- lfail : observable
+           (labelOf t)
+       end)
+      (okStep x)
+  end
+end
+
+-- the next state: step if possible, else stay (a stuck process loops on itself, so
+-- its behaviour is a constant `none` tail).
+nextStateF : Proc -> Proc is
+  fn (x : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Proc end)
+      x
+      (fn (t : Trans) is procOf t end)
+      (okStep x)
+  end
+end
+
+-- ===== The ch208 LTS-bisimulation library (re-declared standalone) =====
+
+Str : UF -> UF is
+  fn (A : UF) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end
+end
+
+head : (A : UF) -> El (Str A) -> El A is
+  fn (A : UF) (s : El (Str A)) is
+    fstF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+tail : (A : UF) -> El (Str A) -> El (Str A) is
+  fn (A : UF) (s : El (Str A)) is
+    sndF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+
+traceOf : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> El S -> El (Str A) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end))) (s : El S) is
+    unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c s
+  end
+end
+
+ptransStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A)) -> (z : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y z) -> El (pathF (Str A) x z) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (z : El (Str A))
+     (p : El (pathF (Str A) x y)) (q : El (pathF (Str A) y z)) is
+    pathJ (Str A) y
+      (fn (w : El (Str A)) (r : El (pathF (Str A) y w)) is pathF (Str A) x w end)
+      p z q
+  end
+end
+
+repairEndpointsStr : (A : UF)
+   -> (x : El (Str A)) -> (x2 : El (Str A)) -> (y2 : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x x2) -> El (pathF (Str A) x2 y2) -> El (pathF (Str A) y2 y)
+   -> El (pathF (Str A) x y) is
+  fn (A : UF) (x : El (Str A)) (x2 : El (Str A)) (y2 : El (Str A)) (y : El (Str A))
+     (sx : El (pathF (Str A) x x2)) (q : El (pathF (Str A) x2 y2)) (sy : El (pathF (Str A) y2 y)) is
+    ptransStr A x x2 y sx (ptransStr A x2 y2 y q sy)
+  end
+end
+
+consStr : (A : UF) -> (h : El A) -> (ts : El (Str A)) -> El (Str A) is
+  fn (A : UF) (h : El A) (ts : El (Str A)) is
+    nuCons (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+      (pairF A (fn (w : El A) is Str A end) h ts)
+  end
+end
+
+symStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y x) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (p : El (pathF (Str A) x y)) is
+    pabs (Str A) (fn (i : I) is papp (Str A) x y p (ineg i) end)
+  end
+end
+
+converseFromConsEta : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+   -> (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t)))
+     (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+     (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t)) is
+    repairEndpointsStr A
+      s (consStr A (head A s) (tail A s)) (consStr A (head A t) (tail A t)) t
+      (symStr A (consStr A (head A s) (tail A s)) s es)
+      (pabs (Str A)
+         (fn (i : I) is
+            consStr A (papp A (head A s) (head A t) hp i)
+              (papp (Str A) (tail A s) (tail A t) tp i)
+          end))
+      et
+  end
+end
+
+bisimToPathStr : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t))) is
+    converseFromConsEta A s t hp tp (preflF (Str A) s) (preflF (Str A) t)
+  end
+end
+
+traceBisim : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> (s : El S) -> (t : El S)
+   -> (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+   -> (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t))))
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c t)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s : El S) (t : El S)
+     (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+     (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t)))) is
+    bisimToPathStr A (traceOf A S c s) (traceOf A S c t) hp tp
+  end
+end
+
+-- ===== The fault behaviour coalgebra =====
+--
+-- A process is embedded as the fibrant code `fib Proc`; the observation alphabet
+-- is `fib (Option Label)` (the visible fault label, or none). The coalgebra emits
+-- the visible observation and steps; `behaviour` is the infinite observation
+-- stream — the process's fault behaviour, the coinductive object adequacy is about.
+faultCoalg : El (fib Proc)
+   -> El (sigmaF (fib (Option Label)) (fn (w : El (fib (Option Label))) is fib Proc end)) is
+  fn (p : El (fib Proc)) is
+    pairF (fib (Option Label)) (fn (w : El (fib (Option Label))) is fib Proc end)
+      (visObs p)
+      (nextStateF p)
+  end
+end
+
+behaviour : El (fib Proc) -> El (Str (fib (Option Label))) is
+  fn (p : El (fib Proc)) is
+    traceOf (fib (Option Label)) (fib Proc) faultCoalg p
+  end
+end
+
+-- the supervised systems we compare: MIRROR IMAGES — sysA crashes the LEFT peer of
+-- its monitor, sysB crashes the RIGHT peer. Structurally distinct, yet (symmetric
+-- DETECT) both observe the failure and collapse to the SAME post-recovery state
+-- `halt`.
+sysA : Proc is par crash (mon halt) end
+sysB : Proc is par (mon halt) crash end
+
+-- The behaviour OBSERVES, by refl: each system's first observation is the detected
+-- failure `some lfail`, and the next is `none` (quiescent after recovery). The
+-- fault shows up in the stream — grounding the coalgebra on the real fault LTS.
+behHeadA : Eq (El (fib (Option Label)))
+     (head (fib (Option Label)) (behaviour sysA)) (some Label lfail) is
+  refl (some Label lfail)
+end
+
+behHeadB : Eq (El (fib (Option Label)))
+     (head (fib (Option Label)) (behaviour sysB)) (some Label lfail) is
+  refl (some Label lfail)
+end
+
+behHeadTailA : Eq (El (fib (Option Label)))
+     (head (fib (Option Label)) (tail (fib (Option Label)) (behaviour sysA))) (none Label) is
+  refl (none Label)
+end
+
+-- ===== COINDUCTIVE ADEQUACY: same fault behaviour, path-equal streams =====
+--
+-- sysA and sysB are mirror-image supervised systems (crash left vs right of the
+-- monitor). Both have the SAME observable fault behaviour: `some lfail` (the
+-- detected crash), then `none` forever (quiescent after recovery). The proof is a
+-- bisimulation via the ch208 `traceBisim` — and since both collapse to the SAME
+-- state `halt`, it closes by `refl` (the ch70 process-bisimulation pattern, now on
+-- the fault coalgebra):
+--   • heads agree — both observe `some lfail` (`preflF`, each computes to it);
+--   • tails agree — both step to `halt`, so each tail is `behaviour halt` on the
+--     nose (`preflF`).
+-- No fuel bound: the whole unbounded behaviour stream is equated at once. This is
+-- the coinductive analogue of ch207's finite-list adequacy — the runtime's fault
+-- behaviour is determined by the spec, for all of (unbounded) time, and the two
+-- mirror systems are observationally equal as behaviours (genuinely coinductive:
+-- distinct seeds, the equality discharged by `bisimToPathStr`).
+sysAdequate :
+    El (pathF (Str (fib (Option Label))) (behaviour sysA) (behaviour sysB)) is
+  traceBisim (fib (Option Label)) (fib Proc) faultCoalg sysA sysB
+    (preflF (fib (Option Label)) (some Label lfail))
+    (preflF (Str (fib (Option Label))) (behaviour halt))
+end

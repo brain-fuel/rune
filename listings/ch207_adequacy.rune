@@ -1,0 +1,361 @@
+-- Chapter 207 — Adequacy: the projection refines the fault LTS (E3).
+--
+-- ch206 gave the fault LTS `lstep` ({CRASH, LOSS, DETECT}) — the SPEC of how a
+-- distributed system may behave. A `Proc` is *run* by PROJECTING it to actor
+-- primitives (the R-CALC table: send->primSend, recv->primReceive, par->primSpawn,
+-- crash->primExit), which on BEAM are real processes (ch205). The correctness
+-- theorem that ties spec to runtime is ADEQUACY: the projected actor's OBSERVABLE
+-- behaviour refines (is a simulation of) the LTS — the runtime does nothing the
+-- spec forbids.
+--
+-- The live runtime is foreign (real BEAM), so adequacy is stated between two
+-- rune-level semantics: the operational LTS trace (`visibleRun`, collecting the
+-- observable labels `lstep ok` produces) and the projection's denotation
+-- (`project`, the observable action sequence the projected actor emits,
+-- structural over Proc). Communication is internal (a τ rendezvous) on both sides;
+-- the observable alphabet is FAILURE (`lfail`) — the events a supervisor reacts
+-- to. ADEQUACY for a (well-supervised) protocol: `visibleRun k P ≡ project P` — the
+-- runtime's fault trace is exactly a trace the LTS allows. Proven by refl per
+-- protocol (the E3 per-protocol deliverable; the general structural lemma is the
+-- coinductive-trace follow-on).
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (h : A) (t : List A) (ih : List A) is cons A h ih end)
+      xs
+  end
+end
+
+-- ===== The fault LTS, as ch206 (the SPEC we refine against) =====
+
+data Label : U is
+  ltau  : Label
+| lsend : Label
+| lrecv : Label
+| lfail : Label
+end
+
+data Proc : U is
+  halt  : Proc
+| out   : Proc -> Proc
+| inp   : Proc -> Proc
+| mon   : Proc -> Proc
+| par   : Proc -> Proc -> Proc
+| crash : Proc
+end
+
+data Fault : U is
+  ok      : Fault
+| crashIt : Fault
+| loseIt  : Fault
+end
+
+data Trans : U is
+  tr : Label -> Proc -> Trans
+end
+
+labelOf : Trans -> Label is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t
+  end
+end
+
+procOf : Trans -> Proc is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t
+  end
+end
+
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+isHalt : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      true
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      false
+      x
+  end
+end
+
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+isLive : Proc -> Bool is
+  fn (x : Proc) is
+    BoolElim (fn (b : Bool) is Bool end)
+      false
+      (BoolElim (fn (b : Bool) is Bool end) false true (isHalt x))
+      (isCrash x)
+  end
+end
+
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+
+commT : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (interleaveT iha ihb a b)
+      (fn (pa : Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+           (interleaveT iha ihb a b)
+           (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+           (inpCont b)
+       end)
+      (outCont a)
+  end
+end
+
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (commT a b iha ihb)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (commT a b iha ihb)
+      (isCrash a)
+  end
+end
+
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+crashStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (some Trans (tr lfail crash))
+      (none Trans)
+      (isLive x)
+  end
+end
+
+loseStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) is some Trans (tr ltau p) end)
+      (outCont x)
+  end
+end
+
+lstep : Fault -> Proc -> Option Trans is
+  fn (f : Fault) (x : Proc) is
+    FaultElim (fn (w : Fault) is Option Trans end)
+      (okStep x)
+      (crashStep x)
+      (loseStep x)
+      f
+  end
+end
+
+-- ===== The observable trace of the LTS =====
+
+-- the observable alphabet excludes the silent τ (rendezvous / lost message); a
+-- failure is observable (a supervisor reacts to it), communication is internal.
+visible : Label -> Bool is
+  fn (l : Label) is
+    LabelElim (fn (w : Label) is Bool end)
+      false   -- ltau  : silent
+      true    -- lsend
+      true    -- lrecv
+      true    -- lfail : observable failure
+      l
+  end
+end
+
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is
+    BoolElim (fn (w : Bool) is List Label end)
+      (cons Label l rest)
+      rest
+      (visible l)
+  end
+end
+
+-- run `lstep ok` for k steps, collecting the observable labels (a stuck process
+-- ends the trace). This is the LTS's runtime-trace semantics.
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (lstep ok p)
+         end
+       end)
+      n
+  end
+end
+
+-- ===== The projection denotation =====
+--
+-- The observable action sequence the PROJECTED actor emits (the R-CALC projection
+-- table, restricted to the observable alphabet): communication prefixes are
+-- internal (τ, contributing nothing observable); a parallel composition runs its
+-- branches (left then right, matching the LTS's left-biased schedule); a `crash`
+-- projects to `primExit`, the one observable failure action.
+project : Proc -> List Label is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is List Label end)
+      (nil Label)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (a : Proc) (b : Proc) (iha : List Label) (ihb : List Label) is append Label iha ihb end)
+      (cons Label lfail (nil Label))
+      x
+  end
+end
+
+-- ===== ADEQUACY: the projection refines the LTS (per protocol) =====
+--
+-- Each protocol below is WELL-SUPERVISED (every crash sits beside a monitor), so
+-- every failure the projection emits (`primExit`) is matched by a DETECT in the
+-- LTS. The theorem `visibleRun k P ≡ project P` says the runtime's observable
+-- fault trace is exactly a trace the spec allows — the projected actor refines
+-- `lstep`. Each holds by refl (both sides compute to the same label list).
+
+-- Protocol 1: a single supervised worker that has crashed. The monitor DETECTs the
+-- failure (one observable lfail); the projection emits one primExit. They agree.
+prot1 : Proc is par crash (mon halt) end
+
+adequacy1 : Eq (List Label) (visibleRun (succ (succ zero)) prot1) (project prot1) is
+  refl (cons Label lfail (nil Label))
+end
+
+-- Protocol 2: TWO independent supervised workers, both crashed. The LTS detects
+-- them in sequence (left-biased), two lfail events; the projection emits two
+-- primExits in the same order. Adequacy on a multi-fault trace.
+prot2 : Proc is par (par crash (mon halt)) (par crash (mon halt)) end
+
+adequacy2 :
+    Eq (List Label) (visibleRun (succ (succ (succ zero))) prot2) (project prot2) is
+  refl (cons Label lfail (cons Label lfail (nil Label)))
+end
+
+-- Protocol 3: a supervised worker beside a SURVIVING peer (a plain halt). Only the
+-- monitored crash is observable; the survivor contributes nothing. One lfail on
+-- both sides — the projection neither invents nor drops a failure.
+prot3 : Proc is par (par crash (mon halt)) halt end
+
+adequacy3 :
+    Eq (List Label) (visibleRun (succ (succ (succ zero))) prot3) (project prot3) is
+  refl (cons Label lfail (nil Label))
+end
+
+-- ===== Refinement is non-trivial: the spec does not over- or under-approximate ===
+
+-- A protocol with NO faults (a lone, stuck rendezvous half) has an EMPTY observable
+-- trace on both sides — the projection emits no spurious failure, and the silent
+-- internal step (were there a partner) is correctly erased.
+protQuiet : Proc is par (out halt) halt end
+
+adequacyQuiet :
+    Eq (List Label) (visibleRun (succ (succ zero)) protQuiet) (project protQuiet) is
+  refl (nil Label)
+end
+
+-- The observable trace is INSENSITIVE to extra fuel (the LTS reaches a stuck state
+-- and stops): running prot1 for more steps yields the same single-failure trace,
+-- so the refinement is a genuine trace statement, not a step-count artifact.
+adequacy1Stable :
+    Eq (List Label) (visibleRun (succ (succ (succ (succ (succ zero))))) prot1)
+       (project prot1) is
+  refl (cons Label lfail (nil Label))
+end
