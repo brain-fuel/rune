@@ -1,0 +1,425 @@
+-- Chapter 204 — DIVISIBILITY IS A PARTIAL ORDER (telos-3 / M6, number theory).
+-- ch155 made ℕ-divisibility a PREORDER (dividesRefl, dividesTrans, dividesMulR); ch156–158
+-- closed it under +, scaling, and products. Both ch155 and ch158 name the next step
+-- explicitly: dividesAntisym (a ∣ b ∧ b ∣ a ⇒ a = b), which upgrades the preorder to a
+-- PARTIAL ORDER. This chapter lands it — WITHOUT a multiplicative cancellation lemma, by
+-- reusing the verified ℕ ORDER (ch65 lte/lteAddR, ch82 lteAntisym):
+--
+--   dividesLePos : a positive divisor is ≤ its (positive) dividend.
+--     succ b = (succ a)·k forces k = succ k' (k=0 ⇒ succ b = 0, absurd), and then
+--     succ b = (succ a)·(succ k') = (succ a)·k' + (succ a) = (succ a) + (succ a)·k'  [mulSuccR, addComm],
+--     so succ a ≤ succ b by lteAddR (a ≤ a + x).
+--   dividesAntisym : if a = 0 the dividend is 0 (mul 0 k ≡ 0) so a = b; if both positive,
+--     dividesLePos both ways gives succ a ≤ succ b and succ b ≤ succ a, and lteAntisym (ch82)
+--     concludes succ a = succ b.
+--
+-- FULLY PROVEN over the verified ℕ semiring + order; no admits, holes, or postulates.
+-- ch63/ch81/ch65/ch82's lemmas are REDECLARED VERBATIM so the chapter is self-contained.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+mul : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is add n ih end) m
+  end
+end
+
+-- The equality toolkit (ch07).
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> Eq A x y -> Eq B (f x) (f y) is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ============================================================================
+-- ℕ semiring lemmas (ch63 / ch81), redeclared verbatim.
+-- ============================================================================
+
+addZeroR : (n : Nat) -> Eq Nat (add n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (add k zero) k) is
+         subst Nat (add k zero) k ih
+           (fn (z : Nat) is Eq Nat (add (succ k) zero) (succ z) end)
+           (refl (add (succ k) zero))
+       end)
+      n
+  end
+end
+
+addSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (add n (succ m)) (succ (add n m)) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x (succ m)) (succ (add x m)) end)
+      (refl (succ m))
+      (fn (k : Nat) (ih : Eq Nat (add k (succ m)) (succ (add k m))) is
+         subst Nat (add k (succ m)) (succ (add k m)) ih
+           (fn (z : Nat) is Eq Nat (add (succ k) (succ m)) (succ z) end)
+           (refl (add (succ k) (succ m)))
+       end)
+      n
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (add (add a b) c) (add a (add b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add (add x b) c) (add x (add b c)) end)
+      (refl (add b c))
+      (fn (k : Nat) (ih : Eq Nat (add (add k b) c) (add k (add b c))) is
+         subst Nat (add (add k b) c) (add k (add b c)) ih
+           (fn (z : Nat) is Eq Nat (succ (add (add k b) c)) (succ z) end)
+           (refl (succ (add (add k b) c)))
+       end)
+      a
+  end
+end
+
+addComm : (n : Nat) -> (m : Nat) -> Eq Nat (add n m) (add m n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (add x m) (add m x) end)
+      (subst Nat (add m zero) m (addZeroR m)
+         (fn (z : Nat) is Eq Nat z (add m zero) end)
+         (refl (add m zero)))
+      (fn (k : Nat) (ih : Eq Nat (add k m) (add m k)) is
+         subst Nat (succ (add m k)) (add m (succ k))
+           (subst Nat (add m (succ k)) (succ (add m k)) (addSuccR m k)
+              (fn (z : Nat) is Eq Nat z (add m (succ k)) end)
+              (refl (add m (succ k))))
+           (fn (z : Nat) is Eq Nat (succ (add k m)) z end)
+           (subst Nat (add k m) (add m k) ih
+              (fn (z : Nat) is Eq Nat (succ (add k m)) (succ z) end)
+              (refl (succ (add k m))))
+       end)
+      n
+  end
+end
+
+mulZeroR : (n : Nat) -> Eq Nat (mul n zero) zero is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (mul x zero) zero end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k zero) zero) is ih end)
+      n
+  end
+end
+
+-- mul n (succ m) = add (mul n m) n (ch81), by induction on n.
+mulSuccR : (n : Nat) -> (m : Nat) -> Eq Nat (mul n (succ m)) (add (mul n m) n) is
+  fn (n : Nat) (m : Nat) is
+    NatElim
+      (fn (x : Nat) is Eq Nat (mul x (succ m)) (add (mul x m) x) end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (mul k (succ m)) (add (mul k m) k)) is
+         subst Nat
+           (succ (add (add m (mul k m)) k))
+           (add (add m (mul k m)) (succ k))
+           (subst Nat
+              (add (add m (mul k m)) (succ k))
+              (succ (add (add m (mul k m)) k))
+              (addSuccR (add m (mul k m)) k)
+              (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) (succ k)) end)
+              (refl (add (add m (mul k m)) (succ k))))
+           (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) z end)
+           (subst Nat
+              (add m (add (mul k m) k))
+              (add (add m (mul k m)) k)
+              (subst Nat
+                 (add (add m (mul k m)) k)
+                 (add m (add (mul k m) k))
+                 (addAssoc m (mul k m) k)
+                 (fn (z : Nat) is Eq Nat z (add (add m (mul k m)) k) end)
+                 (refl (add (add m (mul k m)) k)))
+              (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ z) end)
+              (subst Nat
+                 (mul k (succ m))
+                 (add (mul k m) k)
+                 ih
+                 (fn (z : Nat) is Eq Nat (mul (succ k) (succ m)) (succ (add m z)) end)
+                 (refl (mul (succ k) (succ m)))))
+       end)
+      n
+  end
+end
+
+-- ============================================================================
+-- ℕ ORDER (ch65 lte / lteRefl / lteAddR, ch82 lteAbsurdNat / lteAntisym), verbatim.
+-- ============================================================================
+
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is
+           NatElim (fn (y : Nat) is Bool end)
+             false
+             (fn (m : Nat) (ih2 : Bool) is ih m end)
+             n
+         end
+       end)
+      a
+  end
+end
+
+lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x x) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end)
+      n
+  end
+end
+
+-- a <= a + b, by induction on a (ch65).
+lteAddR : (a : Nat) -> (b : Nat) -> Eq Bool (lte a (add a b)) true is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (lte x (add x b)) true end)
+      (refl true)
+      (fn (k : Nat) (ih : Eq Bool (lte k (add k b)) true) is ih end)
+      a
+  end
+end
+
+-- From `false = true`, conclude any lte fact (ch82 idiom: a Bool-case motive that is the
+-- target at `true` and the trivially-true reflexive fact at `false`).
+lteFromFalse : (a : Nat) -> (b : Nat) -> Eq Bool false true -> Eq Bool (lte a b) true is
+  fn (a : Nat) (b : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (lte a b) true
+         | false -> Eq Bool (lte a a) true
+         end
+       end)
+      (lteRefl a)
+  end
+end
+
+lteAbsurdNat : (a : Nat) -> (b : Nat) -> Eq Bool false true -> Eq Nat a b is
+  fn (a : Nat) (b : Nat) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Nat a b
+         | false -> Eq Nat a a
+         end
+       end)
+      (refl a)
+  end
+end
+
+-- ANTISYMMETRY of <=, a <= b and b <= a imply a = b (ch82), by induction on a then b.
+lteAntisym : (a : Nat) -> (b : Nat)
+   -> Eq Bool (lte a b) true -> Eq Bool (lte b a) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat)
+           -> Eq Bool (lte x b) true -> Eq Bool (lte b x) true
+           -> Eq Nat x b end)
+      (fn (b : Nat) is
+         NatElim
+           (fn (y : Nat) is
+              Eq Bool (lte zero y) true -> Eq Bool (lte y zero) true
+                -> Eq Nat zero y end)
+           (fn (hab : Eq Bool (lte zero zero) true)
+               (hba : Eq Bool (lte zero zero) true) is
+              refl zero end)
+           (fn (b' : Nat)
+               (ihb : Eq Bool (lte zero b') true -> Eq Bool (lte b' zero) true
+                        -> Eq Nat zero b') is
+              fn (hab : Eq Bool (lte zero (succ b')) true)
+                 (hba : Eq Bool false true) is
+                lteAbsurdNat zero (succ b') hba end
+            end)
+           b
+       end)
+      (fn (a' : Nat)
+          (ih : (b : Nat)
+                  -> Eq Bool (lte a' b) true -> Eq Bool (lte b a') true
+                  -> Eq Nat a' b) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                Eq Bool (lte (succ a') y) true -> Eq Bool (lte y (succ a')) true
+                  -> Eq Nat (succ a') y end)
+             (fn (hab : Eq Bool false true)
+                 (hba : Eq Bool (lte zero (succ a')) true) is
+                lteAbsurdNat (succ a') zero hab end)
+             (fn (b' : Nat)
+                 (ihb : Eq Bool (lte (succ a') b') true
+                          -> Eq Bool (lte b' (succ a')) true
+                          -> Eq Nat (succ a') b') is
+                fn (hab : Eq Bool (lte a' b') true)
+                   (hba : Eq Bool (lte b' a') true) is
+                  subst Nat a' b' (ih b' hab hba)
+                    (fn (z : Nat) is Eq Nat (succ a') (succ z) end)
+                    (refl (succ a'))
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ============================================================================
+-- DIVISIBILITY (ch155): a ∣ b = Σ k, b = a·k.
+-- ============================================================================
+
+divides : Nat -> Nat -> U is
+  fn (a : Nat) (b : Nat) is Sig Nat (fn (k : Nat) is Eq Nat b (mul a k) end) end
+end
+
+-- ============================================================================
+-- CHAPTER 204 — the partial-order step.
+-- ============================================================================
+
+-- A POSITIVE divisor is <= its (positive) dividend. We take the quotient witness `k` and
+-- the equation `succ b = (succ a)·k` as explicit arguments and recurse on `k` with the
+-- equation in the motive (so each branch receives it at the refined `k` — the witness of a
+-- bound Sigma is a stuck neutral that `case` would not refine).
+dividesLePosAux : (a : Nat) -> (b : Nat) -> (k : Nat)
+   -> Eq Nat (succ b) (mul (succ a) k)
+   -> Eq Bool (lte (succ a) (succ b)) true is
+  fn (a : Nat) (b : Nat) (k : Nat) is
+    NatElim
+      (fn (kk : Nat) is
+         Eq Nat (succ b) (mul (succ a) kk) -> Eq Bool (lte (succ a) (succ b)) true end)
+      -- kk = zero: succ b = (succ a)·0 = 0 (mulZeroR), so `false = true`; absurd.
+      (fn (pf : Eq Nat (succ b) (mul (succ a) zero)) is
+         lteFromFalse (succ a) (succ b)
+           (cong (fn (z : Nat) is lte z zero end)
+              (trans pf (mulZeroR (succ a))))
+       end)
+      -- kk = succ k': succ b = (succ a)·(succ k') = (succ a)·k' + (succ a)
+      --                     = (succ a) + (succ a)·k'  ⇒  succ a <= succ b  (lteAddR).
+      (fn (k' : Nat)
+          (ihk : Eq Nat (succ b) (mul (succ a) k') -> Eq Bool (lte (succ a) (succ b)) true) is
+         fn (pf : Eq Nat (succ b) (mul (succ a) (succ k'))) is
+           subst Nat
+             (add (succ a) (mul (succ a) k'))
+             (succ b)
+             (sym
+               (trans pf
+                 (trans (mulSuccR (succ a) k')
+                   (addComm (mul (succ a) k') (succ a)))))
+             (fn (z : Nat) is Eq Bool (lte (succ a) z) true end)
+             (lteAddR (succ a) (mul (succ a) k'))
+         end
+       end)
+      k
+  end
+end
+
+dividesLePos : (a : Nat) -> (b : Nat)
+   -> divides (succ a) (succ b) -> Eq Bool (lte (succ a) (succ b)) true is
+  fn (a : Nat) (b : Nat) (hd : divides (succ a) (succ b)) is
+    dividesLePosAux a b (Fst hd) (Snd hd)
+  end
+end
+
+-- ANTISYMMETRY: a ∣ b and b ∣ a imply a = b — divisibility is a PARTIAL ORDER.
+-- Induct on a (motive abstracts both divisibility hypotheses, so each branch gets them at
+-- the refined a), then on b.
+--   a = zero            : b = mul zero k ≡ 0, so b = 0 = a   (Snd of a∣b, sym).
+--   a = succ a', b = 0  : a = mul zero j ≡ 0, i.e. succ a' = 0 — but that IS exactly what
+--                         b∣a provides (Snd of b∣a), so it discharges the goal directly.
+--   both positive       : dividesLePos both ways + lteAntisym.
+dividesAntisym : (a : Nat) -> (b : Nat)
+   -> divides a b -> divides b a -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim
+      (fn (x : Nat) is
+         (b : Nat) -> divides x b -> divides b x -> Eq Nat x b end)
+      -- a = zero: divides zero b gives b = mul zero k ≡ 0.
+      (fn (b : Nat) is
+         fn (hab : divides zero b) (hba : divides b zero) is
+           sym {Nat} {b} {zero} (Snd hab)
+         end
+       end)
+      -- a = succ a'.
+      (fn (a' : Nat)
+          (ih : (b : Nat) -> divides a' b -> divides b a' -> Eq Nat a' b) is
+         fn (b : Nat) is
+           NatElim
+             (fn (y : Nat) is
+                divides (succ a') y -> divides y (succ a') -> Eq Nat (succ a') y end)
+             -- b = zero: divides zero (succ a') gives succ a' = mul zero j ≡ 0 — the goal.
+             (fn (hab : divides (succ a') zero) (hba : divides zero (succ a')) is
+                Snd hba
+              end)
+             -- b = succ b': both positive, antisymmetry of <=.
+             (fn (b' : Nat)
+                 (ihb : divides (succ a') b' -> divides b' (succ a')
+                          -> Eq Nat (succ a') b') is
+                fn (hab : divides (succ a') (succ b'))
+                   (hba : divides (succ b') (succ a')) is
+                  lteAntisym (succ a') (succ b')
+                    (dividesLePos a' b' hab)
+                    (dividesLePos b' a' hba)
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ------------------------------------------------------------------------------------
+-- Sanity: antisymmetry computes on concrete divisibilities. 6 ∣ 6 both ways ⇒ 6 = 6.
+-- ------------------------------------------------------------------------------------
+six : Nat is succ (succ (succ (succ (succ (succ zero))))) end
+
+sixDivSix : divides six six is
+  Pair Nat (fn (k : Nat) is Eq Nat six (mul six k) end)
+    (succ zero)
+    (sym
+      (trans (mulSuccR six zero)
+        (refl (add (mul six zero) six))))
+end
+
+sixEqSix : Eq Nat six six is
+  dividesAntisym six six sixDivSix sixDivSix
+end
+
+-- ------------------------------------------------------------------------------------
+-- CHAPTER 204 — WHAT LANDED.
+-- FULLY PROVEN (no admits/holes/postulates): dividesAntisym — a ∣ b ∧ b ∣ a ⇒ a = b, so
+-- ℕ-divisibility is a PARTIAL ORDER (reflexive + transitive from ch155, now antisymmetric).
+-- The proof needs NO multiplicative cancellation: it reuses the verified ℕ order (ch65
+-- lteAddR — a positive divisor is ≤ its dividend — and ch82 lteAntisym). The helper
+-- dividesLePos (a positive divisor ≤ its positive dividend) is independently useful.
+-- THE NEXT STEP: the Euclidean gcd as the GREATEST common divisor (the meet of the
+-- divisibility lattice), and lcm as the join.
+-- ====================================================================================
