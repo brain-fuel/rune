@@ -412,6 +412,50 @@ divChecked : Whole -> Whole -> Result Frac Whole is
   end
 end
 
+-- ====================================================================
+-- DEMOTION, checked.  Climbing the tower (− promotes, / climbs to ℚ) is implicit;
+-- coming back DOWN is not — `3/1` is `3 : Frac`, a rational that happens to be
+-- whole. `toInt`/`toWhole` are the deliberate, checked descents: a fraction lands
+-- in Int (resp. Whole) only when it is integral (denominator 1 in lowest terms),
+-- and `toWhole` additionally only when it is non-negative; otherwise `err`. (Lisp
+-- demotes implicitly because it is dynamically typed; here, where the type is a
+-- static commitment, the divisibility check is made explicit and returns a Result.)
+-- ====================================================================
+toInt : Frac -> Result Int Whole is
+  fn (f : Frac) is
+    let r : Frac = reduce f in
+    case fden r of
+    | zero   -> err Int Whole 0
+    | succ k ->
+        case k of
+        | succ j -> err Int Whole 0                          -- denominator >= 2: not integral
+        | zero   -> ok Int Whole (mkInt (fneg r) (fnum r))   -- denominator 1: the integer
+        end
+    end
+  end
+end
+toWhole : Frac -> Result Whole Whole is
+  fn (f : Frac) is
+    let r : Frac = reduce f in
+    case fden r of
+    | zero   -> err Whole Whole 0
+    | succ k ->
+        case k of
+        | succ j -> err Whole Whole 0           -- denominator >= 2: not integral
+        | zero   ->
+            case fnum r of
+            | zero   -> ok Whole Whole 0         -- zero is whole (any sign)
+            | succ n ->
+                case fneg r of
+                | false -> ok Whole Whole (fnum r)   -- positive integer
+                | true  -> err Whole Whole 0         -- negative: no whole answer
+                end
+            end
+        end
+    end
+  end
+end
+
 powTen : Whole -> Whole is
   fn (n : Whole) is case n of | zero -> 1 | succ k with ih -> 10 * ih end end
 end

@@ -181,6 +181,9 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 		if inner, ok := p.decimalStr(args[2]); ok {
 			return "ok " + inner, true
 		}
+		if w, ok := p.wholeVal(args[2]); ok {
+			return "ok " + strconv.Itoa(w), true
+		}
 		return "", false
 	case ref.Hash == p.dec.Err && len(args) == 3:
 		return "err", true

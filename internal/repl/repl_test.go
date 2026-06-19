@@ -194,6 +194,43 @@ func TestREPLIntTower(t *testing.T) {
 	}
 }
 
+// TestREPLDemotion is the acceptance test for the checked DESCENT down the tower:
+// `3/1` is `3 : Frac` (a rational that happens to be whole), and `toWhole`/`toInt`
+// demote it only when it is integral (denominator 1) — and `toWhole` only when
+// non-negative — returning a Result (err otherwise). The implicit climb up is met
+// by an explicit, checked climb down.
+func TestREPLDemotion(t *testing.T) {
+	script := []string{
+		"3/1",                  // a whole-valued fraction stays Frac (no implicit demotion)
+		"toWhole (3/1)",        // explicit, checked: ok 3
+		"toWhole (6/2)",        // reduces first: ok 3
+		"toWhole (1/3)",        // not integral: err
+		"toWhole (0/5)",        // zero is whole: ok 0
+		"toInt (6/2)",          // ok 3 : Result Int Whole
+		"toInt ((2/3) - (8/3))", // integral negative: ok -2 (Int holds the sign)
+		"toWhole ((2/3) - (8/3))", // negative: err (no whole answer)
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		"3 : Frac",                     // 3/1
+		"ok 3 : Result Whole Whole",    // toWhole (3/1) and (6/2)
+		"err : Result Whole Whole",     // toWhole (1/3) and the negative
+		"ok 0 : Result Whole Whole",    // toWhole (0/5)
+		"ok 3 : Result Int Whole",      // toInt (6/2)
+		"ok -2 : Result Int Whole",     // toInt of an integral negative
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}
+
 // TestREPLRadixAndSigfigs is the acceptance test that the fraction / radix /
 // significant-figure feature WORKS AT THE PROMPT (not just as listings): `/`
 // builds a fraction, `|>` pipes it into a conversion, and the result prints in
