@@ -50,6 +50,16 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   numerals `0` and `1` are usage annotations — position disambiguates, never the lexer. In
   expression position a numeral is a literal lowered to a compressed core numeral against the
   `builtin nat` binding (§5.5).
+- **Decimal literal:** `digit+ "." digit* ( "{" digit+ "}" )?`, one token, when the `.` is
+  immediately followed by a digit or a `{digit+}` repetend — e.g. `1.3`, `0.75`, `1.{3}`,
+  `0.1{6}` (the `{…}` part is the repeating block, mirroring `to_radix` output §5.5). A decimal
+  is parse-time sugar for the exact fraction `num / den` (the value of `I.N{R}` with p = |N|,
+  q = |R|: terminating `num = I·10ᵖ+N, den = 10ᵖ`; repeating `num = (I·10ᵖ+N)·(10^q−1)+R,
+  den = 10ᵖ·(10^q−1)`), so it reuses the prelude `/` and requires it in scope (a tower feature,
+  like `3/4`). Because the digit scanner consumes `.<digit>` as part of the number, a `.` after
+  a numeral is always a decimal, never a Σ-projection — `.1`/`.2` projections apply only after
+  a non-numeral atom (`pair.1`, `(e).2`). A bare `1.` (dot not followed by a digit/`{`) and
+  `1 {x}` (a brace block) are unaffected.
 - **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
   equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4),
   `builtin` (ergonomics rung 2), `case`, `of`, `with` (rung 4), and `calc`, `by` (rung 5). The bare underscore `_` is
@@ -117,6 +127,7 @@ Arg       ::= Atom                        -- explicit argument
 
 Atom      ::= Ident
            |  Num                         -- a numeral; lowered by expected type, nat or bin (§5.5)
+           |  Dec                         -- a decimal literal; parse-time sugar for `num / den` (§2)
            |  "(" Op ")"                  -- an operator, prefix/first-class: (+) x y
            |  Case                        -- case expression (§5.6)
            |  Calc                        -- equational ladder (§5.7)

@@ -151,6 +151,44 @@ func TestREPLTowerArithmetic(t *testing.T) {
 	}
 }
 
+// TestREPLDecimalLiterals is the acceptance gate for decimal-literal INPUT: a
+// decimal is parse-time sugar for an exact fraction, so it flows through the tower
+// like any `Frac`. Terminating (1.3) and repeating (1.{3}, 0.1{6}) forms both work;
+// results stay fractional (input-only sugar), and `|> to_radix` recovers a decimal.
+func TestREPLDecimalLiterals(t *testing.T) {
+	script := []string{
+		"1.3 + 2.5",            // 13/10 + 5/2 = 19/5
+		"1.{3} + 2/3",          // 4/3 + 2/3 = 2
+		"0.1{6}",               // repeating input reduces to 1/6
+		"0.75",                 // terminating reduces to 3/4
+		"-2.5",                 // prefix minus on a decimal
+		"(1.3 + 2.5) |> to_radix", // back to a decimal for display
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"19/5 : Frac", // 1.3 + 2.5
+		"2 : Frac",    // 1.{3} + 2/3
+		"1/6 : Frac",  // 0.1{6}
+		"3/4 : Frac",  // 0.75
+		"-5/2 : Frac", // -2.5
+		"3.8 : RDec",  // (1.3 + 2.5) |> to_radix
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "error") || strings.Contains(got, "mismatch") {
+		t.Errorf("unexpected error in decimal literals\n--- full output ---\n%s", got)
+	}
+}
+
 // TestREPLIntTower is the acceptance test for the Int rung and PROMOTION: ℕ is
 // not closed under subtraction, so `-` climbs into the signed integers (2 − 5 =
 // −3 : Int), composes (the result is a first-class Int, not a stuck type), and

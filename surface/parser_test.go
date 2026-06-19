@@ -2,6 +2,7 @@ package surface_test
 
 import (
 	"errors"
+	"math/big"
 	"reflect"
 	"strings"
 	"testing"
@@ -251,6 +252,65 @@ func TestPipeAndPrefixMinus(t *testing.T) {
 		if !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%q: got %#v, want %#v", c.src, got, c.want)
 		}
+	}
+}
+
+// TestDecimalLiterals pins GRAMMAR §2: a decimal literal `I.N{R}` is parse-time
+// sugar for the exact fraction `num / den` (the same Exp a written `num / den`
+// builds), so it reuses the prelude `/`. Both numeral operands carry the decimal
+// token's start offset as Pos. Terminating: num = I·10ᵖ+N, den = 10ᵖ. Repeating:
+// num = (I·10ᵖ+N)·(10^q−1)+R, den = 10ᵖ·(10^q−1).
+func TestDecimalLiterals(t *testing.T) {
+	num := func(n int64, pos int) surface.Exp { return surface.ENum{Val: big.NewInt(n), Pos: pos} }
+	div := func(n, d int64, pos int) surface.Exp {
+		return surface.EApp{Fn: surface.EApp{Fn: surface.EVar{Name: "/"}, Arg: num(n, pos)}, Arg: num(d, pos)}
+	}
+	neg := func(e surface.Exp) surface.Exp { return surface.EApp{Fn: surface.EVar{Name: "negate"}, Arg: e} }
+	cases := []struct {
+		src  string
+		want surface.Exp
+	}{
+		{"1.3", div(13, 10, 0)},
+		{"2.5", div(25, 10, 0)},
+		{"0.75", div(75, 100, 0)},
+		{"3.14", div(314, 100, 0)},
+		{"1.{3}", div(12, 9, 0)},     // = 4/3 after reduce
+		{"0.1{6}", div(15, 90, 0)},   // = 1/6 after reduce
+		{"10.{142857}", div(10*999999+142857, 999999, 0)},
+		{"-2.5", neg(div(25, 10, 1))}, // prefix minus, decimal token at offset 1
+	}
+	for _, c := range cases {
+		got, err := surface.ParseExpr(c.src)
+		if err != nil {
+			t.Errorf("parse %q: %v", c.src, err)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%q: got %#v, want %#v", c.src, got, c.want)
+		}
+	}
+}
+
+// TestDecimalDotDisambiguation pins that the decimal scanner does not break Σ
+// projections: a dot after a NON-numeral atom is still a postfix projection, and a
+// dot after digits is a decimal only when followed by a digit or a `{digits}`
+// repetend (so `1.` alone and `1 {x}` are unaffected).
+func TestDecimalDotDisambiguation(t *testing.T) {
+	// `pair.1` is a projection (first), NOT a decimal.
+	got, err := surface.ParseExpr("pair.1")
+	if err != nil {
+		t.Fatalf("parse pair.1: %v", err)
+	}
+	if _, ok := got.(surface.EFst); !ok {
+		t.Errorf("pair.1: want EFst projection, got %#v", got)
+	}
+	// `x.2` likewise the second projection.
+	got, err = surface.ParseExpr("x.2")
+	if err != nil {
+		t.Fatalf("parse x.2: %v", err)
+	}
+	if _, ok := got.(surface.ESnd); !ok {
+		t.Errorf("x.2: want ESnd projection, got %#v", got)
 	}
 }
 

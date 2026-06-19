@@ -44,6 +44,7 @@ const (
 	tPartial  // partial (a general-recursive definition; C4)
 	tForeign  // foreign (a typed FFI axiom; R-FFI / B4)
 	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
+	tDec     // a decimal literal: digits "." digits, optionally "{" digits "}" (a repetend); e.g. 1.3, 1.{3}, 0.1{6}
 	tOp      // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
 	tBuiltin // builtin (a builtin-binding declaration: builtin nat Nat zero succ)
 	tCase    // case (a case expression; GRAMMAR §5.6)
@@ -115,6 +116,8 @@ func (k tokKind) String() string {
 		return "'subst'"
 	case tNum:
 		return "numeral"
+	case tDec:
+		return "decimal literal"
 	case tOp:
 		return "operator"
 	case tBuiltin:
@@ -140,6 +143,20 @@ func isIdentStart(r rune) bool {
 
 func isIdentCont(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '\''
+}
+
+// isDigitBrace reports whether rs[at] begins a well-formed decimal repetend `{`
+// digits `}` (at least one digit). Used by the numeral lexer to absorb a repeating
+// part (`1.{3}`, `0.1{6}`) while leaving a non-digit brace block (`{x}`) untouched.
+func isDigitBrace(rs []rune, at int) bool {
+	if at >= len(rs) || rs[at] != '{' {
+		return false
+	}
+	j := at + 1
+	for j < len(rs) && unicode.IsDigit(rs[j]) {
+		j++
+	}
+	return j > at+1 && j < len(rs) && rs[j] == '}'
 }
 
 // lex turns source into a token slice for the v0.2.0 surface grammar (see
@@ -221,7 +238,28 @@ func lex(src string) ([]token, error) {
 			for i < len(rs) && unicode.IsDigit(rs[i]) {
 				i++
 			}
-			toks = append(toks, token{tNum, string(rs[start:i]), start})
+			// Optional decimal tail: `. digits? ({ digits })?` — a decimal literal
+			// (GRAMMAR §2). The `.` is consumed as part of the number ONLY when it is
+			// followed by a digit or a well-formed `{digits}` repetend, so `1.3`/`1.{3}`
+			// lex as one tDec while `x.1`/`(e).2` stay postfix projections and `1.` /
+			// `1 {x}` are unaffected. A repetend `{…}` is absorbed only when all-digits.
+			if i < len(rs) && rs[i] == '.' && i+1 < len(rs) &&
+				(unicode.IsDigit(rs[i+1]) || (rs[i+1] == '{' && isDigitBrace(rs, i+1))) {
+				i++ // the dot
+				for i < len(rs) && unicode.IsDigit(rs[i]) {
+					i++
+				}
+				if i < len(rs) && rs[i] == '{' && isDigitBrace(rs, i) {
+					i++ // '{'
+					for i < len(rs) && unicode.IsDigit(rs[i]) {
+						i++
+					}
+					i++ // '}'
+				}
+				toks = append(toks, token{tDec, string(rs[start:i]), start})
+			} else {
+				toks = append(toks, token{tNum, string(rs[start:i]), start})
+			}
 		case isIdentStart(r):
 			start := i
 			for i < len(rs) && isIdentCont(rs[i]) {

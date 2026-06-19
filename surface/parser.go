@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"goforge.dev/rune/v3/core"
 )
@@ -671,6 +672,9 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tNum:
 		p.next()
 		return p.numLit(t)
+	case tDec:
+		p.next()
+		return p.decLit(t)
 	case tFn:
 		return p.parseLam()
 	case tCase:
@@ -782,6 +786,52 @@ func (p *parser) numLit(t token) (Exp, error) {
 		return nil, fmt.Errorf("numeral %s at offset %d is not a valid base-10 integer", t.text, t.pos)
 	}
 	return ENum{Val: n, Pos: t.pos}, nil
+}
+
+// decLit reads a decimal-literal token `I "." N? ("{" R "}")?` and desugars it, at
+// parse time, to the exact fraction `num / den` — the SAME Exp a written `num / den`
+// produces, so it reuses the prelude's `/` (the Div typeclass, which yields a reduced
+// Frac) with no new AST node or elaborator change. The value of `I.N{R}` (p = |N|,
+// q = |R|) is the standard repeating-decimal fraction:
+//   terminating (q = 0): num = I·10ᵖ + N,                   den = 10ᵖ
+//   repeating  (q > 0):  num = (I·10ᵖ + N)·(10^q − 1) + R,  den = 10ᵖ·(10^q − 1)
+// e.g. 1.3 → 13/10, 1.{3} → 12/9 (= 4/3), 0.1{6} → 15/90 (= 1/6). Lowest-terms
+// reduction is the prelude `/`'s job (`divWF` → `reduce`).
+func (p *parser) decLit(t token) (Exp, error) {
+	dot := strings.IndexByte(t.text, '.')
+	intStr := t.text[:dot]
+	rest := t.text[dot+1:]
+	var nStr, rStr string
+	if b := strings.IndexByte(rest, '{'); b >= 0 {
+		nStr = rest[:b]
+		rStr = rest[b+1 : len(rest)-1] // strip the braces
+	} else {
+		nStr = rest
+	}
+	bigOf := func(s string) *big.Int {
+		if s == "" {
+			return big.NewInt(0)
+		}
+		n, _ := new(big.Int).SetString(s, 10) // all-digits by construction (the lexer)
+		return n
+	}
+	pow10 := func(k int) *big.Int {
+		return new(big.Int).Exp(big.NewInt(10), big.NewInt(int64(k)), nil)
+	}
+	intPart, fracPart, repPart := bigOf(intStr), bigOf(nStr), bigOf(rStr)
+	tenP := pow10(len(nStr))
+	// scaled = I·10ᵖ + N  (the whole-plus-fraction numerator before the repetend)
+	scaled := new(big.Int).Add(new(big.Int).Mul(intPart, tenP), fracPart)
+	var num, den *big.Int
+	if len(rStr) == 0 {
+		num, den = scaled, tenP
+	} else {
+		tenQ1 := new(big.Int).Sub(pow10(len(rStr)), big.NewInt(1)) // 10^q − 1
+		num = new(big.Int).Add(new(big.Int).Mul(scaled, tenQ1), repPart)
+		den = new(big.Int).Mul(tenP, tenQ1)
+	}
+	slash := EVar{Name: "/"}
+	return EApp{Fn: EApp{Fn: slash, Arg: ENum{Val: num, Pos: t.pos}}, Arg: ENum{Val: den, Pos: t.pos}}, nil
 }
 
 // isQtyTok reports whether a token is a usage annotation in binder position:
