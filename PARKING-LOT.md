@@ -140,9 +140,11 @@ or a later-phase feature with no current consumer.
 - **Multi-binder Pi telescopes** (`(x : A) (y : B) -> C`). Chain with `->` for now.
 - **Operators / infix, multi-clause definitions, pattern matching, literals.** Later
   phases; the surface has no notion of any of them.
-- **REPL line editing: readline, history, completion.** The REPL reads with `bufio`
-  only. No `golang.org/x/term` or readline dependency — the one-dependency posture
-  holds; ergonomics wait.
+- **REPL line editing: ~~readline, history~~, completion.** DONE for history +
+  line editing + Ctrl-R reverse search (hand-rolled on `golang.org/x/sys`, promoted
+  indirect→direct; no third-party readline dep — `chzyer/readline` was a reference,
+  not an import). Persistent `~/.rune_history`; numbered referenceable results (`$N`).
+  Still parked: TAB completion of names/commands; multi-row redraw for wrapped lines.
 - **REPL evaluation.** `:type`/`:t` is an honest forward-compat stub
   (`type checking arrives in Phase 1`); the default expression action is resolve +
   pretty-print, and the single dispatch point in `internal/repl` is marked as the

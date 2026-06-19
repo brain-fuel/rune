@@ -652,10 +652,15 @@ first and forces only on mismatch, so the fast path logs nothing.
 
 ## Engineering conventions
 
-- Go standard library plus two recorded direct dependencies: the property-testing
-  library `pgregory.net/rapid`, and `goforge.dev/blake3sum` for BLAKE3 content
-  hashing (behind `core.Hash`; pulls `klauspost/cpuid` and `golang.org/x/sys` as
-  indirect deps for its SIMD dispatch). No further dependency without recording why.
+- Go standard library plus three recorded direct dependencies: the property-testing
+  library `pgregory.net/rapid`; `goforge.dev/blake3sum` for BLAKE3 content hashing
+  (behind `core.Hash`; pulls `klauspost/cpuid` as an indirect dep for its SIMD
+  dispatch); and `golang.org/x/sys` (was already indirect via blake3sum) promoted to
+  DIRECT for the REPL's hand-rolled raw-mode line editor (termios via `unix.Ioctl*Termios`
+  in `internal/repl/rawmode_linux.go`). The line editor — history, Ctrl-R reverse
+  search, persistent `~/.rune_history` — is hand-rolled rather than pulled from a
+  readline library, so no third-party module enters the graph (the MIT `chzyer/readline`
+  was a structural reference only). No further dependency without recording why.
 - The harness is the gate from day one: `parse ∘ pretty = id` and hash-invariance
   under alpha-renaming hold now; the Phase-1+ invariants (type preservation,
   conversion as equivalence + congruence, the proof-cache Frame Lemma) exist as

@@ -2,6 +2,7 @@ package repl
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -65,15 +66,6 @@ func (r *scanReader) ReadLine(prompt string) (string, bool, error) {
 func (r *scanReader) AddHistory(string) {}
 func (r *scanReader) Close() error      { return nil }
 
-// --- interactive editor seam ---------------------------------------------------
-// isTerminal and newEditReader are the entry points the interactive editor plugs
-// into. Until the editor lands (checkpoint 3) they decline, so newLineReader always
-// returns the bufio fallback. Replaced by the platform-tagged editor files.
-
-func isTerminal(uintptr) bool { return false }
-
-func newEditReader(_, _ *os.File) (lineReader, error) {
-	return nil, errNoEditor
-}
-
-var errNoEditor = fmt.Errorf("interactive editor not available")
+// errNoEditor signals that the interactive editor is unavailable on this platform
+// (or could not enter raw mode), so newLineReader falls back to scanReader.
+var errNoEditor = errors.New("interactive editor not available")

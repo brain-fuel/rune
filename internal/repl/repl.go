@@ -52,7 +52,7 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 		}
 		fmt.Fprintln(out, "prelude: the numeric tower Whole < Int < Frac with overloaded `+ - *`. Subtraction PROMOTES — ℕ is not closed under it, so 2 - 5 = -3 : Int while 5 - 2 = 3 : Int; `monus` truncates at 0 and `minus a b (pf : b ≤ a)` stays Whole when provable. 1/3 - 2/3 = -1/3 : Frac. `/` builds a fraction; `divChecked a b` returns a `Result Frac ArithErr` (err carries `divByZero a b`); descend explicitly with `toNat`/`toWhole`/`toInt`, each a checked `Result _ ArithErr`; `// %` and gcd are integer ops at Whole. Pipe a fraction with `|>` into `to_radix` (1/3 |> to_radix = 0.{3}), `to_radix_sigplace n`, or `to_radix_sigfig n`. `rune repl --no-prelude` for a bare session.")
 	}
-	fmt.Fprintln(out, "type :help for commands, :quit to exit.")
+	fmt.Fprintln(out, "results are numbered ($N) and referenceable; on a terminal: up/down history, Ctrl-R reverse search. type :help for commands, :quit to exit.")
 
 	st := &replState{}
 	for {

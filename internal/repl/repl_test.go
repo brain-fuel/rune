@@ -113,16 +113,16 @@ func TestREPLPrelude(t *testing.T) {
 // lowest terms.
 func TestREPLTowerArithmetic(t *testing.T) {
 	script := []string{
-		"1 + 1",        // Whole addition, the foundation
-		"1/3 - 2/3",    // fraction subtraction (signed), reduced
+		"1 + 1",         // Whole addition, the foundation
+		"1/3 - 2/3",     // fraction subtraction (signed), reduced
 		"(1/3) - (2/3)", // parenthesised, same
-		"1/3 + 2/3",    // sums to one whole
-		"2/3 + 1/6",    // common denominator
-		"1/3 * 2",      // fraction times a (defaulted) whole numeral
-		"1/(3*2)",      // a whole product in the denominator (numerals stay whole)
-		"1/3 - 1/3",    // to zero
-		"2/4",          // a typed fraction reduces to lowest terms
-		"2/3 * 3/2",    // product reduces to a whole-valued fraction
+		"1/3 + 2/3",     // sums to one whole
+		"2/3 + 1/6",     // common denominator
+		"1/3 * 2",       // fraction times a (defaulted) whole numeral
+		"1/(3*2)",       // a whole product in the denominator (numerals stay whole)
+		"1/3 - 1/3",     // to zero
+		"2/4",           // a typed fraction reduces to lowest terms
+		"2/3 * 3/2",     // product reduces to a whole-valued fraction
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -158,16 +158,16 @@ func TestREPLTowerArithmetic(t *testing.T) {
 // (`minus` with `b ≤ a`); `monus` truncates; and division is defended by a Result.
 func TestREPLIntTower(t *testing.T) {
 	script := []string{
-		"2 - 5",                  // promotes: Whole − Whole = Int
-		"5 - 2",                  // 3, still Int (no truncation surprise)
-		"(2 - 5) + 1",            // the Int composes with +
-		"2 - 5 - 1",              // chained subtraction
+		"2 - 5",                 // promotes: Whole − Whole = Int
+		"5 - 2",                 // 3, still Int (no truncation surprise)
+		"(2 - 5) + 1",           // the Int composes with +
+		"2 - 5 - 1",             // chained subtraction
 		"intOf 7",               // the Int injection
-		"1/3 - 2/3",              // fractions still subtract to Frac
-		"monus 2 5",              // truncating whole subtraction floors at 0
-		"minus 5 2 (refl true)",  // provable b ≤ a keeps the result Whole
-		"divChecked 7 2",         // checked division: ok
-		"divChecked 7 0",         // checked division: err on zero divisor
+		"1/3 - 2/3",             // fractions still subtract to Frac
+		"monus 2 5",             // truncating whole subtraction floors at 0
+		"minus 5 2 (refl true)", // provable b ≤ a keeps the result Whole
+		"divChecked 7 2",        // checked division: ok
+		"divChecked 7 0",        // checked division: err on zero divisor
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -183,8 +183,8 @@ func TestREPLIntTower(t *testing.T) {
 		"-4 : Int",
 		"7 : Int",
 		"-1/3 : Frac",
-		"0 : Whole",            // monus 2 5
-		"3 : Whole",            // minus 5 2 (refl true)
+		"0 : Whole", // monus 2 5
+		"3 : Whole", // minus 5 2 (refl true)
 		"ok 7/2 : Result Frac ArithErr",
 		"err: cannot divide 7 by 0 : Result Frac ArithErr",
 	} {
@@ -203,18 +203,18 @@ func TestREPLIntTower(t *testing.T) {
 // print boundary. The implicit climb up is met by an explicit, checked climb down.
 func TestREPLDemotion(t *testing.T) {
 	script := []string{
-		"3/1",                  // a whole-valued fraction stays Frac (no implicit demotion)
-		"toWhole (3/1)",        // explicit, checked: ok 3
-		"toWhole (6/2)",        // reduces first: ok 3
-		"toWhole (1/3)",        // not integral: err
-		"toWhole (0/5)",        // zero is whole: ok 0
-		"toInt (6/2)",          // ok 3 : Result Int ArithErr
-		"toInt ((2/3) - (8/3))", // integral negative: ok -2 (Int holds the sign)
-		"toWhole ((2/3) - (8/3))", // negative: err (no whole answer)
-		"toNat (6/2)",          // counting number: ok 3
-		"toNat (0/5)",          // zero is not a counting number: err
-		"toNat (1/3)",          // not integral: err
-		"toNat ((2/3) - (8/3))", // negative: err
+		"3/1",                      // a whole-valued fraction stays Frac (no implicit demotion)
+		"toWhole (3/1)",            // explicit, checked: ok 3
+		"toWhole (6/2)",            // reduces first: ok 3
+		"toWhole (1/3)",            // not integral: err
+		"toWhole (0/5)",            // zero is whole: ok 0
+		"toInt (6/2)",              // ok 3 : Result Int ArithErr
+		"toInt ((2/3) - (8/3))",    // integral negative: ok -2 (Int holds the sign)
+		"toWhole ((2/3) - (8/3))",  // negative: err (no whole answer)
+		"toNat (6/2)",              // counting number: ok 3
+		"toNat (0/5)",              // zero is not a counting number: err
+		"toNat (1/3)",              // not integral: err
+		"toNat ((2/3) - (8/3))",    // negative: err
 		"divChecked 5 (monus 1 1)", // a computed-zero denominator: divByZero carries it
 		":quit",
 	}
@@ -225,14 +225,14 @@ func TestREPLDemotion(t *testing.T) {
 	}
 	got := out.String()
 	for _, w := range []string{
-		"3 : Frac",                              // 3/1
-		"ok 3 : Result Whole ArithErr",          // toWhole (3/1) and (6/2)
-		"err: 1/3 is not an integer : Result Whole ArithErr", // toWhole (1/3)
-		"ok 0 : Result Whole ArithErr",          // toWhole (0/5)
-		"ok 3 : Result Int ArithErr",            // toInt (6/2)
-		"ok -2 : Result Int ArithErr",           // toInt of an integral negative
-		"err: -2 is negative : Result Whole ArithErr", // toWhole of a negative
-		"ok 3 : Result Nat ArithErr",            // toNat (6/2)
+		"3 : Frac",                     // 3/1
+		"ok 3 : Result Whole ArithErr", // toWhole (3/1) and (6/2)
+		"err: 1/3 is not an integer : Result Whole ArithErr",    // toWhole (1/3)
+		"ok 0 : Result Whole ArithErr",                          // toWhole (0/5)
+		"ok 3 : Result Int ArithErr",                            // toInt (6/2)
+		"ok -2 : Result Int ArithErr",                           // toInt of an integral negative
+		"err: -2 is negative : Result Whole ArithErr",           // toWhole of a negative
+		"ok 3 : Result Nat ArithErr",                            // toNat (6/2)
 		"err: 0 is not a counting number : Result Nat ArithErr", // toNat (0/5)
 		"err: 1/3 is not an integer : Result Nat ArithErr",      // toNat (1/3)
 		"err: -2 is negative : Result Nat ArithErr",             // toNat negative
@@ -251,13 +251,13 @@ func TestREPLDemotion(t *testing.T) {
 // consume a number but produce no $N. `:reset` zeroes the counter.
 func TestREPLResultRefs(t *testing.T) {
 	script := []string{
-		"1 + 1",                                               // line 1 -> $1 ==> 2
-		"$1 + $1",                                             // recall $1 -> $2 ==> 4
+		"1 + 1",   // line 1 -> $1 ==> 2
+		"$1 + $1", // recall $1 -> $2 ==> 4
 		"double : Whole -> Whole is fn (n : Whole) is n + n end end", // line 3: a def, no $3
-		"double $",                                            // bare $ = last result ($2 = 4) -> $4 ==> 8
-		"$ * 3",                                               // bare $ = $4 = 8 -> $5 ==> 24
-		":reset",                                              // line 6: clears + zeroes the counter
-		"2 + 2",                                               // numbering restarts -> $1 ==> 4
+		"double $", // bare $ = last result ($2 = 4) -> $4 ==> 8
+		"$ * 3",    // bare $ = $4 = 8 -> $5 ==> 24
+		":reset",   // line 6: clears + zeroes the counter
+		"2 + 2",    // numbering restarts -> $1 ==> 4
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -293,19 +293,19 @@ func TestREPLResultRefs(t *testing.T) {
 // positional notation — exact (with the repetend bracketed) or rounded.
 func TestREPLRadixAndSigfigs(t *testing.T) {
 	script := []string{
-		"1/3",                       // a fraction prints as a/b
-		"3/4 |> to_radix",           // 0.75    (exact, terminating)
-		"1/3 |> to_radix",           // 0.{3}   (exact, repeating)
-		"1/6 |> to_radix",           // 0.1{6}  (non-repeating head + cycle)
-		"1/7 |> to_radix",           // 0.{142857}
+		"1/3",                        // a fraction prints as a/b
+		"3/4 |> to_radix",            // 0.75    (exact, terminating)
+		"1/3 |> to_radix",            // 0.{3}   (exact, repeating)
+		"1/6 |> to_radix",            // 0.1{6}  (non-repeating head + cycle)
+		"1/7 |> to_radix",            // 0.{142857}
 		"7/4 |> to_radix_sigplace 1", // 1.8    (round to 1 decimal place)
-		"7/4 |> to_radix_sigfig 1",  // 2       (round to 1 significant figure)
-		"7/4 |> to_radix_sigfig 2",  // 1.8
-		"7/4 |> to_radix_sigfig 3",  // 1.75
-		"-1/3",                      // negatives: a signed fraction, not 0/3
-		"-1/3 |> to_radix",          // -0.{3}
-		"-3/4 |> to_radix",          // -0.75
-		"-7/4 |> to_radix_sigfig 2", // -1.8
+		"7/4 |> to_radix_sigfig 1",   // 2       (round to 1 significant figure)
+		"7/4 |> to_radix_sigfig 2",   // 1.8
+		"7/4 |> to_radix_sigfig 3",   // 1.75
+		"-1/3",                       // negatives: a signed fraction, not 0/3
+		"-1/3 |> to_radix",           // -0.{3}
+		"-3/4 |> to_radix",           // -0.75
+		"-7/4 |> to_radix_sigfig 2",  // -1.8
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
