@@ -1,0 +1,72 @@
+-- Chapter 261 — trace equivalence of two machines: a finite bisimulation (E2/E3).
+--
+-- Two transition systems are observationally equal if they emit the same traces. Here two
+-- machines that both emit action `a` forever, but with DIFFERENT internal state — M1 is
+-- stateless, M2 carries a Nat counter it never observes — are proven trace-equivalent for
+-- every run length. The proof is the essence of a bisimulation: the IH is GENERALIZED over
+-- M2's state (the counter is irrelevant to behaviour), so a single induction on the run
+-- length closes it. Proof-only.
+--
+--   bisim : (n : Nat) -> (s : Nat) -> Eq ActList (run1 n) (run2 n s)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Act : U is
+  a : Act
+| b : Act
+end
+
+data ActList : U is
+  anil  : ActList
+| acons : Act -> ActList -> ActList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consA : ActList -> ActList is fn (t : ActList) is acons a t end end
+
+-- M1: stateless, emits `a` each step.
+run1 : Nat -> ActList is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is ActList end)
+      anil
+      (fn (k : Nat) (ih : ActList) is acons a ih end)
+      n
+  end
+end
+
+-- M2: carries a Nat counter (incremented each step but never emitted), still emits `a`.
+run2 : Nat -> Nat -> ActList is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat -> ActList end)
+      (fn (s : Nat) is anil end)
+      (fn (k : Nat) (ih : Nat -> ActList) is fn (s : Nat) is acons a (ih (succ s)) end end)
+      n
+  end
+end
+
+-- THE BISIMULATION, by induction on the run length n, the IH generalized over M2's state:
+--   0:      both traces are anil                                            -> refl
+--   succ k: both prepend `a`; cong (acons a) on the IH at the advanced state (succ s).
+bisim : (n : Nat) -> (s : Nat) -> Eq ActList (run1 n) (run2 n s) is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is (s : Nat) -> Eq ActList (run1 x) (run2 x s) end)
+      (fn (s : Nat) is refl end)
+      (fn (k : Nat) (ih : (s : Nat) -> Eq ActList (run1 k) (run2 k s)) is
+         fn (s : Nat) is
+           cong ActList ActList consA (run1 k) (run2 k (succ s)) (ih (succ s))
+         end
+       end)
+      n
+  end
+end
