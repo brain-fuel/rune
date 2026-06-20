@@ -110,6 +110,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fsqrt") {
 		b.WriteString("const fsqrt = () => x => Math.sqrt(x);\n")
 	}
+	if usesForeign(p, "fpow") {
+		b.WriteString("const fpow = () => b => e => Math.pow(b, e);\n")
+	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("const dot2 = () => a0 => a1 => b0 => b1 => a0 * b0 + a1 * b1;\n")
 	}

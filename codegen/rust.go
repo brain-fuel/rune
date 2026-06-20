@@ -86,6 +86,9 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fsqrt") {
 		b.WriteString("fn fsqrt() -> Rc<V> { vfun(|x: Rc<V>| Rc::new(V::Float(_float(&x).sqrt()))) }\n")
 	}
+	if usesForeign(p, "fpow") {
+		b.WriteString("fn fpow() -> Rc<V> { vfun(|b: Rc<V>| vfun(move |e: Rc<V>| Rc::new(V::Float(_float(&b).powf(_float(&e)))))) }\n")
+	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("fn dot2() -> Rc<V> { vfun(|a0: Rc<V>| vfun(move |a1: Rc<V>| { let a0 = a0.clone(); vfun(move |b0: Rc<V>| { let a0 = a0.clone(); let a1 = a1.clone(); vfun(move |b1: Rc<V>| Rc::new(V::Float(_float(&a0) * _float(&b0) + _float(&a1) * _float(&b1)))) }) })) }\n")
 	}

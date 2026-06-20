@@ -1120,3 +1120,70 @@ func TestD3FloatSqrt(t *testing.T) {
 		}
 	})
 }
+
+// TestD3FloatPow gates the floating-point power primitive: a pure host pow baked per
+// backend (native link -lm). 2^10/3^4/5^3 = 1024/81/125, byte-identical
+// "1024\n81\n125\nunit" across all seven backends.
+func TestD3FloatPow(t *testing.T) {
+	const want = "1024\n81\n125\nunit"
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch229_float_pow.rune", "main", ""); got != want {
+				t.Errorf("[%s] fpow gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	s := loadListing(t, "ch229_float_pow.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("c", func(t *testing.T) {
+		if _, err := exec.LookPath("cc"); err != nil {
+			t.Skip("cc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.C{}.Emit(p)
+		f := filepath.Join(dir, "main.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		if out, err := exec.Command("cc", "-o", bin, f, "-lm").CombinedOutput(); err != nil {
+			t.Fatalf("[c] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[c] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[c] fpow gave %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if _, err := exec.LookPath("clang"); err != nil {
+			t.Skip("clang not in PATH")
+		}
+		dir := t.TempDir()
+		ll, _ := codegen.LL{}.Emit(p)
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		f := filepath.Join(dir, "main.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(ll), 0o644)
+		os.WriteFile(rtf, []byte(rt), 0o644)
+		if out, err := exec.Command("clang", f, rtf, "-o", bin, "-lm").CombinedOutput(); err != nil {
+			t.Fatalf("[ll] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[ll] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[ll] fpow gave %q, want %q", got, want)
+		}
+	})
+}

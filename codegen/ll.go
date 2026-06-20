@@ -252,6 +252,14 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value fsqrt_c(Value x, Value* env) { (void)env; return mkfloat(sqrt(float_val(x))); }\n")
 		b.WriteString("Value fsqrt(void) { return rt_mkclo(&fsqrt_c, 0); }\n")
 	}
+	if usesForeign(p, "fpow") {
+		if !usesForeign(p, "fsqrt") {
+			b.WriteString("#include <math.h>\n")
+		}
+		b.WriteString("static Value fpow_c2(Value e, Value* env) { return mkfloat(pow(float_val(env[0]), float_val(e))); }\n")
+		b.WriteString("static Value fpow_c1(Value bs, Value* env) { (void)env; Value c = rt_mkclo(&fpow_c2, 1); rt_clo_set(c, 0, bs); return c; }\n")
+		b.WriteString("Value fpow(void) { return rt_mkclo(&fpow_c1, 0); }\n")
+	}
 	if usesForeign(p, "fabsP") {
 		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); return mkfloat(d < 0 ? -d : d); }\n")
 		b.WriteString("Value fabsP(void) { return rt_mkclo(&fabsP_c, 0); }\n")
