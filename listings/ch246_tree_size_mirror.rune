@@ -1,0 +1,135 @@
+-- Chapter 246 — mirror preserves tree size: size (mirror t) = size t (proven tier).
+--
+-- A capstone tying the tree work (ch244) to the arithmetic (ch245): reflecting a tree
+-- swaps every node's subtrees, so the size proof must commute the two subtree sizes —
+-- exactly addComm. By structural induction on the tree, the node step chaining a
+-- subtree-congruence with addition's commutativity. Proof-only.
+--
+--   sizeMirror : (t : Tree) -> Eq Nat (size (mirror t)) (size t)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Tree : U is
+  leaf : Tree
+| node : Tree -> Nat -> Tree -> Tree
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addZeroR : (n : Nat) -> Eq Nat (natAdd n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k zero) k) is cong Nat Nat succ (natAdd k zero) k ih end)
+      n
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+addComm : (a : Nat) -> (b : Nat) -> Eq Nat (natAdd a b) (natAdd b a) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k b) (natAdd b k) end)
+      (symEq Nat (natAdd b zero) b (addZeroR b))
+      (fn (k : Nat) (ih : Eq Nat (natAdd k b) (natAdd b k)) is
+         transEq Nat (succ (natAdd k b)) (succ (natAdd b k)) (natAdd b (succ k))
+           (cong Nat Nat succ (natAdd k b) (natAdd b k) ih)
+           (symEq Nat (natAdd b (succ k)) (succ (natAdd b k)) (addSuccR b k)) end)
+      a
+  end
+end
+
+mirror : Tree -> Tree is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Tree end)
+      leaf
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Tree) (ihr : Tree) is node ihr x ihl end)
+      t
+  end
+end
+
+size : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end)
+      zero
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Nat) (ihr : Nat) is succ (natAdd ihl ihr) end)
+      t
+  end
+end
+
+-- THE THEOREM, by structural induction on t:
+--   leaf:  size (mirror leaf) = size leaf = 0                              -> refl
+--   node:  size (mirror (node l x r)) = succ (natAdd (size (mirror r)) (size (mirror l)))
+--          A = succ (natAdd (size (mirror r)) (size (mirror l)))
+--          B = succ (natAdd (size r) (size l))     [cong succ (cong2 natAdd ihr ihl)]
+--          C = succ (natAdd (size l) (size r))     [cong succ (addComm (size r) (size l))] = size (node l x r)
+--          chained by transitivity.
+sizeMirror : (t : Tree) -> Eq Nat (size (mirror t)) (size t) is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Nat (size (mirror x)) (size x) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Nat (size (mirror l)) (size l))
+          (ihr : Eq Nat (size (mirror r)) (size r)) is
+         transEq Nat
+           (succ (natAdd (size (mirror r)) (size (mirror l))))
+           (succ (natAdd (size r) (size l)))
+           (succ (natAdd (size l) (size r)))
+           (cong Nat Nat succ
+              (natAdd (size (mirror r)) (size (mirror l)))
+              (natAdd (size r) (size l))
+              (cong2 Nat Nat Nat natAdd
+                 (size (mirror r)) (size r) (size (mirror l)) (size l) ihr ihl))
+           (cong Nat Nat succ
+              (natAdd (size r) (size l)) (natAdd (size l) (size r))
+              (addComm (size r) (size l))) end)
+      t
+  end
+end
