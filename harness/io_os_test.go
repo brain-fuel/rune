@@ -682,3 +682,84 @@ func TestD4NumpyMean(t *testing.T) {
 		}
 	})
 }
+
+// TestD4NumpyMatmul is the 2-D interop gate: npMatSum reshapes two flat row-major Rune
+// FLists into 2-D arrays and multiplies — REAL numpy matmul ((A@B).sum()) on py, OpenBLAS
+// (cblas_dgemm) on C/LLVM, a portable triple loop on js/go/erl/rust — all guarded by the
+// same contract against an in-language reference. A·B for [[1,2],[3,4]]·[[5,6],[7,8]]
+// sums to 134; within-default ok; negative-tolerance blame: "134\n134\n0\nunit".
+func TestD4NumpyMatmul(t *testing.T) {
+	const want = "134\n134\n0\nunit"
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if bk.name == "py" {
+				if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+					t.Skip("numpy not installed")
+				}
+			}
+			if got := runIOListing(t, bk, "ch223_numpy_matmul.rune", "main", ""); got != want {
+				t.Errorf("[%s] npMatSum gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	s := loadListing(t, "ch223_numpy_matmul.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipNoBLAS := func(t *testing.T, out []byte, err error) {
+		if err != nil && strings.Contains(string(out)+err.Error(), "cblas") {
+			t.Skip("OpenBLAS/cblas.h not available")
+		}
+	}
+	t.Run("c", func(t *testing.T) {
+		if _, err := exec.LookPath("cc"); err != nil {
+			t.Skip("cc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.C{}.Emit(p)
+		f := filepath.Join(dir, "main.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		if out, err := exec.Command("cc", "-o", bin, f, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[c] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[c] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[c] OpenBLAS npMatSum gave %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if _, err := exec.LookPath("clang"); err != nil {
+			t.Skip("clang not in PATH")
+		}
+		dir := t.TempDir()
+		ll, _ := codegen.LL{}.Emit(p)
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		f := filepath.Join(dir, "main.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(ll), 0o644)
+		os.WriteFile(rtf, []byte(rt), 0o644)
+		if out, err := exec.Command("clang", f, rtf, "-o", bin, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[ll] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[ll] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[ll] OpenBLAS npMatSum gave %q, want %q", got, want)
+		}
+	})
+}

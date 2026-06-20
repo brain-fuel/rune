@@ -124,6 +124,12 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npMean") {
 		b.WriteString("def npMean():\n    import numpy as np\n    def _m(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.mean(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _m(xs)\n")
 	}
+	// D4 interop: npMatSum binds REAL numpy matmul on py — reshape the flat row-major
+	// FLists into 2-D np.arrays, multiply with @, sum. This proves the 2-D marshalling
+	// boundary works THROUGH numpy (the signature linalg op).
+	if usesForeign(p, "npMatSum") {
+		b.WriteString("def npMatSum():\n    import numpy as np\n    def _np(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return a\n    def _g(m, k, n, A, B):\n        M, K, N = int(m), int(k), int(n)\n        a = np.array(_np(A), dtype=float).reshape(M, K)\n        b = np.array(_np(B), dtype=float).reshape(K, N)\n        return float((a @ b).sum())\n    return lambda m: lambda k: lambda n: lambda A: lambda B: _g(m, k, n, A, B)\n")
+	}
 	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
 	// portable triple-loop reference (native backends use cblas_dgemm).
 	if usesForeign(p, "gemmSum") {

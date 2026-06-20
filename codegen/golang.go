@@ -134,6 +134,10 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("func gemmSum() any { return func(m any) any { return func(k any) any { return func(n any) any { return func(A any) any { return func(B any) any { var a, b2 []float64; for t := A; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); a = append(a, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; for t := B; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); b2 = append(b2, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; M := int(m.(*big.Int).Int64()); K := int(k.(*big.Int).Int64()); N := int(n.(*big.Int).Int64()); s := 0.0; for i := 0; i < M; i++ { for j := 0; j < N; j++ { for l := 0; l < K; l++ { s += a[i*K+l] * b2[l*N+j] } } }; return s } } } } } }\n")
 	}
+	// D4 interop: npMatSum — the triple-loop reference floor; py serves real numpy matmul.
+	if usesForeign(p, "npMatSum") {
+		b.WriteString("func npMatSum() any { return func(m any) any { return func(k any) any { return func(n any) any { return func(A any) any { return func(B any) any { var a, b2 []float64; for t := A; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); a = append(a, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; for t := B; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); b2 = append(b2, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; M := int(m.(*big.Int).Int64()); K := int(k.(*big.Int).Int64()); N := int(n.(*big.Int).Int64()); s := 0.0; for i := 0; i < M; i++ { for j := 0; j < N; j++ { for l := 0; l < K; l++ { s += a[i*K+l] * b2[l*N+j] } } }; return s } } } } } }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatGo(&b, *p.Nat)

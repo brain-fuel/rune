@@ -58,7 +58,8 @@ var ioPrims = map[string]bool{
 	// the CONTRACT, not the library — the guard checks each impl against an in-language
 	// reference, so a divergent third-party result is BLAMED, never trusted blindly.
 	"npDot":  true, // npDot      xs ys          : FList -> FList -> Float (NumPy on py; OpenBLAS on C/LLVM; reference elsewhere)
-	"npMean": true, // npMean     xs             : FList -> Float (numpy.mean on py; hand sum/count elsewhere — no BLAS)
+	"npMean":   true, // npMean     xs             : FList -> Float (numpy.mean on py; hand sum/count elsewhere — no BLAS)
+	"npMatSum": true, // npMatSum   m k n A B       : Nat^3 -> FList -> FList -> Float (numpy matmul (A@B).sum() on py; cblas_dgemm on C/LLVM; triple loop elsewhere)
 }
 
 // fileEnvPrims are the D6 prims whose host body needs the packed-String codec

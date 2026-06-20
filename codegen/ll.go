@@ -251,11 +251,11 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); return mkfloat(d < 0 ? -d : d); }\n")
 		b.WriteString("Value fabsP(void) { return rt_mkclo(&fabsP_c, 0); }\n")
 	}
-	if usesForeign(p, "dot2") || usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") {
+	if usesForeign(p, "dot2") || usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") {
 		b.WriteString("#include <cblas.h>\n")
 	}
-	// shared FList marshaller (vectors + flat matrices), used by dotList/npDot and gemmSum.
-	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") {
+	// shared FList marshaller (vectors + flat matrices), used by dotList/npDot and gemmSum/npMatSum.
+	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") {
 		b.WriteString("static void fl_fill(Value lst, double* a) { int i = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { a[i++] = float_val(obj(lst)->slots[0]); lst = obj(lst)->slots[1]; } }\n")
 	}
 	if usesForeign(p, "dotList") || usesForeign(p, "npDot") {
@@ -295,6 +295,15 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value gemmSum_c2(Value k, Value* env) { Value c = rt_mkclo(&gemmSum_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, k); return c; }\n")
 		b.WriteString("static Value gemmSum_c1(Value m, Value* env) { (void)env; Value c = rt_mkclo(&gemmSum_c2, 1); rt_clo_set(c, 0, m); return c; }\n")
 		b.WriteString("Value gemmSum(void) { return rt_mkclo(&gemmSum_c1, 0); }\n")
+	}
+	// D4 interop: npMatSum on the native backends is the OpenBLAS gift (cblas_dgemm).
+	if usesForeign(p, "npMatSum") {
+		b.WriteString("static Value npMatSum_c5(Value Bm, Value* env) { int m = (int)big_to_double(env[0]), k = (int)big_to_double(env[1]), n = (int)big_to_double(env[2]); Value A = env[3]; int al = m*k, bl = k*n, cl = m*n; double* AA = (double*)malloc(sizeof(double)*(al>0?al:1)); double* BB = (double*)malloc(sizeof(double)*(bl>0?bl:1)); double* CC = (double*)malloc(sizeof(double)*(cl>0?cl:1)); fl_fill(A, AA); fl_fill(Bm, BB); cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, AA, k, BB, n, 0.0, CC, n); double s = 0; for (int i = 0; i < cl; i++) s += CC[i]; free(AA); free(BB); free(CC); return mkfloat(s); }\n")
+		b.WriteString("static Value npMatSum_c4(Value A, Value* env) { Value c = rt_mkclo(&npMatSum_c5, 4); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, env[1]); rt_clo_set(c, 2, env[2]); rt_clo_set(c, 3, A); return c; }\n")
+		b.WriteString("static Value npMatSum_c3(Value n, Value* env) { Value c = rt_mkclo(&npMatSum_c4, 3); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, env[1]); rt_clo_set(c, 2, n); return c; }\n")
+		b.WriteString("static Value npMatSum_c2(Value k, Value* env) { Value c = rt_mkclo(&npMatSum_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, k); return c; }\n")
+		b.WriteString("static Value npMatSum_c1(Value m, Value* env) { (void)env; Value c = rt_mkclo(&npMatSum_c2, 1); rt_clo_set(c, 0, m); return c; }\n")
+		b.WriteString("Value npMatSum(void) { return rt_mkclo(&npMatSum_c1, 0); }\n")
 	}
 }
 

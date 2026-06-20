@@ -144,6 +144,10 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("ff_gemmSum() -> fun(M) -> fun(K) -> fun(N) -> fun(A) -> fun(B) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, AL = Col(A), BL = Col(B), lists:sum([ lists:nth(I * K + P + 1, AL) * lists:nth(P * N + J + 1, BL) || I <- lists:seq(0, M - 1), J <- lists:seq(0, N - 1), P <- lists:seq(0, K - 1) ]) end end end end end.\n")
 	}
+	// D4 interop: npMatSum — the triple-loop reference floor; py serves real numpy matmul.
+	if usesForeign(p, "npMatSum") {
+		b.WriteString("ff_npMatSum() -> fun(M) -> fun(K) -> fun(N) -> fun(A) -> fun(B) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, AL = Col(A), BL = Col(B), lists:sum([ lists:nth(I * K + P + 1, AL) * lists:nth(P * N + J + 1, BL) || I <- lists:seq(0, M - 1), J <- lists:seq(0, N - 1), P <- lists:seq(0, K - 1) ]) end end end end end.\n")
+	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}

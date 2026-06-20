@@ -1,0 +1,116 @@
+-- Chapter 223 — NumPy matmul behind a contract: the 2-D interop boundary (D4 / R-INTEROP).
+--
+-- ch221/222 bound 1-D NumPy ops. The signature NumPy operation is matrix multiply, and
+-- it is where interop earns its keep: a 2-D array marshalled BOTH ways across the
+-- boundary. `npMatSum` reshapes two flat row-major FLists into 2-D `np.array`s on the
+-- python backend, multiplies them with `@`, and sums — REAL `numpy` linear algebra. The
+-- native backends serve the same capability with OpenBLAS (`cblas_dgemm`); the rest a
+-- portable triple loop. As always, ONE Rune contract guards every impl against an
+-- in-language reference (here the four product entries, hand-summed), so the library is
+-- assumed but checked.
+--
+-- A=[[1,2],[3,4]], B=[[5,6],[7,8]]; A·B = [[19,22],[43,50]], entry sum 134.
+-- Observable: "134\n134\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the interop kernel: numpy matmul (A@B).sum() on py; cblas_dgemm on C/LLVM; triple loop else.
+foreign npMatSum   : Nat -> Nat -> Nat -> FList -> FList -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+two : Nat is succ (succ zero) end
+
+aMat : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+bMat : FList is fcons (fromNat 5) (fcons (fromNat 6) (fcons (fromNat 7) (fcons (fromNat 8) fnil))) end
+
+-- the in-language reference: the four product entries hand-summed (independent of numpy).
+refSum : Float is
+  fadd
+    (fadd (fadd (fmul (fromNat 1) (fromNat 5)) (fmul (fromNat 2) (fromNat 7)))
+          (fadd (fmul (fromNat 1) (fromNat 6)) (fmul (fromNat 2) (fromNat 8))))
+    (fadd (fadd (fmul (fromNat 3) (fromNat 5)) (fmul (fromNat 4) (fromNat 7)))
+          (fadd (fmul (fromNat 3) (fromNat 6)) (fmul (fromNat 4) (fromNat 8))))
+end
+
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+-- THE INTEROP CONTRACT: accept numpy's matmul sum only within `eps` of the reference.
+matChecked : Float -> Result Float Blame is
+  fn (eps : Float) is
+    case withinTol eps (npMatSum two two two aMat bMat) refSum of
+    | true  -> ok  Float Blame (npMatSum two two two aMat bMat)
+    | false -> err Float Blame (driftBlame (npMatSum two two two aMat bMat))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npMatSum two two two aMat bMat))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (matChecked defaultEps))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (matChecked (fsub (fromNat 0) (fromNat 1))))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
