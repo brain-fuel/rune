@@ -1,0 +1,30 @@
+-- Chapter 388 — product swap is involutive: swap (swap p) = p (proven tier).
+--
+-- swapProd exchanges the two components of a pair; doing it twice is the identity (Prod A B
+-- and Prod B A are isomorphic). The multiplicative dual of Sum swap (ch333). By case
+-- analysis. Proof-only.
+--
+--   swapProdInvol : (A B : U) -> (p : Prod A B) -> Eq (Prod A B) (swapProd B A (swapProd A B p)) p
+
+data Prod : U -> U -> U is
+  mkProd : (A : U) -> (B : U) -> A -> B -> Prod A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+swapProd : (A : U) -> (B : U) -> Prod A B -> Prod B A is
+  fn (A : U) (B : U) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is Prod B A end)
+      (fn (a : A) (b : B) is mkProd B A b a end)
+      p
+  end
+end
+
+swapProdInvol : (A : U) -> (B : U) -> (p : Prod A B) ->
+                Eq (Prod A B) (swapProd B A (swapProd A B p)) p is
+  fn (A : U) (B : U) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is Eq (Prod A B) (swapProd B A (swapProd A B x)) x end)
+      (fn (a : A) (b : B) is refl end)
+      p
+  end
+end

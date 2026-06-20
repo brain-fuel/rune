@@ -218,6 +218,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch384_option_some_map` — `isNone = not isSome` + map preserves definedness `isSome (omap f m) = isSome m`.
 - `ch332_sum_option_iso` — the other direction: `optionToSum (sumToOption s) = s` (full iso, unit eta).
 - `ch333_sum_swap` — Sum symmetry is involutive: `swap (swap s) = s` (Sum A B ≅ Sum B A).
+- `ch388_prod_swap` — product swap involutive: `swap (swap p) = p` (Prod A B ≅ Prod B A).
 - `ch284_swap_involutions` — swap is an involution on products and sums
   (`swapP (swapP p) = p`, `sswap (sswap e) = e`).
 - `ch255_de_morgan` — De Morgan's laws.
