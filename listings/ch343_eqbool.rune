@@ -1,0 +1,37 @@
+-- Chapter 343 — boolean equality is reflexive and symmetric (proven tier).
+--
+-- eqBool is the XNOR / decidable equality on Bool (true iff the two agree). It is reflexive
+-- and symmetric — the decidable-equality half of an equivalence. By case analysis. Proof-only.
+--
+--   eqBoolRefl : (a : Bool) -> Eq Bool (eqBool a a) true
+--   eqBoolSym  : (a b : Bool) -> Eq Bool (eqBool a b) (eqBool b a)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+eqBool : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b (notB b) a end
+end
+
+eqBoolRefl : (a : Bool) -> Eq Bool (eqBool a a) true is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (eqBool x x) true end) refl refl a
+  end
+end
+
+eqBoolSym : (a : Bool) -> (b : Bool) -> Eq Bool (eqBool a b) (eqBool b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (eqBool x b) (eqBool b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (eqBool true y) (eqBool y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (eqBool false y) (eqBool y false) end) refl refl b)
+      a
+  end
+end
