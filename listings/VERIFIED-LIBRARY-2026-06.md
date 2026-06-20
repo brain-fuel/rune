@@ -203,6 +203,7 @@ equation).
 - `ch302_leb_minmax_r` — the other bounds: `b <= max a b` and `min a b <= b` (4 bounds complete).
 - `ch368_min_max_sum` — min + max = a + b: `natAdd (natMin a b)(natMax a b) = natAdd a b`.
 - `ch391_max_monus` — max via addition/monus: `max a b = a + (b - a)` (closed form).
+- `ch397_min_leb_max` — min is below max: `leb (min a b)(max a b) = true`.
 - `ch369_minmax_comm` — structural min/max ARE commutative: `min a b = min b a`, `max a b = max b a` (leb-if version was blocked; structural is not).
 - `ch370_min_assoc` — min is associative: `min (min a b) c = min a (min b c)` (with comm+idem, a meet-semilattice).
 - `ch371_max_assoc` — max is associative: `max (max a b) c = max a (max b c)` (join-semilattice). min/max are dual semilattices.
