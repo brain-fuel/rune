@@ -156,3 +156,49 @@ func TestIOParseCLIConformance(t *testing.T) {
 		})
 	}
 }
+
+// TestIOFileEnvConformance is the D6 net/fs gate: the file + environment vocabulary
+// (writeFileCode/readFileCode/getEnvCode/printStrCode) runs on a real OS, marshalling
+// packed `String` paths/contents across the host boundary in BOTH directions. ch215
+// writes "hello, wootz" to a relative file, reads it back and prints it, then prints
+// the env var RUNE_D6 — so with the program's cwd set to a temp dir and RUNE_D6=ok the
+// observable output is byte-identical across js/py/go/erl. (Rust is excluded for the
+// same reason as ch213: it has no packed-String host body yet — parked.)
+func TestIOFileEnvConformance(t *testing.T) {
+	for _, bk := range ioCLIBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			dir := t.TempDir()
+			s := loadListing(t, "ch215_io_fs_env.rune")
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := bk.emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := filepath.Join(dir, "main."+bk.ext)
+			if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := bk.run(f)
+			cmd.Dir = dir // relative path "d6.tmp" resolves here
+			cmd.Env = append(os.Environ(), "RUNE_D6=ok")
+			out, err := cmd.Output()
+			if err != nil {
+				stderr := ""
+				if ee, ok := err.(*exec.ExitError); ok {
+					stderr = string(ee.Stderr)
+				}
+				t.Fatalf("[%s] run failed: %v\n%s\n--- src ---\n%s", bk.name, err, stderr, src)
+			}
+			if want := "hello, wootz\nok\nunit"; strings.TrimSpace(string(out)) != want {
+				t.Errorf("[%s] D6 fs+env run gave %q, want %q", bk.name, strings.TrimSpace(string(out)), want)
+			}
+		})
+	}
+}

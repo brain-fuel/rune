@@ -723,9 +723,20 @@ first and forces only on mismatch, so the fast path logs nothing.
     prints 1 and 2 — byte-identical `1\n2\n2`; ch211 echoes a stdin number (feed "7"
     → `7\n7`); both on all 5 source backends (harness/io_os_test.go), RUN by
     `rune run` unaided. The compressed `builtin nat` (C7) is load-bearing: a clock
-    reading is ~1e18 ns, a native int, never a succ-chain. Still waits on D1
-    (Result/IOError) + B4 (String/Ptr marshalling) for richer fs/net; these ops are
-    over `Nat`/`IO` only. No core change, no hash bump.
+    reading is ~1e18 ns, a native int, never a succ-chain. No core change, no hash bump.
+    **FILES + ENV LANDED (v3.20.0, ch215):** the net/fs vocabulary now spends D1's
+    IOError + B4's packed String — `getEnvCode`/`readFileCode`/`writeFileCode`/
+    `printStrCode`, all over the bare packed-String CODE (a `Nat`; the Rune side wraps
+    `bytes`/`codeOf`, so the host body never touches the constructor encoding). Each
+    backend emits a shared codec (`__s2h`/`__h2s` decode/encode the bignum; beam's are
+    top-level `d6unpack`/`d6pack`) gated by `usesFileEnv`, plus the four bodies (JS uses
+    `globalThis.String` — a Rune `String : U` def shadows the bare builtin; Go gains the
+    `"os"` import). ch215 writes a String to a file, reads it back and prints it, then
+    prints `$RUNE_D6` — byte-identical `hello, wootz\nok\nunit` on js/py/go/erl with cwd
+    set + the env var (`TestIOFileEnvConformance`); `readFileR` lifts an unreadable file
+    into `Result String IOError` (`emptyInput`, via `monus code 1`), the ch212/ch213
+    totality discipline at the fs boundary. REMAINING D6: net (sockets) + argv + process
+    (rust excluded — no packed-String host body yet, parked like ch213).
 
 ## Standing rules
 

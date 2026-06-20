@@ -24,6 +24,32 @@ var ioPrims = map[string]bool{
 	"getNat":       true,
 	"timeNanos":    true,
 	"readLineCode": true,
+	// D6 net/fs: env + file vocabulary, over the PACKED-String code (a bignum, B4).
+	// Each takes/returns a bare `Nat` code (first byte LSB, 0x01 sentinel) — the
+	// SAME representation `readLineCode` returns and `bytes`/`codeOf` wrap/unwrap on
+	// the Rune side, so the host bodies never touch the constructor encoding. fs/net
+	// FAILURE is surfaced as the EMPTY string (code 1), which the Rune side lifts
+	// into ch212's `Result _ IOError` (the parseWhole pattern, ch213).
+	"getEnvCode":    true, // getEnvCode    name        : Nat -> IO Nat
+	"readFileCode":  true, // readFileCode  path        : Nat -> IO Nat  (1 = unreadable)
+	"writeFileCode": true, // writeFileCode path content : Nat -> Nat -> IO Nat
+	"printStrCode":  true, // printStrCode  s           : Nat -> IO Nat  (decode + println)
+}
+
+// fileEnvPrims are the D6 prims whose host body needs the packed-String codec
+// (decode a code to a host string, encode a host string to a code). A backend
+// emits the shared codec helpers once when any of these is referenced.
+var fileEnvPrims = []string{"getEnvCode", "readFileCode", "writeFileCode", "printStrCode"}
+
+// usesFileEnv reports whether the program references any D6 net/fs primitive, so a
+// backend knows to emit the shared packed-String codec helpers.
+func usesFileEnv(p Program) bool {
+	for _, n := range fileEnvPrims {
+		if usesForeign(p, n) {
+			return true
+		}
+	}
+	return false
 }
 
 // usesForeign reports whether any emitted definition references a `foreign` axiom

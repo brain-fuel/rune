@@ -32,6 +32,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "timeNanos") {
 		imports += "\t\"time\"\n"
 	}
+	if usesFileEnv(p) {
+		imports += "\t\"os\"\n"
+	}
 	b.WriteString("package main\n\nimport (\n" + imports + ")\n\n")
 	b.WriteString(goRuntime)
 	if usesQuot(p) {
@@ -52,6 +55,23 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "readLineCode") {
 		b.WriteString("func readLineCode() any { return func(_u any) any { var s string; fmt.Scan(&s); n := big.NewInt(1); for i := len(s) - 1; i >= 0; i-- { n.Mul(n, big.NewInt(256)); n.Add(n, big.NewInt(int64(s[i]))) }; return n } }\n")
+	}
+	// D6 net/fs: the packed-String codec + env/file host bodies, over bare Nat codes.
+	if usesFileEnv(p) {
+		b.WriteString("func __s2h(v any) string { b := new(big.Int).Set(v.(*big.Int)); one := big.NewInt(1); m := big.NewInt(256); var sb []byte; for b.Cmp(one) > 0 { r := new(big.Int); b.DivMod(b, m, r); sb = append(sb, byte(r.Int64())) }; return string(sb) }\n")
+		b.WriteString("func __h2s(v string) any { n := big.NewInt(1); m := big.NewInt(256); for i := len(v) - 1; i >= 0; i-- { n.Mul(n, m); n.Add(n, big.NewInt(int64(v[i]))) }; return n }\n")
+	}
+	if usesForeign(p, "getEnvCode") {
+		b.WriteString("func getEnvCode() any { return func(c any) any { return func(_u any) any { return __h2s(os.Getenv(__s2h(c))) } } }\n")
+	}
+	if usesForeign(p, "readFileCode") {
+		b.WriteString("func readFileCode() any { return func(c any) any { return func(_u any) any { d, err := os.ReadFile(__s2h(c)); if err != nil { return big.NewInt(1) }; return __h2s(string(d)) } } }\n")
+	}
+	if usesForeign(p, "writeFileCode") {
+		b.WriteString("func writeFileCode() any { return func(p any) any { return func(c any) any { return func(_u any) any { os.WriteFile(__s2h(p), []byte(__s2h(c)), 0644); return c } } } }\n")
+	}
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("func printStrCode() any { return func(c any) any { return func(_u any) any { fmt.Println(__s2h(c)); return c } } }\n")
 	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {

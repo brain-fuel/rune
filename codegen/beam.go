@@ -60,6 +60,24 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "readLineCode") {
 		b.WriteString("ff_readLineCode() -> fun(_U) -> L = string:trim(io:get_line(\"\")), {N, P} = lists:foldl(fun(C, {Acc, Pl}) -> {Acc + C * Pl, Pl * 256} end, {0, 1}, L), N + P end.\n")
 	}
+	// D6 net/fs: the packed-String codec (top-level helpers) + env/file host bodies,
+	// over bare Nat codes (the Rune side wraps `bytes`/`codeOf`).
+	if usesFileEnv(p) {
+		b.WriteString("d6unpack(N) when N =< 1 -> [];\nd6unpack(N) -> [N rem 256 | d6unpack(N div 256)].\n")
+		b.WriteString("d6pack(S) -> {N, P} = lists:foldl(fun(C, {Acc, Pl}) -> {Acc + C * Pl, Pl * 256} end, {0, 1}, S), N + P.\n")
+	}
+	if usesForeign(p, "getEnvCode") {
+		b.WriteString("ff_getEnvCode() -> fun(C) -> fun(_U) -> V = case os:getenv(d6unpack(C)) of false -> \"\"; X -> X end, d6pack(V) end end.\n")
+	}
+	if usesForeign(p, "readFileCode") {
+		b.WriteString("ff_readFileCode() -> fun(C) -> fun(_U) -> case file:read_file(d6unpack(C)) of {ok, B} -> d6pack(binary_to_list(B)); _ -> 1 end end end.\n")
+	}
+	if usesForeign(p, "writeFileCode") {
+		b.WriteString("ff_writeFileCode() -> fun(P) -> fun(C) -> fun(_U) -> file:write_file(d6unpack(P), list_to_binary(d6unpack(C))), C end end end.\n")
+	}
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("ff_printStrCode() -> fun(C) -> fun(_U) -> io:format(\"~s~n\", [d6unpack(C)]), C end end.\n")
+	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}

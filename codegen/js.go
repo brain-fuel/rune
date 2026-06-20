@@ -46,6 +46,26 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "readLineCode") {
 		b.WriteString("const readLineCode = () => () => { const s = require('fs').readFileSync(0, 'utf8').split('\\n')[0]; let n = 1n; for (let i = s.length - 1; i >= 0; i--) n = n * 256n + BigInt(s.charCodeAt(i)); return n; };\n")
 	}
+	// D6 net/fs: the packed-String codec (decode code->string, encode string->code)
+	// + env/file host bodies, over bare Nat codes (the Rune side wraps `bytes`).
+	if usesFileEnv(p) {
+		// globalThis.String (NOT bare `String`): a Rune `String : U` def emits a
+		// top-level `const String` that would shadow the JS builtin.
+		b.WriteString("const __s2h = n => { let s = ''; while (n > 1n) { s += globalThis.String.fromCharCode(Number(n % 256n)); n = n / 256n; } return s; };\n")
+		b.WriteString("const __h2s = v => { let n = 1n; for (let i = v.length - 1; i >= 0; i--) n = n * 256n + BigInt(v.charCodeAt(i)); return n; };\n")
+	}
+	if usesForeign(p, "getEnvCode") {
+		b.WriteString("const getEnvCode = () => c => () => __h2s(process.env[__s2h(c)] || '');\n")
+	}
+	if usesForeign(p, "readFileCode") {
+		b.WriteString("const readFileCode = () => c => () => { try { return __h2s(require('fs').readFileSync(__s2h(c), 'utf8')); } catch (e) { return 1n; } };\n")
+	}
+	if usesForeign(p, "writeFileCode") {
+		b.WriteString("const writeFileCode = () => p => c => () => { require('fs').writeFileSync(__s2h(p), __s2h(c)); return c; };\n")
+	}
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("const printStrCode = () => c => () => { console.log(__s2h(c)); return c; };\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNat(&b, *p.Nat)

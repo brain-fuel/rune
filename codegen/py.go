@@ -50,6 +50,23 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "readLineCode") {
 		b.WriteString("def readLineCode():\n    import sys\n    def t(_u):\n        s = sys.stdin.readline().rstrip('\\n')\n        n = 1\n        for ch in reversed(s):\n            n = n * 256 + ord(ch)\n        return n\n    return t\n")
 	}
+	// D6 net/fs: the packed-String codec + env/file host bodies, over bare Nat codes.
+	if usesFileEnv(p) {
+		b.WriteString("def __s2h(n):\n    s = ''\n    while n > 1:\n        s += chr(n % 256)\n        n //= 256\n    return s\n")
+		b.WriteString("def __h2s(v):\n    n = 1\n    for ch in reversed(v):\n        n = n * 256 + ord(ch)\n    return n\n")
+	}
+	if usesForeign(p, "getEnvCode") {
+		b.WriteString("def getEnvCode():\n    import os\n    return lambda c: lambda _u: __h2s(os.environ.get(__s2h(c), ''))\n")
+	}
+	if usesForeign(p, "readFileCode") {
+		b.WriteString("def readFileCode():\n    def f(c):\n        def t(_u):\n            try:\n                with open(__s2h(c), 'r') as h:\n                    return __h2s(h.read())\n            except Exception:\n                return 1\n        return t\n    return f\n")
+	}
+	if usesForeign(p, "writeFileCode") {
+		b.WriteString("def writeFileCode():\n    def f(p2):\n        def g(c):\n            def t(_u):\n                with open(__s2h(p2), 'w') as h:\n                    h.write(__s2h(c))\n                return c\n            return t\n        return g\n    return f\n")
+	}
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("def printStrCode():\n    return lambda c: lambda _u: (print(__s2h(c)), c)[1]\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatPy(&b, *p.Nat)

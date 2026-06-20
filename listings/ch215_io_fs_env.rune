@@ -1,0 +1,113 @@
+-- Chapter 215 — FILES + ENVIRONMENT, LIVE (D6 / R-EFFECT, the net/fs vocabulary).
+--
+-- ch210/211 gave console + clock; ch212/213 gave the IOError layer and the packed
+-- String (a bignum of UTF-8 bytes, first byte LSB + 0x01 sentinel) with total
+-- parsers. This chapter spends both: the OS/IO vocabulary grows FILES and the
+-- ENVIRONMENT, marshalling `String` paths/contents across the host boundary. The
+-- host bodies ship WITH the compiler (baked per backend, like D5's beamOTPRuntime
+-- and ch210's printNat) — NOT test-injected — so `rune run` executes them unaided.
+--
+-- Four new live primitives, over the bare packed-String CODE (a `Nat`; the Rune
+-- side wraps/unwraps `bytes`/`codeOf`, so the host never touches the constructor):
+--   getEnvCode    name        ~> getenv(name)            (empty code 1 if unset)
+--   readFileCode  path        ~> read the file           (empty code 1 if unreadable)
+--   writeFileCode path body   ~> write body to the file
+--   printStrCode  s           ~> decode + println the String
+--
+-- The runnable demo writes a String to a file, reads it back, prints it, then
+-- prints an environment variable — exercising String marshalling in BOTH
+-- directions, on a real OS. `readFileR` shows the same op returning the proper
+-- `Result String IOError` (an unreadable file is `emptyInput`, never a crash —
+-- the ch212/ch213 totality discipline, applied at the fs boundary).
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ k -> k end end end
+-- truncated subtraction (kernel-accelerated), used to test "is the code empty?".
+monus : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end end
+builtin natMonus monus
+
+-- the packed String (B4): a String IS one bignum of UTF-8 bytes. `bytes` must be
+-- in scope for the `"…"` literal sugar (it desugars to `bytes <packed-numeral>`).
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+-- ch212's error layer (the subset this chapter needs), so fs ops can be TOTAL.
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+data IOError : U is
+  eofError   : IOError
+| parseError : IOError
+| emptyInput : IOError
+| rangeError : IOError
+end
+IOResult : U -> U is fn (A : U) is Result A IOError end end
+
+-- The live primitives (host bodies baked per backend).
+foreign getEnvCode    : Nat -> IO Nat end
+foreign readFileCode  : Nat -> IO Nat end
+foreign writeFileCode : Nat -> Nat -> IO Nat end
+foreign printStrCode  : Nat -> IO Nat end
+
+-- String-level wrappers: the prims speak bare codes; these wrap `bytes`/`codeOf`
+-- so the surface is `String -> IO String` etc. (exactly the readLineCode pattern).
+writeFile : String -> String -> IO Unit is
+  fn (path : String) (content : String) is
+    bindIO Nat Unit (writeFileCode (codeOf path) (codeOf content)) (fn (n : Nat) is pureIO Unit unit end)
+  end
+end
+readFile : String -> IO String is
+  fn (path : String) is
+    bindIO Nat String (readFileCode (codeOf path)) (fn (code : Nat) is pureIO String (bytes code) end)
+  end
+end
+printStr : String -> IO Unit is
+  fn (s : String) is
+    bindIO Nat Unit (printStrCode (codeOf s)) (fn (n : Nat) is pureIO Unit unit end)
+  end
+end
+getEnv : String -> IO String is
+  fn (name : String) is
+    bindIO Nat String (getEnvCode (codeOf name)) (fn (code : Nat) is pureIO String (bytes code) end)
+  end
+end
+
+-- TOTAL fs read: an unreadable file comes back as the empty code (1), which we lift
+-- into `Result String IOError` as `emptyInput` — a value you must case on, never a
+-- crash. `monus code 1 = 0` exactly when the code is the bare sentinel (empty).
+readFileR : String -> IO (IOResult String) is
+  fn (path : String) is
+    bindIO Nat (IOResult String) (readFileCode (codeOf path)) (fn (code : Nat) is
+      pureIO (IOResult String)
+        (case monus code 1 of
+         | zero    -> err String IOError emptyInput
+         | succ k  -> ok  String IOError (bytes code)
+         end)
+    end)
+  end
+end
+
+-- Write a String to a file, read it back, print it; then print an env var. The
+-- observed output is the file contents followed by the value of RUNE_D6.
+main : IO Unit is
+  bindIO Unit Unit (writeFile "d6.tmp" "hello, wootz") (fn (u1 : Unit) is
+    bindIO String Unit (readFile "d6.tmp") (fn (s : String) is
+      bindIO Unit Unit (printStr s) (fn (u2 : Unit) is
+        bindIO String Unit (getEnv "RUNE_D6") (fn (e : String) is
+          printStr e
+        end)
+      end)
+    end)
+  end)
+end
