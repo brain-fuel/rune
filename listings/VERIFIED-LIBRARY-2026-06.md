@@ -70,6 +70,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch314_sum_map_succ` — mapping succ adds the length to the sum: `sum (map succ xs) = len xs + sum xs`.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
+- `ch322_filter_length` — filter never increases length: `len (filter p xs) <= len xs`.
 - `ch291_any_all_demorgan` — quantifier De Morgan: `any p xs = not (all (not . p) xs)`.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
 - `ch292_reverse_involution` — `reverse (append xs ys) = reverse ys ++ reverse xs` and

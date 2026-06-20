@@ -1,0 +1,106 @@
+-- Chapter 322 — filter never increases the length: len (filter p xs) <= len xs (proven tier).
+--
+-- Filtering keeps a sublist, so its length is bounded by the original. A branch-aware
+-- induction: when the head is kept, both lengths grow by one (the IH transfers); when it is
+-- dropped, the result length stays put while the original grows, closed by leb weakening
+-- (ch303's lebSuccR). Proof-only.
+--
+--   lenFilter : (p : Nat -> Bool) -> (xs : NatList) -> Eq Bool (leb (len (filter p xs)) (len xs)) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+everythingTrue : Eq Bool false true -> (x : Bool) -> Eq Bool x true is
+  fn (h : Eq Bool false true) (x : Bool) is
+    BoolElim (fn (z : Bool) is Eq Bool z true end) refl h x
+  end
+end
+
+lebSuccR : (a : Nat) -> (b : Nat) -> Eq Bool (leb a b) true -> Eq Bool (leb a (succ b)) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (leb x b) true -> Eq Bool (leb x (succ b)) true end)
+      (fn (b : Nat) (h : Eq Bool (leb zero b) true) is refl end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> Eq Bool (leb k b) true -> Eq Bool (leb k (succ b)) true) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is
+                      Eq Bool (leb (succ k) y) true -> Eq Bool (leb (succ k) (succ y)) true end)
+             (fn (h : Eq Bool (leb (succ k) zero) true) is everythingTrue h (leb (succ k) (succ zero)) end)
+             (fn (j : Nat)
+                 (ihj : Eq Bool (leb (succ k) j) true -> Eq Bool (leb (succ k) (succ j)) true) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) true) is ih j h end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+filter : (Nat -> Bool) -> NatList -> NatList is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end) (ncons h ih) ih (p h) end)
+      xs
+  end
+end
+
+-- THE BOUND, by induction on xs with a BoolElim on (p h):
+--   nnil:  leb 0 0 = true                                                          -> refl
+--   keep (p h = true):  leb (succ (len (filter p t))) (succ (len t)) = leb _ _ = IH
+--   drop (p h = false): leb (len (filter p t)) (succ (len t)) by leb weakening on the IH
+lenFilter : (p : Nat -> Bool) -> (xs : NatList) -> Eq Bool (leb (len (filter p xs)) (len xs)) true is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Bool (leb (len (filter p z)) (len z)) true end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (leb (len (filter p rest)) (len rest)) true) is
+         BoolElim
+           (fn (c : Bool) is
+              Eq Bool (leb (len (BoolElim (fn (d : Bool) is NatList end)
+                                    (ncons h (filter p rest)) (filter p rest) c))
+                           (succ (len rest))) true end)
+           ih
+           (lebSuccR (len (filter p rest)) (len rest) ih)
+           (p h) end)
+      xs
+  end
+end
