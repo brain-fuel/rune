@@ -430,3 +430,69 @@ visibleRunVisible : (k : Nat) -> (p : Proc) -> Eq Bool (allVisible (visibleRun k
       k
   end
 end
+
+-- ===== Tighter: the projection's observable alphabet is EXACTLY failures =====
+-- projectVisible says project stays in the observable alphabet; this pins it down to
+-- precisely {lfail} - a supervisor observes ONLY failures from the projection.
+
+isFail : Label -> Bool is
+  fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false false false true l end
+end
+
+allFail : List Label -> Bool is
+  fn (xs : List Label) is
+    ListElim Label (fn (w : List Label) is Bool end)
+      true
+      (fn (l : Label) (t : List Label) (ih : Bool) is andB (isFail l) ih end)
+      xs
+  end
+end
+
+allFailAppend : (xs : List Label) -> (ys : List Label) ->
+    Eq Bool (allFail (append Label xs ys)) (andB (allFail xs) (allFail ys)) is
+  fn (xs : List Label) (ys : List Label) is
+    ListElim Label
+      (fn (w : List Label) is
+         Eq Bool (allFail (append Label w ys)) (andB (allFail w) (allFail ys)) end)
+      refl
+      (fn (l : Label) (t : List Label)
+          (ih : Eq Bool (allFail (append Label t ys)) (andB (allFail t) (allFail ys))) is
+         transEq Bool
+           (allFail (append Label (cons Label l t) ys))
+           (andB (isFail l) (andB (allFail t) (allFail ys)))
+           (andB (andB (isFail l) (allFail t)) (allFail ys))
+           (cong Bool Bool (fn (z : Bool) is andB (isFail l) z end)
+              (allFail (append Label t ys)) (andB (allFail t) (allFail ys)) ih)
+           (andBAssoc (isFail l) (allFail t) (allFail ys))
+       end)
+      xs
+  end
+end
+
+projectOnlyFail : (p : Proc) -> Eq Bool (allFail (project p)) true is
+  fn (p : Proc) is
+    ProcElim (fn (w : Proc) is Eq Bool (allFail (project w)) true end)
+      refl
+      (fn (q : Proc) (ih : Eq Bool (allFail (project q)) true) is ih end)
+      (fn (q : Proc) (ih : Eq Bool (allFail (project q)) true) is ih end)
+      (fn (q : Proc) (ih : Eq Bool (allFail (project q)) true) is ih end)
+      (fn (a : Proc) (b : Proc)
+          (iha : Eq Bool (allFail (project a)) true)
+          (ihb : Eq Bool (allFail (project b)) true) is
+         transEq Bool
+           (allFail (append Label (project a) (project b)))
+           (andB (allFail (project a)) (allFail (project b)))
+           true
+           (allFailAppend (project a) (project b))
+           (transEq Bool
+              (andB (allFail (project a)) (allFail (project b)))
+              (allFail (project b))
+              true
+              (cong Bool Bool (fn (z : Bool) is andB z (allFail (project b)) end)
+                 (allFail (project a)) true iha)
+              ihb)
+       end)
+      refl
+      p
+  end
+end
