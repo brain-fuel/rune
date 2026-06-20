@@ -78,6 +78,8 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch258_mul_identities` — `mulZeroR`, `mulOneL`, `mulOneR`.
 - `ch276_pow_add` — exponentiation + the exponent law `a^(m+n) = a^m * a^n`.
 - `ch282_monus` — truncated subtraction: `monus n 0 = n`, `monus n n = 0`.
+- `ch283_binary_inc` — verified binary numerals: `toNat (bsucc b) = succ (toNat b)`
+  (binary increment agrees with unary successor).
 - `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
 - `ch270_mul_distrib` — four-term interchange + **left distributivity** (`a*(b+c) = a*b + a*c`).
 - `ch271_mul_assoc` — right distributivity + **associativity of multiplication** (`(a*b)*c = a*(b*c)`)

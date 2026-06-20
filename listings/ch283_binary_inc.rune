@@ -1,0 +1,73 @@
+-- Chapter 283 — verified binary increment: toNat (bsucc b) = succ (toNat b) (proven tier).
+--
+-- A little-endian binary numeral and its increment, proven to agree with the unary
+-- successor under the denotation `toNat`. The carry case (incrementing a list ending in 1)
+-- recurses, and the doubling in toNat lines up with the two successors. A classic
+-- number-representation correctness result. Proof-only.
+--
+--   bsuccCorrect : (b : Bin) -> Eq Nat (toNat (bsucc b)) (succ (toNat b))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- little-endian binary: bnil = 0, b0 t = 2*t, b1 t = 2*t+1.
+data Bin : U is
+  bnil : Bin
+| b0   : Bin -> Bin
+| b1   : Bin -> Bin
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+double : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is succ (succ ih) end) n
+  end
+end
+
+toNat : Bin -> Nat is
+  fn (b : Bin) is
+    BinElim (fn (x : Bin) is Nat end)
+      zero
+      (fn (t : Bin) (ih : Nat) is double ih end)
+      (fn (t : Bin) (ih : Nat) is succ (double ih) end)
+      b
+  end
+end
+
+-- increment with carry: bsucc bnil = b1 bnil; bsucc (b0 t) = b1 t; bsucc (b1 t) = b0 (bsucc t).
+bsucc : Bin -> Bin is
+  fn (b : Bin) is
+    BinElim (fn (x : Bin) is Bin end)
+      (b1 bnil)
+      (fn (t : Bin) (ih : Bin) is b1 t end)
+      (fn (t : Bin) (ih : Bin) is b0 ih end)
+      b
+  end
+end
+
+-- THE THEOREM, by induction on b:
+--   bnil:  toNat (b1 bnil) = succ (double 0) = succ 0 = succ (toNat bnil)        -> refl
+--   b0 t:  toNat (b1 t) = succ (double (toNat t)) = succ (toNat (b0 t))          -> refl
+--   b1 t:  toNat (b0 (bsucc t)) = double (toNat (bsucc t))
+--          cong double IH : = double (succ (toNat t)) = succ (succ (double (toNat t)))
+--                          = succ (toNat (b1 t))  (the doubling unfolds to two successors)
+bsuccCorrect : (b : Bin) -> Eq Nat (toNat (bsucc b)) (succ (toNat b)) is
+  fn (b : Bin) is
+    BinElim (fn (x : Bin) is Eq Nat (toNat (bsucc x)) (succ (toNat x)) end)
+      refl
+      (fn (t : Bin) (ih : Eq Nat (toNat (bsucc t)) (succ (toNat t))) is refl end)
+      (fn (t : Bin) (ih : Eq Nat (toNat (bsucc t)) (succ (toNat t))) is
+         cong Nat Nat double (toNat (bsucc t)) (succ (toNat t)) ih end)
+      b
+  end
+end
