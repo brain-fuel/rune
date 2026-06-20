@@ -46,6 +46,11 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 
+## Proven tier — a verified map (association list)
+
+- `ch278_assoc_lookup` — `lookup k (insert k v m) = some v` (lookup-after-insert),
+  via `beqNat` reflexivity transported into the lookup's key comparison.
+
 ## Proven tier — sorting correctness (insertion sort)
 
 - `ch264_insert_length` — `len (insert x xs) = succ (len xs)` (insert adds one).

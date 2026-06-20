@@ -1,0 +1,91 @@
+-- Chapter 278 — a verified association-list map: lookup after insert (proven tier).
+--
+-- A dictionary as a list of key/value pairs, with the fundamental correctness law: looking
+-- up a key just inserted returns its value. insert prepends; lookup walks comparing keys
+-- with a Nat equality test. The proof transports `beqNat k k = true` (reflexivity of the
+-- test) into the lookup's branch on that very comparison. Proof-only.
+--
+--   lookupInsert : (k v : Nat) -> (m : AList) -> Eq (Option Nat) (lookup k (insert k v m)) (some Nat v)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data AList : U is
+  anil  : AList
+| acons : Nat -> Nat -> AList -> AList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+-- structural equality test on Nat.
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+-- the test is reflexive: beqNat n n = true (step reduces to beqNat k k, so returns the IH).
+beqNatRefl : (n : Nat) -> Eq Bool (beqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (beqNat x x) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (beqNat k k) true) is ih end)
+      n
+  end
+end
+
+insert : Nat -> Nat -> AList -> AList is
+  fn (k : Nat) (v : Nat) (m : AList) is acons k v m end
+end
+
+lookup : Nat -> AList -> Option Nat is
+  fn (k : Nat) (m : AList) is
+    AListElim (fn (x : AList) is Option Nat end)
+      (none Nat)
+      (fn (k2 : Nat) (v2 : Nat) (rest : AList) (ih : Option Nat) is
+         BoolElim (fn (c : Bool) is Option Nat end) (some Nat v2) ih (beqNat k k2) end)
+      m
+  end
+end
+
+-- THE THEOREM: lookup k (insert k v m) = some v.
+-- lookup k (acons k v m) = BoolElim (..) (some v) (lookup k m) (beqNat k k). Transporting the
+-- reflexivity proof beqNat k k = true selects the `some v` branch.
+lookupInsert : (k : Nat) -> (v : Nat) -> (m : AList) ->
+               Eq (Option Nat) (lookup k (insert k v m)) (some Nat v) is
+  fn (k : Nat) (v : Nat) (m : AList) is
+    subst Bool true (beqNat k k)
+      (symEq Bool (beqNat k k) true (beqNatRefl k))
+      (fn (c : Bool) is
+         Eq (Option Nat)
+            (BoolElim (fn (d : Bool) is Option Nat end) (some Nat v) (lookup k m) c)
+            (some Nat v) end)
+      refl
+  end
+end
