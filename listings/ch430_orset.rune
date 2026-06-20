@@ -12,6 +12,12 @@
 --   reAddWins      : tombstone the only tag, then add a fresh one -> present again.
 --   addWinsConcurrent : an add concurrent with a remove survives the merge (add wins).
 --
+-- NOTE: ch109_or_set is the FAITHFUL, general OR-Set (token sets over arbitrary tokens,
+-- convergence componentwise from the verified finite-set lattice, addWinsConcurrent). This
+-- chapter is the SIMULATOR-COMPANION: a fixed-arity model the `rune simulate` fold can run
+-- (examples/orset.rune), paralleling ch104/ch413 (G-Set) and ch106/ch415 (PN-Counter). Use
+-- ch109 as the canonical OR-Set proof; this one exists to be SIMULATED, not to supersede it.
+--
 -- Proof-only over the ambient Eq/refl/subst.
 
 data Bool : U is true : Bool | false : Bool end

@@ -358,7 +358,9 @@ equation).
   A remove only tombstones OBSERVED tags. Convergence (OR-join, cong4) + `reAddWins`
   (tombstone the tag then add a fresh one -> present again, which a 2P-Set cannot) +
   `removedAbsent` + `addWinsConcurrent` (an add concurrent with a remove survives the
-  merge - add wins). Scenario theorems by refl (concrete computation).
+  merge - add wins). Scenario theorems by refl (concrete computation). (The FAITHFUL,
+  general OR-Set is ch109 - token sets, arbitrary tokens; ch430 is its simulator-companion
+  fixed-arity model, paralleling ch104/ch413 and ch106/ch415. Use ch109 as canonical.)
 - `ch431_gcounter_inflationary`: the PROOF behind the simulator's inflation check (v3.278).
   Each G-Counter increment is inflationary - `merge s (inc s) = inc s` (so s <= inc s, the
   update never moves a replica down the lattice), via `maxIdem` + `maxSuccR` + `congGC`.
