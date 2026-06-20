@@ -1,0 +1,209 @@
+-- Chapter 314 — mapping succ adds the length to the sum (proven tier).
+--
+-- Incrementing every element raises the total by the number of elements:
+--   sum (mapList succ xs) = len xs + sum xs.
+-- The cons step commutes the head past the tail's running sum (addLeftComm). The add
+-- toolkit (cong/trans + addLeftComm) is reused from ch265. Proof-only.
+--
+--   sumMapSucc : (xs : NatList) -> Eq Nat (sum (mapList sucF xs)) (natAdd (len xs) (sum xs))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addZeroR : (n : Nat) -> Eq Nat (natAdd n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k zero) k) is cong Nat Nat succ (natAdd k zero) k ih end)
+      n
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+addComm : (a : Nat) -> (b : Nat) -> Eq Nat (natAdd a b) (natAdd b a) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k b) (natAdd b k) end)
+      (symEq Nat (natAdd b zero) b (addZeroR b))
+      (fn (k : Nat) (ih : Eq Nat (natAdd k b) (natAdd b k)) is
+         transEq Nat (succ (natAdd k b)) (succ (natAdd b k)) (natAdd b (succ k))
+           (cong Nat Nat succ (natAdd k b) (natAdd b k) ih)
+           (symEq Nat (natAdd b (succ k)) (succ (natAdd b k)) (addSuccR b k)) end)
+      a
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Nat (natAdd (natAdd a b) c) (natAdd a (natAdd b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c))) is
+         cong Nat Nat succ (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) ih end)
+      a
+  end
+end
+
+addToC : Nat -> Nat -> Nat is fn (c : Nat) (z : Nat) is natAdd z c end end
+
+-- left-commutativity: a + (b + c) = b + (a + c).
+addLeftComm : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+              Eq Nat (natAdd a (natAdd b c)) (natAdd b (natAdd a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    transEq Nat (natAdd a (natAdd b c)) (natAdd (natAdd a b) c) (natAdd b (natAdd a c))
+      (symEq Nat (natAdd (natAdd a b) c) (natAdd a (natAdd b c)) (addAssoc a b c))
+      (transEq Nat (natAdd (natAdd a b) c) (natAdd (natAdd b a) c) (natAdd b (natAdd a c))
+         (cong Nat Nat (addToC c) (natAdd a b) (natAdd b a) (addComm a b))
+         (addAssoc b a c))
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+insert : Nat -> NatList -> NatList is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is NatList end)
+      (ncons x nnil)
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end)
+           (ncons x (ncons h rest)) (ncons h ih) (leb x h) end)
+      xs
+  end
+end
+
+sum : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is natAdd h ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs with a BoolElim on (leb x h) in the cons step:
+--   nnil:  sum (insert x nnil) = natAdd x 0 = natAdd x (sum nnil)              -> refl
+--   true:  sum (ncons x (ncons h rest)) = natAdd x (natAdd h (sum rest))       -> refl
+--   false: sum (ncons h (insert x rest)) = natAdd h (sum (insert x rest))
+--          cong (natAdd h) IH : = natAdd h (natAdd x (sum rest))
+--          addLeftComm h x (sum rest) : = natAdd x (natAdd h (sum rest))       (the goal)
+sumInsert : (x : Nat) -> (xs : NatList) -> Eq Nat (sum (insert x xs)) (natAdd x (sum xs)) is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is Eq Nat (sum (insert x w)) (natAdd x (sum w)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (sum (insert x rest)) (natAdd x (sum rest))) is
+         BoolElim (fn (c : Bool) is
+                     Eq Nat
+                       (sum (BoolElim (fn (d : Bool) is NatList end)
+                               (ncons x (ncons h rest)) (ncons h (insert x rest)) c))
+                       (natAdd x (natAdd h (sum rest))) end)
+           refl
+           (transEq Nat
+              (natAdd h (sum (insert x rest)))
+              (natAdd h (natAdd x (sum rest)))
+              (natAdd x (natAdd h (sum rest)))
+              (cong Nat Nat (natAdd h) (sum (insert x rest)) (natAdd x (sum rest)) ih)
+              (addLeftComm h x (sum rest)))
+           (leb x h) end)
+      xs
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+sucF : Nat -> Nat is fn (n : Nat) is succ n end end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  sum (mapList succ nnil) = 0 = natAdd 0 0                               -> refl
+--   ncons: sum (mapList succ (h::t)) = succ (natAdd h (sum (mapList succ t)))
+--          cong (natAdd h) IH then addLeftComm h (len t) (sum t), under one succ.
+sumMapSucc : (xs : NatList) -> Eq Nat (sum (mapList sucF xs)) (natAdd (len xs) (sum xs)) is
+  fn (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Nat (sum (mapList sucF z)) (natAdd (len z) (sum z)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (sum (mapList sucF rest)) (natAdd (len rest) (sum rest))) is
+         cong Nat Nat succ
+           (natAdd h (sum (mapList sucF rest)))
+           (natAdd (len rest) (natAdd h (sum rest)))
+           (transEq Nat
+              (natAdd h (sum (mapList sucF rest)))
+              (natAdd h (natAdd (len rest) (sum rest)))
+              (natAdd (len rest) (natAdd h (sum rest)))
+              (cong Nat Nat (natAdd h) (sum (mapList sucF rest)) (natAdd (len rest) (sum rest)) ih)
+              (addLeftComm h (len rest) (sum rest))) end)
+      xs
+  end
+end
