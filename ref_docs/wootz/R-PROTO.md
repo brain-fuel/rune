@@ -1,5 +1,19 @@
 # R-PROTO — Verified distributed protocols
 
+> **AS BUILT (E4 first slices, v3.230 to v3.233).** The better-than-Winglang
+> simulator landed as `internal/sim` (shadow tooling, a consumer of the kernel,
+> never core): `Simulate(sess, init, merge, value, n, rounds, FaultPolicy)` folds a
+> protocol's OWN verified Rune operations forward under a deterministic FaultPolicy
+> (`Partitioned`, `Duplicate`), and `Render` prints the per-step divergence/
+> convergence trace. The Lambert gate holds by observed behaviour: a G-Counter
+> (join) diverges under a partition and reconverges to the correct total, and is
+> robust to drop+dup (idempotence); a last-writer-wins register (no join) stays
+> divergent. Surfaced as `rune simulate <file> [replicas]` (convention: init / merge
+> / value / op0..opN) with examples/gcounter.rune + examples/lww.rune. The E3
+> all-P/all-fuel soundness invariant (observable alphabet respected everywhere)
+> landed as listing ch229. REMAINING: preflight(proof)/inflight(projection) tie to
+> the BEAM runtime (D5/B3), Crash policy, N-way scenarios, `protocol ... end` sugar.
+
 > Roadmap node **E3** (`E3 [I] verified protocols (consensus/repl/CRDT) +
 > projection to actors ⇐ E2, D5`), the **M7/M0 demonstrator**. Telos 4:
 > "verified algebra over distributed systems… used to specify and *prove*
