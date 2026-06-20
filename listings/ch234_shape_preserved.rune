@@ -1,0 +1,65 @@
+-- Chapter 234 — shapes PRESERVED: a machine-checked length-preservation proof (D4 design).
+--
+-- ch233 made equal-length an INPUT contract (discharged at the call). The other half of
+-- "shapes proven" is the OUTPUT guarantee: an operation that provably keeps the shape. A
+-- map over a list returns a list of the SAME length — and here that is not asserted, it is
+-- PROVEN, by induction, machine-checked by elaboration (no runtime, no test data):
+--
+--   lenPreserved : (xs : NatList) -> Eq Nat (len (mapInc xs)) (len xs)
+--
+-- This is the proven-tier counterpart to the foreign numpy work: where numpy's shape is
+-- guarded at the boundary, the in-language transform's shape is a theorem. Proof-only.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are the ambient propositional equality, as in ch03/ch07.)
+
+-- congruence, derived from subst: equals map to equals under any f.
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- the shape-preserving transform: increment every element (length untouched).
+mapInc : NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (succ h) ih end)
+      xs
+  end
+end
+
+-- THE THEOREM: mapInc preserves length, by induction on the list.
+--   nnil:  len (mapInc nnil) = len nnil = 0           -> refl
+--   ncons: len (mapInc (ncons h rest)) = succ (len (mapInc rest))
+--          len (ncons h rest)          = succ (len rest)
+--          so succ-congruence on the IH closes it.
+lenPreserved : (xs : NatList) -> Eq Nat (len (mapInc xs)) (len xs) is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Eq Nat (len (mapInc x)) (len x) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (len (mapInc rest)) (len rest)) is
+         cong Nat Nat succ (len (mapInc rest)) (len rest) ih end)
+      xs
+  end
+end
