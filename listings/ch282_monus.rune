@@ -1,0 +1,51 @@
+-- Chapter 282 — truncated subtraction (monus): basic laws (proven tier).
+--
+-- monus is subtraction clamped at zero (0 - m = 0). Two basic laws, both by induction:
+-- subtracting zero is the identity, and self-subtraction is zero. monus peels both
+-- arguments in lockstep, so each step reduces definitionally to its predecessor.
+-- Proof-only.
+--
+--   monusZeroR : (n : Nat) -> Eq Nat (monus n zero) n
+--   monusSelf  : (n : Nat) -> Eq Nat (monus n n) zero
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+-- monus 0 m = 0 ; monus (succ k) 0 = succ k ; monus (succ k) (succ j) = monus k j.
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (monK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is monK j end) m
+         end
+       end)
+      a b
+  end
+end
+
+-- subtracting zero is the identity (each branch reduces by refl).
+monusZeroR : (n : Nat) -> Eq Nat (monus n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (monus x zero) x end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (monus k zero) k) is refl end)
+      n
+  end
+end
+
+-- self-subtraction is zero (the step reduces monus (succ k) (succ k) to monus k k = IH).
+monusSelf : (n : Nat) -> Eq Nat (monus n n) zero is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (monus x x) zero end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (monus k k) zero) is ih end)
+      n
+  end
+end
