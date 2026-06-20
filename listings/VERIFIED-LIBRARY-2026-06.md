@@ -166,6 +166,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch270_mul_distrib` — four-term interchange + **left distributivity** (`a*(b+c) = a*b + a*c`).
 - `ch271_mul_assoc` — right distributivity + **associativity of multiplication** (`(a*b)*c = a*(b*c)`)
 - `ch347_pow_add` — exponents add: `pow b (m+n) = pow b m * pow b n`.
+- `ch348_pow_one_base` — one to any power: `pow 1 n = 1`.
   — the Nat commutative semiring core (comm + assoc + distrib + identities) is now hermetic.
 
 ## Proven tier — booleans & Option
