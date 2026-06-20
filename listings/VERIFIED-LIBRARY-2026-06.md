@@ -322,6 +322,11 @@ equation).
   hypotheses): `orderIndependent` (different gossip orders converge), `gossipRobust`
   (re-merge is a no-op), `duplicateSafe` (re-delivery is absorbed). Concrete CRDTs inherit
   all three by passing their own laws; the OR-join instantiation (`orSet*`) witnesses it.
+- `ch424_vector_clock`: vector clocks + the CAUSAL order. Decidable `lte` with `lteRefl`/
+  `lteTrans` (nested induction, off-diagonal cases via `everythingTrue` boolean explosion);
+  the happens-before order `vcLeq` (pointwise <=) proven a partial order (`vcLeqRefl`/
+  `vcLeqTrans`); and `tickAdvances0`/`tickAdvances1` - a tick moves the clock strictly
+  forward, so local events are causally ordered (what makes a vector clock track causality).
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl

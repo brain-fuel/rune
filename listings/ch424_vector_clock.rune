@@ -1,0 +1,200 @@
+-- Chapter 424, Vector clocks and the causal order (E3/E4).
+--
+-- The CRDTs (ch72/413/415/422) converge but carry no CAUSALITY. A vector clock is the
+-- standard mechanism that does: one counter per replica, where `tick` bumps a replica's
+-- own entry and the partial order `vcLeq` (pointwise <=) is the happens-before relation.
+-- This chapter proves the laws that make a vector clock a correct causality tracker:
+--
+--   vcLeqRefl   : the causal order is reflexive.
+--   vcLeqTrans  : the causal order is transitive (a genuine partial order).
+--   tickAdvances0/1 : a tick moves the clock strictly forward in the causal order -
+--                     i.e. the event after a tick causally FOLLOWS the event before it.
+--
+-- Pointwise <= is the join's induced order (a vector-clock merge is two G-Counters, so it
+-- is a CvRDT inheriting ch423); causality is the order that comes WITH it. Proof-only.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data VC   : U is vc : Nat -> Nat -> VC end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+-- the equational toolkit.
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (w : A) is Eq A w x end) refl
+  end
+end
+
+-- ex-falso into a boolean equality: from false = true, any boolean is true. The only
+-- explosion the engine admits (BoolElim does not large-eliminate into U).
+everythingTrue : Eq Bool false true -> (b : Bool) -> Eq Bool b true is
+  fn (h : Eq Bool false true) (b : Bool) is
+    subst Bool false true h
+      (fn (w : Bool) is Eq Bool b (BoolElim (fn (z : Bool) is Bool end) true b w) end)
+      refl
+  end
+end
+
+-- both conjuncts hold when a conjunction does (and the converse builder).
+andTrueL : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (andB w b) true -> Eq Bool w true end)
+      (fn (h : Eq Bool (andB true b) true) is refl end)
+      (fn (h : Eq Bool (andB false b) true) is h end)
+      a
+  end
+end
+
+andTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (andB w b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool (andB true b) true) is h end)
+      (fn (h : Eq Bool (andB false b) true) is
+         BoolElim (fn (w : Bool) is Eq Bool w true end) refl h b end)
+      a
+  end
+end
+
+andTrue : (a : Bool) -> (b : Bool) -> Eq Bool a true -> Eq Bool b true -> Eq Bool (andB a b) true is
+  fn (a : Bool) (b : Bool) (ha : Eq Bool a true) (hb : Eq Bool b true) is
+    subst Bool true a (symEq Bool a true ha)
+      (fn (w : Bool) is Eq Bool (andB w b) true end)
+      (subst Bool true b (symEq Bool b true hb)
+         (fn (w : Bool) is Eq Bool (andB true w) true end) refl)
+  end
+end
+
+-- decidable <= on Nat (0 <= b; succ k <= succ j iff k <= j; succ k <= 0 is false).
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Bool end)
+      (fn (b : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Bool end) false (fn (j : Nat) (ihj : Bool) is ih j end) b
+         end
+       end)
+      a
+  end
+end
+
+lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Eq Bool (lte w w) true end) refl (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end) n
+  end
+end
+
+lteSuccSelf : (n : Nat) -> Eq Bool (lte n (succ n)) true is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Eq Bool (lte w (succ w)) true end) refl
+      (fn (k : Nat) (ih : Eq Bool (lte k (succ k)) true) is ih end) n
+  end
+end
+
+-- transitivity of <=, by induction on a then casing b and c (absurd off-diagonal cases
+-- discharged by everythingTrue).
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+    Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (wa : Nat) is (b : Nat) -> (c : Nat) ->
+         Eq Bool (lte wa b) true -> Eq Bool (lte b c) true -> Eq Bool (lte wa c) true end)
+      (fn (b : Nat) (c : Nat) (h1 : Eq Bool (lte zero b) true) (h2 : Eq Bool (lte b c) true) is refl end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> (c : Nat) ->
+             Eq Bool (lte k b) true -> Eq Bool (lte b c) true -> Eq Bool (lte k c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (wb : Nat) is (c : Nat) ->
+                Eq Bool (lte (succ k) wb) true -> Eq Bool (lte wb c) true ->
+                Eq Bool (lte (succ k) c) true end)
+             (fn (c : Nat)
+                 (h1 : Eq Bool (lte (succ k) zero) true)
+                 (h2 : Eq Bool (lte zero c) true) is everythingTrue h1 (lte (succ k) c) end)
+             (fn (m : Nat)
+                 (ihb : (c : Nat) ->
+                    Eq Bool (lte (succ k) m) true -> Eq Bool (lte m c) true ->
+                    Eq Bool (lte (succ k) c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (wc : Nat) is
+                       Eq Bool (lte (succ k) (succ m)) true -> Eq Bool (lte (succ m) wc) true ->
+                       Eq Bool (lte (succ k) wc) true end)
+                    (fn (h1 : Eq Bool (lte (succ k) (succ m)) true)
+                        (h2 : Eq Bool (lte (succ m) zero) true) is
+                       everythingTrue h2 (lte (succ k) zero) end)
+                    (fn (p : Nat)
+                        (ihc : Eq Bool (lte (succ k) (succ m)) true -> Eq Bool (lte (succ m) p) true ->
+                           Eq Bool (lte (succ k) p) true) is
+                       fn (h1 : Eq Bool (lte (succ k) (succ m)) true)
+                          (h2 : Eq Bool (lte (succ m) (succ p)) true) is
+                         ih m p h1 h2 end end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ===== the vector clock and its causal order =====
+
+c0 : VC -> Nat is fn (v : VC) is VCElim (fn (w : VC) is Nat end) (fn (x : Nat) (y : Nat) is x end) v end end
+c1 : VC -> Nat is fn (v : VC) is VCElim (fn (w : VC) is Nat end) (fn (x : Nat) (y : Nat) is y end) v end end
+
+-- the happens-before (causal precedence) order: pointwise <= on every replica's counter.
+vcLeq : VC -> VC -> Bool is
+  fn (x : VC) (y : VC) is andB (lte (c0 x) (c0 y)) (lte (c1 x) (c1 y)) end
+end
+
+-- tick replica 0's / replica 1's own entry (the local-event operation).
+tick0 : VC -> VC is fn (v : VC) is vc (succ (c0 v)) (c1 v) end end
+tick1 : VC -> VC is fn (v : VC) is vc (c0 v) (succ (c1 v)) end end
+
+-- the causal order is reflexive.
+vcLeqRefl : (v : VC) -> Eq Bool (vcLeq v v) true is
+  fn (v : VC) is
+    VCElim (fn (w : VC) is Eq Bool (vcLeq w w) true end)
+      (fn (x : Nat) (y : Nat) is andTrue (lte x x) (lte y y) (lteRefl x) (lteRefl y) end)
+      v
+  end
+end
+
+-- the causal order is transitive (so happens-before is a genuine partial order).
+vcLeqTrans : (x : VC) -> (y : VC) -> (z : VC) ->
+    Eq Bool (vcLeq x y) true -> Eq Bool (vcLeq y z) true -> Eq Bool (vcLeq x z) true is
+  fn (x : VC) (y : VC) (z : VC)
+     (hxy : Eq Bool (vcLeq x y) true) (hyz : Eq Bool (vcLeq y z) true) is
+    andTrue (lte (c0 x) (c0 z)) (lte (c1 x) (c1 z))
+      (lteTrans (c0 x) (c0 y) (c0 z)
+         (andTrueL (lte (c0 x) (c0 y)) (lte (c1 x) (c1 y)) hxy)
+         (andTrueL (lte (c0 y) (c0 z)) (lte (c1 y) (c1 z)) hyz))
+      (lteTrans (c1 x) (c1 y) (c1 z)
+         (andTrueR (lte (c0 x) (c0 y)) (lte (c1 x) (c1 y)) hxy)
+         (andTrueR (lte (c0 y) (c0 z)) (lte (c1 y) (c1 z)) hyz))
+  end
+end
+
+-- a tick advances the clock in the causal order: the post-tick event happens-after the
+-- pre-tick one. This is what makes a vector clock track causality - local events are
+-- causally ordered by the ticking replica.
+tickAdvances0 : (v : VC) -> Eq Bool (vcLeq v (tick0 v)) true is
+  fn (v : VC) is
+    VCElim (fn (w : VC) is Eq Bool (vcLeq w (tick0 w)) true end)
+      (fn (x : Nat) (y : Nat) is andTrue (lte x (succ x)) (lte y y) (lteSuccSelf x) (lteRefl y) end)
+      v
+  end
+end
+
+tickAdvances1 : (v : VC) -> Eq Bool (vcLeq v (tick1 v)) true is
+  fn (v : VC) is
+    VCElim (fn (w : VC) is Eq Bool (vcLeq w (tick1 w)) true end)
+      (fn (x : Nat) (y : Nat) is andTrue (lte x x) (lte y (succ y)) (lteRefl x) (lteSuccSelf y) end)
+      v
+  end
+end
