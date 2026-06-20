@@ -1,0 +1,101 @@
+-- Chapter 259 — `all` is a monoid homomorphism over append (proven tier).
+--
+-- all p = foldr andB true carries the list monoid (append, nnil) to the boolean-and monoid
+-- (andB, true): the predicate holds of a concatenation iff it holds of each part. The cons
+-- step re-brackets with associativity of andB. A boolean analogue of ch239's sum
+-- homomorphism. Proof-only.
+--
+--   allAppend : (p)(xs ys) -> Eq Bool (all p (append xs ys)) (andB (all p xs) (all p ys))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+andAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+           Eq Bool (andB (andB a b) c) (andB a (andB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB (andB x b) c) (andB x (andB b c)) end)
+      refl refl a
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+all : (Nat -> Bool) -> NatList -> Bool is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (x : NatList) is Bool end)
+      true
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is andB (p h) ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  all p (append nnil ys) = all p ys = andB true (all p ys)                  -> refl
+--   ncons: LHS = andB (p h) (all p (append rest ys))
+--          RHS = andB (andB (p h) (all p rest)) (all p ys)
+--          cong (andB (p h)) IH : LHS = andB (p h) (andB (all p rest) (all p ys))
+--          sym (andAssoc (p h) ...) : that = RHS ; chained by transitivity.
+allAppend : (p : Nat -> Bool) -> (xs : NatList) -> (ys : NatList) ->
+            Eq Bool (all p (append xs ys)) (andB (all p xs) (all p ys)) is
+  fn (p : Nat -> Bool) (xs : NatList) (ys : NatList) is
+    NatListElim
+      (fn (x : NatList) is Eq Bool (all p (append x ys)) (andB (all p x) (all p ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq Bool (all p (append rest ys)) (andB (all p rest) (all p ys))) is
+         transEq Bool
+           (andB (p h) (all p (append rest ys)))
+           (andB (p h) (andB (all p rest) (all p ys)))
+           (andB (andB (p h) (all p rest)) (all p ys))
+           (cong Bool Bool (andB (p h)) (all p (append rest ys)) (andB (all p rest) (all p ys)) ih)
+           (symEq Bool
+              (andB (andB (p h) (all p rest)) (all p ys))
+              (andB (p h) (andB (all p rest) (all p ys)))
+              (andAssoc (p h) (all p rest) (all p ys))) end)
+      xs
+  end
+end
