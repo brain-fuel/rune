@@ -1,0 +1,63 @@
+-- Chapter 384 — isNone is the negation of isSome, and map preserves definedness (proven tier).
+--
+--   isNoneNotSome : isNone A m = notB (isSome A m)
+--   mapIsSome     : isSome B (omap A B f m) = isSome A m
+--
+-- The first says the two definedness predicates are complementary; the second says mapping
+-- a function over an Option never creates or destroys a value. By case analysis. Proof-only.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+isSome : (A : U) -> Option A -> Bool is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Bool end) false (fn (a : A) is true end) m
+  end
+end
+
+isNone : (A : U) -> Option A -> Bool is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Bool end) true (fn (a : A) is false end) m
+  end
+end
+
+omap : (A : U) -> (B : U) -> (A -> B) -> Option A -> Option B is
+  fn (A : U) (B : U) (f : A -> B) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Option B end)
+      (none B)
+      (fn (a : A) is some B (f a) end)
+      m
+  end
+end
+
+isNoneNotSome : (A : U) -> (m : Option A) -> Eq Bool (isNone A m) (notB (isSome A m)) is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Eq Bool (isNone A x) (notB (isSome A x)) end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
+
+mapIsSome : (A : U) -> (B : U) -> (f : A -> B) -> (m : Option A) ->
+            Eq Bool (isSome B (omap A B f m)) (isSome A m) is
+  fn (A : U) (B : U) (f : A -> B) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Eq Bool (isSome B (omap A B f x)) (isSome A x) end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
