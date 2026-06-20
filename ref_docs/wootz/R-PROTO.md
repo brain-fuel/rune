@@ -1,18 +1,24 @@
 # R-PROTO — Verified distributed protocols
 
-> **AS BUILT (E4 first slices, v3.230 to v3.233).** The better-than-Winglang
+> **AS BUILT (E4 first slices, v3.230 to v3.240).** The better-than-Winglang
 > simulator landed as `internal/sim` (shadow tooling, a consumer of the kernel,
 > never core): `Simulate(sess, init, merge, value, n, rounds, FaultPolicy)` folds a
 > protocol's OWN verified Rune operations forward under a deterministic FaultPolicy
-> (`Partitioned`, `Duplicate`), and `Render` prints the per-step divergence/
-> convergence trace. The Lambert gate holds by observed behaviour: a G-Counter
-> (join) diverges under a partition and reconverges to the correct total, and is
-> robust to drop+dup (idempotence); a last-writer-wins register (no join) stays
-> divergent. Surfaced as `rune simulate <file> [replicas]` (convention: init / merge
-> / value / op0..opN) with examples/gcounter.rune + examples/lww.rune. The E3
-> all-P/all-fuel soundness invariant (observable alphabet respected everywhere)
-> landed as listing ch229. REMAINING: preflight(proof)/inflight(projection) tie to
-> the BEAM runtime (D5/B3), Crash policy, N-way scenarios, `protocol ... end` sugar.
+> (`Partitioned`, `Duplicate`, `Crashed`), and `Render` prints the per-step trace.
+> The gates hold by observed behaviour: SAFETY (a G-Counter diverges under a
+> partition and reconverges to the correct total), ROBUSTNESS (drop+dup leave the
+> outcome unchanged, idempotence), DURABILITY (a crashed replica recovers without
+> losing its pre-crash increment), while a last-writer-wins register stays
+> divergent. `Diagnose` is the observational CvRDT LAW LINTER (samples states,
+> checks merge commutativity/idempotence/associativity, names the violated law with
+> a witness); `Stabilize` is the LIVENESS check (reaches a global fixpoint under
+> fair ring gossip within n-1 rounds for a join, never for a non-join). Surfaced as
+> `rune simulate <file> [replicas]` (convention init/merge/value/op0..opN, prints
+> the trace + law report + verdict) with examples/gcounter.rune (proves convergence
+> AND simulates from one source), examples/gcounter3.rune (N-way), examples/lww.rune
+> (non-CvRDT). The E3 all-P/all-fuel soundness invariant landed as listing ch229.
+> REMAINING: preflight(proof)/inflight(projection) tie to the BEAM runtime (D5/B3),
+> `protocol ... end` surface sugar + a `deploy` verb.
 
 > Roadmap node **E3** (`E3 [I] verified protocols (consensus/repl/CRDT) +
 > projection to actors ⇐ E2, D5`), the **M7/M0 demonstrator**. Telos 4:
