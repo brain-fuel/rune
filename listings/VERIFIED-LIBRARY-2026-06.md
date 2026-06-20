@@ -70,6 +70,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch240_map_append` — `mapList f (xs ++ ys) = mapList f xs ++ mapList f ys`.
 - `ch314_sum_map_succ` — mapping succ adds the length to the sum: `sum (map succ xs) = len xs + sum xs`.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
+- `ch330_nonempty` — non-empty list with a STRUCTURALLY total head (no precondition); conversion is never empty.
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
 - `ch322_filter_length` — filter never increases length: `len (filter p xs) <= len xs`.
 - `ch323_filter_append` — filter distributes over append: `filter p (xs++ys) = filter p xs ++ filter p ys`.

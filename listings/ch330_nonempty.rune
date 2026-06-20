@@ -1,0 +1,65 @@
+-- Chapter 330 — a non-empty list with a structurally total head (proven tier).
+--
+-- Where ch249 made head total via a non-emptiness PROOF, here non-emptiness is built into
+-- the TYPE: a NEList always has a head, so nehead is total with no precondition. Its
+-- conversion to an ordinary list is provably never empty. Proof-only (+ total functions).
+--
+--   neNonEmpty : (ne : NEList) -> Eq Bool (isEmpty (neToList ne)) false
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- a non-empty list: always a head plus a (possibly empty) tail.
+data NEList : U is
+  necons : Nat -> NatList -> NEList
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+-- total head: no precondition needed, the type guarantees a head.
+nehead : NEList -> Nat is
+  fn (ne : NEList) is
+    NEListElim (fn (x : NEList) is Nat end)
+      (fn (h : Nat) (t : NatList) is h end)
+      ne
+  end
+end
+
+neToList : NEList -> NatList is
+  fn (ne : NEList) is
+    NEListElim (fn (x : NEList) is NatList end)
+      (fn (h : Nat) (t : NatList) is ncons h t end)
+      ne
+  end
+end
+
+isEmpty : NatList -> Bool is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Bool end)
+      true
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is false end)
+      xs
+  end
+end
+
+-- the conversion is always non-empty (it is a cons).
+neNonEmpty : (ne : NEList) -> Eq Bool (isEmpty (neToList ne)) false is
+  fn (ne : NEList) is
+    NEListElim (fn (x : NEList) is Eq Bool (isEmpty (neToList x)) false end)
+      (fn (h : Nat) (t : NatList) is refl end)
+      ne
+  end
+end
