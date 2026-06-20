@@ -572,6 +572,31 @@ func TestListingsGenericReplicaBeam(t *testing.T) {
 	if want := "succ (succ (succ (succ zero)))"; strings.TrimSpace(string(got)) != want {
 		t.Fatalf("generic replica on BEAM printed %q, want %q (two G-Counter replicas via the generic serveG should converge)", got, want)
 	}
+	// The SAME serveG, deployed at a G-Set: confirm the projection RUNS for a second CvRDT,
+	// not merely type-checks. Two replicas add different elements and converge to the union.
+	pg, err := s.EmitProgram("mainGS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outg, err := codegen.Beam{}.Emit(pg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fg := filepath.Join(t.TempDir(), "ch436gs.erl")
+	if err := os.WriteFile(fg, []byte(outg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gotg, err := exec.Command("escript", fg).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("escript run (mainGS) failed: %v\n%s", err, stderr)
+	}
+	if want := "succ (succ (succ (succ zero)))"; strings.TrimSpace(string(gotg)) != want {
+		t.Fatalf("generic G-Set replica on BEAM printed %q, want %q (the same serveG should run for a G-Set too)", gotg, want)
+	}
 }
 
 // TestListingsOTPFaultLiveBeam is the D5 / R-OTP Layer-R2 LIVE-fault gate: the

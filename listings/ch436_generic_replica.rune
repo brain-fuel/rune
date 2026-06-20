@@ -84,10 +84,50 @@ gsMerge : GS -> GS -> GS is fn (x : GS) (y : GS) is gset (orF (s0 x) (s0 y)) (or
 gsAdd0 : GS -> GS is fn (s : GS) is gset on (s1 s) end end
 gsCard : Flag -> Nat -> Nat is fn (f : Flag) (acc : Nat) is FlagElim (fn (w : Flag) is Nat end) (succ acc) acc f end end
 gsValue : GS -> Nat is fn (s : GS) is gsCard (s0 s) (gsCard (s1 s) zero) end end
+gsAdd1 : GS -> GS is fn (s : GS) is gset (s0 s) on end end
 gsInit : GS is gset off off end
 
 -- the SAME generic loop, instantiated at the G-Set: the projection is not counter-specific.
 gsetReplica : GS -> IO Unit is fn (s : GS) is serveG GS gsMerge gsAdd0 gsValue s end end
+
+-- the SAME deployment at the G-SET, run LIVE: two replicas each add a different element
+-- via the generic serveG, gossip, and converge to the union (cardinality 2 each, sum 4).
+-- This confirms the generic projection RUNS for a second CvRDT, not merely type-checks.
+mainGS : IO Nat is
+  bindIO (Pid GS) Nat (primSelf GS) (fn (selfGS : Pid GS) is
+    bindIO (Pid Nat) Nat (primSelf Nat) (fn (selfNat : Pid Nat) is
+      bindIO (Pid (Msg GS)) Nat (primSpawn (Msg GS) (fn (sa : Pid (Msg GS)) is serveG GS gsMerge gsAdd0 gsValue gsInit end)) (fn (a : Pid (Msg GS)) is
+        bindIO (Pid (Msg GS)) Nat (primSpawn (Msg GS) (fn (sb : Pid (Msg GS)) is serveG GS gsMerge gsAdd1 gsValue gsInit end)) (fn (b : Pid (Msg GS)) is
+          bindIO Unit Nat (primSend (Msg GS) a (tick GS)) (fn (u1 : Unit) is
+            bindIO Unit Nat (primSend (Msg GS) b (tick GS)) (fn (u2 : Unit) is
+              bindIO Unit Nat (primSend (Msg GS) a (getState GS selfGS)) (fn (u3 : Unit) is
+                bindIO GS Nat (primReceive GS) (fn (sA : GS) is
+                  bindIO Unit Nat (primSend (Msg GS) b (getState GS selfGS)) (fn (u4 : Unit) is
+                    bindIO GS Nat (primReceive GS) (fn (sB : GS) is
+                      bindIO Unit Nat (primSend (Msg GS) a (mergeM GS sB)) (fn (u5 : Unit) is
+                        bindIO Unit Nat (primSend (Msg GS) b (mergeM GS sA)) (fn (u6 : Unit) is
+                          bindIO Unit Nat (primSend (Msg GS) a (report GS selfNat)) (fn (u7 : Unit) is
+                            bindIO Nat Nat (primReceive Nat) (fn (vA : Nat) is
+                              bindIO Unit Nat (primSend (Msg GS) b (report GS selfNat)) (fn (u8 : Unit) is
+                                bindIO Nat Nat (primReceive Nat) (fn (vB : Nat) is
+                                  pureIO Nat (add vA vB)
+                                end)
+                              end)
+                            end)
+                          end)
+                        end)
+                      end)
+                    end)
+                  end)
+                end)
+              end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end
 
 -- the deployed scenario: two G-Counter replicas via the generic serveG, gossip, converge.
 main : IO Nat is

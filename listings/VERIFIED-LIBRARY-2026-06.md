@@ -395,7 +395,9 @@ equation).
   `Msg : U -> U`. Deployed live at the G-Counter (two replicas converge, sum 4) AND
   type-checked at a G-Set (`gsetReplica`), so the protocol->actors projection is uniform
   across CvRDTs - the general projection as a LIBRARY (higher-order function), not gated
-  surface syntax. Runs on escript (TestListingsGenericReplicaBeam).
+  surface syntax. BOTH `main` (G-Counter) and `mainGS` (G-Set) deploy and RUN live on
+  escript via the same serveG (TestListingsGenericReplicaBeam) - genericity confirmed at
+  runtime for two distinct CRDTs, not merely type-checked.
   (NOTE: quorum intersection / consensus agreement is already proven for ARBITRARY n by
   ch110 (fixed {0,1,2}) and ch112 (general, via pigeonhole counting); no N=3 restatement is
   added here - that would be Rule-5 redundancy.)
