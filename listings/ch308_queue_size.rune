@@ -1,0 +1,82 @@
+-- Chapter 308 — a two-list queue: enqueue increments the size (proven tier).
+--
+-- A FIFO queue as a front list and a (reversed) back list; its size is the sum of the two
+-- lengths. Enqueuing pushes onto the back, so the size goes up by one — proven via the
+-- right-successor law of addition. Proof-only.
+--
+--   enqueueSize : (x : Nat) -> (q : Queue) -> Eq Nat (qsize (enqueue x q)) (succ (qsize q))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+data Queue : U is
+  mkQ : NatList -> NatList -> Queue
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+qsize : Queue -> Nat is
+  fn (q : Queue) is
+    QueueElim (fn (x : Queue) is Nat end)
+      (fn (f : NatList) (b : NatList) is natAdd (len f) (len b) end)
+      q
+  end
+end
+
+enqueue : Nat -> Queue -> Queue is
+  fn (x : Nat) (q : Queue) is
+    QueueElim (fn (z : Queue) is Queue end)
+      (fn (f : NatList) (b : NatList) is mkQ f (ncons x b) end)
+      q
+  end
+end
+
+-- THE THEOREM, by destructuring the queue:
+--   mkQ f b: qsize (enqueue x (mkQ f b)) = natAdd (len f) (succ (len b))
+--          = succ (natAdd (len f) (len b)) = succ (qsize (mkQ f b))   [addSuccR]
+enqueueSize : (x : Nat) -> (q : Queue) -> Eq Nat (qsize (enqueue x q)) (succ (qsize q)) is
+  fn (x : Nat) (q : Queue) is
+    QueueElim (fn (z : Queue) is Eq Nat (qsize (enqueue x z)) (succ (qsize z)) end)
+      (fn (f : NatList) (b : NatList) is addSuccR (len f) (len b) end)
+      q
+  end
+end

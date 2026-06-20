@@ -85,6 +85,10 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
 - `ch288_elem_snoc` — appending x makes it a member: `elem x (snoc xs x) = true`.
 
+## Proven tier — a verified queue
+
+- `ch308_queue_size` — two-list FIFO queue: `qsize (enqueue x q) = succ (qsize q)`.
+
 ## Proven tier — a verified map (association list)
 
 - `ch278_assoc_lookup` — `lookup k (insert k v m) = some v` (lookup-after-insert),
