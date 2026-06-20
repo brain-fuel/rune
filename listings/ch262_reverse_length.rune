@@ -1,0 +1,115 @@
+-- Chapter 262 — reverse preserves length, machine-checked (proven tier).
+--
+-- reverse (via append: reverse (h::rest) = reverse rest ++ [h]) keeps the length. The cons
+-- step uses the append-length law and `natAdd x 1 = succ x` to turn the appended singleton
+-- into a successor. Proof-only.
+--
+--   revLen : (xs : NatList) -> Eq Nat (len (reverse xs)) (len xs)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+-- natAdd x 1 = succ x, by induction on x.
+addOneR : (x : Nat) -> Eq Nat (natAdd x (succ zero)) (succ x) is
+  fn (x : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ zero)) (succ k) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ zero)) (succ k)) is
+         cong Nat Nat succ (natAdd k (succ zero)) (succ k) ih end)
+      x
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+lenAppend : (xs : NatList) -> (ys : NatList) -> Eq Nat (len (append xs ys)) (natAdd (len xs) (len ys)) is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is Eq Nat (len (append x ys)) (natAdd (len x) (len ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (len (append rest ys)) (natAdd (len rest) (len ys))) is
+         cong Nat Nat succ (len (append rest ys)) (natAdd (len rest) (len ys)) ih end)
+      xs
+  end
+end
+
+reverse : NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is append ih (ncons h nnil) end)
+      xs
+  end
+end
+
+addAtOne : Nat -> Nat is fn (z : Nat) is natAdd z (succ zero) end end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  len (reverse nnil) = 0 = len nnil                                     -> refl
+--   ncons: len (reverse (h::rest)) = len (append (reverse rest) (ncons h nnil))
+--                                  = natAdd (len (reverse rest)) 1               [lenAppend]
+--          cong (\z -> z + 1) IH : that = natAdd (len rest) 1
+--          addOneR (len rest)    : that = succ (len rest) = len (h::rest)
+--          chained by transitivity.
+revLen : (xs : NatList) -> Eq Nat (len (reverse xs)) (len xs) is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Eq Nat (len (reverse x)) (len x) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (len (reverse rest)) (len rest)) is
+         transEq Nat
+           (len (append (reverse rest) (ncons h nnil)))
+           (natAdd (len rest) (succ zero))
+           (succ (len rest))
+           (transEq Nat
+              (len (append (reverse rest) (ncons h nnil)))
+              (natAdd (len (reverse rest)) (succ zero))
+              (natAdd (len rest) (succ zero))
+              (lenAppend (reverse rest) (ncons h nnil))
+              (cong Nat Nat addAtOne (len (reverse rest)) (len rest) ih))
+           (addOneR (len rest)) end)
+      xs
+  end
+end
