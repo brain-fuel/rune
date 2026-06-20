@@ -327,6 +327,10 @@ equation).
   the happens-before order `vcLeq` (pointwise <=) proven a partial order (`vcLeqRefl`/
   `vcLeqTrans`); and `tickAdvances0`/`tickAdvances1` - a tick moves the clock strictly
   forward, so local events are causally ordered (what makes a vector clock track causality).
+- `ch425_vc_concurrency`: completes the causal order to a PARTIAL order (`lteAntisym` via
+  ex-falso-into-Eq-Nat by `cong`, then `vcLeqAntisym`) and proves CONCURRENCY DETECTION:
+  two clocks that each ticked a different replica are concurrent (`vcLeq` false both ways,
+  by refl) - the capability a scalar Lamport clock lacks (it would falsely order them).
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl

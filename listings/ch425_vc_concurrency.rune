@@ -1,0 +1,151 @@
+-- Chapter 425, Vector clocks: antisymmetry and concurrency detection (E3/E4).
+--
+-- ch424 proved happens-before (vcLeq, pointwise <=) reflexive and transitive. This chapter
+-- completes it to a genuine PARTIAL order with antisymmetry, and proves the feature that
+-- makes vector clocks strictly more powerful than Lamport (scalar) clocks: they DETECT
+-- CONCURRENCY - two events with neither happening-before the other.
+--
+--   lteAntisym     : a <= b and b <= a imply a = b (ex-falso into Eq Nat via cong).
+--   vcLeqAntisym   : the causal order is antisymmetric (so it is a partial order).
+--   concurrentAB/BA: two clocks that each ticked a different replica are CONCURRENT
+--                    (neither <= the other) - a Lamport clock would falsely order them.
+--
+-- Proof-only over the ambient Eq/refl/subst.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data VC   : U is vc : Nat -> Nat -> VC end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+andTrueL : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (andB w b) true -> Eq Bool w true end)
+      (fn (h : Eq Bool (andB true b) true) is refl end)
+      (fn (h : Eq Bool (andB false b) true) is h end)
+      a
+  end
+end
+
+andTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (andB w b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool (andB true b) true) is h end)
+      (fn (h : Eq Bool (andB false b) true) is
+         BoolElim (fn (w : Bool) is Eq Bool w true end) refl h b end)
+      a
+  end
+end
+
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Bool end)
+      (fn (b : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Bool end) false (fn (j : Nat) (ihj : Bool) is ih j end) b
+         end
+       end)
+      a
+  end
+end
+
+-- antisymmetry of <=: a <= b and b <= a force a = b. Off-diagonal cases are vacuous - a
+-- false hypothesis is exploded into the required Eq Nat by `cong` with a tailored function
+-- (f false = the goal's LHS, f true = its RHS), the Eq-Nat analogue of everythingTrue.
+lteAntisym : (a : Nat) -> (b : Nat) ->
+    Eq Bool (lte a b) true -> Eq Bool (lte b a) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim (fn (wa : Nat) is (b : Nat) ->
+        Eq Bool (lte wa b) true -> Eq Bool (lte b wa) true -> Eq Nat wa b end)
+      (fn (b : Nat) is
+         NatElim (fn (wb : Nat) is
+             Eq Bool (lte zero wb) true -> Eq Bool (lte wb zero) true -> Eq Nat zero wb end)
+           (fn (h1 : Eq Bool (lte zero zero) true) (h2 : Eq Bool (lte zero zero) true) is refl end)
+           (fn (m : Nat)
+               (ihb : Eq Bool (lte zero m) true -> Eq Bool (lte m zero) true -> Eq Nat zero m) is
+              fn (h1 : Eq Bool (lte zero (succ m)) true) (h2 : Eq Bool (lte (succ m) zero) true) is
+                cong Bool Nat (fn (w : Bool) is BoolElim (fn (z : Bool) is Nat end) (succ m) zero w end)
+                  false true h2 end end)
+           b
+       end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> Eq Bool (lte k b) true -> Eq Bool (lte b k) true -> Eq Nat k b) is
+         fn (b : Nat) is
+           NatElim (fn (wb : Nat) is
+               Eq Bool (lte (succ k) wb) true -> Eq Bool (lte wb (succ k)) true -> Eq Nat (succ k) wb end)
+             (fn (h1 : Eq Bool (lte (succ k) zero) true) (h2 : Eq Bool (lte zero (succ k)) true) is
+                cong Bool Nat (fn (w : Bool) is BoolElim (fn (z : Bool) is Nat end) zero (succ k) w end)
+                  false true h1 end)
+             (fn (m : Nat)
+                 (ihb : Eq Bool (lte (succ k) m) true -> Eq Bool (lte m (succ k)) true -> Eq Nat (succ k) m) is
+                fn (h1 : Eq Bool (lte (succ k) (succ m)) true) (h2 : Eq Bool (lte (succ m) (succ k)) true) is
+                  cong Nat Nat (fn (n : Nat) is succ n end) k m (ih m h1 h2) end end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+c0 : VC -> Nat is fn (v : VC) is VCElim (fn (w : VC) is Nat end) (fn (x : Nat) (y : Nat) is x end) v end end
+c1 : VC -> Nat is fn (v : VC) is VCElim (fn (w : VC) is Nat end) (fn (x : Nat) (y : Nat) is y end) v end end
+
+vcLeq : VC -> VC -> Bool is
+  fn (x : VC) (y : VC) is andB (lte (c0 x) (c0 y)) (lte (c1 x) (c1 y)) end
+end
+
+congVC : (x0 : Nat) -> (y0 : Nat) -> (x1 : Nat) -> (y1 : Nat) ->
+    Eq Nat x0 y0 -> Eq Nat x1 y1 -> Eq VC (vc x0 x1) (vc y0 y1) is
+  fn (x0 : Nat) (y0 : Nat) (x1 : Nat) (y1 : Nat) (p : Eq Nat x0 y0) (q : Eq Nat x1 y1) is
+    subst Nat x0 y0 p (fn (w : Nat) is Eq VC (vc x0 x1) (vc w y1) end)
+      (subst Nat x1 y1 q (fn (w : Nat) is Eq VC (vc x0 x1) (vc x0 w) end) refl)
+  end
+end
+
+-- antisymmetry of the causal order: mutually-preceding clocks are equal (componentwise
+-- lteAntisym + congVC). With ch424's refl + trans, vcLeq is a genuine partial order.
+vcLeqAntisym : (x : VC) -> (y : VC) ->
+    Eq Bool (vcLeq x y) true -> Eq Bool (vcLeq y x) true -> Eq VC x y is
+  fn (x : VC) is
+    VCElim (fn (wx : VC) is (y : VC) ->
+        Eq Bool (vcLeq wx y) true -> Eq Bool (vcLeq y wx) true -> Eq VC wx y end)
+      (fn (x0 : Nat) (x1 : Nat) is
+         fn (y : VC) is
+           VCElim (fn (wy : VC) is
+               Eq Bool (vcLeq (vc x0 x1) wy) true -> Eq Bool (vcLeq wy (vc x0 x1)) true ->
+               Eq VC (vc x0 x1) wy end)
+             (fn (y0 : Nat) (y1 : Nat) is
+                fn (h1 : Eq Bool (vcLeq (vc x0 x1) (vc y0 y1)) true)
+                   (h2 : Eq Bool (vcLeq (vc y0 y1) (vc x0 x1)) true) is
+                  congVC x0 y0 x1 y1
+                    (lteAntisym x0 y0
+                       (andTrueL (lte x0 y0) (lte x1 y1) h1)
+                       (andTrueL (lte y0 x0) (lte y1 x1) h2))
+                    (lteAntisym x1 y1
+                       (andTrueR (lte x0 y0) (lte x1 y1) h1)
+                       (andTrueR (lte y0 x0) (lte y1 x1) h2)) end end)
+             y
+         end end)
+      x
+  end
+end
+
+-- ===== concurrency detection: the vector-clock advantage =====
+-- replica 0 ticked once (clockA) vs replica 1 ticked once (clockB): neither happened
+-- before the other, so they are CONCURRENT. A scalar Lamport clock would assign them
+-- comparable timestamps and FALSELY order them; the vector clock reports them concurrent.
+
+clockA : VC is vc (succ zero) zero end
+clockB : VC is vc zero (succ zero) end
+
+concurrentAB : Eq Bool (vcLeq clockA clockB) false is refl end
+concurrentBA : Eq Bool (vcLeq clockB clockA) false is refl end
