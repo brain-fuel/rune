@@ -3,6 +3,7 @@ package elaborate
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"goforge.dev/rune/v3/core"
@@ -290,6 +291,48 @@ func (e *Elaborator) reflNonEqError(c *Ctx, want core.Val) error {
 	}
 }
 
+// caseUnknownCtorError builds the diagnostic for a `case` clause naming something
+// that is not a constructor of the scrutinee's type. It lists the real constructor
+// set (so the reader sees the menu) and offers the closest as a "did you mean?".
+func caseUnknownCtorError(name, dataName string, ctors []string) error {
+	d := &Diagnostic{
+		Summary: "`" + name + "` is not a constructor of `" + dataName + "`.",
+		Body: []string{
+			"A `case` clause must name one of the type's constructors. `" + dataName +
+				"` has " + countCtors(ctors) + ": " + orList(append([]string(nil), ctors...)) + ".",
+		},
+	}
+	if hits := suggest(name, ctors); len(hits) > 0 {
+		d.Hints = append(d.Hints, "Did you mean "+orList(hits)+"?")
+	}
+	return d
+}
+
+// caseMissingClausesError builds the diagnostic for a `case` that does not cover
+// every constructor — reporting ALL the missing ones at once (Elm's exhaustiveness
+// shape), not just the first, since coverage is total and there is no fallthrough.
+func caseMissingClausesError(dataName string, ctors, missing []string) error {
+	return &Diagnostic{
+		Summary: "This `case` does not cover every constructor of `" + dataName + "`.",
+		Body: []string{
+			"`" + dataName + "` has " + countCtors(ctors) + ", and a `case` must handle " +
+				"every one — coverage is checked and there is no catch-all. " +
+				"Not handled: " + andList(append([]string(nil), missing...)) + ".",
+		},
+		Hints: []string{
+			"Add a clause for each missing constructor: `| " + missing[0] + " … -> …`.",
+		},
+	}
+}
+
+// countCtors renders "N constructors" (or "1 constructor") for a constructor list.
+func countCtors(ctors []string) string {
+	if len(ctors) == 1 {
+		return "one constructor"
+	}
+	return strconv.Itoa(len(ctors)) + " constructors"
+}
+
 // isUniverseMismatch reports whether a unifier error is a universe-level clash, so
 // the diagnostic can switch to the level-aware explanation.
 func isUniverseMismatch(err error) bool {
@@ -345,7 +388,13 @@ func min3(a, b, c int) int {
 }
 
 // orList renders names as a human "a, b, or c" phrase, each backticked.
-func orList(names []string) string {
+func orList(names []string) string { return joinList(names, "or") }
+
+// andList is orList with "and" — for a set where every item applies (e.g. the
+// constructors a case is ALL missing), not a choice among alternatives.
+func andList(names []string) string { return joinList(names, "and") }
+
+func joinList(names []string, conj string) string {
 	for i := range names {
 		names[i] = "`" + names[i] + "`"
 	}
@@ -355,8 +404,8 @@ func orList(names []string) string {
 	case 1:
 		return names[0]
 	case 2:
-		return names[0] + " or " + names[1]
+		return names[0] + " " + conj + " " + names[1]
 	default:
-		return strings.Join(names[:len(names)-1], ", ") + ", or " + names[len(names)-1]
+		return strings.Join(names[:len(names)-1], ", ") + ", " + conj + " " + names[len(names)-1]
 	}
 }

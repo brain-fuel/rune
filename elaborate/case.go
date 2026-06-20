@@ -67,15 +67,20 @@ func (e *Elaborator) elabCase(c *Ctx, s surface.ECase, want core.Val) (core.Tm, 
 		}
 		byCtor[cl.Ctor] = cl
 	}
-	for name := range byCtor {
+	for i := range s.Clauses {
+		name := s.Clauses[i].Ctor
 		if !containsName(decl.CtorNames, name) {
-			return fail("%s is not a constructor of %s", name, decl.Name)
+			return nil, caseUnknownCtorError(name, decl.Name, decl.CtorNames)
 		}
 	}
+	var missing []string
 	for _, name := range decl.CtorNames {
 		if byCtor[name] == nil {
-			return fail("missing clause for constructor %s", name)
+			missing = append(missing, name)
 		}
+	}
+	if len(missing) > 0 {
+		return nil, caseMissingClausesError(decl.Name, decl.CtorNames, missing)
 	}
 
 	// The motive, from the expected type: λx. want, generalized over the

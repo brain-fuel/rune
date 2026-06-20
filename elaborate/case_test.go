@@ -43,11 +43,11 @@ end`
 // TestCaseErrors pins the §5.6 well-formedness errors.
 func TestCaseErrors(t *testing.T) {
 	cases := []struct{ body, want string }{
-		{"case m of | zero -> zero end", "missing clause for constructor succ"},
+		{"case m of | zero -> zero end", "does not cover every constructor"},
 		{"case m of | zero -> zero | succ k -> k | zero -> zero end", "duplicate clause"},
 		{"case m of | zero -> zero | succ k j -> k end", "takes 1 argument(s), the clause binds 2"},
 		{"case m of | zero with h -> zero | succ k -> k end", "no recursive argument"},
-		{"case m of | foo -> zero | succ k -> k end", "not a constructor of Nat"},
+		{"case m of | foo -> zero | succ k -> k end", "is not a constructor of `Nat`"},
 		{"case U of | zero -> zero | succ k -> k end", "not a datatype"},
 	}
 	for _, c := range cases {
