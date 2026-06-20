@@ -67,6 +67,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch252_leb_trans` — `leb` transitive (Boolean explosion `everythingTrue`).
 - `ch253_leb_total` — `leb` total (so a total preorder).
 - `ch258_mul_identities` — `mulZeroR`, `mulOneL`, `mulOneR`.
+- `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
 
 ## Proven tier — booleans & Option
 
