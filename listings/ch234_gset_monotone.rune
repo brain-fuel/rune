@@ -1,0 +1,72 @@
+-- Chapter 234, G-Set SAFETY INVARIANT: membership only grows under merge (E3/E4).
+--
+-- ch233 proved the grow-only Set CONVERGES (OR is a join); this adds its defining
+-- SAFETY guarantee: an element once present is never removed by a merge. Per slot,
+-- the boolean "implies" order: if a flag is set, it stays set after OR-ing in a peer
+-- (impl a (orB a c) = true). Pairs ch233's liveness with safety, as ch230/ch231 do
+-- for the counter. Proof-only.
+--
+--   mem0Monotone : (g h : GS) -> Eq Bool (impl (m0 g) (m0 (merge g h))) true
+--   mem1Monotone : (g h : GS) -> Eq Bool (impl (m1 g) (m1 (merge g h))) true
+
+data Bool : U is true : Bool | false : Bool end
+data GS   : U is gs : Bool -> Bool -> GS end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+
+-- boolean implication, the membership order: impl a b = "a present => b present".
+impl : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b true a end
+end
+
+-- a => (a OR c): if a holds, so does a OR anything. By case analysis.
+orGeL : (a : Bool) -> (c : Bool) -> Eq Bool (impl a (orB a c)) true is
+  fn (a : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (impl w (orB w c)) true end) refl refl a
+  end
+end
+
+m0 : GS -> Bool is fn (s : GS) is GSElim (fn (w : GS) is Bool end) (fn (a : Bool) (b : Bool) is a end) s end end
+m1 : GS -> Bool is fn (s : GS) is GSElim (fn (w : GS) is Bool end) (fn (a : Bool) (b : Bool) is b end) s end end
+
+merge : GS -> GS -> GS is
+  fn (g : GS) (h : GS) is
+    GSElim (fn (x : GS) is GS end)
+      (fn (a : Bool) (b : Bool) is
+         GSElim (fn (y : GS) is GS end)
+           (fn (c : Bool) (d : Bool) is gs (orB a c) (orB b d) end)
+           h
+       end)
+      g
+  end
+end
+
+mem0Monotone : (g : GS) -> (h : GS) -> Eq Bool (impl (m0 g) (m0 (merge g h))) true is
+  fn (g : GS) is
+    GSElim (fn (x : GS) is (h : GS) -> Eq Bool (impl (m0 x) (m0 (merge x h))) true end)
+      (fn (a : Bool) (b : Bool) is
+         fn (h : GS) is
+           GSElim (fn (y : GS) is Eq Bool (impl (m0 (gs a b)) (m0 (merge (gs a b) y))) true end)
+             (fn (c : Bool) (d : Bool) is orGeL a c end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+mem1Monotone : (g : GS) -> (h : GS) -> Eq Bool (impl (m1 g) (m1 (merge g h))) true is
+  fn (g : GS) is
+    GSElim (fn (x : GS) is (h : GS) -> Eq Bool (impl (m1 x) (m1 (merge x h))) true end)
+      (fn (a : Bool) (b : Bool) is
+         fn (h : GS) is
+           GSElim (fn (y : GS) is Eq Bool (impl (m1 (gs a b)) (m1 (merge (gs a b) y))) true end)
+             (fn (c : Bool) (d : Bool) is orGeL b d end)
+             h
+         end
+       end)
+      g
+  end
+end
