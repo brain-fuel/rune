@@ -1,0 +1,66 @@
+-- Chapter 216 — COMMAND-LINE ARGUMENTS + PROCESS EXIT (D6 / R-EFFECT).
+--
+-- The OS/IO vocabulary's last mechanical, cross-backend slice: read the program's
+-- argv and terminate with an explicit exit status. With files+env (ch215) this
+-- rounds out the standard OS surface (in/out/time/fs/env/argv/process); raw
+-- SOCKETS are parked (their async accept/connect model does not fit the sequential
+-- IO monad uniformly across js/py/go/erl, and there is no consumer — PARKING-LOT).
+--
+-- Three new live primitives (host bodies baked per backend, like ch215):
+--   argCountCode             ~> the number of command-line arguments
+--   argAtCode  i             ~> argv[i] as a packed String code (empty code 1 if oob)
+--   exitWith   code          ~> terminate the process with the given status
+--
+-- The demo prints the argument count, then argv[0] and argv[1], then exits with a
+-- status equal to the count. Run with two args `alpha beta` the observable is
+-- "2\nalpha\nbeta" on stdout and exit status 2 — byte-identical across backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- the packed String (B4); `bytes` wraps an argv code back into a String.
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+-- console + the new argv/process primitives.
+foreign printNat     : Nat -> IO Nat end
+foreign printStrCode : Nat -> IO Nat end
+foreign argCountCode : IO Nat end
+foreign argAtCode    : Nat -> IO Nat end
+foreign exitWith     : Nat -> IO Unit end
+
+printStr : String -> IO Unit is
+  fn (s : String) is
+    bindIO Nat Unit (printStrCode (codeOf s)) (fn (n : Nat) is pureIO Unit unit end)
+  end
+end
+argAt : Nat -> IO String is
+  fn (i : Nat) is
+    bindIO Nat String (argAtCode i) (fn (code : Nat) is pureIO String (bytes code) end)
+  end
+end
+
+-- print argc, then argv[0] and argv[1], then exit with status = argc.
+main : IO Unit is
+  bindIO Nat Unit argCountCode (fn (n : Nat) is
+    bindIO Nat Unit (printNat n) (fn (k : Nat) is
+      bindIO String Unit (argAt 0) (fn (a0 : String) is
+        bindIO Unit Unit (printStr a0) (fn (u1 : Unit) is
+          bindIO String Unit (argAt 1) (fn (a1 : String) is
+            bindIO Unit Unit (printStr a1) (fn (u2 : Unit) is
+              exitWith n
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

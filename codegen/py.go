@@ -67,6 +67,16 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("def printStrCode():\n    return lambda c: lambda _u: (print(__s2h(c)), c)[1]\n")
 	}
+	// D6 argv + process.
+	if usesForeign(p, "argCountCode") {
+		b.WriteString("def argCountCode():\n    import sys\n    return lambda _u: len(sys.argv) - 1\n")
+	}
+	if usesForeign(p, "argAtCode") {
+		b.WriteString("def argAtCode():\n    import sys\n    return lambda i: lambda _u: (__h2s(sys.argv[i + 1]) if i + 1 < len(sys.argv) else 1)\n")
+	}
+	if usesForeign(p, "exitWith") {
+		b.WriteString("def exitWith():\n    import sys\n    return lambda n: lambda _u: sys.exit(n)\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatPy(&b, *p.Nat)

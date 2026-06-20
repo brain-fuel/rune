@@ -78,6 +78,19 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("ff_printStrCode() -> fun(C) -> fun(_U) -> io:format(\"~s~n\", [d6unpack(C)]), C end end.\n")
 	}
+	// D6 argv + process. escript exposes the script's plain arguments via
+	// init:get_plain_arguments/0; halt/1 terminates with an exit status.
+	// init:get_plain_arguments/0 under escript is [ScriptName | UserArgs]; drop the
+	// head so argv matches the other backends' user-args-only convention.
+	if usesForeign(p, "argCountCode") {
+		b.WriteString("ff_argCountCode() -> fun(_U) -> max(0, length(init:get_plain_arguments()) - 1) end.\n")
+	}
+	if usesForeign(p, "argAtCode") {
+		b.WriteString("ff_argAtCode() -> fun(I) -> fun(_U) -> A = case init:get_plain_arguments() of [_ | T] -> T; [] -> [] end, case I + 1 =< length(A) of true -> d6pack(lists:nth(I + 1, A)); false -> 1 end end end.\n")
+	}
+	if usesForeign(p, "exitWith") {
+		b.WriteString("ff_exitWith() -> fun(N) -> fun(_U) -> halt(N) end end.\n")
+	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}

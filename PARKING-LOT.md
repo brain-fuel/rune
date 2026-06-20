@@ -310,9 +310,9 @@ or a later-phase feature with no current consumer.
   BEAM runtime LANDED (Layer R0+R1: Pid + spawn/send/receive/self as real Erlang,
   ch205 runs a looping actor on escript; codegen `beamOTPRuntime`). Parked, each
   for a stated reason:
-  - **`primMonitor`/`primExit` (fault detection: DOWN/Reason).** No consumer until
-    a supervisor listing observes a crash; the supervisor models (ch115/ch118) are
-    still fault-free. Add with the first listing that crashes a child.
+  - **`primMonitor`/`primExit` (fault detection: DOWN/Reason).** LANDED 2026-06-19
+    (ch214, v3.19.0) — a worker crashes, the supervisor detects the DOWN and restarts;
+    no longer parked.
   - **Non-BEAM cooperative scheduler shim (JS single-thread, Go goroutines+chan).**
     Concurrency cannot give byte-identical cross-backend output without a
     deterministic scheduler, so the cross-backend conformance corpus gains nothing;
@@ -324,3 +324,18 @@ or a later-phase feature with no current consumer.
     bisimulation + E3 per-protocol adequacy — none of which exist yet. The proven
     MODELS and the LIVE runtime both exist; the bisimulation BRIDGE between them is
     the open research (R-OTP.md "needs-more-research").
+
+- **D6 / R-EFFECT — raw network SOCKETS (2026-06-19).** The standard OS/IO vocabulary
+  is otherwise complete and cross-backend: console+clock (ch210/211), the IOError
+  layer + packed String + CLI parsing (ch212/213), files+env (ch215, v3.20.0), and
+  argv+process-exit (ch216, v3.20.x). Raw TCP/UDP sockets are PARKED:
+  - No consumer — no listing or stdlib module needs a socket yet.
+  - The async accept/connect/select model does NOT fit the sequential `IO` monad
+    uniformly across backends (js callbacks/promises, py blocking, go goroutines,
+    erl gen_tcp+processes), so there is no byte-identical cross-backend conformance
+    shape — the property every other D6 op is gated by. A socket op needs its own
+    effect shape (a continuation/async extension of R-EFFECT), i.e. a design doc, not
+    a baked one-liner. Build when a networked consumer (an HTTP client, a distributed
+    transport for the E-track) actually demands it; BEAM's `gen_tcp` + the OTP runtime
+    is the natural first target. Until then, distribution rides the proven process
+    calculus (E1–E3), not raw sockets.

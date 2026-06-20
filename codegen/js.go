@@ -66,6 +66,16 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("const printStrCode = () => c => () => { console.log(__s2h(c)); return c; };\n")
 	}
+	// D6 argv + process.
+	if usesForeign(p, "argCountCode") {
+		b.WriteString("const argCountCode = () => () => BigInt(process.argv.length - 2);\n")
+	}
+	if usesForeign(p, "argAtCode") {
+		b.WriteString("const argAtCode = () => i => () => { const a = process.argv[Number(i) + 2]; return a === undefined ? 1n : __h2s(a); };\n")
+	}
+	if usesForeign(p, "exitWith") {
+		b.WriteString("const exitWith = () => n => () => { process.exit(Number(n)); };\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNat(&b, *p.Nat)

@@ -202,3 +202,61 @@ func TestIOFileEnvConformance(t *testing.T) {
 		})
 	}
 }
+
+// TestIOArgvExitConformance is the D6 argv + process gate: a program reads its
+// command-line arguments (argCountCode/argAtCode) and terminates with an explicit
+// status (exitWith). ch216 prints argc then argv[0]/argv[1], then exits with status
+// = argc. Run with `alpha beta` the stdout is "2\nalpha\nbeta" and the exit status is
+// 2 on js/py/go/erl. Go is BUILT to a binary (not `go run`, which masks the child's
+// exit code); the others run their interpreter directly so the status passes through.
+func TestIOArgvExitConformance(t *testing.T) {
+	for _, bk := range ioCLIBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			dir := t.TempDir()
+			s := loadListing(t, "ch216_io_argv_exit.rune")
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := bk.emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := filepath.Join(dir, "main."+bk.ext)
+			if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var cmd *exec.Cmd
+			if bk.name == "go" {
+				// `go run` reports a child non-zero exit as its own status 1, masking
+				// the real code — build a binary and run it directly.
+				bin := filepath.Join(dir, "main.bin")
+				if out, err := exec.Command("go", "build", "-o", bin, f).CombinedOutput(); err != nil {
+					t.Fatalf("[go] build failed: %v\n%s", err, out)
+				}
+				cmd = exec.Command(bin, "alpha", "beta")
+			} else {
+				cmd = exec.Command(bk.bin, f, "alpha", "beta")
+			}
+			out, err := cmd.Output()
+			exitCode := 0
+			if err != nil {
+				if ee, ok := err.(*exec.ExitError); ok {
+					exitCode = ee.ExitCode()
+				} else {
+					t.Fatalf("[%s] run failed: %v", bk.name, err)
+				}
+			}
+			if got, want := strings.TrimSpace(string(out)), "2\nalpha\nbeta"; got != want {
+				t.Errorf("[%s] argv stdout = %q, want %q", bk.name, got, want)
+			}
+			if exitCode != 2 {
+				t.Errorf("[%s] exit status = %d, want 2", bk.name, exitCode)
+			}
+		})
+	}
+}

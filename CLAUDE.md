@@ -735,8 +735,17 @@ first and forces only on mismatch, so the fast path logs nothing.
     prints `$RUNE_D6` — byte-identical `hello, wootz\nok\nunit` on js/py/go/erl with cwd
     set + the env var (`TestIOFileEnvConformance`); `readFileR` lifts an unreadable file
     into `Result String IOError` (`emptyInput`, via `monus code 1`), the ch212/ch213
-    totality discipline at the fs boundary. REMAINING D6: net (sockets) + argv + process
-    (rust excluded — no packed-String host body yet, parked like ch213).
+    totality discipline at the fs boundary. **ARGV + PROCESS-EXIT LANDED (v3.21.0,
+    ch216):** `argCountCode`/`argAtCode` (argv[i] code, 1 if oob) + `exitWith` (process
+    exit status); ch216 prints argc + argv[0]/argv[1] then exits with status = argc —
+    "2\nalpha\nbeta" + exit 2 on js/py/go/erl (`TestIOArgvExitConformance`; go is BUILT
+    to a binary since `go run` masks the child status; erl drops the script-name head of
+    `init:get_plain_arguments`). **D6 is now COMPLETE** for the demonstrated-need scope
+    (OS/time/fs/env/argv/process, all baked + cross-backend). PARKED: raw network
+    SOCKETS — async accept/connect has no uniform sequential-`IO` shape across backends
+    and no consumer; needs its own effect-shape design doc (PARKING-LOT). Distribution
+    rides the proven process calculus (E1–E3), not raw sockets. (rust excluded from the
+    String-marshalling prims — no packed-String host body yet, parked like ch213.)
 
 ## Standing rules
 

@@ -34,12 +34,23 @@ var ioPrims = map[string]bool{
 	"readFileCode":  true, // readFileCode  path        : Nat -> IO Nat  (1 = unreadable)
 	"writeFileCode": true, // writeFileCode path content : Nat -> Nat -> IO Nat
 	"printStrCode":  true, // printStrCode  s           : Nat -> IO Nat  (decode + println)
+	// D6 argv + process: command-line arguments and process exit.
+	"argCountCode": true, // argCountCode             : IO Nat          number of argv entries
+	"argAtCode":    true, // argAtCode     i          : Nat -> IO Nat   argv[i] code (1 if oob)
+	"exitWith":     true, // exitWith      code       : Nat -> IO Unit  terminate with status
 }
 
 // fileEnvPrims are the D6 prims whose host body needs the packed-String codec
 // (decode a code to a host string, encode a host string to a code). A backend
 // emits the shared codec helpers once when any of these is referenced.
-var fileEnvPrims = []string{"getEnvCode", "readFileCode", "writeFileCode", "printStrCode"}
+var fileEnvPrims = []string{"getEnvCode", "readFileCode", "writeFileCode", "printStrCode", "argAtCode"}
+
+// usesOS reports whether the program references any D6 prim needing the host OS
+// module (the file/env codec users plus argv/process), so the Go backend knows to
+// add the "os" import.
+func usesOS(p Program) bool {
+	return usesFileEnv(p) || usesForeign(p, "argCountCode") || usesForeign(p, "exitWith")
+}
 
 // usesFileEnv reports whether the program references any D6 net/fs primitive, so a
 // backend knows to emit the shared packed-String codec helpers.

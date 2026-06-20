@@ -32,7 +32,7 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "timeNanos") {
 		imports += "\t\"time\"\n"
 	}
-	if usesFileEnv(p) {
+	if usesOS(p) {
 		imports += "\t\"os\"\n"
 	}
 	b.WriteString("package main\n\nimport (\n" + imports + ")\n\n")
@@ -72,6 +72,16 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("func printStrCode() any { return func(c any) any { return func(_u any) any { fmt.Println(__s2h(c)); return c } } }\n")
+	}
+	// D6 argv + process.
+	if usesForeign(p, "argCountCode") {
+		b.WriteString("func argCountCode() any { return func(_u any) any { return big.NewInt(int64(len(os.Args) - 1)) } }\n")
+	}
+	if usesForeign(p, "argAtCode") {
+		b.WriteString("func argAtCode() any { return func(i any) any { return func(_u any) any { idx := int(i.(*big.Int).Int64()) + 1; if idx < len(os.Args) { return __h2s(os.Args[idx]) }; return big.NewInt(1) } } }\n")
+	}
+	if usesForeign(p, "exitWith") {
+		b.WriteString("func exitWith() any { return func(n any) any { return func(_u any) any { os.Exit(int(n.(*big.Int).Int64())); return nil } } }\n")
 	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
