@@ -57,7 +57,7 @@ func TestEqualityErrors(t *testing.T) {
 		{`bad : Eq U1 U (U -> U) is refl end`, "does not prove the equation"},
 		// Eq needs its type argument to be a type.
 		{`f : U -> U is fn (x : U) is x end end
-bad : Prop is Eq f f f end`, "not a type"},
+bad : Prop is Eq f f f end`, "A type was expected here"},
 		// Under-applied former.
 		{`bad : Prop is Eq U1 U end`, "3 arguments"},
 		// Prop is a universe, not a proposition: refl U : Eq U U U, not Prop itself.

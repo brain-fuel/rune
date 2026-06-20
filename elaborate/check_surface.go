@@ -73,7 +73,19 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		}
 		return core.Snd{P: p}, sig.Cod(e.Eval(c, core.Fst{P: p})), nil
 	case surface.ECase:
-		return nil, nil, fmt.Errorf("a case expression needs an expected type for its motive; ascribe it: (case … end : T)")
+		return nil, nil, &Diagnostic{
+			Summary: "I need to know what type this `case` should produce.",
+			Body: []string{
+				"A `case` becomes a use of the datatype's eliminator, and that needs a motive " +
+					"— the result type — which I cannot guess from the branches alone (they may " +
+					"each have a different-looking type that only agree up to the scrutinee).",
+			},
+			Hints: []string{
+				"Ascribe the result type: `(case … end : T)`, or put the `case` somewhere its " +
+					"expected type is already known (a definition's declared type, a function " +
+					"argument position).",
+			},
+		}
 	case surface.EHole:
 		// A hole is a fresh meta; its type is another fresh meta.
 		tyM := e.freshMeta(c, "type of _")
@@ -766,8 +778,19 @@ func (e *Elaborator) checkType(c *Ctx, x surface.Exp) (core.Tm, core.Val, error)
 		return tm2, core.VProp{}, nil
 	default:
 		if err := e.Unify(c.Lvl(), got2, core.VU{}); err != nil {
-			return nil, nil, fmt.Errorf("not a type: %s has type %s",
-				e.prettyTm(tm2), e.pretty(c, got2))
+			return nil, nil, &Diagnostic{
+				Summary: "A type was expected here, but this is a value.",
+				Body: []string{
+					"`" + e.prettyTm(tm2) + "` has type `" + e.pretty(c, got2) + "`, so it is " +
+						"an ordinary value — but this position needs a TYPE (something in `U` or " +
+						"`Prop`), the kind of thing that can stand to the right of a `:`.",
+				},
+				Hints: []string{
+					"Did you mean a type with a similar name, or to apply this to arguments " +
+						"until it becomes one? A type is a member of `U`; `" + e.prettyTm(tm2) +
+						"` is a member of `" + e.pretty(c, got2) + "`.",
+				},
+			}
 		}
 		return tm2, core.VU{}, nil
 	}
