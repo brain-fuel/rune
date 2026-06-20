@@ -1,0 +1,125 @@
+-- Chapter 380 — the successor of an even number is odd: even (succ (double n)) = false.
+--
+-- double n is even (ch250), so its successor is odd. The proof maps notB across
+-- evenDouble (even (succ m) reduces to notB (even m)). Toolkit + evenDouble reused from
+-- ch329. Proof-only.
+--
+--   evenSuccDouble : (n : Nat) -> Eq Bool (even (succ (double n))) false
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+double : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is succ (succ ih) end) n
+  end
+end
+
+-- THE THEOREM, by induction on n:
+--   0:      double 0 = 0 = natAdd 0 0                                              -> refl
+--   succ k: double (succ k) = succ (succ (double k))
+--           cong succ (cong succ IH) : = succ (succ (natAdd k k))
+--           natAdd (succ k) (succ k) = succ (natAdd k (succ k)) = succ (succ (natAdd k k))  [addSuccR]
+doubleAdd : (n : Nat) -> Eq Nat (double n) (natAdd n n) is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (double x) (natAdd x x) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (double k) (natAdd k k)) is
+         transEq Nat
+           (succ (succ (double k)))
+           (succ (succ (natAdd k k)))
+           (natAdd (succ k) (succ k))
+           (cong Nat Nat succ (succ (double k)) (succ (natAdd k k))
+              (cong Nat Nat succ (double k) (natAdd k k) ih))
+           (symEq Nat
+              (natAdd (succ k) (succ k))
+              (succ (succ (natAdd k k)))
+              (cong Nat Nat succ (natAdd k (succ k)) (succ (natAdd k k)) (addSuccR k k))) end)
+      n
+  end
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+notNot : (b : Bool) -> Eq Bool (notB (notB b)) b is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (notB (notB x)) x end) refl refl b end
+end
+
+even : Nat -> Bool is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is notB ih end) n
+  end
+end
+
+evenDouble : (n : Nat) -> Eq Bool (even (double n)) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (even (double x)) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (even (double k)) true) is
+         transEq Bool (notB (notB (even (double k)))) (even (double k)) true
+           (notNot (even (double k))) ih end)
+      n
+  end
+end
+
+-- transport even (double n) = true along double n = n + n.
+evenSelfAdd : (n : Nat) -> Eq Bool (even (natAdd n n)) true is
+  fn (n : Nat) is
+    subst Nat (double n) (natAdd n n) (doubleAdd n)
+      (fn (z : Nat) is Eq Bool (even z) true end)
+      (evenDouble n)
+  end
+end
+
+-- even (succ (double n)) = notB (even (double n)) = notB true = false.
+evenSuccDouble : (n : Nat) -> Eq Bool (even (succ (double n))) false is
+  fn (n : Nat) is
+    cong Bool Bool notB (even (double n)) true (evenDouble n)
+  end
+end
