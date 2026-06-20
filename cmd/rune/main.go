@@ -13,6 +13,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"fmt"
@@ -21,6 +22,7 @@ import (
 
 	"goforge.dev/rune/v3/internal/repl"
 	"goforge.dev/rune/v3/internal/session"
+	"goforge.dev/rune/v3/internal/sim"
 )
 
 func main() {
@@ -79,10 +81,72 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
+	case "simulate":
+		if len(os.Args) < 3 {
+			usage()
+			os.Exit(2)
+		}
+		src, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			fatal(err)
+		}
+		n := 2
+		if len(os.Args) >= 4 {
+			parsed, perr := strconv.Atoi(os.Args[3])
+			if perr != nil || parsed < 1 {
+				fmt.Fprintln(os.Stderr, "rune: replica count must be a positive integer")
+				os.Exit(2)
+			}
+			n = parsed
+		}
+		if err := runSimulate(string(src), n, os.Stdout); err != nil {
+			fatal(err)
+		}
 	default:
 		usage()
 		os.Exit(2)
 	}
+}
+
+// runSimulate runs the better-than-Winglang simulator (E4) over a protocol file by
+// convention: the file defines `init` (a replica's start state), `merge` (the join),
+// `value` (the observable), and one local op per replica `op0`, `op1`, .... The
+// canned scenario makes every replica act, then a PARTITIONED gossip round (the
+// network is cut in half) so divergence is visible, then a HEALED gossip round; the
+// rendered trace shows whether the protocol re-converges. Full scenario/`protocol`
+// surface sugar is a later contained pass.
+func runSimulate(src string, n int, out io.Writer) error {
+	s := session.New()
+	if _, err := s.LoadSource(src); err != nil {
+		return err
+	}
+	rounds := []sim.Round{{Local: map[int]string{}}}
+	for i := 0; i < n; i++ {
+		rounds[0].Local[i] = "op" + strconv.Itoa(i)
+	}
+	// During the partition, replica 0 acts again so the cut halves visibly diverge
+	// (a value function can otherwise mask one-op-each as equal); then heal.
+	rounds = append(rounds,
+		sim.Round{Local: map[int]string{0: "op0"}, Gossip: true}, // partitioned (see policy)
+		sim.Round{Gossip: true},                                  // healed
+	)
+	half := n / 2
+	pol := sim.FaultPolicy{
+		Partitioned: func(step, i, j int) bool {
+			return step == 1 && (i < half) != (j < half)
+		},
+	}
+	run, err := sim.Simulate(s, "init", "merge", "value", n, rounds, pol)
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(out, sim.Render(run, n))
+	if run.Converged() {
+		fmt.Fprintf(out, "\nverdict: CONVERGED to %s on all %d replicas\n", run.Final[0], n)
+	} else {
+		fmt.Fprintf(out, "\nverdict: did NOT converge (final %v) - no join? this is not a CvRDT\n", run.Final)
+	}
+	return nil
 }
 
 func runFmt(src string) error {
@@ -114,6 +178,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  rune repl [--no-prelude]")
 	fmt.Fprintln(os.Stderr, "  rune emit <file> [name] [--target js|py|go|rs|erl|jvm]")
 	fmt.Fprintln(os.Stderr, "  rune run  <file> <name> [--target js|py|go|rs|erl|jvm]")
+	fmt.Fprintln(os.Stderr, "  rune simulate <file> [replicas]   (defines init/merge/value/op0..opN)")
 	fmt.Fprintf(os.Stderr, "  targets: %s (aliases: python, rust, golang, javascript)\n",
 		strings.Join(codegen.Targets(), ", "))
 }

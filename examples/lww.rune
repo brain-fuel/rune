@@ -1,0 +1,21 @@
+-- A last-writer-wins register over two replicas, in the `rune simulate` convention.
+-- merge just takes the peer's value: it is NOT a join (not idempotent, not
+-- commutative), so concurrent writes are never reconciled. Run it:
+--
+--   rune simulate examples/lww.rune 2
+--
+-- and watch it FAIL to converge even after the network heals - the simulator
+-- distinguishes a non-CvRDT from a real one with no appeal to any proof.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+data LW : U is lw : Nat -> LW end
+
+getLW : LW -> Nat is fn (s : LW) is LWElim (fn (w : LW) is Nat end) (fn (a : Nat) is a end) s end end
+
+init : LW is lw zero end
+
+op0 : LW -> LW is fn (s : LW) is lw (succ (succ zero)) end end
+op1 : LW -> LW is fn (s : LW) is lw (succ zero) end end
+
+merge : LW -> LW -> LW is fn (x : LW) (y : LW) is y end end
+value : LW -> Nat is fn (s : LW) is getLW s end end
