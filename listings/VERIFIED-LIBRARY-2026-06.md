@@ -125,6 +125,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch260_flatten_size` — `len (flatten t) = size t` (inorder length = size).
 - `ch267_tree_functor` — tree functor: `tmap id = id` + `size (tmap f t) = size t`.
 - `ch290_tree_map_fusion` — tree functor composition: `tmap g (tmap f t) = tmap (g . f) t`.
+- `ch337_leaves_nodes` — leaves = internal nodes + 1: `countLeaves t = succ (countNodes t)`.
 - `ch326_flatten_mirror` — mirroring reverses the inorder traversal: `flatten (mirror t) = reverse (flatten t)`.
 
 ## Proven tier — arithmetic & order

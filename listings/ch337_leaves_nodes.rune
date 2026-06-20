@@ -1,0 +1,105 @@
+-- Chapter 337 — a binary tree has one more leaf than internal node (proven tier).
+--
+-- The classic counting identity: countLeaves t = succ (countNodes t). By structural
+-- induction; the node step combines both IHs and one right-successor shift of addition.
+-- Proof-only.
+--
+--   leavesNodes : (t : Tree) -> Eq Nat (countLeaves t) (succ (countNodes t))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Tree : U is
+  leaf : Tree
+| node : Tree -> Nat -> Tree -> Tree
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+countNodes : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end)
+      zero
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Nat) (ihr : Nat) is succ (natAdd ihl ihr) end)
+      t
+  end
+end
+
+countLeaves : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end)
+      (succ zero)
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Nat) (ihr : Nat) is natAdd ihl ihr end)
+      t
+  end
+end
+
+-- THE THEOREM, by induction on t. The node step:
+--   countLeaves (node l x r) = natAdd (countLeaves l) (countLeaves r)
+--   cong2 natAdd IHl IHr : = natAdd (succ (countNodes l)) (succ (countNodes r))
+--                          = succ (natAdd (countNodes l) (succ (countNodes r)))
+--   cong succ (addSuccR ..) : = succ (succ (natAdd (countNodes l) (countNodes r)))
+--                            = succ (countNodes (node l x r))
+leavesNodes : (t : Tree) -> Eq Nat (countLeaves t) (succ (countNodes t)) is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Nat (countLeaves x) (succ (countNodes x)) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Nat (countLeaves l) (succ (countNodes l)))
+          (ihr : Eq Nat (countLeaves r) (succ (countNodes r))) is
+         transEq Nat
+           (natAdd (countLeaves l) (countLeaves r))
+           (natAdd (succ (countNodes l)) (succ (countNodes r)))
+           (succ (succ (natAdd (countNodes l) (countNodes r))))
+           (cong2 Nat Nat Nat natAdd
+              (countLeaves l) (succ (countNodes l))
+              (countLeaves r) (succ (countNodes r)) ihl ihr)
+           (cong Nat Nat succ
+              (natAdd (countNodes l) (succ (countNodes r)))
+              (succ (natAdd (countNodes l) (countNodes r)))
+              (addSuccR (countNodes l) (countNodes r))) end)
+      t
+  end
+end
