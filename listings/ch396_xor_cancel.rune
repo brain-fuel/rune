@@ -1,0 +1,34 @@
+-- Chapter 396 — xor self-cancels: xor a (xor a b) = b (proven tier).
+--
+-- Applying xor with a twice is the identity (a is its own inverse, so Bool under xor is a
+-- group). By case analysis on a; the true case uses double negation. Proof-only.
+--
+--   xorCancelL : (a b : Bool) -> Eq Bool (xor a (xor a b)) b
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+notNot : (b : Bool) -> Eq Bool (notB (notB b)) b is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (notB (notB x)) x end) refl refl b end
+end
+
+xor : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) (notB b) b a end
+end
+
+xorCancelL : (a : Bool) -> (b : Bool) -> Eq Bool (xor a (xor a b)) b is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (xor x (xor x b)) b end)
+      (notNot b)
+      refl
+      a
+  end
+end

@@ -246,6 +246,7 @@ equation).
 - `ch256_bool_lattice` — distributivity + absorption.
 - `ch257_bool_monoid` — and/or commutativity + associativity (→ full boolean algebra).
 - `ch287_xor` — exclusive-or laws (`xor a a = false`, `xor a false = a`, commutativity).
+- `ch396_xor_cancel` — xor self-cancels: `xor a (xor a b) = b` (Bool is a group under xor).
 - `ch343_eqbool` — boolean equality (XNOR) reflexive + symmetric: `eqBool a a = true`, `eqBool a b = eqBool b a`.
 - `ch345_implb` — boolean implication: `implb a a = true`, `implb a b = ¬a ∨ b`.
 - `ch350_bool_lem` — excluded middle + non-contradiction: `b || ¬b = true`, `b && ¬b = false`.
