@@ -126,6 +126,39 @@ func TestGCounterDivergesThenConverges(t *testing.T) {
 	}
 }
 
+// TestGCounterRobustToDropAndDup shows the CvRDT magic operationally: the failure
+// model is a hypothesis the result is robust to. With gossip dropped on one round
+// and DUPLICATED on the next, the counter converges to the SAME value a healthy run
+// reaches (no lost increments, no double-counting) because merge is an idempotent
+// join. The simulator exhibits what the convergence proof asserts.
+func TestGCounterRobustToDropAndDup(t *testing.T) {
+	s := loadSession(t, gcounterSrc)
+	rounds := []Round{
+		{Local: map[int]string{0: "inc0", 1: "inc1"}, Gossip: true},
+		{Gossip: true},
+		{Gossip: true},
+	}
+
+	healthy, err := Simulate(s, "gc zero zero", "mergeGC", "valueGC", 2, rounds, FaultPolicy{})
+	if err != nil {
+		t.Fatalf("healthy simulate: %v", err)
+	}
+	faulty, err := Simulate(s, "gc zero zero", "mergeGC", "valueGC", 2, rounds, FaultPolicy{
+		Partitioned: func(step, i, j int) bool { return step == 0 }, // drop round 0
+		Duplicate:   func(step, i, j int) bool { return step == 1 }, // double-deliver round 1
+	})
+	if err != nil {
+		t.Fatalf("faulty simulate: %v", err)
+	}
+
+	if !faulty.Converged() {
+		t.Errorf("G-Counter must converge despite drop+dup, got %v", faulty.Final)
+	}
+	if faulty.Final[0] != healthy.Final[0] {
+		t.Errorf("drop+dup changed the outcome: healthy=%q faulty=%q", healthy.Final[0], faulty.Final[0])
+	}
+}
+
 // TestLWWStaysDivergent is the contrast: a last-writer-wins register has no join
 // (merge just takes the peer), so even on a HEALTHY network concurrent writes are
 // never reconciled. The simulator distinguishes it from the CvRDT with no appeal to

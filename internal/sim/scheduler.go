@@ -28,15 +28,22 @@ type Event struct {
 	Detail  string // a human note, e.g. the observed value
 }
 
-// FaultPolicy perturbs the network. Partitioned reports whether, at a given step,
-// replica i cannot hear from replica j (so anti-entropy gossip i<-j is dropped).
-// A nil Partitioned is a healthy network.
+// FaultPolicy perturbs the network, deterministically (so a run is reproducible).
+// Partitioned reports whether, at a given step, replica i cannot hear from replica j
+// (anti-entropy gossip i<-j is dropped). Duplicate reports whether that same gossip
+// is delivered TWICE — harmless to a CvRDT, since a join is idempotent, which the
+// simulator then shows. A nil function is the benign default.
 type FaultPolicy struct {
 	Partitioned func(step, i, j int) bool
+	Duplicate   func(step, i, j int) bool
 }
 
 func (p FaultPolicy) cut(step, i, j int) bool {
 	return p.Partitioned != nil && p.Partitioned(step, i, j)
+}
+
+func (p FaultPolicy) dup(step, i, j int) bool {
+	return p.Duplicate != nil && p.Duplicate(step, i, j)
 }
 
 // Round is one simulated time step: each replica optionally performs a local
@@ -128,6 +135,11 @@ func Simulate(sess *session.Session, init, mergeFn, valueFn string, n int, round
 					}
 					states[i] = d.apply2(mergeRef, states[i], snap[j])
 					run.Events = append(run.Events, Event{Step: step, Kind: "gossip", Replica: i, Peer: j})
+					if pol.dup(step, i, j) {
+						// Re-deliver the same update; a join absorbs it (idempotence).
+						states[i] = d.apply2(mergeRef, states[i], snap[j])
+						run.Events = append(run.Events, Event{Step: step, Kind: "dup", Replica: i, Peer: j})
+					}
 				}
 			}
 		}
