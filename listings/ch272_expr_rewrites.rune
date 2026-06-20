@@ -1,0 +1,188 @@
+-- Chapter 272 — verified expression rewrites: semantics-preserving optimizations (proven).
+--
+-- A small arithmetic-expression language (lit/add/mul) with an evaluator, and two
+-- compiler-style rewrite rules proven to PRESERVE the evaluation result — the heart of a
+-- verified optimizer. Each rewrite's correctness is exactly a Nat-semiring law applied to
+-- the evaluated subterms (commutativity, distributivity). The semiring toolkit is reused
+-- from ch270. Proof-only.
+--
+--   evalAddComm : eval (add a b)         = eval (add b a)
+--   evalDistrib : eval (mul a (add b c)) = eval (add (mul a b) (mul a c))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addZeroR : (n : Nat) -> Eq Nat (natAdd n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k zero) k) is cong Nat Nat succ (natAdd k zero) k ih end)
+      n
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+addComm : (a : Nat) -> (b : Nat) -> Eq Nat (natAdd a b) (natAdd b a) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k b) (natAdd b k) end)
+      (symEq Nat (natAdd b zero) b (addZeroR b))
+      (fn (k : Nat) (ih : Eq Nat (natAdd k b) (natAdd b k)) is
+         transEq Nat (succ (natAdd k b)) (succ (natAdd b k)) (natAdd b (succ k))
+           (cong Nat Nat succ (natAdd k b) (natAdd b k) ih)
+           (symEq Nat (natAdd b (succ k)) (succ (natAdd b k)) (addSuccR b k)) end)
+      a
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Nat (natAdd (natAdd a b) c) (natAdd a (natAdd b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c))) is
+         cong Nat Nat succ (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) ih end)
+      a
+  end
+end
+
+addToC : Nat -> Nat -> Nat is fn (c : Nat) (z : Nat) is natAdd z c end end
+
+addLeftComm : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+              Eq Nat (natAdd a (natAdd b c)) (natAdd b (natAdd a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    transEq Nat (natAdd a (natAdd b c)) (natAdd (natAdd a b) c) (natAdd b (natAdd a c))
+      (symEq Nat (natAdd (natAdd a b) c) (natAdd a (natAdd b c)) (addAssoc a b c))
+      (transEq Nat (natAdd (natAdd a b) c) (natAdd (natAdd b a) c) (natAdd b (natAdd a c))
+         (cong Nat Nat (addToC c) (natAdd a b) (natAdd b a) (addComm a b))
+         (addAssoc b a c))
+  end
+end
+
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a
+  end
+end
+
+
+addW : Nat -> Nat -> Nat is fn (w : Nat) (z : Nat) is natAdd w z end end
+
+-- the four-term interchange: (w+x)+(y+z) = (w+y)+(x+z).
+addInterchange : (w : Nat) -> (x : Nat) -> (y : Nat) -> (z : Nat) ->
+                 Eq Nat (natAdd (natAdd w x) (natAdd y z)) (natAdd (natAdd w y) (natAdd x z)) is
+  fn (w : Nat) (x : Nat) (y : Nat) (z : Nat) is
+    transEq Nat
+      (natAdd (natAdd w x) (natAdd y z))
+      (natAdd w (natAdd x (natAdd y z)))
+      (natAdd (natAdd w y) (natAdd x z))
+      (addAssoc w x (natAdd y z))
+      (transEq Nat
+         (natAdd w (natAdd x (natAdd y z)))
+         (natAdd w (natAdd (natAdd x y) z))
+         (natAdd (natAdd w y) (natAdd x z))
+         (cong Nat Nat (addW w) (natAdd x (natAdd y z)) (natAdd (natAdd x y) z)
+            (symEq Nat (natAdd (natAdd x y) z) (natAdd x (natAdd y z)) (addAssoc x y z)))
+         (transEq Nat
+            (natAdd w (natAdd (natAdd x y) z))
+            (natAdd w (natAdd (natAdd y x) z))
+            (natAdd (natAdd w y) (natAdd x z))
+            (cong Nat Nat (addW w) (natAdd (natAdd x y) z) (natAdd (natAdd y x) z)
+               (cong Nat Nat (addToC z) (natAdd x y) (natAdd y x) (addComm x y)))
+            (transEq Nat
+               (natAdd w (natAdd (natAdd y x) z))
+               (natAdd w (natAdd y (natAdd x z)))
+               (natAdd (natAdd w y) (natAdd x z))
+               (cong Nat Nat (addW w) (natAdd (natAdd y x) z) (natAdd y (natAdd x z))
+                  (addAssoc y x z))
+               (symEq Nat (natAdd (natAdd w y) (natAdd x z)) (natAdd w (natAdd y (natAdd x z)))
+                  (addAssoc w y (natAdd x z))))))
+  end
+end
+
+-- LEFT DISTRIBUTIVITY, by induction on a:
+--   0:      0 = natAdd 0 0                                                       -> refl
+--   succ k: natMul (succ k)(b+c) = natAdd (b+c) (natMul k (b+c))
+--           cong (natAdd (b+c)) IH : = natAdd (b+c) (natAdd (k*b) (k*c))
+--           addInterchange b c (k*b) (k*c) : = natAdd (natAdd b (k*b)) (natAdd c (k*c))
+--                                            = natAdd ((succ k)*b) ((succ k)*c)
+distribL : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Nat (natMul a (natAdd b c)) (natAdd (natMul a b) (natMul a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natMul k (natAdd b c)) (natAdd (natMul k b) (natMul k c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMul k (natAdd b c)) (natAdd (natMul k b) (natMul k c))) is
+         transEq Nat
+           (natAdd (natAdd b c) (natMul k (natAdd b c)))
+           (natAdd (natAdd b c) (natAdd (natMul k b) (natMul k c)))
+           (natAdd (natAdd b (natMul k b)) (natAdd c (natMul k c)))
+           (cong Nat Nat (addW (natAdd b c)) (natMul k (natAdd b c)) (natAdd (natMul k b) (natMul k c)) ih)
+           (addInterchange b c (natMul k b) (natMul k c)) end)
+      a
+  end
+end
+
+-- the expression language and its evaluator.
+data Expr : U is
+  lit : Nat -> Expr
+| add : Expr -> Expr -> Expr
+| mul : Expr -> Expr -> Expr
+end
+
+eval : Expr -> Nat is
+  fn (e : Expr) is
+    ExprElim (fn (x : Expr) is Nat end)
+      (fn (n : Nat) is n end)
+      (fn (l : Expr) (r : Expr) (ihl : Nat) (ihr : Nat) is natAdd ihl ihr end)
+      (fn (l : Expr) (r : Expr) (ihl : Nat) (ihr : Nat) is natMul ihl ihr end)
+      e
+  end
+end
+
+-- swapping the operands of an add node preserves the value (commutativity rewrite).
+evalAddComm : (a : Expr) -> (b : Expr) -> Eq Nat (eval (add a b)) (eval (add b a)) is
+  fn (a : Expr) (b : Expr) is addComm (eval a) (eval b) end
+end
+
+-- distributing a multiplication over an add node preserves the value.
+evalDistrib : (a : Expr) -> (b : Expr) -> (c : Expr) ->
+              Eq Nat (eval (mul a (add b c))) (eval (add (mul a b) (mul a c))) is
+  fn (a : Expr) (b : Expr) (c : Expr) is distribL (eval a) (eval b) (eval c) end
+end

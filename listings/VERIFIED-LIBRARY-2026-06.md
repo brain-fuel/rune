@@ -82,6 +82,12 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch256_bool_lattice` — distributivity + absorption.
 - `ch257_bool_monoid` — and/or commutativity + associativity (→ full boolean algebra).
 
+## Proven tier — verified metatheory (a tiny optimizer)
+
+- `ch272_expr_rewrites` — expression evaluator + semantics-preserving rewrites
+  (`eval (add a b) = eval (add b a)` via addComm; `eval (mul a (add b c)) =
+  eval (add (a*b) (a*c))` via distribL) — verified compiler-optimization rules.
+
 ## Telos 4 — distributed (CRDTs + bisimulation)
 
 - `ch241_crdt_flag` — grow-only flag CvRDT: merge semilattice laws (convergence).
