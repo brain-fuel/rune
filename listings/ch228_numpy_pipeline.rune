@@ -1,0 +1,124 @@
+-- Chapter 228 — a contract-guarded NumPy PIPELINE (D4 / R-INTEROP, the capstone).
+--
+-- The individual interop ops (ch221–227) compose. This is the teachable artifact: a
+-- small numeric pipeline where the output of one stage feeds the next, and the final
+-- foreign result is contract-guarded.
+--
+--   1. mean      : npMean xs                 (real numpy.mean on py)
+--   2. center    : subtract the mean (an in-language list transform, FListElim)
+--   3. norm      : npNorm centered           (real numpy.linalg.norm on py)
+--   4. guard     : check the norm against the fsqrt reference, blame on drift
+--
+-- For xs = [2,4,6,8]: mean = 5; centered = [-3,-1,1,3]; ‖centered‖ = sqrt(20) ≈ 4.47,
+-- truncated to 4. Observable: "5\n4\nunit" (the mean, the guarded centered-norm, unit).
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign fsqrt      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+foreign npMean     : FList -> Float end
+foreign npNorm     : FList -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+-- stage 2: center the data by subtracting `m` from each element (a list transform).
+center : Float -> FList -> FList is
+  fn (m : Float) (xs : FList) is
+    FListElim (fn (x : FList) is FList end)
+      fnil
+      (fn (x : Float) (rest : FList) (ih : FList) is fcons (fsub x m) ih end)
+      xs
+  end
+end
+
+-- the reference norm (sqrt of sum of squares) the guard checks the library against.
+sumSq : FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Float end)
+      (fromNat 0)
+      (fn (x : Float) (rest : FList) (ih : Float) is fadd (fmul x x) ih end)
+      xs
+  end
+end
+
+refNorm : FList -> Float is fn (xs : FList) is fsqrt (sumSq xs) end end
+
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+guardedNorm : FList -> Result Float Blame is
+  fn (xs : FList) is
+    case withinTol defaultEps (npNorm xs) (refNorm xs) of
+    | true  -> ok  Float Blame (npNorm xs)
+    | false -> err Float Blame (driftBlame (npNorm xs))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+xs : FList is fcons (fromNat 2) (fcons (fromNat 4) (fcons (fromNat 6) (fcons (fromNat 8) fnil))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npMean xs))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (guardedNorm (center (npMean xs) xs)))) (fn (u2 : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end
