@@ -84,6 +84,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
 - `ch320_len_drop` — drop shrinks length by n: `len (drop n xs) = monus (len xs) n`.
 - `ch321_len_take` — take caps the length: `len (take n xs) = min n (len xs)`.
+- `ch336_zipwith_length` — zip stops at the shorter: `len (zipWith f xs ys) = min (len xs)(len ys)`.
 - `ch280_reverse_acc` — accumulator reverse equals naive reverse (`revAcc xs nnil = reverse xs`),
   via the generalized spec `revAcc xs acc = reverse xs ++ acc` — an optimization-correctness result.
 - `ch281_map_take` — naturality: `take n (map f xs) = map f (take n xs)`.
