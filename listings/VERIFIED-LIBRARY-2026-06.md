@@ -359,6 +359,11 @@ equation).
   (tombstone the tag then add a fresh one -> present again, which a 2P-Set cannot) +
   `removedAbsent` + `addWinsConcurrent` (an add concurrent with a remove survives the
   merge - add wins). Scenario theorems by refl (concrete computation).
+- `ch431_gcounter_inflationary`: the PROOF behind the simulator's inflation check (v3.278).
+  Each G-Counter increment is inflationary - `merge s (inc s) = inc s` (so s <= inc s, the
+  update never moves a replica down the lattice), via `maxIdem` + `maxSuccR` + `congGC`.
+  With ch72's join laws this is the full state-based convergence criterion (join-semilattice
+  of states + monotone updates); the linter checks observationally what this proves.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
