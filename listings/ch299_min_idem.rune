@@ -1,0 +1,53 @@
+-- Chapter 299 — minimum: idempotence and zero-absorption (proven tier).
+--
+-- natMin peels both arguments in lockstep. Two clean laws: min a a = a and min a 0 = 0
+-- (zero is absorbing for min). Proof-only.
+--
+--   natMinIdem  : (a : Nat) -> Eq Nat (natMin a a) a
+--   natMinZeroR : (a : Nat) -> Eq Nat (natMin a zero) zero
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+-- min 0 m = 0 ; min (succ k) 0 = 0 ; min (succ k) (succ j) = succ (min k j).
+natMin : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (minK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) zero (fn (j : Nat) (ih2 : Nat) is succ (minK j) end) m
+         end
+       end)
+      a b
+  end
+end
+
+natMinIdem : (a : Nat) -> Eq Nat (natMin a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (natMin x x) x end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMin k k) k) is cong Nat Nat succ (natMin k k) k ih end)
+      a
+  end
+end
+
+natMinZeroR : (a : Nat) -> Eq Nat (natMin a zero) zero is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (natMin x zero) zero end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMin k zero) zero) is refl end)
+      a
+  end
+end
