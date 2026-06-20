@@ -224,8 +224,7 @@ func (e *Elaborator) checkBinderUse(inner *Ctx, declared core.Qty, name string) 
 	delete(e.uses, lvl)
 	want := e.sr.Mul(e.mult, declared)
 	if !e.sr.Compatible(want, used) {
-		return fmt.Errorf("binder %s declared with quantity %s is used %s",
-			name, qtyName(declared), qtyName(used))
+		return quantityUseError(name, declared, used)
 	}
 	return nil
 }

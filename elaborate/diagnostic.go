@@ -333,6 +333,63 @@ func countCtors(ctors []string) string {
 	return strconv.Itoa(len(ctors)) + " constructors"
 }
 
+// quantityUseError builds the diagnostic for a binder used in a way its usage
+// quantity (QTT: 0 erased, 1 linear, ω unrestricted) forbids. The dominant case —
+// an erased (`0`) binder used computationally — is the erasure boundary, and gets a
+// full explanation of what "erased" means and why a runtime use cannot stand.
+func quantityUseError(name string, declared, used core.Qty) error {
+	switch declared {
+	case core.QZero:
+		return &Diagnostic{
+			Summary: "The erased binder `" + name + "` is used at runtime.",
+			Body: []string{
+				"`" + name + "` is marked `0` (erased): it exists only for type checking and " +
+					"proofs, and is DELETED before the program runs. But here it is used " +
+					"computationally — in a value the running program needs — and a deleted " +
+					"thing cannot be there to use.",
+			},
+			Hints: []string{
+				"If `" + name + "` really is needed when the program runs, drop the `0` so it " +
+					"is kept. If it is only there to make a type or proof go through, use it " +
+					"only in those positions (types and proof arguments), never in the value " +
+					"you return.",
+			},
+		}
+	case core.QOne:
+		return &Diagnostic{
+			Summary: "The linear binder `" + name + "` is used " + plainUse(used) + ", not exactly once.",
+			Body: []string{
+				"`" + name + "` is marked `1` (linear): it must be used exactly once — no more, " +
+					"no less. Here it is used " + plainUse(used) + ".",
+			},
+			Hints: []string{
+				"Use `" + name + "` exactly one time, or change its annotation to `0` (if it is " +
+					"only for typing) or leave it unannotated (ω, any number of uses).",
+			},
+		}
+	default:
+		return &Diagnostic{
+			Summary: "The binder `" + name + "` is used more than its quantity allows.",
+			Body: []string{
+				"`" + name + "` was declared with quantity " + qtyName(declared) + " but is " +
+					"used " + qtyName(used) + ".",
+			},
+		}
+	}
+}
+
+// plainUse renders a usage quantity as a plain phrase for prose.
+func plainUse(q core.Qty) string {
+	switch q {
+	case core.QZero:
+		return "never"
+	case core.QOne:
+		return "once"
+	default:
+		return "more than once"
+	}
+}
+
 // isUniverseMismatch reports whether a unifier error is a universe-level clash, so
 // the diagnostic can switch to the level-aware explanation.
 func isUniverseMismatch(err error) bool {
