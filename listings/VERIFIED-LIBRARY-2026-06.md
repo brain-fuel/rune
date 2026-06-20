@@ -84,6 +84,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
   via `sumL acc xs = acc + sum xs` — fold-direction independence for the additive monoid.
 - `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
 - `ch288_elem_snoc` — appending x makes it a member: `elem x (snoc xs x) = true`.
+- `ch309_count_snoc` — appending x increments its count: `countOccur x (snoc xs x) = succ (countOccur x xs)`.
 
 ## Proven tier — a verified queue
 
