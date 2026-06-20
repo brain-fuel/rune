@@ -91,6 +91,8 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch248_option_monad` — Option monad laws (left/right id, assoc).
 - `ch254_option_functor` — Option functor laws (id, composition).
 - `ch263_sum_bifunctor` — Sum (Either) bifunctor laws (id, composition).
+- `ch284_swap_involutions` — swap is an involution on products and sums
+  (`swapP (swapP p) = p`, `sswap (sswap e) = e`).
 - `ch255_de_morgan` — De Morgan's laws.
 - `ch256_bool_lattice` — distributivity + absorption.
 - `ch257_bool_monoid` — and/or commutativity + associativity (→ full boolean algebra).

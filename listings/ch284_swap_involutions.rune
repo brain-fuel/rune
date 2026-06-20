@@ -1,0 +1,52 @@
+-- Chapter 284 — swap is an involution on products and sums (proven tier).
+--
+-- The duality pair: swapping the two components of a product twice, or the two injections
+-- of a sum twice, is the identity. Both by case analysis (refl leaves). Proof-only.
+--
+--   swapPInvol : swapP (swapP p) = p
+--   sswapInvol : sswap (sswap e) = e
+
+data Prod : U -> U -> U is
+  mkProd : (A : U) -> (B : U) -> A -> B -> Prod A B
+end
+
+data Sum : U -> U -> U is
+  inl : (A : U) -> (B : U) -> A -> Sum A B
+| inr : (A : U) -> (B : U) -> B -> Sum A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+swapP : (A : U) -> (B : U) -> Prod A B -> Prod B A is
+  fn (A : U) (B : U) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is Prod B A end)
+      (fn (a : A) (b : B) is mkProd B A b a end)
+      p
+  end
+end
+
+swapPInvol : (A : U) -> (B : U) -> (p : Prod A B) -> Eq (Prod A B) (swapP B A (swapP A B p)) p is
+  fn (A : U) (B : U) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is Eq (Prod A B) (swapP B A (swapP A B x)) x end)
+      (fn (a : A) (b : B) is refl end)
+      p
+  end
+end
+
+sswap : (A : U) -> (B : U) -> Sum A B -> Sum B A is
+  fn (A : U) (B : U) (e : Sum A B) is
+    SumElim A B (fn (x : Sum A B) is Sum B A end)
+      (fn (a : A) is inr B A a end)
+      (fn (b : B) is inl B A b end)
+      e
+  end
+end
+
+sswapInvol : (A : U) -> (B : U) -> (e : Sum A B) -> Eq (Sum A B) (sswap B A (sswap A B e)) e is
+  fn (A : U) (B : U) (e : Sum A B) is
+    SumElim A B (fn (x : Sum A B) is Eq (Sum A B) (sswap B A (sswap A B x)) x end)
+      (fn (a : A) is refl end)
+      (fn (b : B) is refl end)
+      e
+  end
+end
