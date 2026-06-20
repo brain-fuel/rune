@@ -8,12 +8,16 @@
 -- {0,1,2} to arbitrary n by lists. We prove the key causality-merge facts for every N:
 --
 --   vcleRefl          : the causal order is reflexive.
+--   vcleTrans         : it is transitive (so happens-before is a preorder for any N).
 --   vmergeUpperBoundL : vcle x (vmerge x y)  - the merge advances replica x's own clock.
 --   vmergeUpperBoundR : vcle y (vmerge x y)  - and replica y's; gossip never loses info.
+--   vmergeLUB         : the merge is the LEAST upper bound - merge IS the join, for any N.
 --
--- (The LUB and transitivity halves need an equal-length side condition over lists - the
--- two-replica ch425/ch426 give those concretely; here we ship the unconditional upper-bound
--- generalisation.) Proof-only over the ambient Eq/refl/subst.
+-- The zero-padding is what makes LUB/transitivity unconditional: `vcle x z` forces x's
+-- entries beyond z to be 0, so no equal-length side condition is needed. Two `headMono`/
+-- `tailMono` lemmas (a vcle on lists implies it on heads and tails) carry the induction.
+-- This is the full ch426 result (merge = join of happens-before), generalised to N.
+-- Proof-only over the ambient Eq/refl/subst.
 
 data Bool : U is true : Bool | false : Bool end
 data Nat  : U is zero : Nat | succ : Nat -> Nat end
@@ -38,6 +42,33 @@ andTrue : (a : Bool) -> (b : Bool) -> Eq Bool a true -> Eq Bool b true -> Eq Boo
   end
 end
 
+andTrueL : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (andB w b) true -> Eq Bool w true end)
+      (fn (h : Eq Bool (andB true b) true) is refl end)
+      (fn (h : Eq Bool (andB false b) true) is h end)
+      a
+  end
+end
+
+andTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (andB w b) true -> Eq Bool b true end)
+      (fn (h : Eq Bool (andB true b) true) is h end)
+      (fn (h : Eq Bool (andB false b) true) is
+         BoolElim (fn (w : Bool) is Eq Bool w true end) refl h b end)
+      a
+  end
+end
+
+everythingTrue : Eq Bool false true -> (b : Bool) -> Eq Bool b true is
+  fn (h : Eq Bool false true) (b : Bool) is
+    subst Bool false true h
+      (fn (w : Bool) is Eq Bool b (BoolElim (fn (z : Bool) is Bool end) true b w) end)
+      refl
+  end
+end
+
 lte : Nat -> Nat -> Bool is
   fn (a : Nat) is
     NatElim (fn (w : Nat) is Nat -> Bool end)
@@ -55,6 +86,52 @@ lteRefl : (n : Nat) -> Eq Bool (lte n n) true is
   fn (n : Nat) is
     NatElim (fn (w : Nat) is Eq Bool (lte w w) true end) refl
       (fn (k : Nat) (ih : Eq Bool (lte k k) true) is ih end) n
+  end
+end
+
+lteTrans : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+    Eq Bool (lte a b) true -> Eq Bool (lte b c) true -> Eq Bool (lte a c) true is
+  fn (a : Nat) is
+    NatElim
+      (fn (wa : Nat) is (b : Nat) -> (c : Nat) ->
+         Eq Bool (lte wa b) true -> Eq Bool (lte b c) true -> Eq Bool (lte wa c) true end)
+      (fn (b : Nat) (c : Nat) (h1 : Eq Bool (lte zero b) true) (h2 : Eq Bool (lte b c) true) is refl end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> (c : Nat) ->
+             Eq Bool (lte k b) true -> Eq Bool (lte b c) true -> Eq Bool (lte k c) true) is
+         fn (b : Nat) is
+           NatElim
+             (fn (wb : Nat) is (c : Nat) ->
+                Eq Bool (lte (succ k) wb) true -> Eq Bool (lte wb c) true ->
+                Eq Bool (lte (succ k) c) true end)
+             (fn (c : Nat)
+                 (h1 : Eq Bool (lte (succ k) zero) true)
+                 (h2 : Eq Bool (lte zero c) true) is everythingTrue h1 (lte (succ k) c) end)
+             (fn (m : Nat)
+                 (ihb : (c : Nat) ->
+                    Eq Bool (lte (succ k) m) true -> Eq Bool (lte m c) true ->
+                    Eq Bool (lte (succ k) c) true) is
+                fn (c : Nat) is
+                  NatElim
+                    (fn (wc : Nat) is
+                       Eq Bool (lte (succ k) (succ m)) true -> Eq Bool (lte (succ m) wc) true ->
+                       Eq Bool (lte (succ k) wc) true end)
+                    (fn (h1 : Eq Bool (lte (succ k) (succ m)) true)
+                        (h2 : Eq Bool (lte (succ m) zero) true) is
+                       everythingTrue h2 (lte (succ k) zero) end)
+                    (fn (p : Nat)
+                        (ihc : Eq Bool (lte (succ k) (succ m)) true -> Eq Bool (lte (succ m) p) true ->
+                           Eq Bool (lte (succ k) p) true) is
+                       fn (h1 : Eq Bool (lte (succ k) (succ m)) true)
+                          (h2 : Eq Bool (lte (succ m) (succ p)) true) is
+                         ih m p h1 h2 end end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
   end
 end
 
@@ -96,6 +173,46 @@ maxUpperBoundR : (a : Nat) -> (b : Nat) -> Eq Bool (lte b (max a b)) true is
            NatElim (fn (wb : Nat) is Eq Bool (lte wb (max (succ k) wb)) true end)
              refl
              (fn (j : Nat) (ihj : Eq Bool (lte j (max (succ k) j)) true) is ih j end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+maxLeast : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+    Eq Bool (lte a c) true -> Eq Bool (lte b c) true -> Eq Bool (lte (max a b) c) true is
+  fn (a : Nat) is
+    NatElim (fn (wa : Nat) is (b : Nat) -> (c : Nat) ->
+        Eq Bool (lte wa c) true -> Eq Bool (lte b c) true -> Eq Bool (lte (max wa b) c) true end)
+      (fn (b : Nat) (c : Nat) (h1 : Eq Bool (lte zero c) true) (h2 : Eq Bool (lte b c) true) is h2 end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> (c : Nat) ->
+             Eq Bool (lte k c) true -> Eq Bool (lte b c) true -> Eq Bool (lte (max k b) c) true) is
+         fn (b : Nat) is
+           NatElim (fn (wb : Nat) is (c : Nat) ->
+               Eq Bool (lte (succ k) c) true -> Eq Bool (lte wb c) true ->
+               Eq Bool (lte (max (succ k) wb) c) true end)
+             (fn (c : Nat) (h1 : Eq Bool (lte (succ k) c) true) (h2 : Eq Bool (lte zero c) true) is h1 end)
+             (fn (m : Nat)
+                 (ihb : (c : Nat) ->
+                    Eq Bool (lte (succ k) c) true -> Eq Bool (lte m c) true ->
+                    Eq Bool (lte (max (succ k) m) c) true) is
+                fn (c : Nat) is
+                  NatElim (fn (wc : Nat) is
+                      Eq Bool (lte (succ k) wc) true -> Eq Bool (lte (succ m) wc) true ->
+                      Eq Bool (lte (max (succ k) (succ m)) wc) true end)
+                    (fn (h1 : Eq Bool (lte (succ k) zero) true) (h2 : Eq Bool (lte (succ m) zero) true) is
+                       everythingTrue h1 (lte (max (succ k) (succ m)) zero) end)
+                    (fn (p : Nat)
+                        (ihc : Eq Bool (lte (succ k) p) true -> Eq Bool (lte (succ m) p) true ->
+                           Eq Bool (lte (max (succ k) (succ m)) p) true) is
+                       fn (h1 : Eq Bool (lte (succ k) (succ p)) true)
+                          (h2 : Eq Bool (lte (succ m) (succ p)) true) is
+                         ih m p h1 h2 end end)
+                    c
+                end
+              end)
              b
          end
        end)
@@ -175,6 +292,77 @@ vmergeUpperBoundR : (x : List Nat) -> (y : List Nat) -> Eq Bool (vcle y (vmerge 
                   (maxUpperBoundR x0 y0) (ih ys) end)
              y
          end end)
+      x
+  end
+end
+
+-- a vcle on whole clocks implies it on heads and on tails (case on the first clock; the
+-- nil case uses lte 0 _ = true / vcle nil _ = true). These carry the list inductions below.
+headMono : (y : List Nat) -> (z : List Nat) -> Eq Bool (vcle y z) true -> Eq Bool (lte (head0 y) (head0 z)) true is
+  fn (y : List Nat) is
+    ListElim Nat (fn (w : List Nat) is (z : List Nat) -> Eq Bool (vcle w z) true -> Eq Bool (lte (head0 w) (head0 z)) true end)
+      (fn (z : List Nat) (h : Eq Bool (vcle (nil Nat) z) true) is refl end)
+      (fn (y0 : Nat) (ys : List Nat) (ih : (z : List Nat) -> Eq Bool (vcle ys z) true -> Eq Bool (lte (head0 ys) (head0 z)) true) is
+         fn (z : List Nat) (h : Eq Bool (vcle (cons Nat y0 ys) z) true) is
+           andTrueL (lte y0 (head0 z)) (vcle ys (tail0 z)) h end end)
+      y
+  end
+end
+
+tailMono : (y : List Nat) -> (z : List Nat) -> Eq Bool (vcle y z) true -> Eq Bool (vcle (tail0 y) (tail0 z)) true is
+  fn (y : List Nat) is
+    ListElim Nat (fn (w : List Nat) is (z : List Nat) -> Eq Bool (vcle w z) true -> Eq Bool (vcle (tail0 w) (tail0 z)) true end)
+      (fn (z : List Nat) (h : Eq Bool (vcle (nil Nat) z) true) is refl end)
+      (fn (y0 : Nat) (ys : List Nat) (ih : (z : List Nat) -> Eq Bool (vcle ys z) true -> Eq Bool (vcle (tail0 ys) (tail0 z)) true) is
+         fn (z : List Nat) (h : Eq Bool (vcle (cons Nat y0 ys) z) true) is
+           andTrueR (lte y0 (head0 z)) (vcle ys (tail0 z)) h end end)
+      y
+  end
+end
+
+-- the causal order is transitive, for any N (induction on a; lteTrans on heads, ih on tails).
+vcleTrans : (a : List Nat) -> (b : List Nat) -> (c : List Nat) ->
+    Eq Bool (vcle a b) true -> Eq Bool (vcle b c) true -> Eq Bool (vcle a c) true is
+  fn (a : List Nat) is
+    ListElim Nat (fn (wa : List Nat) is (b : List Nat) -> (c : List Nat) ->
+        Eq Bool (vcle wa b) true -> Eq Bool (vcle b c) true -> Eq Bool (vcle wa c) true end)
+      (fn (b : List Nat) (c : List Nat) (h1 : Eq Bool (vcle (nil Nat) b) true) (h2 : Eq Bool (vcle b c) true) is refl end)
+      (fn (a0 : Nat) (as : List Nat)
+          (ih : (b : List Nat) -> (c : List Nat) ->
+             Eq Bool (vcle as b) true -> Eq Bool (vcle b c) true -> Eq Bool (vcle as c) true) is
+         fn (b : List Nat) (c : List Nat)
+            (h1 : Eq Bool (vcle (cons Nat a0 as) b) true) (h2 : Eq Bool (vcle b c) true) is
+           andTrue (lte a0 (head0 c)) (vcle as (tail0 c))
+             (lteTrans a0 (head0 b) (head0 c)
+                (andTrueL (lte a0 (head0 b)) (vcle as (tail0 b)) h1)
+                (headMono b c h2))
+             (ih (tail0 b) (tail0 c)
+                (andTrueR (lte a0 (head0 b)) (vcle as (tail0 b)) h1)
+                (tailMono b c h2)) end end)
+      a
+  end
+end
+
+-- THE JOIN: the merge is the LEAST upper bound - any z above both x and y is above the
+-- merge. With the two upper-bound lemmas, vmerge IS the join of happens-before, for any N.
+vmergeLUB : (x : List Nat) -> (y : List Nat) -> (z : List Nat) ->
+    Eq Bool (vcle x z) true -> Eq Bool (vcle y z) true -> Eq Bool (vcle (vmerge x y) z) true is
+  fn (x : List Nat) is
+    ListElim Nat (fn (wx : List Nat) is (y : List Nat) -> (z : List Nat) ->
+        Eq Bool (vcle wx z) true -> Eq Bool (vcle y z) true -> Eq Bool (vcle (vmerge wx y) z) true end)
+      (fn (y : List Nat) (z : List Nat) (hx : Eq Bool (vcle (nil Nat) z) true) (hy : Eq Bool (vcle y z) true) is hy end)
+      (fn (x0 : Nat) (xs : List Nat)
+          (ih : (y : List Nat) -> (z : List Nat) ->
+             Eq Bool (vcle xs z) true -> Eq Bool (vcle y z) true -> Eq Bool (vcle (vmerge xs y) z) true) is
+         fn (y : List Nat) (z : List Nat)
+            (hx : Eq Bool (vcle (cons Nat x0 xs) z) true) (hy : Eq Bool (vcle y z) true) is
+           andTrue (lte (max x0 (head0 y)) (head0 z)) (vcle (vmerge xs (tail0 y)) (tail0 z))
+             (maxLeast x0 (head0 y) (head0 z)
+                (andTrueL (lte x0 (head0 z)) (vcle xs (tail0 z)) hx)
+                (headMono y z hy))
+             (ih (tail0 y) (tail0 z)
+                (andTrueR (lte x0 (head0 z)) (vcle xs (tail0 z)) hx)
+                (tailMono y z hy)) end end)
       x
   end
 end

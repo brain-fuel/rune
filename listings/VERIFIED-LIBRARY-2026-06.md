@@ -401,10 +401,12 @@ equation).
 - `ch437_vc_nreplica`: vector clocks generalized from the fixed 2 replicas (ch424-426) to
   ARBITRARY N - a `List Nat` with zero-padding semantics (a replica not yet seen counts 0,
   so different-length clocks compare/merge sensibly), paralleling how ch112 generalized
-  consensus quorums to lists. `vcleRefl` + `vmergeUpperBoundL`/`vmergeUpperBoundR` (the
-  merge advances every replica's clock - gossip never loses info), by list induction over
-  zip-style `vcle`/`vmerge` reusing the `max`/`lte` LUB lemmas. (LUB + transitivity over
-  lists carry an equal-length side condition, given concretely at n=2 by ch425/ch426.)
+  consensus quorums to lists. The FULL ch426 result, generalized to N: `vcleRefl` +
+  `vcleTrans` (preorder), `vmergeUpperBoundL`/`R` (merge advances every replica's clock),
+  and `vmergeLUB` (merge is the LEAST upper bound - merge IS the join for any N). The
+  zero-padding makes LUB/transitivity UNCONDITIONAL (a `vcle x z` forces x's out-of-range
+  entries to 0, no equal-length side condition); two `headMono`/`tailMono` lemmas carry the
+  list inductions, reusing `lteTrans`/`maxLeast`.
   (NOTE: quorum intersection / consensus agreement is already proven for ARBITRARY n by
   ch110 (fixed {0,1,2}) and ch112 (general, via pigeonhole counting); no N=3 restatement is
   added here - that would be Rule-5 redundancy.)
