@@ -376,6 +376,12 @@ equation).
   gossip both converged to 2 (sum 4). `convergedCorrect` carries the proof; runs live on
   escript (TestListingsReplicatedActorsBeam). The deploy half of better-than-Winglang on
   real distributed actors, not a model - using existing primitives, no new machinery.
+- `ch434_fault_tolerant_replica`: fault-tolerant replication on live BEAM (E4 + D5 faults).
+  Replica A increments and gossips its state to B, then A CRASHES (primExit) and its death
+  is DETECTed (primMonitor); because A's increment was anti-entropied into B, B still
+  reports it (answer 1) - DURABILITY under a crash, the real distributed-systems claim.
+  Combines ch214's live faults with ch433's replication. `durable` carries the proof; runs
+  on escript (TestListingsFaultTolerantReplicaBeam).
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl

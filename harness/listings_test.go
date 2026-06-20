@@ -466,6 +466,42 @@ func TestListingsReplicatedActorsBeam(t *testing.T) {
 	}
 }
 
+// TestListingsFaultTolerantReplicaBeam is the E4 fault-tolerant-replication gate (E4 + D5
+// faults): replica A increments and gossips its state to replica B, then A is CRASHED
+// (primExit) and its death DETECTed (primMonitor). Because A's increment was already
+// anti-entropied into B, B still reports it - the value survives the replica. ch434 runs
+// this on genuine BEAM processes and prints succ zero (1): durability under a crash, the
+// real distributed-systems claim. BEAM-only, like ch205/ch214.
+func TestListingsFaultTolerantReplicaBeam(t *testing.T) {
+	if _, err := exec.LookPath("escript"); err != nil {
+		t.Skip("escript not in PATH")
+	}
+	s := loadListing(t, "ch434_fault_tolerant_replica.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Beam{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "ch434.erl")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("escript", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("escript run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ zero"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("fault-tolerant replica on BEAM printed %q, want %q (gossiped increment should survive the crash)", got, want)
+	}
+}
+
 // TestListingsOTPFaultLiveBeam is the D5 / R-OTP Layer-R2 LIVE-fault gate: the
 // fault primitives ch206 SPECIFIED (CRASH/DETECT + bounded restart-liveness) now
 // RUN as real BEAM signals. ch214 spawns a worker that crashes itself
