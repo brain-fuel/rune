@@ -116,6 +116,11 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("const dotList = () => xs => ys => { let s = 0; while (xs.tag === 1 && ys.tag === 1) { s += xs.args[0] * ys.args[0]; xs = xs.args[1]; ys = ys.args[1]; } return s; };\n")
 	}
+	// D4 interop: npDot is the uniform dot CAPABILITY (NumPy on py, OpenBLAS on C/LLVM);
+	// on the other source backends it is the portable reference floor.
+	if usesForeign(p, "npDot") {
+		b.WriteString("const npDot = () => xs => ys => { let s = 0; while (xs.tag === 1 && ys.tag === 1) { s += xs.args[0] * ys.args[0]; xs = xs.args[1]; ys = ys.args[1]; } return s; };\n")
+	}
 	// Matrix product sum: flat row-major A (m×k) and B (k×n) as Rune FLists; sum all
 	// entries of A·B. The native backends route this through cblas_dgemm; on the source
 	// backends it is the portable triple-loop reference.

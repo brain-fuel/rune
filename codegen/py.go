@@ -114,6 +114,12 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("def dotList():\n    def _dl(xs, ys):\n        s = 0.0\n        while xs[\"tag\"] == 1 and ys[\"tag\"] == 1:\n            s += xs[\"args\"][0] * ys[\"args\"][0]\n            xs = xs[\"args\"][1]; ys = ys[\"args\"][1]\n        return s\n    return lambda xs: lambda ys: _dl(xs, ys)\n")
 	}
+	// D4 interop: npDot binds REAL NumPy on the py backend — marshal each Rune FList
+	// into an np.array and call np.dot. The Rune tolerance contract guards the result,
+	// so the third-party library is checked, never trusted blindly.
+	if usesForeign(p, "npDot") {
+		b.WriteString("def npDot():\n    import numpy as np\n    def _np(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return np.array(a, dtype=float)\n    return lambda xs: lambda ys: float(np.dot(_np(xs), _np(ys)))\n")
+	}
 	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
 	// portable triple-loop reference (native backends use cblas_dgemm).
 	if usesForeign(p, "gemmSum") {

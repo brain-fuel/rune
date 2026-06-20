@@ -251,12 +251,15 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); return mkfloat(d < 0 ? -d : d); }\n")
 		b.WriteString("Value fabsP(void) { return rt_mkclo(&fabsP_c, 0); }\n")
 	}
-	if usesForeign(p, "dot2") || usesForeign(p, "dotList") || usesForeign(p, "gemmSum") {
+	if usesForeign(p, "dot2") || usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") {
 		b.WriteString("#include <cblas.h>\n")
 	}
-	// shared FList marshaller (vectors + flat matrices), used by dotList and gemmSum.
-	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") {
+	// shared FList marshaller (vectors + flat matrices), used by dotList/npDot and gemmSum.
+	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") {
 		b.WriteString("static void fl_fill(Value lst, double* a) { int i = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { a[i++] = float_val(obj(lst)->slots[0]); lst = obj(lst)->slots[1]; } }\n")
+	}
+	if usesForeign(p, "dotList") || usesForeign(p, "npDot") {
+		b.WriteString("static int fl_len(Value lst) { int n = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { n++; lst = obj(lst)->slots[1]; } return n; }\n")
 	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("static Value dot2_c4(Value b1, Value* env) { double X[2] = { float_val(env[0]), float_val(env[1]) }; double Y[2] = { float_val(env[2]), float_val(b1) }; return mkfloat(cblas_ddot(2, X, 1, Y, 1)); }\n")
@@ -267,10 +270,16 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 	}
 	// arbitrary-length ddot: marshal a Rune FList into a C double[], then cblas_ddot.
 	if usesForeign(p, "dotList") {
-		b.WriteString("static int fl_len(Value lst) { int n = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { n++; lst = obj(lst)->slots[1]; } return n; }\n")
 		b.WriteString("static Value dotList_c2(Value ys, Value* env) { Value xs = env[0]; int n = fl_len(xs), m = fl_len(ys); int k = n < m ? n : m; double* X = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); double* Y = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); fl_fill(xs, X); fl_fill(ys, Y); double r = cblas_ddot(k, X, 1, Y, 1); free(X); free(Y); return mkfloat(r); }\n")
 		b.WriteString("static Value dotList_c1(Value xs, Value* env) { (void)env; Value c = rt_mkclo(&dotList_c2, 1); rt_clo_set(c, 0, xs); return c; }\n")
 		b.WriteString("Value dotList(void) { return rt_mkclo(&dotList_c1, 0); }\n")
+	}
+	// D4 interop: npDot on the native backends is the OpenBLAS gift (cblas_ddot), the
+	// same uniform capability the py backend serves with NumPy.
+	if usesForeign(p, "npDot") {
+		b.WriteString("static Value npDot_c2(Value ys, Value* env) { Value xs = env[0]; int n = fl_len(xs), m = fl_len(ys); int k = n < m ? n : m; double* X = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); double* Y = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); fl_fill(xs, X); fl_fill(ys, Y); double r = cblas_ddot(k, X, 1, Y, 1); free(X); free(Y); return mkfloat(r); }\n")
+		b.WriteString("static Value npDot_c1(Value xs, Value* env) { (void)env; Value c = rt_mkclo(&npDot_c2, 1); rt_clo_set(c, 0, xs); return c; }\n")
+		b.WriteString("Value npDot(void) { return rt_mkclo(&npDot_c1, 0); }\n")
 	}
 	// MATRIX BLAS: gemmSum m k n A B — cblas_dgemm over two flat row-major FLists,
 	// returning the SUM of all product entries (scalar observable; no host→Rune matrix).

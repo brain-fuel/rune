@@ -120,6 +120,11 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("func dotList() any { return func(xs any) any { return func(ys any) any { s := 0.0; for xs.(map[string]any)[\"tag\"] == 1 && ys.(map[string]any)[\"tag\"] == 1 { mx := xs.(map[string]any); my := ys.(map[string]any); s += mx[\"args\"].([]any)[0].(float64) * my[\"args\"].([]any)[0].(float64); xs = mx[\"args\"].([]any)[1]; ys = my[\"args\"].([]any)[1] }; return s } } }\n")
 	}
+	// D4 interop: npDot is the uniform dot CAPABILITY (NumPy on py, OpenBLAS on C/LLVM);
+	// on the other source backends it is the portable reference floor.
+	if usesForeign(p, "npDot") {
+		b.WriteString("func npDot() any { return func(xs any) any { return func(ys any) any { s := 0.0; for xs.(map[string]any)[\"tag\"] == 1 && ys.(map[string]any)[\"tag\"] == 1 { mx := xs.(map[string]any); my := ys.(map[string]any); s += mx[\"args\"].([]any)[0].(float64) * my[\"args\"].([]any)[0].(float64); xs = mx[\"args\"].([]any)[1]; ys = my[\"args\"].([]any)[1] }; return s } } }\n")
+	}
 	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
 	// portable triple-loop reference (native backends use cblas_dgemm).
 	if usesForeign(p, "gemmSum") {

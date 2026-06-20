@@ -52,6 +52,12 @@ var ioPrims = map[string]bool{
 	"dot2":       true, // dot2       a0 a1 b0 b1    : Float^4 -> Float (a0*b0 + a1*b1)
 	"dotList":    true, // dotList    xs ys          : FList -> FList -> Float (cblas_ddot over a marshalled double[]; C/LLVM)
 	"gemmSum":    true, // gemmSum    m k n A B       : Nat^3 -> FList -> FList -> Float (cblas_dgemm A·B, sum of entries; C/LLVM)
+	// D4 INTEROP — a uniform numeric CAPABILITY with per-backend impls, all behind one
+	// Rune tolerance contract: the py backend binds REAL NumPy (np.dot), the native
+	// backends OpenBLAS (cblas_ddot), the rest a portable reference floor. Parity is of
+	// the CONTRACT, not the library — the guard checks each impl against an in-language
+	// reference, so a divergent third-party result is BLAMED, never trusted blindly.
+	"npDot": true, // npDot      xs ys          : FList -> FList -> Float (NumPy on py; OpenBLAS on C/LLVM; reference elsewhere)
 }
 
 // fileEnvPrims are the D6 prims whose host body needs the packed-String codec

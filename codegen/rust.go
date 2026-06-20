@@ -89,6 +89,11 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("fn dotList() -> Rc<V> { vfun(|xs: Rc<V>| vfun(move |ys: Rc<V>| Rc::new(V::Float(_fldot(xs.clone(), ys.clone()))))) }\n")
 	}
+	// D4 interop: npDot is the uniform dot CAPABILITY (NumPy on py, OpenBLAS on C/LLVM);
+	// on rust it is the portable reference floor.
+	if usesForeign(p, "npDot") {
+		b.WriteString("fn npDot() -> Rc<V> { vfun(|xs: Rc<V>| vfun(move |ys: Rc<V>| Rc::new(V::Float(_fldot(xs.clone(), ys.clone()))))) }\n")
+	}
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("fn gemmSum() -> Rc<V> { vfun(|m: Rc<V>| vfun(move |k: Rc<V>| { let m = m.clone(); vfun(move |n: Rc<V>| { let m = m.clone(); let k = k.clone(); vfun(move |a: Rc<V>| { let m = m.clone(); let k = k.clone(); let n = n.clone(); vfun(move |bm: Rc<V>| { let mm: usize = _big_to_string(_nat(&m)).parse().unwrap(); let kk: usize = _big_to_string(_nat(&k)).parse().unwrap(); let nn: usize = _big_to_string(_nat(&n)).parse().unwrap(); let av = _flvec(a.clone()); let bv = _flvec(bm.clone()); let mut s = 0.0; for i in 0..mm { for j in 0..nn { for l in 0..kk { s += av[i * kk + l] * bv[l * nn + j]; } } } Rc::new(V::Float(s)) }) }) }) })) }\n")
 	}

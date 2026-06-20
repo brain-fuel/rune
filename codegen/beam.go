@@ -129,6 +129,11 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("ff_dotList() -> fun(Xs) -> fun(Ys) -> (fun D(A, B, Acc) -> case {A, B} of {{c, 1, _, [X, Xr]}, {c, 1, _, [Y, Yr]}} -> D(Xr, Yr, Acc + X * Y); _ -> Acc end end)(Xs, Ys, 0.0) end end.\n")
 	}
+	// D4 interop: npDot is the uniform dot CAPABILITY (NumPy on py, OpenBLAS on C/LLVM);
+	// on the other source backends it is the portable reference floor.
+	if usesForeign(p, "npDot") {
+		b.WriteString("ff_npDot() -> fun(Xs) -> fun(Ys) -> (fun D(A, B, Acc) -> case {A, B} of {{c, 1, _, [X, Xr]}, {c, 1, _, [Y, Yr]}} -> D(Xr, Yr, Acc + X * Y); _ -> Acc end end)(Xs, Ys, 0.0) end end.\n")
+	}
 	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
 	// portable triple-loop reference (native backends use cblas_dgemm). Col flattens an
 	// FList to an Erlang (1-indexed) list; the comprehension sums A[i*K+P]·B[P*N+J].

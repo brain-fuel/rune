@@ -1,0 +1,128 @@
+-- Chapter 221 — REAL NumPy interop behind a contract guard (D4 / R-INTEROP / R-FFI).
+--
+-- D3 built the f64 element type, the array/matrix marshalling boundary, and the
+-- tolerance contract. D4 is the payoff: bind a REAL third-party numeric library and
+-- trust it only as far as a Rune contract permits. `npDot` is a single uniform
+-- CAPABILITY with per-backend impls — on the PYTHON backend it calls actual NumPy
+-- (`numpy.dot` over marshalled `np.array`s), on the NATIVE backends it is OpenBLAS
+-- (`cblas_ddot`), and on the rest a portable reference loop. The point is not that all
+-- three compute the same loop — it is that ONE Rune contract guards them ALL.
+--
+-- The interop discipline (Lambert): a foreign library is ASSUMED, never trusted blind.
+-- `npDotChecked` runs `npDot` AND an in-language reference fold, and only accepts the
+-- library result if it lands within `eps` of the reference — otherwise it BLAMES the
+-- library (`Result Float Blame`). So a NumPy that returned garbage would be caught at
+-- the boundary, not propagated. Parity is of the CONTRACT, not the library's bits.
+--
+-- Observable: the dot of [1,2,3,4]·[4,3,2,1] = 4+6+6+4 = 20, a within-default ok (20),
+-- and a negative-tolerance blame (0): "20\n20\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the interop kernel: NumPy on py, OpenBLAS on C/LLVM, reference floor elsewhere.
+foreign npDot      : FList -> FList -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+-- the portable reference dot (an in-language fold) the library result is checked against.
+refDot : FList -> FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is FList -> Float end)
+      (fn (ys : FList) is fromNat 0 end)
+      (fn (x : Float) (rest : FList) (ih : FList -> Float) is
+         fn (ys : FList) is
+           FListElim (fn (y : FList) is Float end)
+             (fromNat 0)
+             (fn (y : Float) (yrest : FList) (ih2 : Float) is
+                fadd (fmul x y) (ih yrest) end)
+             ys
+         end
+       end)
+      xs
+  end
+end
+
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+-- THE INTEROP CONTRACT: accept the NumPy/OpenBLAS result only within `eps` of refDot.
+npDotChecked : Float -> FList -> FList -> Result Float Blame is
+  fn (eps : Float) (xs : FList) (ys : FList) is
+    case withinTol eps (npDot xs ys) (refDot xs ys) of
+    | true  -> ok  Float Blame (npDot xs ys)
+    | false -> err Float Blame (driftBlame (npDot xs ys))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+xs : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+ys : FList is fcons (fromNat 4) (fcons (fromNat 3) (fcons (fromNat 2) (fcons (fromNat 1) fnil))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npDot xs ys))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (npDotChecked defaultEps xs ys))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (npDotChecked (fsub (fromNat 0) (fromNat 1)) xs ys))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
