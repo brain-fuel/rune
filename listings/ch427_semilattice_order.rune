@@ -1,0 +1,129 @@
+-- Chapter 427, the partial order induced by a join-semilattice (E3/E4).
+--
+-- ch426 proved, CONCRETELY for vector clocks, that the merge is the join of the causal
+-- order. This chapter proves the same thing ABSTRACTLY, for ANY carrier with a merge
+-- satisfying comm/idem/assoc (the CvRDT laws, taken as hypotheses, as in ch423). Every
+-- join-semilattice induces a canonical partial order
+--
+--   x <= y   :=   mrg x y = y      ("merging x into y changes nothing")
+--
+-- and the merge is exactly its join. We prove the order is a partial order and that merge
+-- is the least upper bound - so the order-theoretic and algebraic views of a CvRDT
+-- coincide for EVERY CvRDT, of which ch426's vector clock is one instance.
+--
+--   leqJRefl/leqJTrans/leqJAntisym : the induced relation is a partial order.
+--   leqJUpperL/leqJUpperR          : merge x y is above both x and y.
+--   leqJLeast                      : merge x y is the LEAST such upper bound.
+--
+-- Proof-only over the ambient Eq/refl/subst - purely equational, no induction.
+
+-- the equational toolkit (derived from the ambient subst).
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (w : A) is Eq A w x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- REFLEXIVE: x <= x is exactly idempotence.
+leqJRefl : (S : U) -> (mrg : S -> S -> S) ->
+    (idem : (x : S) -> Eq S (mrg x x) x) ->
+    (a : S) -> Eq S (mrg a a) a is
+  fn (S : U) (mrg : S -> S -> S) (idem : (x : S) -> Eq S (mrg x x) x) (a : S) is idem a end
+end
+
+-- TRANSITIVE: mrg x y = y and mrg y z = z give mrg x z = z (assoc + rewrite).
+leqJTrans : (S : U) -> (mrg : S -> S -> S) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (a : S) -> (b : S) -> (c : S) ->
+    Eq S (mrg a b) b -> Eq S (mrg b c) c -> Eq S (mrg a c) c is
+  fn (S : U) (mrg : S -> S -> S)
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (a : S) (b : S) (c : S) (hab : Eq S (mrg a b) b) (hbc : Eq S (mrg b c) c) is
+    transEq S (mrg a c) (mrg a (mrg b c)) c
+      (cong S S (fn (w : S) is mrg a w end) c (mrg b c) (symEq S (mrg b c) c hbc))
+      (transEq S (mrg a (mrg b c)) (mrg (mrg a b) c) c
+         (symEq S (mrg (mrg a b) c) (mrg a (mrg b c)) (assoc a b c))
+         (transEq S (mrg (mrg a b) c) (mrg b c) c
+            (cong S S (fn (w : S) is mrg w c end) (mrg a b) b hab)
+            hbc))
+  end
+end
+
+-- ANTISYMMETRIC: mutually-below elements are equal (commutativity bridges the two sides).
+leqJAntisym : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (a : S) -> (b : S) ->
+    Eq S (mrg a b) b -> Eq S (mrg b a) a -> Eq S a b is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (a : S) (b : S) (hab : Eq S (mrg a b) b) (hba : Eq S (mrg b a) a) is
+    transEq S a (mrg b a) b
+      (symEq S (mrg b a) a hba)
+      (transEq S (mrg b a) (mrg a b) b (comm b a) hab)
+  end
+end
+
+-- UPPER BOUND (left): x <= mrg x y, i.e. mrg x (mrg x y) = mrg x y (assoc back + idem).
+leqJUpperL : (S : U) -> (mrg : S -> S -> S) ->
+    (idem : (x : S) -> Eq S (mrg x x) x) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (a : S) -> (b : S) -> Eq S (mrg a (mrg a b)) (mrg a b) is
+  fn (S : U) (mrg : S -> S -> S)
+     (idem : (x : S) -> Eq S (mrg x x) x)
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (a : S) (b : S) is
+    transEq S (mrg a (mrg a b)) (mrg (mrg a a) b) (mrg a b)
+      (symEq S (mrg (mrg a a) b) (mrg a (mrg a b)) (assoc a a b))
+      (cong S S (fn (w : S) is mrg w b end) (mrg a a) a (idem a))
+  end
+end
+
+-- UPPER BOUND (right): y <= mrg x y, i.e. mrg y (mrg x y) = mrg x y (comm + assoc + idem).
+leqJUpperR : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (idem : (x : S) -> Eq S (mrg x x) x) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (a : S) -> (b : S) -> Eq S (mrg b (mrg a b)) (mrg a b) is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (idem : (x : S) -> Eq S (mrg x x) x)
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (a : S) (b : S) is
+    transEq S (mrg b (mrg a b)) (mrg b (mrg b a)) (mrg a b)
+      (cong S S (fn (w : S) is mrg b w end) (mrg a b) (mrg b a) (comm a b))
+      (transEq S (mrg b (mrg b a)) (mrg (mrg b b) a) (mrg a b)
+         (symEq S (mrg (mrg b b) a) (mrg b (mrg b a)) (assoc b b a))
+         (transEq S (mrg (mrg b b) a) (mrg b a) (mrg a b)
+            (cong S S (fn (w : S) is mrg w a end) (mrg b b) b (idem b))
+            (comm b a)))
+  end
+end
+
+-- LEAST upper bound: if c is above both a and b, it is above mrg a b. So mrg is the JOIN
+-- of the induced order - for any CvRDT, the algebra and the order theory coincide.
+leqJLeast : (S : U) -> (mrg : S -> S -> S) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (a : S) -> (b : S) -> (c : S) ->
+    Eq S (mrg a c) c -> Eq S (mrg b c) c -> Eq S (mrg (mrg a b) c) c is
+  fn (S : U) (mrg : S -> S -> S)
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (a : S) (b : S) (c : S) (hac : Eq S (mrg a c) c) (hbc : Eq S (mrg b c) c) is
+    transEq S (mrg (mrg a b) c) (mrg a (mrg b c)) c
+      (assoc a b c)
+      (transEq S (mrg a (mrg b c)) (mrg a c) c
+         (cong S S (fn (w : S) is mrg a w end) (mrg b c) c hbc)
+         hac)
+  end
+end

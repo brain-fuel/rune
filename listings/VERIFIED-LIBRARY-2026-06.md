@@ -336,6 +336,11 @@ equation).
   Nat's order), lifted to `mergeUpperBoundL`/`R` (merge follows both inputs) + `mergeLUB`
   (any clock above both is above the merge). So `merge` is exactly the join induced by
   happens-before, not merely some commutative-idempotent-associative operation.
+- `ch427_semilattice_order`: the GENERIC form of ch426 - for ANY join-semilattice (comm/
+  idem/assoc as hypotheses, as ch423), the induced order `x <= y := mrg x y = y` is a
+  partial order (`leqJRefl`/`leqJTrans`/`leqJAntisym`) and merge is its join
+  (`leqJUpperL`/`R` + `leqJLeast`). Purely equational, no induction. So the algebraic and
+  order-theoretic views coincide for EVERY CvRDT; ch426's vector clock is one instance.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
