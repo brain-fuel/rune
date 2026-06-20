@@ -14,10 +14,13 @@
 > a witness); `Stabilize` is the LIVENESS check (reaches a global fixpoint under
 > fair ring gossip within n-1 rounds for a join, never for a non-join). Surfaced as
 > `rune simulate <file> [replicas]` (convention init/merge/value/op0..opN, prints
-> the trace + law report + verdict) with examples/gcounter.rune (proves convergence
-> AND simulates from one source), examples/gcounter3.rune (N-way), examples/lww.rune
-> (non-CvRDT). The E3 all-P/all-fuel soundness invariant landed as listing ch229.
-> REMAINING: preflight(proof)/inflight(projection) tie to the BEAM runtime (D5/B3),
+> the trace + law report + a LINTER-AUTHORITATIVE verdict). Examples: gcounter
+> (PROVES convergence AND simulates AND deploys `converged`=3 on every backend incl
+> BEAM/erl, the triad from one source), gcounter3 (N-way), gset (OR-join), pncounter
+> (compound P/N, inc+dec), lww + badcounter (non-CvRDTs the linter catches). The E3
+> all-P/all-fuel invariant landed as listing ch229 (projectVisible/visibleRunVisible
+> + projectOnlyFail: the projection alphabet is exactly {lfail}). REMAINING:
+> live-actor projection onto spawn/send/receive (the D5/B3 OTP runtime tie),
 > `protocol ... end` surface sugar + a `deploy` verb.
 
 > Roadmap node **E3** (`E3 [I] verified protocols (consensus/repl/CRDT) +
