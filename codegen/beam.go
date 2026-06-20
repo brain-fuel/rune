@@ -47,6 +47,19 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesIO(p) {
 		b.WriteString(beamIORuntime)
 	}
+	// D6 / R-EFFECT: bake the standard OS/IO host bodies when referenced.
+	if usesForeign(p, "printNat") {
+		b.WriteString("ff_printNat() -> fun(N) -> fun(_U) -> begin io:format(\"~w~n\", [N]), N end end end.\n")
+	}
+	if usesForeign(p, "getNat") {
+		b.WriteString("ff_getNat() -> fun(_U) -> list_to_integer(string:trim(io:get_line(\"\"))) end.\n")
+	}
+	if usesForeign(p, "timeNanos") {
+		b.WriteString("ff_timeNanos() -> fun(_U) -> os:system_time(nanosecond) end.\n")
+	}
+	if usesForeign(p, "readLineCode") {
+		b.WriteString("ff_readLineCode() -> fun(_U) -> L = string:trim(io:get_line(\"\")), {N, P} = lists:foldl(fun(C, {Acc, Pl}) -> {Acc + C * Pl, Pl * 256} end, {0, 1}, L), N + P end.\n")
+	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}
@@ -175,6 +188,14 @@ func (em *beamEmitter) accelDispatch(app IApp, env []string) (string, bool) {
 		return fmt.Sprintf("(%s * %s)", ea, eb), true
 	case core.NatOpMonus:
 		return fmt.Sprintf("max((%s) - (%s), 0)", ea, eb), true
+	case core.NatOpDiv:
+		// A0/B0 are FRESH fun-bound variables (uppercase-initial). NOT `$A`/`$B`:
+		// in Erlang `$x` is the character-code literal of x, so `fun($A, $B) -> …`
+		// matches only the integers 65/66 — a real divisor like 256 hits no clause
+		// (exit 127 at runtime). Saturating to the prelude's a//0 = 0 contract.
+		return fmt.Sprintf("(fun(A0, B0) -> case B0 of 0 -> 0; _ -> A0 div B0 end end)(%s, %s)", ea, eb), true
+	case core.NatOpMod:
+		return fmt.Sprintf("(fun(A0, B0) -> case B0 of 0 -> A0; _ -> A0 rem B0 end end)(%s, %s)", ea, eb), true
 	}
 	return "", false
 }

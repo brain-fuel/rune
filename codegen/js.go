@@ -33,6 +33,19 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesIO(p) {
 		b.WriteString(ioRuntime)
 	}
+	// D6 / R-EFFECT: bake the standard OS/IO host bodies when referenced.
+	if usesForeign(p, "printNat") {
+		b.WriteString("const printNat = () => n => () => { console.log(n.toString()); return n; };\n")
+	}
+	if usesForeign(p, "getNat") {
+		b.WriteString("const getNat = () => () => BigInt(require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/)[0]);\n")
+	}
+	if usesForeign(p, "timeNanos") {
+		b.WriteString("const timeNanos = () => () => BigInt(Date.now()) * 1000000n;\n")
+	}
+	if usesForeign(p, "readLineCode") {
+		b.WriteString("const readLineCode = () => () => { const s = require('fs').readFileSync(0, 'utf8').split('\\n')[0]; let n = 1n; for (let i = s.length - 1; i >= 0; i--) n = n * 256n + BigInt(s.charCodeAt(i)); return n; };\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNat(&b, *p.Nat)
@@ -235,6 +248,10 @@ func (em *jsEmitter) accelDispatch(app IApp, env []string) (string, bool) {
 		return fmt.Sprintf("(%s * %s)", ea, eb), true
 	case core.NatOpMonus:
 		return fmt.Sprintf("(() => { const $a = %s, $b = %s; return $a > $b ? $a - $b : 0n; })()", ea, eb), true
+	case core.NatOpDiv:
+		return fmt.Sprintf("(() => { const $a = %s, $b = %s; return $b === 0n ? 0n : $a / $b; })()", ea, eb), true
+	case core.NatOpMod:
+		return fmt.Sprintf("(() => { const $a = %s, $b = %s; return $b === 0n ? $a : $a %% $b; })()", ea, eb), true
 	}
 	return "", false
 }

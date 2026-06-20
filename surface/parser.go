@@ -161,7 +161,7 @@ func (p *parser) parseBuiltin() (Item, error) {
 			return nil, err
 		}
 		return BuiltinNat{TyName: names[0], Zero: names[1], Succ: names[2]}, nil
-	case "natAdd", "natMul", "natMonus":
+	case "natAdd", "natMul", "natMonus", "natDiv", "natMod":
 		names, err := p.builtinNames(1)
 		if err != nil {
 			return nil, err
@@ -177,7 +177,7 @@ func (p *parser) parseBuiltin() (Item, error) {
 		}
 		return BuiltinNumInj{Kind: kind.text, TyName: names[0], InjName: names[1]}, nil
 	default:
-		return nil, fmt.Errorf("unknown builtin kind %q at offset %d (only \"nat\", \"int\", \"rat\", \"natAdd\", \"natMul\", and \"natMonus\" exist)", kind.text, kind.pos)
+		return nil, fmt.Errorf("unknown builtin kind %q at offset %d (only \"nat\", \"int\", \"rat\", \"natAdd\", \"natMul\", \"natMonus\", \"natDiv\", and \"natMod\" exist)", kind.text, kind.pos)
 	}
 }
 
@@ -611,7 +611,7 @@ func (p *parser) parseApp() (Exp, error) {
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tCase, tCalc:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tDec, tStr, tCase, tCalc:
 		return true
 	default:
 		return false
@@ -675,6 +675,9 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tDec:
 		p.next()
 		return p.decLit(t)
+	case tStr:
+		p.next()
+		return p.strLit(t)
 	case tFn:
 		return p.parseLam()
 	case tCase:
@@ -832,6 +835,27 @@ func (p *parser) decLit(t token) (Exp, error) {
 	}
 	slash := EVar{Name: "/"}
 	return EApp{Fn: EApp{Fn: slash, Arg: ENum{Val: num, Pos: t.pos}}, Arg: ENum{Val: den, Pos: t.pos}}, nil
+}
+
+// strLit desugars a string literal `"…"` to a packed `Bytes` value, the surface
+// sugar for B4's host-backed binary string ("Haskell's binary thing only better":
+// packed, not a [Char] cons-list). The decoded content's UTF-8 bytes c0c1…c_{k-1}
+// (c0 first) pack into ONE big integer with the FIRST byte least-significant and a
+// 0x01 SENTINEL on top: n = 1·256ᵏ + Σ cᵢ·256ⁱ. That sentinel makes the byte count
+// recoverable (and leading-NUL bytes survive), and the low-byte-first layout makes
+// `uncons` O(1): head = n mod 256, tail = n div 256, empty ⟺ n = 1. The literal
+// emits `bytes n` (the `Bytes` constructor must be in scope, like `/` for decimals);
+// `bytes` wraps the numeral, so the whole content reduces in the kernel — strings
+// COMPUTE in the REPL, no host needed.
+func (p *parser) strLit(t token) (Exp, error) {
+	acc := big.NewInt(1) // the sentinel (most-significant byte)
+	bs := []byte(t.text)
+	c256 := big.NewInt(256)
+	for i := len(bs) - 1; i >= 0; i-- {
+		acc.Mul(acc, c256)
+		acc.Add(acc, big.NewInt(int64(bs[i])))
+	}
+	return EApp{Fn: EVar{Name: "bytes"}, Arg: ENum{Val: acc, Pos: t.pos}}, nil
 }
 
 // isQtyTok reports whether a token is a usage annotation in binder position:

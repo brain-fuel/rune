@@ -507,6 +507,18 @@ var natOpKinds = map[string]struct {
 		}
 		return a - b
 	}},
+	"natDiv": {core.NatOpDiv, func(a, b int64) int64 {
+		if b == 0 {
+			return 0 // a // 0 = 0 (matches the prelude's fuel divF)
+		}
+		return a / b
+	}},
+	"natMod": {core.NatOpMod, func(a, b int64) int64 {
+		if b == 0 {
+			return a // a % 0 = a (matches the prelude's fuel modF)
+		}
+		return a % b
+	}},
 }
 
 // AddBuiltinNatOp validates and registers a kernel-acceleration declaration

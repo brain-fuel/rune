@@ -198,6 +198,8 @@ type BuiltinNat struct {
 //	builtin natAdd add
 //	builtin natMul mul
 //	builtin natMonus monus
+//	builtin natDiv //
+//	builtin natMod %
 //
 // It tags an already-defined binary nat function as a kernel-accelerated
 // arithmetic op. From its position the def's content hash is registered with the
@@ -206,9 +208,9 @@ type BuiltinNat struct {
 // O(a·b) eliminator peeling. The accelerated op IS the user's own def — the
 // bridge to its recursive body is refl. Like `builtin nat`, the declaration is
 // session state only; nothing enters the store. Kind is one of "natAdd",
-// "natMul", "natMonus"; DefName is the function being accelerated.
+// "natMul", "natMonus", "natDiv", "natMod"; DefName is the function accelerated.
 type BuiltinNatOp struct {
-	Kind    string // "natAdd" | "natMul" | "natMonus"
+	Kind    string // "natAdd" | "natMul" | "natMonus" | "natDiv" | "natMod"
 	DefName string
 }
 

@@ -43,6 +43,16 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesIO(p) {
 		b.WriteString(rustIORuntime())
 	}
+	// D6 / R-EFFECT: bake the standard OS/IO host bodies when referenced.
+	if usesForeign(p, "printNat") {
+		b.WriteString("fn printNat() -> Rc<V> { vfun(|n: Rc<V>| -> Rc<V> { let s = _show(&n); let n2 = n.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { println!(\"{}\", s); n2.clone() }) }) }\n")
+	}
+	if usesForeign(p, "getNat") {
+		b.WriteString("fn getNat() -> Rc<V> { vfun(move |_u: Rc<V>| -> Rc<V> { let mut s = String::new(); std::io::stdin().read_line(&mut s).unwrap(); Rc::new(V::Nat(_big_from_u64(s.trim().parse::<u64>().unwrap()))) }) }\n")
+	}
+	if usesForeign(p, "timeNanos") {
+		b.WriteString("fn timeNanos() -> Rc<V> { vfun(move |_u: Rc<V>| -> Rc<V> { let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64; Rc::new(V::Nat(_big_from_u64(ns))) }) }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatRust(&b, *p.Nat)

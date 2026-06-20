@@ -123,6 +123,92 @@ leb : Whole -> Whole -> Bool is
   end
 end
 
+-- Equality plumbing built from `subst` (the sole Leibniz primitive; there is no
+-- ambient `ap`/`cong`/`sym`/`trans`). These let the lemmas below rewrite under a
+-- context and chain steps.
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- `isZero` is the depth-1 zero-test (compiles to an O(1) constructor dispatch, no
+-- eliminator loop), complementary to `isPos`.
+isZero : Whole -> Bool is
+  fn (n : Whole) is case n of | zero -> true | succ k -> false end end
+end
+
+-- subW order lemmas (by induction; `subW` recurses on its SECOND arg).
+-- subWZeroL: 0 - b truncates to 0.
+subWZeroL : (b : Whole) -> Eq Whole (subW zero b) zero is
+  fn (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (subW zero x) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (subW zero k) zero) is
+         subst Whole (subW zero k) zero ih
+           (fn (z : Whole) is Eq Whole (subW zero (succ k)) (pred z) end)
+           (refl (subW zero (succ k)))
+       end)
+      b
+  end
+end
+-- subWSucc: cancelling one from both sides leaves the subtraction unchanged.
+subWSucc : (a : Whole) -> (b : Whole) -> Eq Whole (subW (succ a) (succ b)) (subW a b) is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (subW (succ a) (succ x)) (subW a x) end)
+      (refl a)
+      (fn (k : Whole) (ih : Eq Whole (subW (succ a) (succ k)) (subW a k)) is
+         subst Whole (subW (succ a) (succ k)) (subW a k) ih
+           (fn (z : Whole) is Eq Whole (subW (succ a) (succ (succ k))) (pred z) end)
+           (refl (subW (succ a) (succ (succ k))))
+       end)
+      b
+  end
+end
+
+-- leW: the accel-friendly `<=`. `subW` is the kernel-accelerated native subtract
+-- (O(1) on bignums) and `isZero` is depth-1, so `leW a b` is O(1) in COMPILED code
+-- where `leb a b` is O(a) — `leb` recurses into a comparison FUNCTION the eager
+-- NatElim codegen fully unrolls (catastrophic on packed-bignum-sized Wholes; fine
+-- in the lazy kernel). Prefer `leW` for comparisons on values that deploy.
+leW : Whole -> Whole -> Bool is
+  fn (a : Whole) (b : Whole) is isZero (subW a b) end
+end
+-- ...and the certificate that the refactor is sound: leW agrees with leb pointwise
+-- (double induction; leb recurses on the first arg, subW on the second).
+lebEquiv : (a : Whole) -> (b : Whole) -> Eq Bool (leb a b) (leW a b) is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is (b : Whole) -> Eq Bool (leb x b) (isZero (subW x b)) end)
+      (fn (b : Whole) is
+         symEq Bool (isZero (subW zero b)) true
+           (subst Whole zero (subW zero b) (symEq Whole (subW zero b) zero (subWZeroL b))
+              (fn (z : Whole) is Eq Bool (isZero z) true end)
+              (refl true))
+       end)
+      (fn (k : Whole) (ih : (b : Whole) -> Eq Bool (leb k b) (isZero (subW k b))) is
+         fn (b : Whole) is
+           WholeElim (fn (x : Whole) is Eq Bool (leb (succ k) x) (isZero (subW (succ k) x)) end)
+             (refl false)
+             (fn (j : Whole) (ihb : Eq Bool (leb (succ k) j) (isZero (subW (succ k) j))) is
+                transEq Bool (leb k j) (isZero (subW k j)) (isZero (subW (succ k) (succ j)))
+                  (ih j)
+                  (symEq Bool (isZero (subW (succ k) (succ j))) (isZero (subW k j))
+                     (subst Whole (subW (succ k) (succ j)) (subW k j) (subWSucc k j)
+                        (fn (z : Whole) is Eq Bool (isZero (subW (succ k) (succ j))) (isZero z) end)
+                        (refl (isZero (subW (succ k) (succ j))))))
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
 -- Division and modulus by repeated subtraction, with the dividend as fuel:
 -- each step removes at least one from the dividend, so the budget suffices
 -- exactly. The flooring quotient of anything by zero is 0; n % 0 is n,
@@ -172,6 +258,14 @@ end
 % : Whole -> Whole -> Whole is
   fn (m : Whole) (n : Whole) is modF m m n end
 end
+
+-- Kernel-accelerate `//` and `%` on literals (C7 / R-NUM Decision 1): the
+-- fuel-based bodies are correct but O(quotient); the accel makes division a
+-- one-bigint-step op on compressed numerals, so it scales to the large literals
+-- that packed-String `uncons` (n div/mod 256) and a real calculator need. Bridge
+-- to the fuel body is refl; agreement is the differential-tested registration gate.
+builtin natDiv //
+builtin natMod %
 
 -- Euclid. The second argument strictly decreases (a % b < b), so its
 -- successor is budget enough.
@@ -687,4 +781,288 @@ to_radix : Frac -> RDec is
     let body : FBody = expand (fden f) (succ (fden f)) (fnum f % fden f) wnil in
     rdec (fneg f) (fnum f // fden f) (fbDigits body) (fbRep body) (fbTerm body)
   end
+end
+
+-- ====================================================================
+-- Packed binary strings + total numeric parsing (D1 + B4 + the goal).
+-- `Bytes` is "Haskell's binary thing only better": a String is a SINGLE Whole
+-- (a bignum) packing the UTF-8 bytes — NOT a [Char] cons-list. The first byte is
+-- least-significant and a 0x01 SENTINEL caps the top, so the length is recoverable
+-- (leading-NUL bytes survive) and `uncons` is O(1): head = code % 256, tail =
+-- code // 256, and the string is exhausted when code <= 1 (sentinel only). A
+-- literal `"3/4"` desugars (surface) to `bytes <packed>`, so strings COMPUTE in
+-- the kernel — these parsers run in the REPL, no host needed. The `// %` accel
+-- (above) keeps uncons one bigint step.
+-- ====================================================================
+
+data Bytes : U is bytes : Whole -> Bytes end
+String : U is Bytes end
+
+codeOf : Bytes -> Whole is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+-- exhausted when only the sentinel (or less) remains. Uses `leW` (not `leb`): the
+-- packed `code` is a bignum, and `leb (codeOf s) 1` unrolls O(code) in compiled code
+-- (see leW/lebEquiv above). `leW _ 1` is O(1) and `lebEquiv` certifies it = leb.
+strNull : Bytes -> Bool  is fn (s : Bytes) is leW (codeOf s) 1 end end
+-- the first byte (its UTF-8 code), or the sentinel value on an empty string.
+strHead : Bytes -> Whole is fn (s : Bytes) is codeOf s % 256 end end
+-- drop the first byte.
+strTail : Bytes -> Bytes is fn (s : Bytes) is bytes (codeOf s // 256) end end
+
+andB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end end
+eqW  : Whole -> Whole -> Bool is fn (a : Whole) (b : Whole) is andB (leb a b) (leb b a) end end
+-- a byte is an ASCII decimal digit iff 48 ('0') <= c <= 57 ('9').
+isDigitB : Whole -> Bool is fn (c : Whole) is andB (leb 48 c) (leb c 57) end end
+
+-- the ways a parse can fail (D1: total, a value you must case on — never a crash).
+data ParseErr : U is
+  emptyStr  : ParseErr     -- nothing to parse
+| notNumber : ParseErr     -- a byte that is not a digit / sign / slash
+| badDenom  : ParseErr     -- a rational with denominator 0
+| tooLong   : ParseErr     -- exceeded the parse fuel (a >256-byte token)
+end
+
+-- the digit loop: total structural recursion on FUEL (a generous fixed bound, far
+-- past any real numeral), recursing into a FUNCTION type so the accumulator + the
+-- remaining string thread through. Computes in the REPL (no `partial`, which would
+-- stay neutral). 256 bytes of digits is astronomically more than any CLI number.
+digitsGo : Whole -> Whole -> Bytes -> Result Whole ParseErr is
+  fn (fuel : Whole) is
+    WholeElim (fn (k : Whole) is Whole -> Bytes -> Result Whole ParseErr end)
+      (fn (acc : Whole) (s : Bytes) is err Whole ParseErr tooLong end)
+      (fn (f : Whole) (ih : Whole -> Bytes -> Result Whole ParseErr) is
+        fn (acc : Whole) (s : Bytes) is
+          case strNull s of
+          | true  -> ok Whole ParseErr acc
+          | false ->
+              case isDigitB (strHead s) of
+              | true  -> ih (addW (mulW acc 10) (subW (strHead s) 48)) (strTail s)
+              | false -> err Whole ParseErr notNumber
+              end
+          end
+        end
+      end)
+      fuel
+  end
+end
+
+-- a Whole from the command line: a non-empty run of digits.
+parseWhole : String -> Result Whole ParseErr is
+  fn (s : String) is
+    case strNull s of
+    | true  -> err Whole ParseErr emptyStr
+    | false -> digitsGo 256 0 s
+    end
+  end
+end
+
+resWtoI : Result Whole ParseErr -> Bool -> Result Int ParseErr is
+  fn (r : Result Whole ParseErr) (sgn : Bool) is
+    ResultElim Whole ParseErr (fn (x : Result Whole ParseErr) is Result Int ParseErr end)
+      (fn (w : Whole) is ok Int ParseErr (mkInt sgn w) end)
+      (fn (e : ParseErr) is err Int ParseErr e end)
+      r
+  end
+end
+
+-- an Int: an optional leading '-' (byte 45) then a non-empty digit run.
+parseInt : String -> Result Int ParseErr is
+  fn (s : String) is
+    case strNull s of
+    | true  -> err Int ParseErr emptyStr
+    | false ->
+        case eqW (strHead s) 45 of
+        | true  ->
+            case strNull (strTail s) of
+            | true  -> err Int ParseErr notNumber
+            | false -> resWtoI (digitsGo 256 0 (strTail s)) true
+            end
+        | false -> resWtoI (digitsGo 256 0 s) false
+        end
+    end
+  end
+end
+
+-- a Rational: [-] digits [ '/' (byte 47) digits ]. ONE pass, a state machine over
+-- (sign, numerator, denominator, seen-slash, rest) recursing into a function type.
+-- A bare integer "n" reads as n/1; a 0 denominator is `badDenom` (no crash).
+fracGo : Whole -> Bool -> Whole -> Whole -> Bool -> Bytes -> Result Frac ParseErr is
+  fn (fuel : Whole) is
+    WholeElim (fn (k : Whole) is Bool -> Whole -> Whole -> Bool -> Bytes -> Result Frac ParseErr end)
+      (fn (sg : Bool) (num : Whole) (den : Whole) (aft : Bool) (s : Bytes) is err Frac ParseErr tooLong end)
+      (fn (f : Whole) (ih : Bool -> Whole -> Whole -> Bool -> Bytes -> Result Frac ParseErr) is
+        fn (sg : Bool) (num : Whole) (den : Whole) (aft : Bool) (s : Bytes) is
+          case strNull s of
+          | true ->
+              case aft of
+              | false -> ok Frac ParseErr (reduce (frac sg num 1))
+              | true  ->
+                  case eqW den 0 of
+                  | true  -> err Frac ParseErr badDenom
+                  | false -> ok Frac ParseErr (reduce (frac sg num den))
+                  end
+              end
+          | false ->
+              case isDigitB (strHead s) of
+              | true  ->
+                  case aft of
+                  | false -> ih sg (addW (mulW num 10) (subW (strHead s) 48)) den false (strTail s)
+                  | true  -> ih sg num (addW (mulW den 10) (subW (strHead s) 48)) true (strTail s)
+                  end
+              | false ->
+                  case eqW (strHead s) 47 of
+                  | true  ->
+                      case aft of
+                      | true  -> err Frac ParseErr notNumber
+                      | false -> ih sg num den true (strTail s)
+                      end
+                  | false -> err Frac ParseErr notNumber
+                  end
+              end
+          end
+        end
+      end)
+      fuel
+  end
+end
+
+parseFrac : String -> Result Frac ParseErr is
+  fn (s : String) is
+    case strNull s of
+    | true  -> err Frac ParseErr emptyStr
+    | false ->
+        case eqW (strHead s) 45 of
+        | true  ->
+            case strNull (strTail s) of
+            | true  -> err Frac ParseErr notNumber
+            | false -> fracGo 256 true 0 0 false (strTail s)
+            end
+        | false -> fracGo 256 false 0 0 false s
+        end
+    end
+  end
+end
+
+-- ====================================================================
+-- Binary: encode/decode between a value and its packed-Bytes rendering — the
+-- "both" half of the goal (a serialization class, like Data.Binary, ONLY BETTER:
+-- decode is TOTAL, returning Result, never a partial crashing `get`). The textual
+-- parsers above ARE the decoders; the encoders render back to the same packed
+-- Bytes, so `decode (encode x)` round-trips (computing on concretes; see the
+-- rt* lemmas).
+-- ====================================================================
+
+-- prepend one byte (its UTF-8 code) onto a packed string: the new least-sig byte.
+strCons : Whole -> Bytes -> Bytes is
+  fn (b : Whole) (s : Bytes) is bytes (addW b (mulW 256 (codeOf s))) end
+end
+
+-- concatenate packed strings (s1's bytes, in order, then s2's). Fuel-bounded total
+-- recursion on s1, recursing into the standard cons fold.
+strAppGo : Whole -> Bytes -> Bytes -> Bytes is
+  fn (fuel : Whole) is
+    WholeElim (fn (k : Whole) is Bytes -> Bytes -> Bytes end)
+      (fn (s1 : Bytes) (s2 : Bytes) is s2 end)
+      (fn (f : Whole) (ih : Bytes -> Bytes -> Bytes) is
+        fn (s1 : Bytes) (s2 : Bytes) is
+          case strNull s1 of
+          | true  -> s2
+          | false -> strCons (strHead s1) (ih (strTail s1) s2)
+          end
+        end
+      end)
+      fuel
+  end
+end
+strApp : Bytes -> Bytes -> Bytes is fn (s1 : Bytes) (s2 : Bytes) is strAppGo 256 s1 s2 end end
+
+-- render a Whole to its decimal Bytes. Peel the least-significant digit (n % 10)
+-- and PREPEND it (strCons), so the digits land most-significant-first; fuel-bounded.
+encodeWholeGo : Whole -> Whole -> Bytes -> Bytes is
+  fn (fuel : Whole) is
+    WholeElim (fn (k : Whole) is Whole -> Bytes -> Bytes end)
+      (fn (n : Whole) (acc : Bytes) is acc end)
+      (fn (f : Whole) (ih : Whole -> Bytes -> Bytes) is
+        fn (n : Whole) (acc : Bytes) is
+          case eqW n 0 of
+          | true  -> acc
+          | false -> ih (n // 10) (strCons (addW 48 (n % 10)) acc)
+          end
+        end
+      end)
+      fuel
+  end
+end
+encodeWhole : Whole -> Bytes is
+  fn (n : Whole) is
+    case eqW n 0 of
+    | true  -> strCons 48 (bytes 1)       -- "0"
+    | false -> encodeWholeGo 256 n (bytes 1)
+    end
+  end
+end
+
+-- render an Int: a '-' (byte 45) prefix when negative, else the magnitude.
+encodeInt : Int -> Bytes is
+  fn (i : Int) is
+    case isign i of
+    | true  -> strCons 45 (encodeWhole (imag i))
+    | false -> encodeWhole (imag i)
+    end
+  end
+end
+
+-- render a Frac: a bare integer when the denominator is 1, else "num/den".
+encodeFrac : Frac -> Bytes is
+  fn (f : Frac) is
+    case eqW (fden f) 1 of
+    | true  -> encodeInt (mkInt (fneg f) (fnum f))
+    | false -> strApp (encodeInt (mkInt (fneg f) (fnum f)))
+                      (strApp (strCons 47 (bytes 1)) (encodeWhole (fden f)))
+    end
+  end
+end
+
+-- the Binary class (a Σ-record: an encoder + a TOTAL decoder), one instance per
+-- tower rung. `encode`/`decode` dispatch on the resolved instance.
+Binary : U -> U is
+  fn (A : U) is Sig (A -> Bytes) (fn (_e : A -> Bytes) is Bytes -> Result A ParseErr end) end
+end
+mkBinary : (A : U) -> (A -> Bytes) -> (Bytes -> Result A ParseErr) -> Binary A is
+  fn (A : U) (e : A -> Bytes) (d : Bytes -> Result A ParseErr) is
+    Pair (A -> Bytes) (fn (_e : A -> Bytes) is Bytes -> Result A ParseErr end) e d
+  end
+end
+instance binWhole : Binary Whole is mkBinary Whole encodeWhole parseWhole end
+instance binInt   : Binary Int   is mkBinary Int   encodeInt   parseInt   end
+instance binFrac  : Binary Frac  is mkBinary Frac  encodeFrac  parseFrac  end
+
+encode : {A : U} -> {d : Binary A} -> A -> Bytes is
+  fn {A : U} {d : Binary A} (x : A) is (d.1) x end
+end
+decode : {A : U} -> {d : Binary A} -> Bytes -> Result A ParseErr is
+  fn {A : U} {d : Binary A} (s : Bytes) is (d.2) s end
+end
+
+-- round-trip witnesses (decode after encode): the "only better" guarantee, shown
+-- COMPUTING on concrete values (the encoders/parsers reduce, so these are refl).
+roundWhole : Whole -> Result Whole ParseErr is fn (n : Whole) is parseWhole (encodeWhole n) end end
+roundInt   : Int   -> Result Int   ParseErr is fn (i : Int)   is parseInt   (encodeInt   i) end end
+roundFrac  : Frac  -> Result Frac  ParseErr is fn (f : Frac)  is parseFrac  (encodeFrac  f) end end
+
+-- Proof-carrying round-trips: decode-after-encode is the identity, MACHINE-CHECKED
+-- by refl (it computes) — the "only better than a partial read" guarantee, on
+-- concrete values; and a malformed token decodes to exactly the right error, not a
+-- crash. These elaborate at prelude load, so they are a standing regression gate.
+rtWhole : Eq (Result Whole ParseErr) (roundWhole 42) (ok Whole ParseErr 42) is
+  refl (ok Whole ParseErr 42)
+end
+rtInt : Eq (Result Int ParseErr) (roundInt (mkInt true 5)) (ok Int ParseErr (mkInt true 5)) is
+  refl (ok Int ParseErr (mkInt true 5))
+end
+rtFrac : Eq (Result Frac ParseErr) (roundFrac (frac false 3 4)) (ok Frac ParseErr (frac false 3 4)) is
+  refl (ok Frac ParseErr (frac false 3 4))
+end
+rtBad : Eq (Result Whole ParseErr) (parseWhole "9z") (err Whole ParseErr notNumber) is
+  refl (err Whole ParseErr notNumber)
 end

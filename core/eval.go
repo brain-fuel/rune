@@ -161,6 +161,13 @@ const (
 	NatOpMul
 	// NatOpMonus: truncated subtraction (max(a-b, 0)).
 	NatOpMonus
+	// NatOpDiv: flooring quotient (a // b), with a // 0 = 0 (matching the prelude's
+	// fuel divF). The accel that makes packed-String uncons (n div 256) and the
+	// tower's `//` fast on large literals.
+	NatOpDiv
+	// NatOpMod: remainder (a % b), with a % 0 = a (matching the prelude's fuel
+	// modF). The companion for n mod 256.
+	NatOpMod
 )
 
 // NatAccelInfo reports the accelerated nat operation a stored hash names, and the
@@ -1172,6 +1179,18 @@ func (m *Machine) tryNatAccel(op NatOp, spine Neutral) (Val, bool) {
 		r.Sub(a, b)
 		if r.Sign() < 0 {
 			r.SetInt64(0)
+		}
+	case NatOpDiv:
+		if b.Sign() == 0 {
+			r.SetInt64(0) // a // 0 = 0 (matches divF)
+		} else {
+			r.Quo(a, b) // non-negative operands: truncated == flooring
+		}
+	case NatOpMod:
+		if b.Sign() == 0 {
+			r.Set(a) // a % 0 = a (matches modF)
+		} else {
+			r.Rem(a, b) // non-negative operands: == Euclidean mod
 		}
 	default:
 		return nil, false

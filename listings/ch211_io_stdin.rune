@@ -1,0 +1,20 @@
+-- Chapter 211 — D6: stdin INPUT rounds out the basic OS/IO vocabulary (in+out+time).
+-- ch210 covered console-out + the clock; this adds the input half. `getNat` reads a
+-- decimal number from stdin; the program echoes it straight back with `printNat`.
+-- Like ch210, the host bodies ship WITH the compiler (codegen/ioprims.go), so it
+-- RUNS unaided on every backend — feed "7" on stdin, observe "7" printed then the
+-- shown IO result (the returned 7). `builtin nat` (C7) gives the native-int reading.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
+foreign getNat : IO Nat end
+foreign printNat : Nat -> IO Nat end
+
+main : IO Nat is
+  bindIO Nat Nat getNat (fn (n : Nat) is printNat n end)
+end

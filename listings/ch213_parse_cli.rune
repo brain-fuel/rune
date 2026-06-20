@@ -1,0 +1,140 @@
+-- Chapter 213 — getting a number from the command line, in a COMPILED program
+-- (D1 + B4 + D6, the deployed half of the REPL story). `readLineCode` reads a line
+-- from stdin and hands back its PACKED bytes (a single bignum, first byte
+-- least-significant, 0x01 sentinel on top — "Haskell's binary thing": NOT a [Char]
+-- list); `bytes` wraps it as a `String`. The parser is TOTAL (a bad token yields a
+-- sentinel, never a crash — D1's floor) and runs on the deployed bignum via the
+-- kernel-accelerated `// %` (codegen emits native div/mod, so uncons is O(1) at
+-- runtime too, not the O(quotient) fuel loop). Feed "42" → prints 42; "4x" → 999.
+
+data Bool : U is true : Bool | false : Bool end
+andB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end end
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+add : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end end
+builtin natAdd add
+mul : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> 0 | succ k with ih -> add n ih end end end
+builtin natMul mul
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ k -> k end end end
+monus : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end end
+builtin natMonus monus
+
+leb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is true end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+
+-- flooring division / remainder, fuel = the dividend (quotient <= dividend); the
+-- bodies are correct, the `builtin natDiv/natMod` accel makes them O(1) on literals
+-- AND emits native div/mod in codegen, so the deployed program never runs the loop.
+divF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is 0 end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> 0
+        | succ k -> case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end
+        end
+      end
+    end
+  end
+end
+modF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is a end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> a
+        | succ k -> case leb b a of | true -> ih (monus a b) b | false -> a end
+        end
+      end
+    end
+  end
+end
+-- named (not the `//`/`%` operators) so the self-contained listing avoids
+-- operator-symbol codegen; the accel still fires on these binary defs.
+fdiv : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is divF m m n end end
+fmod : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is modF m m n end end
+builtin natDiv fdiv
+builtin natMod fmod
+
+-- packed binary strings (B4): a String is one bignum of UTF-8 bytes, first byte
+-- least-significant, 0x01 sentinel on top. uncons is O(1) via the div/mod accel.
+data Bytes : U is bytes : Nat -> Bytes end
+codeOf  : Bytes -> Nat  is fn (s : Bytes) is case s of | bytes n -> n end end end
+-- `leW` (the prelude's accel-friendly `<=`): the packed `code` is a bignum, and
+-- `leb (codeOf s) 1` unrolls O(code) in compiled code (`leb` recurses into a
+-- comparison FUNCTION the eager NatElim codegen fully unrolls — OOM on a packed
+-- bignum). `monus` is the kernel-accelerated native subtract (O(1)) and `isZero` is
+-- a depth-1 dispatch, so `leW _ 1` is O(1); same boolean as `leb (codeOf s) 1`.
+isZero  : Nat -> Bool  is fn (n : Nat) is case n of | zero -> true | succ k -> false end end end
+leW     : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is isZero (monus a b) end end
+strNull : Bytes -> Bool is fn (s : Bytes) is leW (codeOf s) 1 end end
+strHead : Bytes -> Nat  is fn (s : Bytes) is fmod (codeOf s) 256 end end
+strTail : Bytes -> Bytes is fn (s : Bytes) is bytes (fdiv (codeOf s) 256) end end
+
+eqW      : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is andB (leb a b) (leb b a) end end
+isDigitB : Nat -> Bool is fn (c : Nat) is andB (leb 48 c) (leb c 57) end end
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+data ParseErr : U is emptyStr : ParseErr | notNumber : ParseErr | tooLong : ParseErr end
+
+-- total digit fold: structural recursion on FUEL into a FUNCTION type (so the
+-- accumulator + remaining string thread through); 256 bytes is past any real number.
+digitsGo : Nat -> Nat -> Bytes -> Result Nat ParseErr is
+  fn (fuel : Nat) is
+    NatElim (fn (k : Nat) is Nat -> Bytes -> Result Nat ParseErr end)
+      (fn (acc : Nat) (s : Bytes) is err Nat ParseErr tooLong end)
+      (fn (f : Nat) (ih : Nat -> Bytes -> Result Nat ParseErr) is
+        fn (acc : Nat) (s : Bytes) is
+          case strNull s of
+          | true  -> ok Nat ParseErr acc
+          | false ->
+              case isDigitB (strHead s) of
+              | true  -> ih (add (mul acc 10) (monus (strHead s) 48)) (strTail s)
+              | false -> err Nat ParseErr notNumber
+              end
+          end
+        end
+      end)
+      fuel
+  end
+end
+parseWhole : Bytes -> Result Nat ParseErr is
+  fn (s : Bytes) is
+    case strNull s of
+    | true  -> err Nat ParseErr emptyStr
+    | false -> digitsGo 256 0 s
+    end
+  end
+end
+
+-- extract the value or a sentinel (so a parse failure is still observable on stdout).
+unwrapOr : Result Nat ParseErr -> Nat -> Nat is
+  fn (r : Result Nat ParseErr) (d : Nat) is
+    ResultElim Nat ParseErr (fn (x : Result Nat ParseErr) is Nat end)
+      (fn (n : Nat) is n end)
+      (fn (e : ParseErr) is d end)
+      r
+  end
+end
+
+foreign readLineCode : IO Nat end
+foreign printNat : Nat -> IO Nat end
+
+main : IO Nat is
+  bindIO Nat Nat readLineCode (fn (code : Nat) is
+    printNat (unwrapOr (parseWhole (bytes code)) 999)
+  end)
+end

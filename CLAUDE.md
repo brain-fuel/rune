@@ -706,6 +706,21 @@ first and forces only on mismatch, so the fast path logs nothing.
     E3/per-protocol). The verified-OTP supervisor LIVENESS guarantee still waits on
     that fault LTS + E2; the models + the live runtime exist, the bridge between them
     is the open research.
+  - **D6 / R-EFFECT — STANDARD OS/IO VOCABULARY (in + out + time) LANDED.** The IO
+    monad (ch43) sequences effects; ch59 proved one host op runs cross-backend. D6
+    grows the STANDARD host-op vocabulary and ships it WITH the compiler (like D5's
+    beamOTPRuntime), NOT test-injected: `printNat : Nat -> IO Nat` (write a number to
+    stdout, return it), `getNat : IO Nat` (read a decimal from stdin), and
+    `timeNanos : IO Nat` (read the OS clock in ns). The host bodies are baked into
+    each backend runtime gated by `usesForeign` against the `ioPrims` set
+    (codegen/ioprims.go; js/py/go/rust/beam — the Go preamble gains `"time"` only
+    when timeNanos is used). ch210 reads the clock (discarded for determinism) then
+    prints 1 and 2 — byte-identical `1\n2\n2`; ch211 echoes a stdin number (feed "7"
+    → `7\n7`); both on all 5 source backends (harness/io_os_test.go), RUN by
+    `rune run` unaided. The compressed `builtin nat` (C7) is load-bearing: a clock
+    reading is ~1e18 ns, a native int, never a succ-chain. Still waits on D1
+    (Result/IOError) + B4 (String/Ptr marshalling) for richer fs/net; these ops are
+    over `Nat`/`IO` only. No core change, no hash bump.
 
 ## Standing rules
 

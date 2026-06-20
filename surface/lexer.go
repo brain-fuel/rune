@@ -45,6 +45,7 @@ const (
 	tForeign  // foreign (a typed FFI axiom; R-FFI / B4)
 	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
 	tDec     // a decimal literal: digits "." digits, optionally "{" digits "}" (a repetend); e.g. 1.3, 1.{3}, 0.1{6}
+	tStr     // a string literal: "..." with \n \t \r \\ \" escapes; the text is the DECODED content (packed-String sugar, GRAMMAR §2)
 	tOp      // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
 	tBuiltin // builtin (a builtin-binding declaration: builtin nat Nat zero succ)
 	tCase    // case (a case expression; GRAMMAR §5.6)
@@ -118,6 +119,8 @@ func (k tokKind) String() string {
 		return "numeral"
 	case tDec:
 		return "decimal literal"
+	case tStr:
+		return "string literal"
 	case tOp:
 		return "operator"
 	case tBuiltin:
@@ -233,6 +236,13 @@ func lex(src string) ([]token, error) {
 			// cases above have declined it; a bare '/' only after '//'.
 			toks = append(toks, token{tOp, string(r), i})
 			i++
+		case r == '"':
+			s, end, err := scanString(rs, i)
+			if err != nil {
+				return nil, err
+			}
+			toks = append(toks, token{tStr, s, i})
+			i = end
 		case unicode.IsDigit(r):
 			start := i
 			for i < len(rs) && unicode.IsDigit(rs[i]) {
@@ -348,6 +358,50 @@ func keyword(word string, pos int) token {
 	default:
 		return token{tIdent, word, pos}
 	}
+}
+
+// scanString reads a double-quoted string literal starting at rs[at] (the opening
+// '"') and returns the DECODED content (escapes resolved) and the offset just past
+// the closing '"'. Supported escapes: \n \t \r \\ \" \0. The content is sugar for a
+// packed `Bytes` value (the parser desugars it over the UTF-8 bytes); a newline or
+// EOF before the closing quote is an error.
+func scanString(rs []rune, at int) (string, int, error) {
+	var b []rune
+	i := at + 1 // past the opening quote
+	for i < len(rs) {
+		c := rs[i]
+		switch {
+		case c == '"':
+			return string(b), i + 1, nil
+		case c == '\n':
+			return "", i, fmt.Errorf("unterminated string literal at offset %d (newline before closing quote)", at)
+		case c == '\\':
+			if i+1 >= len(rs) {
+				return "", i, fmt.Errorf("unterminated escape in string literal at offset %d", i)
+			}
+			switch rs[i+1] {
+			case 'n':
+				b = append(b, '\n')
+			case 't':
+				b = append(b, '\t')
+			case 'r':
+				b = append(b, '\r')
+			case '\\':
+				b = append(b, '\\')
+			case '"':
+				b = append(b, '"')
+			case '0':
+				b = append(b, 0)
+			default:
+				return "", i, fmt.Errorf("unknown escape %q in string literal at offset %d", string(rs[i+1]), i)
+			}
+			i += 2
+		default:
+			b = append(b, c)
+			i++
+		}
+	}
+	return "", at, fmt.Errorf("unterminated string literal at offset %d (end of input)", at)
 }
 
 // skipBlockComment consumes a nestable {- … -} comment starting at i (positioned on

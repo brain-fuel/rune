@@ -1,0 +1,60 @@
+-- Chapter 212 — IOError + IOResult (D1): the error vocabulary every IO/parse
+-- boundary returns into. ch30 gave the generic two-parameter `Result A E`; this
+-- pins the E that command-line IO and numeric parsing fail into, so reading a
+-- Whole/Int/Rational from argv or stdin is TOTAL — a malformed token yields an
+-- `err`, never a crash (the "better than Haskell's partial `read`" floor: no
+-- exception, a value you must case on). String-carrying error detail layers on
+-- once the String facilities land; these are the structural failure modes.
+
+-- ch30's Result is REDECLARED VERBATIM so the chapter is self-contained.
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+data IOError : U is
+  eofError      : IOError        -- input ended before a value was read
+| parseError    : IOError        -- the token was not a well-formed number
+| emptyInput    : IOError        -- no argument / blank line where one was required
+| rangeError    : IOError        -- the value was out of the expected range/sign
+end
+
+-- IOResult A: a computation that yields an A or fails with an IOError. The success
+-- type the CLI numeric readers (parseWhole/parseInt/parseRat) return into.
+IOResult : U -> U is fn (A : U) is Result A IOError end end
+
+okIO : (A : U) -> A -> IOResult A is
+  fn (A : U) (a : A) is ok A IOError a end
+end
+
+failIO : (A : U) -> IOError -> IOResult A is
+  fn (A : U) (e : IOError) is err A IOError e end
+end
+
+-- Error-propagating bind: chain a second reader only on success; the FIRST error
+-- short-circuits (left-biased), so a pipeline of parses stops at the first bad
+-- token and reports it. This is the Result/Either monad's bind, specialised to
+-- IOError.
+bindIOResult : (A : U) -> (B : U) -> IOResult A -> (A -> IOResult B) -> IOResult B is
+  fn (A : U) (B : U) (r : IOResult A) (k : A -> IOResult B) is
+    ResultElim A IOError (fn (x : Result A IOError) is IOResult B end)
+      (fn (a : A) is k a end)
+      (fn (e : IOError) is err B IOError e end)
+      r
+  end
+end
+
+-- The monad laws hold definitionally (ι on the eliminator), so error-threaded CLI
+-- pipelines reason like ordinary code.
+
+-- LEFT IDENTITY: binding a pure success runs the continuation.
+bindOkLeft : (A : U) -> (B : U) -> (a : A) -> (k : A -> IOResult B) ->
+    Eq (IOResult B) (bindIOResult A B (okIO A a) k) (k a) is
+  fn (A : U) (B : U) (a : A) (k : A -> IOResult B) is refl (k a) end
+end
+
+-- AN ERROR SHORT-CIRCUITS: a failed step ignores the continuation, carrying its error.
+bindFailShort : (A : U) -> (B : U) -> (e : IOError) -> (k : A -> IOResult B) ->
+    Eq (IOResult B) (bindIOResult A B (failIO A e) k) (failIO B e) is
+  fn (A : U) (B : U) (e : IOError) (k : A -> IOResult B) is refl (err B IOError e) end
+end

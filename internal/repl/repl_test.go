@@ -544,3 +544,88 @@ func TestREPLContinuationThenEOF(t *testing.T) {
 		t.Errorf("expected an end-of-input message, got:\n%s", out.String())
 	}
 }
+
+// TestREPLParseFromString is the acceptance test for the goal: getting Wholes,
+// Ints, and Rationals from the command line. A `"…"` literal is a PACKED binary
+// string (a single bignum, not a [Char] list — "Haskell's binary thing only
+// better"); it computes in the kernel, so parseWhole/parseInt/parseFrac run in the
+// REPL. Parsing is TOTAL — a bad token or a 0 denominator is an `err` value, never
+// a crash (D1) — and rationals come back reduced.
+func TestREPLParseFromString(t *testing.T) {
+	script := []string{
+		`strHead "abc"`,    // first byte of a packed string: 'a' = 97
+		`parseWhole "42"`,  // ok 42
+		`parseInt "-5"`,    // ok -5 (signed)
+		`parseInt "7"`,     // ok 7
+		`parseFrac "3/4"`,  // ok 3/4
+		`parseFrac "-7/2"`, // ok -7/2
+		`parseFrac "6/4"`,  // reduced to 3/2
+		`parseFrac "10"`,   // a bare integer reads as 10/1
+		`parseWhole "4x"`,  // err (notNumber) — total, not a crash
+		`parseFrac "1/0"`,  // err (badDenom) — total, not a crash
+		`parseWhole ""`,    // err (emptyStr)
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"97 : Whole",                 // strHead "abc"
+		"ok 42 : Result Whole ParseErr",
+		"ok -5 : Result Int ParseErr",
+		"ok 7 : Result Int ParseErr",
+		"ok 3/4 : Result Frac ParseErr",
+		"ok -7/2 : Result Frac ParseErr",
+		"ok 3/2 : Result Frac ParseErr", // 6/4 reduced
+		"ok 10 : Result Frac ParseErr",  // "10" as 10/1
+		"err : Result Whole ParseErr",   // "4x" and "" both
+		"err : Result Frac ParseErr",    // "1/0"
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "mismatch") {
+		t.Errorf("unexpected error\n--- full output ---\n%s", got)
+	}
+}
+
+// TestREPLBinaryRoundTrip is the acceptance test for the "both / only better" half:
+// a Binary class (encode + a TOTAL decoder) over the packed-Bytes string, and the
+// round-trip decode∘encode = id shown COMPUTING. `encode` dispatches on the tower
+// instance; the prelude's rt* lemmas additionally PROVE the round-trip (refl) at
+// load, so reaching this test at all means they held.
+func TestREPLBinaryRoundTrip(t *testing.T) {
+	script := []string{
+		`encode 42`,                // dispatch Binary Whole -> packed "42"
+		`encode (3/4)`,             // dispatch Binary Frac  -> packed "3/4"
+		`roundWhole 42`,            // parse (encode 42) = ok 42
+		`roundInt (2 - 5)`,         // ok -3 (signed round-trip)
+		`roundFrac (1/3 - 2/3)`,    // ok -1/3 (reduced, signed)
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"bytes 78388 : Bytes",            // encode 42 (packed "42")
+		"ok 42 : Result Whole ParseErr",  // roundWhole 42
+		"ok -3 : Result Int ParseErr",    // roundInt (2-5)
+		"ok -1/3 : Result Frac ParseErr", // roundFrac (1/3-2/3)
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "error") || strings.Contains(got, "mismatch") {
+		t.Errorf("unexpected error\n--- full output ---\n%s", got)
+	}
+}

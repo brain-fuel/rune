@@ -37,6 +37,19 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesIO(p) {
 		b.WriteString(pyIORuntime)
 	}
+	// D6 / R-EFFECT: bake the standard OS/IO host bodies when referenced.
+	if usesForeign(p, "printNat") {
+		b.WriteString("def printNat():\n    return lambda n: lambda _u: (print(n), n)[1]\n")
+	}
+	if usesForeign(p, "getNat") {
+		b.WriteString("def getNat():\n    import sys\n    return lambda _u: int(sys.stdin.readline())\n")
+	}
+	if usesForeign(p, "timeNanos") {
+		b.WriteString("def timeNanos():\n    import time\n    return lambda _u: time.time_ns()\n")
+	}
+	if usesForeign(p, "readLineCode") {
+		b.WriteString("def readLineCode():\n    import sys\n    def t(_u):\n        s = sys.stdin.readline().rstrip('\\n')\n        n = 1\n        for ch in reversed(s):\n            n = n * 256 + ord(ch)\n        return n\n    return t\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatPy(&b, *p.Nat)
@@ -174,6 +187,10 @@ func (em *pyEmitter) accelDispatch(app IApp, env []string) (string, bool) {
 		return fmt.Sprintf("(%s * %s)", ea, eb), true
 	case core.NatOpMonus:
 		return fmt.Sprintf("((%s) - (%s) if (%s) > (%s) else 0)", ea, eb, ea, eb), true
+	case core.NatOpDiv:
+		return fmt.Sprintf("((%s) // (%s) if (%s) != 0 else 0)", ea, eb, eb), true
+	case core.NatOpMod:
+		return fmt.Sprintf("((%s) %% (%s) if (%s) != 0 else (%s))", ea, eb, eb, ea), true
 	}
 	return "", false
 }

@@ -1,0 +1,29 @@
+-- Chapter 210 — D6: the OS/IO primitive vocabulary that DEPLOYS and RUNS.
+-- The R-EFFECT IO monad (ch43) sequences effects; ch59 proved ONE host op runs
+-- across backends. D6 grows the STANDARD host-op vocabulary and ships it WITH the
+-- compiler (like D5's beamOTPRuntime), not test-injected:
+--   printNat  : Nat -> IO Nat   write a number to stdout, return it   (console out)
+--   timeNanos : IO Nat          read a monotonic clock                (the OS/time op)
+-- `main` reads the clock first — proving `timeNanos` links and runs; its result is
+-- DISCARDED so the observable output stays deterministic — then prints 1 and 2 in
+-- sequence, exercising console-out plus multi-effect sequencing. The compressed
+-- `builtin nat` (C7) is mandatory here: a clock reading is ~1e18 nanoseconds, a
+-- native integer, never a succ-chain. Runs identically on js/py/go/rust/erl.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+foreign timeNanos : IO Nat end
+
+main : IO Nat is
+  bindIO Nat Nat timeNanos (fn (t : Nat) is
+    bindIO Nat Nat (printNat 1) (fn (a : Nat) is
+      printNat 2
+    end)
+  end)
+end
