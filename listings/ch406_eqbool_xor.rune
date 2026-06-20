@@ -1,0 +1,44 @@
+-- Chapter 406 — boolean equality is the negation of xor (proven tier).
+--
+-- eqBool a b = notB (xor a b): XNOR is not-XOR. By case analysis on a; the true case cancels
+-- a double negation. Proof-only.
+--
+--   eqXor : (a b : Bool) -> Eq Bool (eqBool a b) (notB (xor a b))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+notNot : (b : Bool) -> Eq Bool (notB (notB b)) b is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (notB (notB x)) x end) refl refl b end
+end
+
+eqBool : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b (notB b) a end
+end
+
+xor : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) (notB b) b a end
+end
+
+eqXor : (a : Bool) -> (b : Bool) -> Eq Bool (eqBool a b) (notB (xor a b)) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (eqBool x b) (notB (xor x b)) end)
+      (symEq Bool (notB (notB b)) b (notNot b))
+      refl
+      a
+  end
+end
