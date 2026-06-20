@@ -1,0 +1,62 @@
+-- Chapter 332 — the other half of Option ≅ Sum Unit (proven tier).
+--
+-- ch331 gave Option -> Sum -> Option = id; this gives Sum -> Option -> Sum = id, completing
+-- the isomorphism. The inl case needs that any Unit value equals unit (UnitElim), then
+-- congruence under inl. Proof-only.
+--
+--   stoRoundtrip : (A : U) -> (s : Sum Unit A) -> Eq (Sum Unit A) (optionToSum A (sumToOption A s)) s
+
+data Unit : U is
+  unit : Unit
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Sum : U -> U -> U is
+  inl : (A : U) -> (B : U) -> A -> Sum A B
+| inr : (A : U) -> (B : U) -> B -> Sum A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+optionToSum : (A : U) -> Option A -> Sum Unit A is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Sum Unit A end)
+      (inl Unit A unit)
+      (fn (a : A) is inr Unit A a end)
+      m
+  end
+end
+
+sumToOption : (A : U) -> Sum Unit A -> Option A is
+  fn (A : U) (s : Sum Unit A) is
+    SumElim Unit A (fn (x : Sum Unit A) is Option A end)
+      (fn (u : Unit) is none A end)
+      (fn (a : A) is some A a end)
+      s
+  end
+end
+
+-- any Unit value equals unit (the unit-eta as an eliminator).
+unitEq : (u : Unit) -> Eq Unit unit u is
+  fn (u : Unit) is UnitElim (fn (x : Unit) is Eq Unit unit x end) refl u end
+end
+
+-- round-trip: Sum -> Option -> Sum is the identity (by case on the Sum).
+stoRoundtrip : (A : U) -> (s : Sum Unit A) -> Eq (Sum Unit A) (optionToSum A (sumToOption A s)) s is
+  fn (A : U) (s : Sum Unit A) is
+    SumElim Unit A (fn (x : Sum Unit A) is Eq (Sum Unit A) (optionToSum A (sumToOption A x)) x end)
+      (fn (u : Unit) is cong Unit (Sum Unit A) (fn (z : Unit) is inl Unit A z end) unit u (unitEq u) end)
+      (fn (a : A) is refl end)
+      s
+  end
+end
