@@ -1,4 +1,4 @@
-# R-PROTO — Verified distributed protocols
+# R-PROTO, Verified distributed protocols
 
 > **AS BUILT (E4 first slices, v3.230 to v3.240).** The better-than-Winglang
 > simulator landed as `internal/sim` (shadow tooling, a consumer of the kernel,
@@ -58,11 +58,11 @@
 > 'Better than Winglang': infra-as-code that is provably correct, simulated and
 > deployed from the same verified source" (`humble-humming-elephant.md:29-34`).
 > Conceptually depends on **R-CALC** (E1: the `Proc` calculus, `Step` LTS,
-> structural congruence, the `project` table — `ref_docs/wootz/R-CALC.md`),
-> **R-COIND** (C5: `Nu`/`out`/`unfold` to *state* bisimulation —
+> structural congruence, the `project` table, `ref_docs/wootz/R-CALC.md`),
+> **R-COIND** (C5: `Nu`/`out`/`unfold` to *state* bisimulation -
 > `ref_docs/wootz/R-COIND.md`), **R-SUM** (C1: outer Σ for protocol state,
-> existentials in `Step`, refinement records — `ref_docs/wootz/R-SUM.md`), and
-> the projection runtime **R-EFFECT/R-OTP/B3(BEAM)** (the actor `IForeign` seam —
+> existentials in `Step`, refinement records, `ref_docs/wootz/R-SUM.md`), and
+> the projection runtime **R-EFFECT/R-OTP/B3(BEAM)** (the actor `IForeign` seam -
 > `ref_docs/wootz/R-EFFECT.md`). R-CALC delivers the *statement* of adequacy and
 > the projection *shape*; **R-PROTO is where a concrete protocol's spec, its
 > safety/liveness properties, its proof obligations, and its projection are
@@ -76,7 +76,7 @@ R-CALC laid the calculus substrate but, by its own statement, stopped at the
 *specific protocol* "verified" is still absent:
 
 - **No protocol spec language.** R-CALC's `Proc` (`ref_docs/wootz/R-CALC.md:177`)
-  is raw π/actor syntax — `send`/`recv`/`par`/`nu`/`bang`/`crash`. A protocol is
+  is raw π/actor syntax, `send`/`recv`/`par`/`nu`/`bang`/`crash`. A protocol is
   not a raw process; it is a *replicated state machine*: per-node local state, a
   set of operations, a merge/transition discipline, and an environment that
   delivers, drops, reorders, and crashes. There is no datatype for "a network of
@@ -87,10 +87,10 @@ R-CALC laid the calculus substrate but, by its own statement, stopped at the
 
 - **No safety/liveness vocabulary.** Today the kernel can state a `Prop`-valued
   relation over data (Phase 4 datatypes + the Eq stratum). But the *correctness
-  properties* of a protocol — *agreement* ("no two replicas decide differently"),
+  properties* of a protocol, *agreement* ("no two replicas decide differently"),
   *validity* ("a decided value was proposed"), *convergence* ("all replicas that
   receive the same updates reach the same state"), *eventual delivery* ("under
-  fair scheduling every update is eventually applied") — have no stated form.
+  fair scheduling every update is eventually applied"), have no stated form.
   Liveness in particular needs a **fairness predicate over infinite executions**,
   which is *coinductive* (an execution is a `Stream Config`), and the outer core
   is inductive-only (`ref_docs/wootz/R-COIND.md:13`, `core/eval.go:82` `ElimSig`,
@@ -105,8 +105,8 @@ R-CALC laid the calculus substrate but, by its own statement, stopped at the
 
 - **No safety-preserved-by-projection bridge.** Even granting adequacy as a
   schema, nothing connects "the spec satisfies agreement" to "the deployed
-  system satisfies agreement". That bridge — *a safety property proved on the
-  `Step` LTS transfers along the projection refinement* — is the load-bearing
+  system satisfies agreement". That bridge, *a safety property proved on the
+  `Step` LTS transfers along the projection refinement*, is the load-bearing
   theorem of the whole telos-4 claim and does not exist.
 
 - **The projection target is a seam, not a runtime.** R-CALC's Layer-4 table
@@ -114,7 +114,7 @@ R-CALC laid the calculus substrate but, by its own statement, stopped at the
   `primSpawn`/`primSend`/`primReceive`/`primNewChan`/`primSpawnLoop`/`primExit`,
   which are R-EFFECT `IForeign` ops (`ref_docs/wootz/R-EFFECT.md:391`,
   `ref_docs/wootz/R-IR.md:314`). None of B1/B2/B3 (the IR + BEAM backend) exists,
-  so today a protocol can be *reasoned about* but not *run* — the M0 "deploys and
+  so today a protocol can be *reasoned about* but not *run*, the M0 "deploys and
   runs on BEAM" bar (`humble-humming-elephant.md:284`) is unmet.
 
 The Thompson constraint is unchanged and total: **a protocol is data and proofs
@@ -122,12 +122,12 @@ in Rune.** No `Protocol` core constructor, no consensus baked into the kernel, n
 hash-format bump ("No hash-format bump unless new core constructor", CLAUDE.md).
 A protocol ships as ordinary datatype declarations + relations + proofs (a
 *library*, `lib/proto/`), exactly as quotients (v2), the fibrant layer (v3), and
-the §F groups shipped contained — plus a thin codegen-stratum extension (the
+the §F groups shipped contained, plus a thin codegen-stratum extension (the
 actor runtime), where Lambert's reality is allowed to live.
 
 ## Prior art (what the literature/other systems do; cite)
 
-**Verified consensus — the two reference points.**
+**Verified consensus, the two reference points.**
 - **Verdi** (Wilcox et al., PLDI 2015) verifies Raft in Coq with *verified
   system transformers* (VSTs): prove the protocol against an idealized network
   semantics, then a *transformer* carries the proof across to a lossy/reordering
@@ -137,7 +137,7 @@ actor runtime), where Lambert's reality is allowed to live.
   idea is exactly R-PROTO's refinement bridge**: prove on the clean LTS, transfer
   along a semantics-changing transformer to the real (failure) model, then to the
   runtime. Verdi's lesson and warning: the Raft linearizability proof was ~50k
-  lines — *pick a small protocol first* (Savage/Thompson).
+  lines, *pick a small protocol first* (Savage/Thompson).
 - **IronFleet** (Hawblitzel et al., SOSP 2015) proves a Paxos-based replicated
   KV in Dafny by *refinement*: a high-level state-machine spec, a distributed
   protocol layer, and an implementation layer, each a refinement of the one
@@ -146,15 +146,15 @@ actor runtime), where Lambert's reality is allowed to live.
   **The three-layer refinement stack is the skeleton R-PROTO adopts**: spec SM →
   protocol LTS (`Step`) → projected actors, each refining the last.
 
-**CRDTs — the *right first protocol* for this substrate.**
+**CRDTs, the *right first protocol* for this substrate.**
 - Shapiro et al., *Conflict-free Replicated Data Types*
   ([INRIA RR-7687](https://inria.hal.science/inria-00609399v1/document)) prove the
   **CvRDT/CmRDT convergence theorem**: a state-based CRDT whose states form a
   *join-semilattice* and whose merge is the *least upper bound* is **Strong
-  Eventually Consistent** — replicas that have delivered the same set of updates
+  Eventually Consistent**, replicas that have delivered the same set of updates
   have equal state, *regardless of order, duplication, or delay*. This is a
   **purely algebraic safety property** (commutativity + associativity +
-  idempotence of merge ⇒ convergence) — no liveness, no consensus, no coinduction
+  idempotence of merge ⇒ convergence), no liveness, no consensus, no coinduction
   needed for *safety*. **That is why a CRDT counter is the M0 demonstrator**: its
   convergence proof is a one-screen algebra proof over a `data`/eliminator
   semilattice, provable in *today's* kernel modulo R-SUM, with failure
@@ -163,7 +163,7 @@ actor runtime), where Lambert's reality is allowed to live.
 - Mechanized CRDT proofs exist: **Gomes et al., *Verifying Strong Eventual
   Consistency in Distributed Systems*** (Isabelle/HOL, OOPSLA 2017,
   [paper](https://www.cl.cam.ac.uk/~vb358/strong-eventual-consistency.pdf))
-  factor SEC into a network model + a per-CRDT commutativity obligation — the
+  factor SEC into a network model + a per-CRDT commutativity obligation, the
   exact *proof-obligation decomposition* R-PROTO reuses.
 
 **Process-calculus / refinement substrate.**
@@ -173,11 +173,11 @@ actor runtime), where Lambert's reality is allowed to live.
   `ref_docs/wootz/R-COIND.md:230`). Safety transfers *backward* along a
   simulation: if every concrete trace is matched by an abstract trace, an
   abstract safety invariant restricts the concrete behavior. This is the standard
-  *trace-inclusion = refinement* result (Lynch–Vaandrager, *Forward and Backward
-  Simulations*) — adopt it.
+  *trace-inclusion = refinement* result (Lynch-Vaandrager, *Forward and Backward
+  Simulations*), adopt it.
 - **Fail-stop, asynchronous, reordering** is the model R-CALC already adopted
-  (`ref_docs/wootz/R-CALC.md:113-116`) from Hennessy–Riely distributed π and
-  crash-stop MPST — and it is the BEAM/OTP model. R-PROTO inherits it verbatim.
+  (`ref_docs/wootz/R-CALC.md:113-116`) from Hennessy-Riely distributed π and
+  crash-stop MPST, and it is the BEAM/OTP model. R-PROTO inherits it verbatim.
 
 **Infra-as-code (the C-INFRA tie).** Winglang's preflight/inflight + simulator
 (`ref_docs/wootz/R-CALC.md:126-136`) maps to **preflight = the proved spec + its
@@ -187,7 +187,7 @@ machine-checked safety proof, and the *same source* simulates and deploys.
 
 Cross-cutting lessons:
 - **Refinement stack (spec SM → protocol LTS → actors), each layer a
-  simulation** (IronFleet/Verdi) — the R-PROTO skeleton.
+  simulation** (IronFleet/Verdi), the R-PROTO skeleton.
 - **Safety-first, liveness-later.** CRDT *convergence is pure safety algebra* (no
   coinduction); consensus *agreement is a safety invariant*; only *liveness*
   (eventual delivery, leader election terminates) needs the coinductive
@@ -208,7 +208,7 @@ is a datatype, the LTS is a relation, the properties are `Prop`s, the proofs are
 ordinary Rune terms, and the projection is R-CALC's `project` over the
 R-EFFECT/R-OTP `IForeign` seam.**
 
-The stack, top to bottom — each layer refines the one above:
+The stack, top to bottom, each layer refines the one above:
 
 ```
   L0  Spec state machine     SpecSM    :  a record (R-SUM Σ): state, step, decided  [pure]
@@ -220,14 +220,14 @@ The stack, top to bottom — each layer refines the one above:
 
 This is the IronFleet/Verdi skeleton, contained.
 
-### Layer 0 — the protocol spec as a replicated-state-machine record
+### Layer 0, the protocol spec as a replicated-state-machine record
 
 A protocol is parametric over a per-replica **local state** `S`, a set of
 **operations** `Op`, and (for convergence-style protocols) a **merge**. R-SUM's Σ
 gives the bundling; nothing here touches the kernel.
 
 ```
--- A state-based (Cv) replicated data type spec — the CRDT shape.
+-- A state-based (Cv) replicated data type spec, the CRDT shape.
 -- This is a RECORD (R-SUM Σ); `lib/proto/crdt.rune`.
 CvRDT : U is
   Sig (S    : U)              -- replica-local state
@@ -243,20 +243,20 @@ CvRDT : U is
 
 The G-Counter instance: `S = Vec n Nat` (per-replica tallies), `merge =
 zipWith max`, `apply (inc i) v = v[i]++`, `init = replicate n 0`. The three
-lattice laws are `max`-comm/assoc/idem lifted pointwise — *one-screen proofs by
+lattice laws are `max`-comm/assoc/idem lifted pointwise, *one-screen proofs by
 the `Nat`/`Vec` eliminators* (D1/D2 stdlib). **This is the M0 artifact's safety
-core and it is provable in today's kernel the moment R-SUM lands** — no
+core and it is provable in today's kernel the moment R-SUM lands**, no
 coinduction, no Kan, no `Proc` even: convergence is an algebra theorem about the
 record's fields (below).
 
-### Layer 1 — the protocol LTS (a network of replicas) as a relation
+### Layer 1, the protocol LTS (a network of replicas) as a relation
 
 A **configuration** is the global state of `n` replicas plus the in-flight
 message bag (R-CALC's async model: a message in flight is a free-floating term).
 This is a datatype + a `Step` relation, both ordinary Rune, no core change:
 
 ```
--- lib/proto/net.rune  — built over R-CALC's Proc/Step idioms.
+-- lib/proto/net.rune , built over R-CALC's Proc/Step idioms.
 data Config : U is                       -- a snapshot of the whole system
   mkConfig : (states : Vec n S)          -- each replica's local state
           -> (inflight : Bag (Fin n × Msg))   -- messages in transit (Bag = unordered)
@@ -278,12 +278,12 @@ Step : Config -> Config -> U
 Two substrate-specific moves:
 - **`inflight` is a `Bag` (multiset).** Wootz *has* multisets as a first-class
   quotient (CLAUDE.md v2.0.0 `Quot`; listings ch06-08). Modelling the network as
-  a `Bag` makes **reordering definitionally free** — two configurations differing
+  a `Bag` makes **reordering definitionally free**, two configurations differing
   only in message order are *equal*, not merely bisimilar. This is a genuine
   substrate advantage over the Coq/Isabelle formalizations, which carry an
   explicit "network is a set/multiset" axiom; here it is the v2 quotient. `DUP`
   and `DROP` are `Bag`-insert/remove. (Honest note: `Eq` is *stuck* at a quotient
-  type unless introduced by `qsound` — so reasoning that uses bag-equality threads
+  type unless introduced by `qsound`, so reasoning that uses bag-equality threads
   `qsound`/`qind` evidence, exactly the v2 discipline.)
 - **`Step` as a relation, encoded the R-CALC.md:498-506 way:** a `Prop`-valued
   recursive predicate over the data, using R-SUM's Σ/× for the per-rule
@@ -299,7 +299,7 @@ an inductive `Reachable` (finite prefix); for *liveness* it is a coinductive
 ready now); liveness needs `Exec` (coinductive, gated on R-COIND C5a to state,
 C5b for path-fairness ergonomics).**
 
-### Layer 1 — the properties (safety & liveness) and their proof obligations
+### Layer 1, the properties (safety & liveness) and their proof obligations
 
 **Safety (an invariant on all reachable configs):**
 
@@ -333,7 +333,7 @@ into (a) a *network-independent* obligation discharged once in `lib/proto/`
 (`Reachable`-induction: the invariant holds at `init` and is preserved by every
 `Step` constructor) and (b) a *per-protocol algebra* obligation (the lattice laws
 for CRDT; the quorum-intersection lemma for consensus). For the G-Counter, (b) is
-the three `merge` laws *already in the `CvRDT` record* — so `convergence` is
+the three `merge` laws *already in the `CvRDT` record*, so `convergence` is
 `Reachable`-induction whose preservation step is *exactly* `mergeComm`/`Assoc`/
 `Idem` + the `Bag`-permutation invariance the v2 quotient gives for free.
 
@@ -350,20 +350,20 @@ eventualDelivery :
 ```
 
 `Eventually` is **inductive** (finite-step), threaded over the **coinductive**
-`Exec` (`Nu`) — a *mixed inductive/coinductive* property, the canonical liveness
+`Exec` (`Nu`), a *mixed inductive/coinductive* property, the canonical liveness
 shape. This needs R-COIND C5a to *state* `Exec`/`Fair`, and the up-to /
 path-fairness ergonomics want C5b (gated on M2). **Convergence/agreement (safety)
-do not need any coinduction** — that is the staging that makes M0 reachable.
+do not need any coinduction**, that is the staging that makes M0 reachable.
 
-### Layer 2 — projection to actors and the adequacy bridge
+### Layer 2, projection to actors and the adequacy bridge
 
 A spec/`Proc` is *run* by R-CALC's `project : Proc -> IO Unit` over the
 R-EFFECT/R-OTP `IForeign` seam (`ref_docs/wootz/R-CALC.md:343-351`). R-PROTO adds
 two things R-CALC left as statement-only:
 
 1. **A *protocol-shaped* projection** `runReplica : CvRDT -> Fin n -> Proc`
-   compiling one replica to a `bang (recv c (\m. ... merge ... gossip))` loop —
-   the standard "receive, merge, re-gossip" actor — and `runSystem : CvRDT ->
+   compiling one replica to a `bang (recv c (\m. ... merge ... gossip))` loop -
+   the standard "receive, merge, re-gossip" actor, and `runSystem : CvRDT ->
    Proc` = the `par`/`nu` composition of `n` replicas. Each constructor maps
    through R-CALC's table; on BEAM each replica is a real OTP process, `crash` is
    process death + supervisor restart, `merge`-on-receive is the message handler.
@@ -390,7 +390,7 @@ safetyTransfer :
   -> AlwaysHolds I ev                                    -- I holds along the real run
 ```
 
-`safetyTransfer` is *backward simulation transfer* (Lynch–Vaandrager): adequacy
+`safetyTransfer` is *backward simulation transfer* (Lynch-Vaandrager): adequacy
 makes each runtime step shadowed by a `Step`, and `Reachable`-closure of `I`
 restricts the shadow, hence the run. **This is where "verified algebra over
 distributed systems" becomes true**: the CRDT convergence proof, established on
@@ -408,28 +408,28 @@ R-COIND** (C5a to state, C5b for the proof ergonomics); the *spec-level safety*
   `project` over R-EFFECT `IForeign` codegen ops. No hash-format bump (no new
   `core.Tm`). The whole protocol library is content-addressed exactly like the
   listings corpus.
-- **Savage:** the on-ramp is the furnace path made literal — **simulate, then
+- **Savage:** the on-ramp is the furnace path made literal, **simulate, then
   prove**: run the G-Counter in the kernel `Step`-scheduler and *watch* two
   replicas diverge then re-converge after gossip; *then* prove `convergence` by
   the three one-line lattice laws; *then* `project` and watch it on BEAM. The
   CRDT is chosen precisely because its safety proof is one screen of algebra a
   learner can hold in their head (Verdi's 50k-line Raft is the contrast artifact).
-- **Lambert:** failure is the model, not an idealization — `DROP`/`DUP`/`CRASH`
+- **Lambert:** failure is the model, not an idealization, `DROP`/`DUP`/`CRASH`
   are the spec's *hypotheses*, and convergence is a theorem *robust to all of
   them* (the CRDT point). `safetyTransfer` carries the proof to a real BEAM
   deployment with real OTP supervision; the *same source* simulates and deploys.
 
 ## Interfaces & signatures to add (Go + Rune surface as relevant)
 
-**Go — strikingly little, all reused.** R-PROTO adds **no new Go to core/store**:
+**Go, strikingly little, all reused.** R-PROTO adds **no new Go to core/store**:
 the spec is R-SUM Σ, the network is `DataDeclOf` datatypes, the coinductive parts
 are R-COIND's `Nu` group, the runtime ops are R-CALC/R-EFFECT `IForeign`. The
 only Go is *registering protocol-runtime op names* in the codegen vocabulary
-(already R-CALC's list) and a **kernel `Step`-scheduler** for the simulator —
+(already R-CALC's list) and a **kernel `Step`-scheduler** for the simulator -
 which is shadow tooling, not core:
 
 ```go
-// internal/sim/scheduler.go  (NEW; shadow tooling, NOT core/store) — the
+// internal/sim/scheduler.go  (NEW; shadow tooling, NOT core/store), the
 // "better-than-Winglang simulator". Folds the Step relation under a pluggable
 // scheduling/fault policy to drive a Config forward, surfacing each event for the
 // REPL/CLI to print. Reuses the kernel evaluator to DECIDE Step membership; it is
@@ -441,14 +441,14 @@ type FaultPolicy struct {
 }
 func Simulate(sess *session.Session, cfg core.Tm, pol FaultPolicy, steps int) []Event
 
-// codegen — the actor-runtime IForeign op names R-CALC named (R-CALC.md:418),
+// codegen, the actor-runtime IForeign op names R-CALC named (R-CALC.md:418),
 // reused, no new IR node:
 //   "spawn","send","receive","newChan","spawnLoop","exit","monitor","restart"
 // ("monitor"/"restart" are the OTP supervision ops R-OTP/D5 implements; R-PROTO
 //  only names them in the projection vocabulary.)
 ```
 
-**Rune surface — a *library* `lib/proto/` (NOT core), layered:**
+**Rune surface, a *library* `lib/proto/` (NOT core), layered:**
 
 ```
 -- lib/proto/crdt.rune     (L0 spec; needs R-SUM Σ)
@@ -461,8 +461,8 @@ convergence : (proto : CvRDT) -> (cfg : Config)
 -- lib/proto/net.rune      (L1 LTS; needs R-SUM Σ, v2 Bag/Quot)
 data Config : U is mkConfig ... end
 Step        : CvRDT -> Config -> Config -> U
-Reachable   : CvRDT -> Config -> U                     -- inductive (finite prefix) — SAFETY
-Exec        : CvRDT -> Config -> U                     -- coinductive Nu — LIVENESS (R-COIND)
+Reachable   : CvRDT -> Config -> U                     -- inductive (finite prefix), SAFETY
+Exec        : CvRDT -> Config -> U                     -- coinductive Nu, LIVENESS (R-COIND)
 Fair        : Exec proto cfg -> U
 Eventually  : (Config -> U) -> Exec proto cfg -> U     -- mixed μ over ν
 
@@ -484,7 +484,7 @@ safetyTransfer : (proto : CvRDT) -> (I : Config -> Prop)
 
 ## Worked micro-example (the teachable artifact)
 
-`gcounter.rune` — a replicated grow-only counter across `n` nodes, **proved
+`gcounter.rune`, a replicated grow-only counter across `n` nodes, **proved
 convergent under drop/dup/reorder/crash**, simulated, then deployed on BEAM. The
 furnace beat: *simulate, then prove, then deploy.*
 
@@ -505,32 +505,32 @@ What the learner sees and can verify, in forgeable order:
 2. **Simulate (the better-than-Winglang simulator).** The kernel `Step`-scheduler
    runs three replicas: replica 0 does `inc 0` twice, replica 1 does `inc 1`,
    gossip is **dropped on a cut** (`FaultPolicy.Partition`), so for a while
-   `value(states!0)=2, value(states!1)=1` — *the learner watches them diverge*.
+   `value(states!0)=2, value(states!1)=1`, *the learner watches them diverge*.
    Healing the partition replays gossip; both `merge` to `value = 3`. **Divergence
-   then convergence is observable, not abstract** (Lambert's teachable moment) —
+   then convergence is observable, not abstract** (Lambert's teachable moment) -
    and crucially it *still converges* after arbitrary drop/dup/reorder, because
    `merge` is a join.
 
 3. **Prove convergence.** `convergence gc cfg reach sameDel : Eq (Vec 3 Nat)
-   (states cfg ! i) (states cfg ! j)` — a `Reachable`-induction whose preservation
+   (states cfg ! i) (states cfg ! j)`, a `Reachable`-induction whose preservation
    case is `mergeComm`/`Assoc`/`Idem` plus the `Bag`-permutation invariance the v2
    quotient gives for free. **The proof does not mention drop/dup/reorder at all**
-   — they are quotiented or absorbed by idempotence. That is the CRDT magic the
+  , they are quotiented or absorbed by idempotence. That is the CRDT magic the
    learner now *owns*: the failure model is a hypothesis the theorem is robust to.
 
 4. **Project & deploy (M0/B3 BEAM).** `rune run gcounter.rune (project (runSystem
    gc))` spawns three BEAM processes exchanging gossip; killing replica 1 (`crash`
    → OTP process death) lets a supervisor restart it, and after re-gossip the
    restarted replica re-converges. `safetyTransfer` certifies that the BEAM run
-   *cannot violate convergence* — the proof from step 3, carried to the deployment.
+   *cannot violate convergence*, the proof from step 3, carried to the deployment.
    **The same source that was proved correct now runs.**
 
-Contrast/harder artifact (labelled): `consensus.rune` — single-decree Raft-like
+Contrast/harder artifact (labelled): `consensus.rune`, single-decree Raft-like
 `agreement`. Its safety (`agreement`/`validity`) is a *quorum-intersection*
 invariant (still inductive `Reachable`, still ready once R-SUM lands), but its
 *liveness* ("a leader is eventually elected and a value decided under fair
 scheduling, modulo FLP's failure-detector caveat") needs `Exec`/`Fair`/
-`Eventually` — the coinductive machinery — and is the **R-COIND-gated** half. The
+`Eventually`, the coinductive machinery, and is the **R-COIND-gated** half. The
 contrast teaches the boundary: *CRDT safety is pure algebra; consensus safety is
 a quorum invariant; consensus liveness needs coinduction and a fairness/failure-
 detector assumption (FLP).*
@@ -549,7 +549,7 @@ detector assumption (FLP).*
 - **R-SUM (C1) is a hard blocker even to *state* a protocol.** The spec record,
   `Step`'s existentials, and `SameDeliveries`/`Decided` all need Σ/×
   (`ref_docs/wootz/R-CALC.md:506` makes the same point for the calculus). No
-  protocol — not even the safety half — can be written before C1.
+  protocol, not even the safety half, can be written before C1.
 
 - **Indexed families vs Σ-encoded relations.** `Step`/`Reachable` are *indexed*
   relations; indexed inductive families are parked (PARKING-LOT.md). The
@@ -562,7 +562,7 @@ detector assumption (FLP).*
   proof, and it depends on R-OTP's runtime guarantees + the BEAM scheduler's
   delivery semantics. *Mitigation:* prove adequacy for the **CRDT shape only**
   first (the `bang(recv→merge→gossip)` loop is structurally simple and its
-  runtime trace is a stream of merges — the simulation is nearly diagonal), and
+  runtime trace is a stream of merges, the simulation is nearly diagonal), and
   *assume* the BEAM scheduler's per-mailbox FIFO + at-least-once delivery as a
   *stated R-OTP axiom* (R-FFI `assume` tier, `ref_docs/wootz/R-FFI.md`) tracked in
   the certificate's assumption set. General adequacy for consensus is deeper
@@ -572,12 +572,12 @@ detector assumption (FLP).*
   Consensus liveness is impossible in pure asynchrony (FLP); the spec must
   *assume* an eventually-perfect failure detector / partial synchrony as a
   hypothesis (R-CALC's `DETECT` rule, R-CALC.md:249). This is honest and standard,
-  but it means consensus liveness is *conditional* — label it as such in the
+  but it means consensus liveness is *conditional*, label it as such in the
   listing. CRDT eventual delivery similarly assumes *fair scheduling* (every
   enabled `DELIVER` eventually fires).
 
 - **`Bag`/`Quot` and stuck `Eq`.** Modelling the network as a v2 `Bag` makes
-  reorder free but `Eq` is *stuck* at the quotient type — proofs that rely on
+  reorder free but `Eq` is *stuck* at the quotient type, proofs that rely on
   bag-equality must introduce identifications via `qsound` and eliminate via
   `qind` (the v2 discipline). For the G-Counter the convergence proof is robust
   to this (it goes through `value = sum`, which is a `qlift` respecting the
@@ -587,7 +587,7 @@ detector assumption (FLP).*
 
 - **Strict positivity of `Config`/`Exec`.** `Config` is first-order (no problem);
   `Exec = Nu (\X. Σ c' (Step c c' × X))` requires R-COIND's positivity-variant
-  check (`ref_docs/wootz/R-COIND.md:365`) — small but not free; inherited from
+  check (`ref_docs/wootz/R-COIND.md:365`), small but not free; inherited from
   R-COIND.
 
 - **C-INFRA surface (open clarify).** The `Simulate` scheduler + `FaultPolicy` is
@@ -602,11 +602,11 @@ detector assumption (FLP).*
   `core/hash.go`, `defFormatVersion`/`hashFormatVersion`; a test asserts an
   existing pure def's hash is byte-identical after `lib/proto/` + R-COIND register
   (the §F groups already prove this is achievable). `CvRDT`/`Config` are ordinary
-  `DataDeclOf`/R-SUM-record declarations — a `structural_test.go`-style test that
+  `DataDeclOf`/R-SUM-record declarations, a `structural_test.go`-style test that
   they declare, check, and that `gcounter 3` discharges its law fields.
 
 - **Safety proof gate (M0, the ready-to-build core):** `convergence (gcounter 3)`
-  type-checks and is *certified* — its preservation step reduces to the three
+  type-checks and is *certified*, its preservation step reduces to the three
   lattice laws + `Bag` permutation invariance. Mutation target: corrupting
   `merge` to a non-idempotent op (e.g. `+` instead of `max`) must break
   `mergeIdem` and hence `convergence` (the proof catches the non-CRDT).
@@ -614,19 +614,19 @@ detector assumption (FLP).*
 - **Simulator gate (Lambert, better-than-Winglang):** `Simulate` under a
   `Partition` policy shows two replicas diverge while partitioned and re-converge
   after healing; under `DropRate=1.0` on a cut, a *non-CRDT* (a last-writer-wins
-  register without a proper join) is shown to *stay* divergent — i.e. the
+  register without a proper join) is shown to *stay* divergent, i.e. the
   simulator distinguishes convergent from non-convergent protocols, matching the
   proof.
 
 - **Failure-robustness property (harness/, rapid):** for the G-Counter, *for all*
   drop/dup/reorder schedules over a fixed set of ops, all replicas that delivered
-  the same op-multiset have equal `value` — a randomized check that *empirically*
+  the same op-multiset have equal `value`, a randomized check that *empirically*
   corroborates `convergence` (the furnace "test it" rung beneath the proof).
 
 - **Liveness gate (M7, R-COIND-gated):** `eventualDelivery` under `Fair`
   type-checks (needs `Exec`/`Eventually`); `agreement`/`validity` for
   `singleDecree` type-check (safety, inductive). Listing ch26 (CRDT) is the M0
-  acceptance gate; ch27 (consensus) the M7 gate — paralleling the `listings/`
+  acceptance gate; ch27 (consensus) the M7 gate, paralleling the `listings/`
   discipline.
 
 - **Projection/run gate (M0, Lambert):** `project (runSystem (gcounter 3))` runs
@@ -646,9 +646,9 @@ detector assumption (FLP).*
 
 ## Unblocks (which implement nodes, and what they still need)
 
-- **E3 (this node's home — verified protocols + projection):** **the CRDT G-Counter
+- **E3 (this node's home, verified protocols + projection):** **the CRDT G-Counter
   *safety* artifact (spec record + LTS + `convergence` proof + simulator) is
-  ready-to-build the moment R-SUM (C1) lands** — it needs Σ, the v2 `Bag`, and the
+  ready-to-build the moment R-SUM (C1) lands**, it needs Σ, the v2 `Bag`, and the
   D1/D2 `Nat`/`Vec` stdlib, and **zero coinduction**. The *projection bridge*
   (`adequacy`/`safetyTransfer`) and **all liveness** (`Exec`/`Fair`/
   `eventualDelivery`, consensus liveness) are **research-blocked on R-COIND** (C5a
@@ -660,7 +660,7 @@ detector assumption (FLP).*
 - **M0 (vertical slice):** R-PROTO *is* the M0 distributed demonstrator
   (`humble-humming-elephant.md:236-238`, `:284` "a replicated counter with a tiny
   consensus core"). The **CRDT counter** is the honest M0 protocol: its safety is
-  provable now (modulo R-SUM), and its deploy needs B1/B2/B3(BEAM) — none of which
+  provable now (modulo R-SUM), and its deploy needs B1/B2/B3(BEAM), none of which
   has a research node yet, so M0's *deploy* half is gated on the B-track, while its
   *proof* half is ready.
 
@@ -670,7 +670,7 @@ detector assumption (FLP).*
   deploy and a contained `surface/`+`cmd/rune/` sugar pass (`protocol … end`,
   `simulate`/`deploy` verbs). **Resolves C-INFRA toward library-first.**
 
-- **D5 / R-OTP:** R-PROTO is the *forcing consumer* — it names the supervision ops
+- **D5 / R-OTP:** R-PROTO is the *forcing consumer*, it names the supervision ops
   (`monitor`/`restart`) the verified actor library must provide and the runtime
   axioms (per-mailbox FIFO, at-least-once delivery) `adequacy` assumes. R-OTP
   supplies the verified library; R-PROTO supplies the protocols that justify it.
@@ -685,7 +685,7 @@ detector assumption (FLP).*
 
 **Status: needs-more-research** overall, because the projection bridge
 (`adequacy`/`safetyTransfer`) and *all liveness* are gated on **R-COIND**
-(undelivered) and on **D5/R-OTP + B3(BEAM)** for the runtime — and the deep
+(undelivered) and on **D5/R-OTP + B3(BEAM)** for the runtime, and the deep
 adequacy proof is, by R-CALC's own admission, genuinely hard. **But the node is
 substantially ready-to-build at its M0 core:** the **CRDT G-Counter spec (R-SUM
 record), the network LTS (a `data Config` + `Step` relation with the Lambert
