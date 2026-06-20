@@ -1,0 +1,66 @@
+-- Chapter 247 — Boolean equality reflects propositional equality (proven tier).
+--
+-- A decidable-equality test `beq : Bool -> Bool -> Bool` is only trustworthy if its bit
+-- agrees with the real proposition. Here that agreement is PROVEN both ways (a reflection):
+--
+--   beqComplete : a = b        -> beq a b = true     (equals test true)
+--   beqSound    : beq a b = true -> a = b            (test true means equal)
+--
+-- so `beq a b = true` and `Eq Bool a b` are interchangeable — sound dispatch on equality,
+-- the basis for Set/Map keyed on Bool. (No empty type needed: the off-diagonal soundness
+-- case transports its own false hypothesis to the goal.) Proof-only.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+-- beq a b = true iff a = b: beq true b = b, beq false b = notB b.
+beq : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) b (notB b) a
+  end
+end
+
+-- beq a a = true, by case analysis (true: beq true true = true; false: notB false = true).
+beqRefl : (a : Bool) -> Eq Bool (beq a a) true is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (beq x x) true end) refl refl a
+  end
+end
+
+-- COMPLETENESS: equal inputs test true — transport beqRefl along the equality a = b.
+beqComplete : (a : Bool) -> (b : Bool) -> Eq Bool a b -> Eq Bool (beq a b) true is
+  fn (a : Bool) (b : Bool) (p : Eq Bool a b) is
+    subst Bool a b p (fn (z : Bool) is Eq Bool (beq a z) true end) (beqRefl a)
+  end
+end
+
+-- SOUNDNESS: a true test means equal. Case on both Bools; the diagonal is refl, the
+-- off-diagonal transports its (false) hypothesis to the goal — no empty type required.
+beqSound : (a : Bool) -> (b : Bool) -> Eq Bool (beq a b) true -> Eq Bool a b is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (beq x b) true -> Eq Bool x b end)
+      (BoolElim (fn (y : Bool) is Eq Bool (beq true y) true -> Eq Bool true y end)
+         (fn (h : Eq Bool (beq true true) true) is refl end)
+         (fn (h : Eq Bool (beq true false) true) is symEq Bool false true h end)
+         b)
+      (BoolElim (fn (y : Bool) is Eq Bool (beq false y) true -> Eq Bool false y end)
+         (fn (h : Eq Bool (beq false true) true) is h end)
+         (fn (h : Eq Bool (beq false false) true) is refl end)
+         b)
+      a
+  end
+end
