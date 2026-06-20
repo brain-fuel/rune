@@ -1,0 +1,46 @@
+-- Chapter 256 — boolean lattice laws: distributivity and absorption (proven tier).
+--
+-- The laws that make (Bool, andB, orB) a distributive lattice (with De Morgan, ch255, a
+-- boolean algebra). Each is a single case analysis on the first argument — the and/or
+-- reductions collapse both branches to refl. Proof-only.
+--
+--   distribAndOr : andB a (orB b c) = orB (andB a b) (andB a c)
+--   absorbAndOr  : andB a (orB a b) = a
+--   absorbOrAnd  : orB  a (andB a b) = a
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+-- DISTRIBUTIVITY of and over or.
+distribAndOr : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+               Eq Bool (andB a (orB b c)) (orB (andB a b) (andB a c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB x (orB b c)) (orB (andB x b) (andB x c)) end)
+      refl refl a
+  end
+end
+
+-- ABSORPTION.
+absorbAndOr : (a : Bool) -> (b : Bool) -> Eq Bool (andB a (orB a b)) a is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB x (orB x b)) x end) refl refl a
+  end
+end
+
+absorbOrAnd : (a : Bool) -> (b : Bool) -> Eq Bool (orB a (andB a b)) a is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB x (andB x b)) x end) refl refl a
+  end
+end
