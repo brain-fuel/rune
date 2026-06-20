@@ -1,0 +1,432 @@
+-- Chapter 229, General adequacy invariant: traces stay observable (E3).
+--
+-- ch207 proved adequacy `visibleRun k P = project P` PER PROTOCOL (by refl, on
+-- concrete well-supervised processes). This chapter lifts one half of adequacy to a
+-- fully GENERAL, all-P / all-fuel INDUCTIVE theorem: on BOTH semantics (the spec
+-- denotation `project` and the runtime trace `visibleRun`) every label emitted is in
+-- the OBSERVABLE alphabet (no silent tau ever leaks into an observation), for EVERY
+-- process and EVERY fuel.
+--
+--   projectVisible    : (p : Proc) -> allVisible (project p) = true
+--   visibleRunVisible : (k : Nat) (p : Proc) -> allVisible (visibleRun k p) = true
+--
+-- `projectVisible` is structural induction over Proc (the par case needs that
+-- allVisible distributes over append). `visibleRunVisible` is induction on the fuel,
+-- and turns on `consVisVisible`, a LabelElim lemma that supplies the per-label
+-- knowledge a non-dependent BoolElim on `visible l` cannot (the scrutinee-knowledge
+-- limit): casing the LABEL exposes whether it is observable in each branch.
+--
+-- This is the universal SOUNDNESS half of adequacy: the observable alphabet is
+-- respected everywhere, which the per-protocol refls never established. The full
+-- refinement `visibleRun (f P) P = project P` for all well-supervised P stays blocked
+-- on the par-interleaving fuel-threading (visibleRun on `par a b` schedules ONE
+-- global step at a time, so it does not decompose as append of the parts): the
+-- documented substrate limit; this lemma is what the induction CAN reach. Proof-only.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end)
+      ys
+      (fn (h : A) (t : List A) (ih : List A) is cons A h ih end)
+      xs
+  end
+end
+
+-- ===== The fault LTS, as ch206 (the SPEC we refine against) =====
+
+data Label : U is
+  ltau  : Label
+| lsend : Label
+| lrecv : Label
+| lfail : Label
+end
+
+data Proc : U is
+  halt  : Proc
+| out   : Proc -> Proc
+| inp   : Proc -> Proc
+| mon   : Proc -> Proc
+| par   : Proc -> Proc -> Proc
+| crash : Proc
+end
+
+data Fault : U is
+  ok      : Fault
+| crashIt : Fault
+| loseIt  : Fault
+end
+
+data Trans : U is
+  tr : Label -> Proc -> Trans
+end
+
+labelOf : Trans -> Label is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t
+  end
+end
+
+procOf : Trans -> Proc is
+  fn (t : Trans) is
+    TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t
+  end
+end
+
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+isHalt : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      true
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      false
+      x
+  end
+end
+
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+isLive : Proc -> Bool is
+  fn (x : Proc) is
+    BoolElim (fn (b : Bool) is Bool end)
+      false
+      (BoolElim (fn (b : Bool) is Bool end) false true (isHalt x))
+      (isCrash x)
+  end
+end
+
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+
+commT : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (interleaveT iha ihb a b)
+      (fn (pa : Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+           (interleaveT iha ihb a b)
+           (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+           (inpCont b)
+       end)
+      (outCont a)
+  end
+end
+
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (commT a b iha ihb)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (commT a b iha ihb)
+      (isCrash a)
+  end
+end
+
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+crashStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (some Trans (tr lfail crash))
+      (none Trans)
+      (isLive x)
+  end
+end
+
+loseStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) is some Trans (tr ltau p) end)
+      (outCont x)
+  end
+end
+
+lstep : Fault -> Proc -> Option Trans is
+  fn (f : Fault) (x : Proc) is
+    FaultElim (fn (w : Fault) is Option Trans end)
+      (okStep x)
+      (crashStep x)
+      (loseStep x)
+      f
+  end
+end
+
+-- ===== The observable trace of the LTS =====
+
+-- the observable alphabet excludes the silent τ (rendezvous / lost message); a
+-- failure is observable (a supervisor reacts to it), communication is internal.
+visible : Label -> Bool is
+  fn (l : Label) is
+    LabelElim (fn (w : Label) is Bool end)
+      false   -- ltau  : silent
+      true    -- lsend
+      true    -- lrecv
+      true    -- lfail : observable failure
+      l
+  end
+end
+
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is
+    BoolElim (fn (w : Bool) is List Label end)
+      (cons Label l rest)
+      rest
+      (visible l)
+  end
+end
+
+-- run `lstep ok` for k steps, collecting the observable labels (a stuck process
+-- ends the trace). This is the LTS's runtime-trace semantics.
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (lstep ok p)
+         end
+       end)
+      n
+  end
+end
+
+-- ===== The projection denotation =====
+--
+-- The observable action sequence the PROJECTED actor emits (the R-CALC projection
+-- table, restricted to the observable alphabet): communication prefixes are
+-- internal (τ, contributing nothing observable); a parallel composition runs its
+-- branches (left then right, matching the LTS's left-biased schedule); a `crash`
+-- projects to `primExit`, the one observable failure action.
+project : Proc -> List Label is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is List Label end)
+      (nil Label)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (a : Proc) (b : Proc) (iha : List Label) (ihb : List Label) is append Label iha ihb end)
+      (cons Label lfail (nil Label))
+      x
+  end
+end
+
+-- ===== General adequacy invariant (all-P / all-fuel) =====
+
+-- the equational toolkit (derived from the ambient subst), as in the proof listings.
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+andBAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+    Eq Bool (andB a (andB b c)) (andB (andB a b) c) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (andB w (andB b c)) (andB (andB w b) c) end)
+      refl refl a
+  end
+end
+
+-- a label list is observable iff every label in it is visible.
+allVisible : List Label -> Bool is
+  fn (xs : List Label) is
+    ListElim Label (fn (w : List Label) is Bool end)
+      true
+      (fn (l : Label) (t : List Label) (ih : Bool) is andB (visible l) ih end)
+      xs
+  end
+end
+
+-- allVisible distributes over append (induction on the first list).
+allVisibleAppend : (xs : List Label) -> (ys : List Label) ->
+    Eq Bool (allVisible (append Label xs ys)) (andB (allVisible xs) (allVisible ys)) is
+  fn (xs : List Label) (ys : List Label) is
+    ListElim Label
+      (fn (w : List Label) is
+         Eq Bool (allVisible (append Label w ys)) (andB (allVisible w) (allVisible ys)) end)
+      refl
+      (fn (l : Label) (t : List Label)
+          (ih : Eq Bool (allVisible (append Label t ys)) (andB (allVisible t) (allVisible ys))) is
+         transEq Bool
+           (allVisible (append Label (cons Label l t) ys))
+           (andB (visible l) (andB (allVisible t) (allVisible ys)))
+           (andB (andB (visible l) (allVisible t)) (allVisible ys))
+           (cong Bool Bool (fn (z : Bool) is andB (visible l) z end)
+              (allVisible (append Label t ys)) (andB (allVisible t) (allVisible ys)) ih)
+           (andBAssoc (visible l) (allVisible t) (allVisible ys))
+       end)
+      xs
+  end
+end
+
+-- (1) the SPEC denotation only ever emits observable labels, structural over Proc.
+projectVisible : (p : Proc) -> Eq Bool (allVisible (project p)) true is
+  fn (p : Proc) is
+    ProcElim (fn (w : Proc) is Eq Bool (allVisible (project w)) true end)
+      refl
+      (fn (q : Proc) (ih : Eq Bool (allVisible (project q)) true) is ih end)
+      (fn (q : Proc) (ih : Eq Bool (allVisible (project q)) true) is ih end)
+      (fn (q : Proc) (ih : Eq Bool (allVisible (project q)) true) is ih end)
+      (fn (a : Proc) (b : Proc)
+          (iha : Eq Bool (allVisible (project a)) true)
+          (ihb : Eq Bool (allVisible (project b)) true) is
+         transEq Bool
+           (allVisible (append Label (project a) (project b)))
+           (andB (allVisible (project a)) (allVisible (project b)))
+           true
+           (allVisibleAppend (project a) (project b))
+           (transEq Bool
+              (andB (allVisible (project a)) (allVisible (project b)))
+              (allVisible (project b))
+              true
+              (cong Bool Bool (fn (z : Bool) is andB z (allVisible (project b)) end)
+                 (allVisible (project a)) true iha)
+              ihb)
+       end)
+      refl
+      p
+  end
+end
+
+-- consing a label onto an observable list keeps it observable, LabelElim supplies
+-- the per-label knowledge a BoolElim on `visible l` would not.
+consVisVisible : (l : Label) -> (rest : List Label) -> Eq Bool (allVisible rest) true ->
+    Eq Bool (allVisible (consVis l rest)) true is
+  fn (l : Label) (rest : List Label) (h : Eq Bool (allVisible rest) true) is
+    LabelElim (fn (w : Label) is Eq Bool (allVisible (consVis w rest)) true end)
+      h h h h l
+  end
+end
+
+-- (2) the RUNTIME trace only ever emits observable labels, induction on the fuel.
+visibleRunVisible : (k : Nat) -> (p : Proc) -> Eq Bool (allVisible (visibleRun k p)) true is
+  fn (k : Nat) is
+    NatElim (fn (n : Nat) is (p : Proc) -> Eq Bool (allVisible (visibleRun n p)) true end)
+      (fn (p : Proc) is refl end)
+      (fn (k0 : Nat) (ih : (p : Proc) -> Eq Bool (allVisible (visibleRun k0 p)) true) is
+         fn (p : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq Bool
+                  (allVisible (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun k0 (procOf t)) end)
+                     o))
+                  true
+              end)
+             refl
+             (fn (t : Trans) is
+                consVisVisible (labelOf t) (visibleRun k0 (procOf t)) (ih (procOf t)) end)
+             (lstep ok p)
+         end
+       end)
+      k
+  end
+end
