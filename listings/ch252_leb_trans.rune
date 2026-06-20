@@ -1,0 +1,89 @@
+-- Chapter 252 — transitivity of <= , machine-checked (proven tier).
+--
+-- With ch251's reflexivity, transitivity makes leb a partial order. The proof is a triple
+-- case analysis (on a, then b, then c); the impossible branches (where a hypothesis like
+-- leb (succ k) zero = true asserts false = true) are discharged by `everythingTrue`: from
+-- false = true, every Bool equals true — explosion without an empty type. Proof-only.
+--
+--   lebTrans : (a b c : Nat) -> leb a b = true -> leb b c = true -> leb a c = true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+-- from a false equality, anything is true (Boolean explosion, no empty type needed).
+everythingTrue : Eq Bool false true -> (x : Bool) -> Eq Bool x true is
+  fn (h : Eq Bool false true) (x : Bool) is
+    BoolElim (fn (z : Bool) is Eq Bool z true end) refl h x
+  end
+end
+
+-- TRANSITIVITY, by induction on a then case on b then c. leb (succ _) (succ _) reduces to
+-- leb _ _, so the deep case is exactly the outer IH; the zero-on-the-right cases are
+-- impossible and discharged by everythingTrue.
+lebTrans : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Bool (leb a b) true -> Eq Bool (leb b c) true -> Eq Bool (leb a c) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is
+               (b : Nat) -> (c : Nat) ->
+               Eq Bool (leb x b) true -> Eq Bool (leb b c) true -> Eq Bool (leb x c) true end)
+      (fn (b : Nat) (c : Nat)
+          (h1 : Eq Bool (leb zero b) true) (h2 : Eq Bool (leb b c) true) is refl end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> (c : Nat) ->
+                Eq Bool (leb k b) true -> Eq Bool (leb b c) true -> Eq Bool (leb k c) true) is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is
+                      (c : Nat) -> Eq Bool (leb (succ k) bb) true ->
+                      Eq Bool (leb bb c) true -> Eq Bool (leb (succ k) c) true end)
+             (fn (c : Nat)
+                 (h1 : Eq Bool (leb (succ k) zero) true) (h2 : Eq Bool (leb zero c) true) is
+                everythingTrue h1 (leb (succ k) c) end)
+             (fn (j : Nat)
+                 (ihb : (c : Nat) -> Eq Bool (leb (succ k) j) true ->
+                        Eq Bool (leb j c) true -> Eq Bool (leb (succ k) c) true) is
+                fn (c : Nat) is
+                  NatElim (fn (cc : Nat) is
+                             Eq Bool (leb (succ k) (succ j)) true ->
+                             Eq Bool (leb (succ j) cc) true -> Eq Bool (leb (succ k) cc) true end)
+                    (fn (h1 : Eq Bool (leb (succ k) (succ j)) true)
+                        (h2 : Eq Bool (leb (succ j) zero) true) is
+                       everythingTrue h2 (leb (succ k) zero) end)
+                    (fn (i : Nat)
+                        (ihc : Eq Bool (leb (succ k) (succ j)) true ->
+                               Eq Bool (leb (succ j) i) true -> Eq Bool (leb (succ k) i) true) is
+                       fn (h1 : Eq Bool (leb (succ k) (succ j)) true)
+                          (h2 : Eq Bool (leb (succ j) (succ i)) true) is
+                         ih j i h1 h2 end
+                       end)
+                    c
+                  end
+                end)
+             b
+           end
+         end)
+      a
+  end
+end
