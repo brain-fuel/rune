@@ -60,6 +60,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 ## Proven tier — list algebra (functor / monoid / foldable)
 
 - `ch235_append_length` — `len (xs ++ ys) = len xs + len ys`.
+- `ch327_len_append_sym` — append length is swap-symmetric: `len (xs++ys) = len (ys++xs)`.
 - `ch236_list_monoid` — append right-identity + associativity (NatList is a monoid).
 - `ch237_map_length` — `len (mapList f xs) = len xs` (any f).
 - `ch238_map_fusion` — `mapList g (mapList f xs) = mapList (g . f) xs`.
