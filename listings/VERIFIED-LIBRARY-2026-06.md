@@ -149,6 +149,7 @@ equation).
 - `ch398_nat_disjoint` — constructor disjointness: `zero != succ n` (and explodes into any Nat eq).
 - `ch400_beqnat_complete` — decidable eq complete: `a = b -> beqNat a b = true` (with ch376, both directions).
 - `ch401_iszero_sound` — isZero reflects: `isZero n = true -> n = zero`.
+- `ch402_iszero_complete` — isZero complete: `n = zero -> isZero n = true` (with ch401, decides being zero).
 - `ch399_succ_inj` — successor injective: `succ a = succ b -> a = b` (via pred).
 - `ch377_beq_implies_leb` — equal implies <=: `beqNat a b = true -> leb a b = true` (decidable eq refines order).
 - `ch378_leb_monus_zero` — below means nothing to subtract: `a <= b -> monus a b = 0`.

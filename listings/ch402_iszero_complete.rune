@@ -1,0 +1,35 @@
+-- Chapter 402 — isZero is complete: n = zero implies isZero n = true (proven tier).
+--
+-- The converse of ch401: transport isZero zero = true back along the equality. With ch401,
+-- isZero fully decides being zero. Proof-only.
+--
+--   isZeroComplete : (n : Nat) -> Eq Nat n zero -> Eq Bool (isZero n) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+isZero : Nat -> Bool is
+  fn (n : Nat) is NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n end
+end
+
+isZeroComplete : (n : Nat) -> Eq Nat n zero -> Eq Bool (isZero n) true is
+  fn (n : Nat) (h : Eq Nat n zero) is
+    subst Nat zero n (symEq Nat n zero h) (fn (z : Nat) is Eq Bool (isZero z) true end) refl
+  end
+end
