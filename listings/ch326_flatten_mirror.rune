@@ -1,0 +1,184 @@
+-- Chapter 326 — mirroring reverses the inorder traversal (proven tier).
+--
+-- flatten (mirror t) = reverse (flatten t): reflecting a binary tree reverses its inorder
+-- list. A capstone joining the tree mirror (ch244), inorder flatten (ch260), and the
+-- reverse laws (ch292/append associativity). The node step rewrites both subtrees by the
+-- IHs and re-associates the append, matching reverse's distribution. Proof-only.
+--
+--   flattenMirror : (t : Tree) -> Eq NatList (flatten (mirror t)) (reverse (flatten t))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+data Tree : U is
+  leaf : Tree
+| node : Tree -> Nat -> Tree -> Tree
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+appendAssoc : (xs : NatList) -> (ys : NatList) -> (zs : NatList) ->
+              Eq NatList (append (append xs ys) zs) (append xs (append ys zs)) is
+  fn (xs : NatList) (ys : NatList) (zs : NatList) is
+    NatListElim
+      (fn (x : NatList) is Eq NatList (append (append x ys) zs) (append x (append ys zs)) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq NatList (append (append rest ys) zs) (append rest (append ys zs))) is
+         cong NatList NatList (consWith h)
+           (append (append rest ys) zs) (append rest (append ys zs)) ih end)
+      xs
+  end
+end
+
+reverse : NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is append ih (ncons h nnil) end)
+      xs
+  end
+end
+
+appendNnilR : (xs : NatList) -> Eq NatList (append xs nnil) xs is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Eq NatList (append x nnil) x end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (append rest nnil) rest) is
+         cong NatList NatList (consWith h) (append rest nnil) rest ih end)
+      xs
+  end
+end
+
+appendTo : NatList -> NatList -> NatList is fn (w : NatList) (z : NatList) is append z w end end
+
+reverseAppend : (xs : NatList) -> (ys : NatList) ->
+                Eq NatList (reverse (append xs ys)) (append (reverse ys) (reverse xs)) is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is (ys : NatList) ->
+                   Eq NatList (reverse (append x ys)) (append (reverse ys) (reverse x)) end)
+      (fn (ys : NatList) is
+         symEq NatList (append (reverse ys) nnil) (reverse ys) (appendNnilR (reverse ys)) end)
+      (fn (h : Nat) (rest : NatList)
+          (ih : (ys : NatList) ->
+                Eq NatList (reverse (append rest ys)) (append (reverse ys) (reverse rest))) is
+         fn (ys : NatList) is
+           transEq NatList
+             (append (reverse (append rest ys)) (ncons h nnil))
+             (append (append (reverse ys) (reverse rest)) (ncons h nnil))
+             (append (reverse ys) (append (reverse rest) (ncons h nnil)))
+             (cong NatList NatList (appendTo (ncons h nnil))
+                (reverse (append rest ys)) (append (reverse ys) (reverse rest)) (ih ys))
+             (appendAssoc (reverse ys) (reverse rest) (ncons h nnil))
+         end
+       end)
+      xs
+  end
+end
+
+mirror : Tree -> Tree is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Tree end)
+      leaf
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Tree) (ihr : Tree) is node ihr x ihl end)
+      t
+  end
+end
+
+flatten : Tree -> NatList is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is NatList end)
+      nnil
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : NatList) (ihr : NatList) is
+         append ihl (ncons x ihr) end)
+      t
+  end
+end
+
+-- consAt x p q = append p (ncons x q) — the f for the two-subtree congruence.
+consAt : Nat -> NatList -> NatList -> NatList is
+  fn (x : Nat) (p : NatList) (q : NatList) is append p (ncons x q) end
+end
+
+-- THE THEOREM, by structural induction on t. The node step:
+--   flatten (mirror (node l x r)) = append (flatten (mirror r)) (x :: flatten (mirror l))
+--   cong2 (consAt x) ihr ihl : = append (reverse (flatten r)) (x :: reverse (flatten l))
+--   sym (appendAssoc ...)     : = append (append (reverse (flatten r)) [x]) (reverse (flatten l))
+--   sym (reverseAppend ...)   : = reverse (append (flatten l) (x :: flatten r)) = reverse (flatten (node l x r))
+flattenMirror : (t : Tree) -> Eq NatList (flatten (mirror t)) (reverse (flatten t)) is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq NatList (flatten (mirror x)) (reverse (flatten x)) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq NatList (flatten (mirror l)) (reverse (flatten l)))
+          (ihr : Eq NatList (flatten (mirror r)) (reverse (flatten r))) is
+         transEq NatList
+           (append (flatten (mirror r)) (ncons x (flatten (mirror l))))
+           (append (reverse (flatten r)) (ncons x (reverse (flatten l))))
+           (reverse (append (flatten l) (ncons x (flatten r))))
+           (cong2 NatList NatList NatList (consAt x)
+              (flatten (mirror r)) (reverse (flatten r))
+              (flatten (mirror l)) (reverse (flatten l)) ihr ihl)
+           (transEq NatList
+              (append (reverse (flatten r)) (ncons x (reverse (flatten l))))
+              (append (append (reverse (flatten r)) (ncons x nnil)) (reverse (flatten l)))
+              (reverse (append (flatten l) (ncons x (flatten r))))
+              (symEq NatList
+                 (append (append (reverse (flatten r)) (ncons x nnil)) (reverse (flatten l)))
+                 (append (reverse (flatten r)) (ncons x (reverse (flatten l))))
+                 (appendAssoc (reverse (flatten r)) (ncons x nnil) (reverse (flatten l))))
+              (symEq NatList
+                 (reverse (append (flatten l) (ncons x (flatten r))))
+                 (append (append (reverse (flatten r)) (ncons x nnil)) (reverse (flatten l)))
+                 (reverseAppend (flatten l) (ncons x (flatten r))))) end)
+      t
+  end
+end
