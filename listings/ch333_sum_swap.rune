@@ -1,0 +1,33 @@
+-- Chapter 333 — Sum symmetry is involutive: swap (swap s) = s (proven tier).
+--
+-- swap exchanges the two injections of a Sum; doing it twice is the identity. The witness
+-- that Sum A B and Sum B A are isomorphic (and that swap is its own inverse). By case
+-- analysis. Proof-only.
+--
+--   swapInvol : (A B : U) -> (s : Sum A B) -> Eq (Sum A B) (swapSum B A (swapSum A B s)) s
+
+data Sum : U -> U -> U is
+  inl : (A : U) -> (B : U) -> A -> Sum A B
+| inr : (A : U) -> (B : U) -> B -> Sum A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+swapSum : (A : U) -> (B : U) -> Sum A B -> Sum B A is
+  fn (A : U) (B : U) (s : Sum A B) is
+    SumElim A B (fn (x : Sum A B) is Sum B A end)
+      (fn (a : A) is inr B A a end)
+      (fn (b : B) is inl B A b end)
+      s
+  end
+end
+
+swapInvol : (A : U) -> (B : U) -> (s : Sum A B) ->
+            Eq (Sum A B) (swapSum B A (swapSum A B s)) s is
+  fn (A : U) (B : U) (s : Sum A B) is
+    SumElim A B (fn (x : Sum A B) is Eq (Sum A B) (swapSum B A (swapSum A B x)) x end)
+      (fn (a : A) is refl end)
+      (fn (b : B) is refl end)
+      s
+  end
+end
