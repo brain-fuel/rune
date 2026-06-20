@@ -1,0 +1,51 @@
+-- Chapter 313 — Option `orElse` is a monoid with unit none (proven tier).
+--
+-- orElse returns the first present value (the alternative/MonadPlus structure on Option).
+-- It is a monoid: none is a two-sided identity and orElse is associative. Left identity is
+-- definitional; the right identity and associativity are by case analysis. Proof-only.
+--
+--   orElseNoneL : orElse (none A) m = m
+--   orElseNoneR : orElse m (none A) = m
+--   orElseAssoc : orElse (orElse a b) c = orElse a (orElse b c)
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+orElse : (A : U) -> Option A -> Option A -> Option A is
+  fn (A : U) (a : Option A) (b : Option A) is
+    OptionElim A (fn (x : Option A) is Option A end)
+      b
+      (fn (z : A) is some A z end)
+      a
+  end
+end
+
+-- left identity is definitional (orElse none m reduces to m), but we record it.
+orElseNoneL : (A : U) -> (m : Option A) -> Eq (Option A) (orElse A (none A) m) m is
+  fn (A : U) (m : Option A) is refl end
+end
+
+orElseNoneR : (A : U) -> (m : Option A) -> Eq (Option A) (orElse A m (none A)) m is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Eq (Option A) (orElse A x (none A)) x end)
+      refl
+      (fn (z : A) is refl end)
+      m
+  end
+end
+
+orElseAssoc : (A : U) -> (a : Option A) -> (b : Option A) -> (c : Option A) ->
+              Eq (Option A) (orElse A (orElse A a b) c) (orElse A a (orElse A b c)) is
+  fn (A : U) (a : Option A) (b : Option A) (c : Option A) is
+    OptionElim A
+      (fn (x : Option A) is
+         Eq (Option A) (orElse A (orElse A x b) c) (orElse A x (orElse A b c)) end)
+      refl
+      (fn (z : A) is refl end)
+      a
+  end
+end

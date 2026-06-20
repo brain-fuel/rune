@@ -147,6 +147,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch296_beq_sym` — symmetry of the Nat equality test: `beqNat a b = beqNat b a`.
 - `ch248_option_monad` — Option monad laws (left/right id, assoc).
 - `ch254_option_functor` — Option functor laws (id, composition).
+- `ch313_option_orelse` — Option `orElse` is a monoid (none identity + associativity; the alternative structure).
 - `ch263_sum_bifunctor` — Sum (Either) bifunctor laws (id, composition).
 - `ch284_swap_involutions` — swap is an involution on products and sums
   (`swapP (swapP p) = p`, `sswap (sswap e) = e`).
