@@ -106,6 +106,9 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fleqN") {
 		b.WriteString("def fleqN():\n    return lambda a: lambda b: (1 if a <= b else 0)\n")
 	}
+	if usesForeign(p, "fsqrt") {
+		b.WriteString("def fsqrt():\n    import math\n    return lambda x: math.sqrt(x)\n")
+	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("def dot2():\n    return lambda a0: lambda a1: lambda b0: lambda b1: a0 * b0 + a1 * b1\n")
 	}

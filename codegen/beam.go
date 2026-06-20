@@ -120,6 +120,9 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fleqN") {
 		b.WriteString("ff_fleqN() -> fun(A) -> fun(B) -> case A =< B of true -> 1; false -> 0 end end end.\n")
 	}
+	if usesForeign(p, "fsqrt") {
+		b.WriteString("ff_fsqrt() -> fun(X) -> math:sqrt(X) end.\n")
+	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("ff_dot2() -> fun(A0) -> fun(A1) -> fun(B0) -> fun(B1) -> A0 * B0 + A1 * B1 end end end end.\n")
 	}

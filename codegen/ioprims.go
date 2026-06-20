@@ -49,6 +49,7 @@ var ioPrims = map[string]bool{
 	"fabsP":      true, // fabsP      x             : Float -> Float (absolute value)
 	"floatToNat": true, // floatToNat x             : Float -> Nat   (truncate toward zero)
 	"fleqN":      true, // fleqN      a b           : Float -> Float -> Nat (1 if a<=b else 0)
+	"fsqrt":      true, // fsqrt      x             : Float -> Float (IEEE-754 square root; host sqrt — C/LLVM link -lm)
 	"dot2":       true, // dot2       a0 a1 b0 b1    : Float^4 -> Float (a0*b0 + a1*b1)
 	"dotList":    true, // dotList    xs ys          : FList -> FList -> Float (cblas_ddot over a marshalled double[]; C/LLVM)
 	"gemmSum":    true, // gemmSum    m k n A B       : Nat^3 -> FList -> FList -> Float (cblas_dgemm A·B, sum of entries; C/LLVM)

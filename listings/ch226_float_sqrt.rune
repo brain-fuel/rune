@@ -1,0 +1,36 @@
+-- Chapter 226 — the IEEE-754 square root primitive (D3 floats).
+--
+-- The float kit had +,-,*,/, abs, and comparison but no transcendental/irrational op.
+-- `fsqrt` adds the host square root (`Math.sqrt` / `math.sqrt` / `math:sqrt` /
+-- `f64::sqrt` / C `sqrt`), the building block for Euclidean norms, standard deviation,
+-- and distance — the next interop ops (numpy.linalg.norm, numpy.std) rest on it. It is a
+-- PURE host body (not IO), baked per backend; the native backends link `-lm`.
+--
+-- Observable: sqrt 16 = 4, sqrt 81 = 9, sqrt 144 = 12: "4\n9\n12\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Float : U end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fsqrt      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (fsqrt (fromNat 16)))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (floatToNat (fsqrt (fromNat 81)))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (floatToNat (fsqrt (fromNat 144)))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

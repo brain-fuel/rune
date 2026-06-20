@@ -35,6 +35,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesOS(p) {
 		imports += "\t\"os\"\n"
 	}
+	if usesForeign(p, "fsqrt") {
+		imports += "\t\"math\"\n"
+	}
 	b.WriteString("package main\n\nimport (\n" + imports + ")\n\n")
 	b.WriteString(goRuntime)
 	if usesQuot(p) {
@@ -111,6 +114,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "fleqN") {
 		b.WriteString("func fleqN() any { return func(a any) any { return func(b any) any { if a.(float64) <= b.(float64) { return big.NewInt(1) }; return big.NewInt(0) } } }\n")
+	}
+	if usesForeign(p, "fsqrt") {
+		b.WriteString("func fsqrt() any { return func(x any) any { return math.Sqrt(x.(float64)) } }\n")
 	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("func dot2() any { return func(a0 any) any { return func(a1 any) any { return func(b0 any) any { return func(b1 any) any { return a0.(float64)*b0.(float64) + a1.(float64)*b1.(float64) } } } } }\n")
