@@ -40,6 +40,11 @@ type Event struct {
 type FaultPolicy struct {
 	Partitioned func(step, i, j int) bool
 	Duplicate   func(step, i, j int) bool
+	// Crashed reports whether replica i is down at a step: it performs no local
+	// action and neither sends nor receives gossip. A crash can be transient (true
+	// for some steps, false later), modelling recovery: when it comes back, the join
+	// brings it up to date without losing the work it did before crashing.
+	Crashed func(step, i int) bool
 }
 
 func (p FaultPolicy) cut(step, i, j int) bool {
@@ -48,6 +53,10 @@ func (p FaultPolicy) cut(step, i, j int) bool {
 
 func (p FaultPolicy) dup(step, i, j int) bool {
 	return p.Duplicate != nil && p.Duplicate(step, i, j)
+}
+
+func (p FaultPolicy) crashed(step, i int) bool {
+	return p.Crashed != nil && p.Crashed(step, i)
 }
 
 // Round is one simulated time step: each replica optionally performs a local
@@ -110,8 +119,14 @@ func Simulate(sess *session.Session, init, mergeFn, valueFn string, n int, round
 	}
 
 	for step, rd := range rounds {
-		// Local actions first.
+		// Local actions first (a crashed replica does nothing this step).
 		for i := 0; i < n; i++ {
+			if pol.crashed(step, i) {
+				if _, ok := rd.Local[i]; ok {
+					run.Events = append(run.Events, Event{Step: step, Kind: "crash", Replica: i, Peer: -1})
+				}
+				continue
+			}
 			fn, ok := rd.Local[i]
 			if !ok {
 				continue
@@ -131,6 +146,10 @@ func Simulate(sess *session.Session, init, mergeFn, valueFn string, n int, round
 			for i := 0; i < n; i++ {
 				for j := 0; j < n; j++ {
 					if i == j {
+						continue
+					}
+					// A crashed replica neither receives (i) nor sends (j).
+					if pol.crashed(step, i) || pol.crashed(step, j) {
 						continue
 					}
 					if pol.cut(step, i, j) {

@@ -46,6 +46,46 @@ mergeGC : GC -> GC -> GC is fn (x : GC) (y : GC) is gc (max (g0 x) (g0 y)) (max 
 valueGC : GC -> Nat is fn (s : GC) is add (g0 s) (g1 s) end end
 `
 
+const gcounter3Src = `
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+data GC : U is gc : Nat -> Nat -> Nat -> GC end
+
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Nat end)
+      (fn (b : Nat) is b end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Nat end)
+             (succ k)
+             (fn (j : Nat) (ihj : Nat) is succ (ih j) end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+h0 : GC -> Nat is fn (s : GC) is GCElim (fn (w : GC) is Nat end) (fn (a : Nat) (b : Nat) (c : Nat) is a end) s end end
+h1 : GC -> Nat is fn (s : GC) is GCElim (fn (w : GC) is Nat end) (fn (a : Nat) (b : Nat) (c : Nat) is b end) s end end
+h2 : GC -> Nat is fn (s : GC) is GCElim (fn (w : GC) is Nat end) (fn (a : Nat) (b : Nat) (c : Nat) is c end) s end end
+
+op0 : GC -> GC is fn (s : GC) is gc (succ (h0 s)) (h1 s) (h2 s) end end
+op1 : GC -> GC is fn (s : GC) is gc (h0 s) (succ (h1 s)) (h2 s) end end
+op2 : GC -> GC is fn (s : GC) is gc (h0 s) (h1 s) (succ (h2 s)) end end
+
+mergeGC : GC -> GC -> GC is
+  fn (x : GC) (y : GC) is gc (max (h0 x) (h0 y)) (max (h1 x) (h1 y)) (max (h2 x) (h2 y)) end
+end
+valueGC : GC -> Nat is fn (s : GC) is add (h0 s) (add (h1 s) (h2 s)) end end
+`
+
 const lwwSrc = `
 data Nat : U is zero : Nat | succ : Nat -> Nat end
 data LW : U is lw : Nat -> LW end
@@ -185,6 +225,42 @@ func TestRenderShowsTheStory(t *testing.T) {
 	}
 	if !strings.Contains(lines[2], "[converged]") {
 		t.Errorf("healed step should show convergence: %q", lines[2])
+	}
+}
+
+// TestGCounterToleratesCrashAndRecovery shows fault tolerance and durability: three
+// replicas each increment once; replica 2 then CRASHES across the gossip rounds, so
+// the two survivors converge among themselves (to 2) while the crashed node is
+// frozen; once replica 2 recovers, gossip catches it up and all three converge to 3
+// - replica 2's pre-crash increment is NOT lost, because the join is durable.
+func TestGCounterToleratesCrashAndRecovery(t *testing.T) {
+	s := loadSession(t, gcounter3Src)
+	rounds := []Round{
+		{Local: map[int]string{0: "op0", 1: "op1", 2: "op2"}}, // all act
+		{Gossip: true}, // replica 2 crashed (see policy): survivors converge to 2
+		{Gossip: true}, // replica 2 recovered: all converge to 3
+	}
+	pol := FaultPolicy{Crashed: func(step, i int) bool { return step == 1 && i == 2 }}
+	run, err := Simulate(s, "gc zero zero zero", "mergeGC", "valueGC", 3, rounds, pol)
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+
+	// While replica 2 is down, the survivors (0,1) agree but replica 2 lags.
+	during := observedAt(run, 1, 3)
+	if during[0] != during[1] {
+		t.Errorf("survivors should agree during the crash, got r0=%q r1=%q", during[0], during[1])
+	}
+	if during[2] == during[0] {
+		t.Errorf("crashed replica should lag the survivors, both at %q", during[0])
+	}
+
+	// After recovery, everyone converges and replica 2's increment survived (total 3).
+	if !run.Converged() {
+		t.Errorf("must converge after recovery, got %v", run.Final)
+	}
+	if !strings.Contains(run.Final[0], "succ (succ (succ zero))") {
+		t.Errorf("converged total should be 3 (no lost increment), got %q", run.Final[0])
 	}
 }
 
