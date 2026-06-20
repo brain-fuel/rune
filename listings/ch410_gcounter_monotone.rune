@@ -1,4 +1,4 @@
--- Chapter 230, G-Counter SAFETY INVARIANT: tallies never go backward (E3/E4).
+-- Chapter 410, G-Counter SAFETY INVARIANT: tallies never go backward (E3/E4).
 --
 -- ch72 proved the G-Counter CONVERGES (merge is a commutative idempotent associative
 -- join) - that is liveness. This chapter adds the SAFETY half a verified protocol

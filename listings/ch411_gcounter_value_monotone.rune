@@ -1,6 +1,6 @@
--- Chapter 231, G-Counter value monotonicity: the OBSERVED count never decreases.
+-- Chapter 411, G-Counter value monotonicity: the OBSERVED count never decreases.
 --
--- ch230 proved each tally is monotone under merge; this lifts it to the observable
+-- ch410 proved each tally is monotone under merge; this lifts it to the observable
 -- VALUE (the sum): merging in a peer never decreases value g. The safety invariant a
 -- user actually sees - eventual consistency that only ever moves forward. Needs leb
 -- transitivity and add-monotonicity. Proof-only.

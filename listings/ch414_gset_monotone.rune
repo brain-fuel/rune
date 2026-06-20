@@ -1,9 +1,9 @@
--- Chapter 234, G-Set SAFETY INVARIANT: membership only grows under merge (E3/E4).
+-- Chapter 414, G-Set SAFETY INVARIANT: membership only grows under merge (E3/E4).
 --
--- ch233 proved the grow-only Set CONVERGES (OR is a join); this adds its defining
+-- ch413 proved the grow-only Set CONVERGES (OR is a join); this adds its defining
 -- SAFETY guarantee: an element once present is never removed by a merge. Per slot,
 -- the boolean "implies" order: if a flag is set, it stays set after OR-ing in a peer
--- (impl a (orB a c) = true). Pairs ch233's liveness with safety, as ch230/ch231 do
+-- (impl a (orB a c) = true). Pairs ch413's liveness with safety, as ch410/ch411 do
 -- for the counter. Proof-only.
 --
 --   mem0Monotone : (g h : GS) -> Eq Bool (impl (m0 g) (m0 (merge g h))) true

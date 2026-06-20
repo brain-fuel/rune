@@ -1,6 +1,6 @@
--- Chapter 238, PN-Counter SAFETY: all four tallies monotone under merge (E3/E4).
+-- Chapter 418, PN-Counter SAFETY: all four tallies monotone under merge (E3/E4).
 --
--- ch235 proved the PN-Counter converges; this adds its safety certificate. A
+-- ch415 proved the PN-Counter converges; this adds its safety certificate. A
 -- PN-Counter's NET value is not monotone (decrements lower it, by design), but its
 -- underlying STATE is: each of the four grow-only tallies (P0,P1,N0,N1) only ever
 -- increases under merge, so the per-replica increment and decrement histories are

@@ -1,6 +1,6 @@
--- Chapter 235, PN-Counter convergence: a COMPOUND-state CvRDT (E3/E4).
+-- Chapter 415, PN-Counter convergence: a COMPOUND-state CvRDT (E3/E4).
 --
--- ch72 (G-Counter) and ch233 (G-Set) verify single-lattice CRDTs; this verifies a
+-- ch72 (G-Counter) and ch413 (G-Set) verify single-lattice CRDTs; this verifies a
 -- COMPOUND one. A PN-Counter keeps two grow-only counters per replica - P
 -- (increments) and N (decrements) - so its state is four Nat tallies and its join is
 -- pointwise max on all four. Convergence is again mergeComm/mergeIdem/mergeAssoc,

@@ -1,6 +1,6 @@
--- Chapter 240, E3 adequacy COMPLETENESS (runtime side, fault alphabet).
+-- Chapter 420, E3 adequacy COMPLETENESS (runtime side, fault alphabet).
 --
--- ch229 proved the runtime trace stays in the observable alphabet (visibleRunVisible)
+-- ch409 proved the runtime trace stays in the observable alphabet (visibleRunVisible)
 -- and the SPEC alphabet is exactly failures (projectOnlyFail). This is the runtime
 -- companion to projectOnlyFail: over the FAULT alphabet - the setting ch207/ch209
 -- fix, where communication is internal (tau) and the observable events are failures

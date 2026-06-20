@@ -1,10 +1,10 @@
--- Chapter 237, the add-merge counter is NOT a CvRDT: a refutation (E3/E4).
+-- Chapter 417, the add-merge counter is NOT a CvRDT: a refutation (E3/E4).
 --
 -- examples/badcounter.rune merges by ADDING the two counts instead of taking the
 -- max, so it double-counts shared history. The linter reports it is not idempotent;
 -- this PROVES it. merge (c 1) (c 1) = c 2, but idempotence demands c 1, and c 2 = c 1
 -- is absurd (pred then the isZero tag discriminate). The refutation companion to
--- ch236 (LWW not commutative). Proof-only.
+-- ch416 (LWW not commutative). Proof-only.
 --
 --   addMergeNotIdempotent : Eq C (merge (c one) (c one)) (c one) -> Eq Bool false true
 

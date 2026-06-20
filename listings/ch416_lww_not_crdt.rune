@@ -1,11 +1,11 @@
--- Chapter 236, LWW is NOT a CvRDT: a refutation (E3/E4).
+-- Chapter 416, LWW is NOT a CvRDT: a refutation (E3/E4).
 --
 -- examples/lww.rune and the simulator's law linter REPORT that a last-writer-wins
 -- register (merge takes the peer) is not convergent. This PROVES it: merge is not
 -- commutative, by a counterexample. merge (lw 0) (lw 1) = lw 1 but merge (lw 1)
 -- (lw 0) = lw 0, and lw 1 = lw 0 is absurd (a discriminator on the tag). So assuming
 -- commutativity at this instance yields false = true. The refutation companion to the
--- affirmative convergence proofs (ch72/ch233/ch235). Proof-only.
+-- affirmative convergence proofs (ch72/ch413/ch415). Proof-only.
 --
 --   lwwNotCommutative : Eq LW (merge (lw one) (lw zero)) (merge (lw zero) (lw one))
 --                       -> Eq Bool true false

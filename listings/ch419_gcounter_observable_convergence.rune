@@ -1,4 +1,4 @@
--- Chapter 239, G-Counter observable convergence: the VALUE is gossip-order-free.
+-- Chapter 419, G-Counter observable convergence: the VALUE is gossip-order-free.
 --
 -- ch72 proved merge is commutative (the STATES agree regardless of gossip order).
 -- This is the user-facing corollary: the observed VALUE agrees too, so two replicas

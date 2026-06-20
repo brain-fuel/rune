@@ -1,4 +1,4 @@
--- Chapter 229, General adequacy invariant: traces stay observable (E3).
+-- Chapter 409, General adequacy invariant: traces stay observable (E3).
 --
 -- ch207 proved adequacy `visibleRun k P = project P` PER PROTOCOL (by refl, on
 -- concrete well-supervised processes). This chapter lifts one half of adequacy to a

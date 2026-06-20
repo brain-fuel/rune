@@ -1,4 +1,4 @@
--- Chapter 233, G-Set CvRDT convergence: a SECOND join lattice (boolean OR) (E3/E4).
+-- Chapter 413, G-Set CvRDT convergence: a SECOND join lattice (boolean OR) (E3/E4).
 --
 -- ch72 proved a G-Counter converges over the (Nat, max) join. This proves a grow-only
 -- SET converges over a different lattice: membership flags joined pointwise by boolean

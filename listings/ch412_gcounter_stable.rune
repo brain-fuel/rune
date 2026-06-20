@@ -1,6 +1,6 @@
--- Chapter 232, G-Counter STABILITY: re-merging an absorbed peer is a no-op (E3/E4).
+-- Chapter 412, G-Counter STABILITY: re-merging an absorbed peer is a no-op (E3/E4).
 --
--- Convergence (ch72, liveness) says replicas agree; monotonicity (ch230/ch231,
+-- Convergence (ch72, liveness) says replicas agree; monotonicity (ch410/ch411,
 -- safety) says the value never drops; this adds QUIESCENCE: once a replica has merged
 -- in a peer h, merging h again changes nothing - the system reaches a fixpoint and
 -- stays there (no perpetual churn). Per slot it is the absorption law

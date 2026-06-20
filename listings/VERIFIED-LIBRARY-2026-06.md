@@ -292,19 +292,19 @@ equation).
 - `ch261_lts_bisim`: finite trace bisimulation of two differently-stated machines.
 
 ### 2026-06-20 (later) E3 adequacy + E4 infra-as-code (critical path)
-- `ch229_general_adequacy`: E3 GENERAL adequacy: `projectVisible`/`visibleRunVisible`
+- `ch409_general_adequacy`: E3 GENERAL adequacy: `projectVisible`/`visibleRunVisible`
   (all-P/all-fuel, both semantics stay in the observable alphabet, by induction) +
   `projectOnlyFail` (projection alphabet is exactly {lfail}). `consVisVisible` (LabelElim)
   supplies the per-label knowledge a BoolElim cannot.
-- `ch230_gcounter_monotone`: G-Counter SAFETY: each tally monotone under merge (maxGeL).
-- `ch231_gcounter_value_monotone`: observable VALUE monotone (lebTrans + add-monotone).
-- `ch232_gcounter_stable`: STABILITY: re-merging an absorbed peer is a no-op (absorption).
-- `ch233_gset_convergence`: G-Set CvRDT convergence over the boolean-OR join (2nd lattice).
-- `ch234_gset_monotone`: G-Set SAFETY: membership only grows (the `impl` order).
-- `ch235_pncounter_convergence`: PN-Counter convergence (COMPOUND 4-tally state).
-- `ch238_pncounter_monotone`: PN-Counter SAFETY: tallies monotone (net value is not, by design).
-- `ch236_lww_not_crdt`: REFUTATION: LWW merge not commutative (counterexample -> false=true).
-- `ch237_badcounter_not_crdt`: REFUTATION: add-merge counter not idempotent.
+- `ch410_gcounter_monotone`: G-Counter SAFETY: each tally monotone under merge (maxGeL).
+- `ch411_gcounter_value_monotone`: observable VALUE monotone (lebTrans + add-monotone).
+- `ch412_gcounter_stable`: STABILITY: re-merging an absorbed peer is a no-op (absorption).
+- `ch413_gset_convergence`: G-Set CvRDT convergence over the boolean-OR join (2nd lattice).
+- `ch414_gset_monotone`: G-Set SAFETY: membership only grows (the `impl` order).
+- `ch415_pncounter_convergence`: PN-Counter convergence (COMPOUND 4-tally state).
+- `ch418_pncounter_monotone`: PN-Counter SAFETY: tallies monotone (net value is not, by design).
+- `ch416_lww_not_crdt`: REFUTATION: LWW merge not commutative (counterexample -> false=true).
+- `ch417_badcounter_not_crdt`: REFUTATION: add-merge counter not idempotent.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
