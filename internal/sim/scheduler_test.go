@@ -159,6 +159,35 @@ func TestGCounterRobustToDropAndDup(t *testing.T) {
 	}
 }
 
+// TestRenderShowsTheStory checks the teachable surface: the rendered trace marks
+// the partition step as diverged and the healed step as converged, and prints it so
+// the behaviour is visible (run with -v).
+func TestRenderShowsTheStory(t *testing.T) {
+	s := loadSession(t, gcounterSrc)
+	rounds := []Round{
+		{Local: map[int]string{0: "inc0"}},
+		{Local: map[int]string{0: "inc0", 1: "inc1"}, Gossip: true},
+		{Gossip: true},
+	}
+	pol := FaultPolicy{Partitioned: func(step, i, j int) bool { return step == 1 }}
+	run, err := Simulate(s, "gc zero zero", "mergeGC", "valueGC", 2, rounds, pol)
+	if err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	out := Render(run, 2)
+	t.Logf("\n%s", out)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 step lines, got %d:\n%s", len(lines), out)
+	}
+	if !strings.Contains(lines[1], "DROP{") || !strings.Contains(lines[1], "[diverged]") {
+		t.Errorf("partition step should show a drop and divergence: %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "[converged]") {
+		t.Errorf("healed step should show convergence: %q", lines[2])
+	}
+}
+
 // TestLWWStaysDivergent is the contrast: a last-writer-wins register has no join
 // (merge just takes the peer), so even on a HEALTHY network concurrent writes are
 // never reconciled. The simulator distinguishes it from the CvRDT with no appeal to

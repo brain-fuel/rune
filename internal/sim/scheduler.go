@@ -14,6 +14,10 @@
 package sim
 
 import (
+	"sort"
+	"strconv"
+	"strings"
+
 	"goforge.dev/rune/v3/core"
 	"goforge.dev/rune/v3/internal/session"
 	"goforge.dev/rune/v3/surface"
@@ -151,6 +155,77 @@ func Simulate(sess *session.Session, init, mergeFn, valueFn string, n int, round
 		run.Final[i] = sess.Pretty(d.apply1(valueRef, states[i]))
 	}
 	return run, nil
+}
+
+// Render turns a run into a human-readable trace: one line per step showing the
+// local actions, any dropped or duplicated gossip, and the observed value at each
+// replica, with a note when the replicas are diverged or (re)converged. This is the
+// teachable surface, the learner watching the protocol behave, not an abstraction.
+func Render(run *Run, n int) string {
+	steps := map[int][]Event{}
+	var order []int
+	for _, e := range run.Events {
+		if _, seen := steps[e.Step]; !seen {
+			order = append(order, e.Step)
+		}
+		steps[e.Step] = append(steps[e.Step], e)
+	}
+	sort.Ints(order)
+
+	var b strings.Builder
+	for _, step := range order {
+		var locals, drops, dups []string
+		obs := make([]string, n)
+		gossiped := false
+		for _, e := range steps[step] {
+			switch e.Kind {
+			case "local":
+				locals = append(locals, "r"+strconv.Itoa(e.Replica)+":"+e.Detail)
+			case "drop":
+				drops = append(drops, "r"+strconv.Itoa(e.Replica)+"<-r"+strconv.Itoa(e.Peer))
+			case "dup":
+				dups = append(dups, "r"+strconv.Itoa(e.Replica)+"<-r"+strconv.Itoa(e.Peer))
+			case "gossip":
+				gossiped = true
+			case "observe":
+				obs[e.Replica] = e.Detail
+			}
+		}
+		b.WriteString("step " + strconv.Itoa(step) + " ")
+		if len(locals) > 0 {
+			b.WriteString("[" + strings.Join(locals, " ") + "] ")
+		}
+		if gossiped {
+			b.WriteString("gossip ")
+		}
+		if len(drops) > 0 {
+			b.WriteString("DROP{" + strings.Join(drops, ",") + "} ")
+		}
+		if len(dups) > 0 {
+			b.WriteString("DUP{" + strings.Join(dups, ",") + "} ")
+		}
+		cells := make([]string, n)
+		for i := 0; i < n; i++ {
+			cells[i] = "r" + strconv.Itoa(i) + "=" + obs[i]
+		}
+		b.WriteString("=> " + strings.Join(cells, " "))
+		if allEqual(obs) {
+			b.WriteString("   [converged]")
+		} else {
+			b.WriteString("   [diverged]")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func allEqual(xs []string) bool {
+	for i := 1; i < len(xs); i++ {
+		if xs[i] != xs[0] {
+			return false
+		}
+	}
+	return len(xs) > 0
 }
 
 // driver bundles the session-evaluation helpers the simulator uses to run Rune
