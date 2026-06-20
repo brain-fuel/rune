@@ -15,6 +15,47 @@
 > that runs through bound NumPy/BLAS/Matplotlib with every foreign edge carrying a
 > Rune contract.
 
+## Build status — first slice LANDED (D4 opened, v3.29.0–v3.31.0, 2026-06-20)
+
+The full design below (the `Array dt sh` shape-indexed handle, the `CArray`
+`CRepr`, embed-vs-port CPython hosting) remains the target. What has actually
+**shipped** is the *contract-guarded interop recipe* on the substrate that exists
+today — the proof that "bind, don't reimplement, and know what you trust" works
+end to end, before the heavier `Array` machinery lands:
+
+- **The capability shape.** A numeric op is ONE Rune `foreign` axiom with
+  **per-backend impls**: the *native gift* where a real library is present, a
+  *portable reference floor* everywhere else. Implemented:
+  - `npDot` (ch221): **real NumPy** (`numpy.dot`) on the **py** backend, **OpenBLAS**
+    (`cblas_ddot`) on **C/LLVM**, a reference loop on js/go/erl/rust.
+  - `npMean` (ch222): **`numpy.mean`** on py; a hand sum/count floor elsewhere (no BLAS).
+  - `npMatSum` (ch223): **`numpy` matmul** `(A@B).sum()` on py (2-D reshape — the
+    both-ways marshalling boundary), `cblas_dgemm` on C/LLVM, a triple loop elsewhere.
+- **The trust discipline, realized.** Each is bound behind a **tolerance contract**
+  written in-language: run the foreign impl AND an in-language reference fold, accept
+  the library result only `withinTol eps` of the reference, else **blame** it
+  (`Result Float Blame`). This is R-FFI's **guard tier** with the postcondition
+  written explicitly (the `with post guard` *surface sugar* is still unbuilt — D3
+  tail). The library is **assumed**, but never trusted blind: a divergent result is
+  caught at the boundary, not propagated. (Lambert.)
+- **Parity of the CONTRACT, not the bits.** All three are byte-identical across the
+  seven backends (`TestD4NumpyInterop`/`Mean`/`Matmul`), because the observable is the
+  *guarded verdict*, not the raw float — NumPy, OpenBLAS, and the reference loop all
+  satisfy the same contract. This is the parity model the design assumes.
+- **The recipe (Savage on-ramp).** Adding a third-party function is now uniform:
+  *pick the op, write its in-language reference, guard it.* ch221→222→223 walk that
+  recipe over 1-D, reduction, and 2-D ops.
+
+**Divergence from the full design, honestly.** The shipped slice marshals a **flat
+`FList` of `Float`** (the ch219 array boundary) + explicit `Nat` dims, NOT the
+`Array dt sh` shape-indexed handle — so shapes are **guarded** (the reference is
+recomputed and compared), not yet **discharged** by dependent types. There is no
+`CArray` `CRepr`, no `DType`/`Shape` kit, no embedded/port CPython host model (py
+interop is the emitted-source calling `import numpy` in-process; native is the C-ABI
+`cblas` only, no CPython). Those remain the design's targets below. What the slice
+proves is that the **contract-and-blame spine** is sound and teachable on the current
+substrate; the `Array` machinery is the next, heavier increment.
+
 ## Problem (what's stuck/absent today, with file:line)
 
 R-FFI (B4) makes a *scalar* foreign call typed and contract-guarded: `c_sqrt :
