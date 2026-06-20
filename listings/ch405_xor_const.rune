@@ -1,0 +1,30 @@
+-- Chapter 405 — xor against the constants (proven tier).
+--
+-- xor a true = notB a (xor with 1 flips) and xor a false = a (false is the unit). By case
+-- analysis. Proof-only.
+--
+--   xorTrue  : (a : Bool) -> Eq Bool (xor a true) (notB a)
+--   xorFalse : (a : Bool) -> Eq Bool (xor a false) a
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+xor : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) (notB b) b a end
+end
+
+xorTrue : (a : Bool) -> Eq Bool (xor a true) (notB a) is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (xor x true) (notB x) end) refl refl a end
+end
+
+xorFalse : (a : Bool) -> Eq Bool (xor a false) a is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (xor x false) x end) refl refl a end
+end
