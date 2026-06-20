@@ -1,0 +1,49 @@
+-- Chapter 361 — folding with the constructors is the identity (proven tier).
+--
+-- foldr ncons nnil xs = xs: the catamorphism that rebuilds with the original constructors
+-- returns the list unchanged (the reflection/refold law). By induction on xs. Proof-only.
+--
+--   foldrId : (xs : NatList) -> Eq NatList (foldr consWith nnil xs) xs
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+foldr : (Nat -> NatList -> NatList) -> NatList -> NatList -> NatList is
+  fn (f : Nat -> NatList -> NatList) (z : NatList) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      z
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is f h ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  foldr _ nnil nnil = nnil                                                 -> refl
+--   ncons: ncons h (foldr consWith nnil t) vs ncons h t; cong (cons h) IH
+foldrId : (xs : NatList) -> Eq NatList (foldr consWith nnil xs) xs is
+  fn (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq NatList (foldr consWith nnil z) z end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (foldr consWith nnil rest) rest) is
+         cong NatList NatList (consWith h) (foldr consWith nnil rest) rest ih end)
+      xs
+  end
+end
