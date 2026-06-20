@@ -80,6 +80,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch325_reverse_replicate` — `reverse (replicate n x) = replicate n x` (n copies are self-reverse).
 - `ch292_reverse_involution` — `reverse (append xs ys) = reverse ys ++ reverse xs` and
   `reverse (reverse xs) = xs` (reverse distribution + involution).
+- `ch349_reverse_snoc` — `reverse (snoc xs x) = ncons x (reverse xs)` (snoc-reverse).
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 - `ch340_replicate_append` — replicate additive: `replicate m x ++ replicate n x = replicate (m+n) x`.
 - `ch324_map_replicate` — `map f (replicate n x) = replicate n (f x)`.
