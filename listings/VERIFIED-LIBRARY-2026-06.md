@@ -176,6 +176,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch301_leb_min` — min is a lower bound: `min a b <= a` (the dual; min/max lattice bounds).
 - `ch302_leb_minmax_r` — the other bounds: `b <= max a b` and `min a b <= b` (4 bounds complete).
 - `ch368_min_max_sum` — min + max = a + b: `natAdd (natMin a b)(natMax a b) = natAdd a b`.
+- `ch369_minmax_comm` — structural min/max ARE commutative: `min a b = min b a`, `max a b = max b a` (leb-if version was blocked; structural is not).
 - `ch283_binary_inc` — verified binary numerals: `toNat (bsucc b) = succ (toNat b)`
   (binary increment agrees with unary successor).
 - `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
