@@ -84,6 +84,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch349_reverse_snoc` — `reverse (snoc xs x) = ncons x (reverse xs)` (snoc-reverse).
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 - `ch340_replicate_append` — replicate additive: `replicate m x ++ replicate n x = replicate (m+n) x`.
+- `ch356_prod_replicate` — product of n copies is a power: `prod (replicate n x) = pow x n`.
 - `ch324_map_replicate` — `map f (replicate n x) = replicate n (f x)`.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
 - `ch341_takewhile_dropwhile` — predicate split-join: `takeWhile p xs ++ dropWhile p xs = xs`.
