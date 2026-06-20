@@ -1,0 +1,293 @@
+-- Chapter 351 — multiplicative right identity and first power (proven tier).
+--
+-- natMul b 1 = b (the right unit of multiplication; the left unit is the natMul-add-zero
+-- shape) and, as a corollary, pow b 1 = b. By induction on b; pow b 1 reduces to natMul b 1.
+-- Semiring toolkit + pow reused from ch347. Proof-only.
+--
+--   mulOneR : (b : Nat) -> Eq Nat (natMul b (succ zero)) b
+--   powOne  : (b : Nat) -> Eq Nat (pow b (succ zero)) b
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addZeroR : (n : Nat) -> Eq Nat (natAdd n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k zero) k) is cong Nat Nat succ (natAdd k zero) k ih end)
+      n
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+addComm : (a : Nat) -> (b : Nat) -> Eq Nat (natAdd a b) (natAdd b a) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k b) (natAdd b k) end)
+      (symEq Nat (natAdd b zero) b (addZeroR b))
+      (fn (k : Nat) (ih : Eq Nat (natAdd k b) (natAdd b k)) is
+         transEq Nat (succ (natAdd k b)) (succ (natAdd b k)) (natAdd b (succ k))
+           (cong Nat Nat succ (natAdd k b) (natAdd b k) ih)
+           (symEq Nat (natAdd b (succ k)) (succ (natAdd b k)) (addSuccR b k)) end)
+      a
+  end
+end
+
+addAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Nat (natAdd (natAdd a b) c) (natAdd a (natAdd b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c))) is
+         cong Nat Nat succ (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) ih end)
+      a
+  end
+end
+
+addToC : Nat -> Nat -> Nat is fn (c : Nat) (z : Nat) is natAdd z c end end
+
+addLeftComm : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+              Eq Nat (natAdd a (natAdd b c)) (natAdd b (natAdd a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    transEq Nat (natAdd a (natAdd b c)) (natAdd (natAdd a b) c) (natAdd b (natAdd a c))
+      (symEq Nat (natAdd (natAdd a b) c) (natAdd a (natAdd b c)) (addAssoc a b c))
+      (transEq Nat (natAdd (natAdd a b) c) (natAdd (natAdd b a) c) (natAdd b (natAdd a c))
+         (cong Nat Nat (addToC c) (natAdd a b) (natAdd b a) (addComm a b))
+         (addAssoc b a c))
+  end
+end
+
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a
+  end
+end
+
+
+addW : Nat -> Nat -> Nat is fn (w : Nat) (z : Nat) is natAdd w z end end
+
+-- the four-term interchange: (w+x)+(y+z) = (w+y)+(x+z).
+addInterchange : (w : Nat) -> (x : Nat) -> (y : Nat) -> (z : Nat) ->
+                 Eq Nat (natAdd (natAdd w x) (natAdd y z)) (natAdd (natAdd w y) (natAdd x z)) is
+  fn (w : Nat) (x : Nat) (y : Nat) (z : Nat) is
+    transEq Nat
+      (natAdd (natAdd w x) (natAdd y z))
+      (natAdd w (natAdd x (natAdd y z)))
+      (natAdd (natAdd w y) (natAdd x z))
+      (addAssoc w x (natAdd y z))
+      (transEq Nat
+         (natAdd w (natAdd x (natAdd y z)))
+         (natAdd w (natAdd (natAdd x y) z))
+         (natAdd (natAdd w y) (natAdd x z))
+         (cong Nat Nat (addW w) (natAdd x (natAdd y z)) (natAdd (natAdd x y) z)
+            (symEq Nat (natAdd (natAdd x y) z) (natAdd x (natAdd y z)) (addAssoc x y z)))
+         (transEq Nat
+            (natAdd w (natAdd (natAdd x y) z))
+            (natAdd w (natAdd (natAdd y x) z))
+            (natAdd (natAdd w y) (natAdd x z))
+            (cong Nat Nat (addW w) (natAdd (natAdd x y) z) (natAdd (natAdd y x) z)
+               (cong Nat Nat (addToC z) (natAdd x y) (natAdd y x) (addComm x y)))
+            (transEq Nat
+               (natAdd w (natAdd (natAdd y x) z))
+               (natAdd w (natAdd y (natAdd x z)))
+               (natAdd (natAdd w y) (natAdd x z))
+               (cong Nat Nat (addW w) (natAdd (natAdd y x) z) (natAdd y (natAdd x z))
+                  (addAssoc y x z))
+               (symEq Nat (natAdd (natAdd w y) (natAdd x z)) (natAdd w (natAdd y (natAdd x z)))
+                  (addAssoc w y (natAdd x z))))))
+  end
+end
+
+-- LEFT DISTRIBUTIVITY, by induction on a:
+--   0:      0 = natAdd 0 0                                                       -> refl
+--   succ k: natMul (succ k)(b+c) = natAdd (b+c) (natMul k (b+c))
+--           cong (natAdd (b+c)) IH : = natAdd (b+c) (natAdd (k*b) (k*c))
+--           addInterchange b c (k*b) (k*c) : = natAdd (natAdd b (k*b)) (natAdd c (k*c))
+--                                            = natAdd ((succ k)*b) ((succ k)*c)
+distribL : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Nat (natMul a (natAdd b c)) (natAdd (natMul a b) (natMul a c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natMul k (natAdd b c)) (natAdd (natMul k b) (natMul k c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMul k (natAdd b c)) (natAdd (natMul k b) (natMul k c))) is
+         transEq Nat
+           (natAdd (natAdd b c) (natMul k (natAdd b c)))
+           (natAdd (natAdd b c) (natAdd (natMul k b) (natMul k c)))
+           (natAdd (natAdd b (natMul k b)) (natAdd c (natMul k c)))
+           (cong Nat Nat (addW (natAdd b c)) (natMul k (natAdd b c)) (natAdd (natMul k b) (natMul k c)) ih)
+           (addInterchange b c (natMul k b) (natMul k c)) end)
+      a
+  end
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+mulZeroR : (a : Nat) -> Eq Nat (natMul a zero) zero is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (natMul x zero) zero end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMul k zero) zero) is ih end)
+      a
+  end
+end
+
+mulSuccR : (a : Nat) -> (b : Nat) -> Eq Nat (natMul a (succ b)) (natAdd a (natMul a b)) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natMul k (succ b)) (natAdd k (natMul k b)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMul k (succ b)) (natAdd k (natMul k b))) is
+         transEq Nat
+           (natAdd (succ b) (natMul k (succ b)))
+           (natAdd (succ b) (natAdd k (natMul k b)))
+           (natAdd (succ k) (natAdd b (natMul k b)))
+           (cong Nat Nat (natAdd (succ b)) (natMul k (succ b)) (natAdd k (natMul k b)) ih)
+           (cong Nat Nat succ
+              (natAdd b (natAdd k (natMul k b))) (natAdd k (natAdd b (natMul k b)))
+              (addLeftComm b k (natMul k b))) end)
+      a
+  end
+end
+
+mulComm : (a : Nat) -> (b : Nat) -> Eq Nat (natMul a b) (natMul b a) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natMul k b) (natMul b k) end)
+      (symEq Nat (natMul b zero) zero (mulZeroR b))
+      (fn (k : Nat) (ih : Eq Nat (natMul k b) (natMul b k)) is
+         transEq Nat
+           (natAdd b (natMul k b)) (natAdd b (natMul b k)) (natMul b (succ k))
+           (cong Nat Nat (natAdd b) (natMul k b) (natMul b k) ih)
+           (symEq Nat (natMul b (succ k)) (natAdd b (natMul b k)) (mulSuccR b k)) end)
+      a
+  end
+end
+
+-- RIGHT distributivity, from left distributivity + commutativity.
+distribR : (x : Nat) -> (y : Nat) -> (c : Nat) ->
+           Eq Nat (natMul (natAdd x y) c) (natAdd (natMul x c) (natMul y c)) is
+  fn (x : Nat) (y : Nat) (c : Nat) is
+    transEq Nat
+      (natMul (natAdd x y) c)
+      (natMul c (natAdd x y))
+      (natAdd (natMul x c) (natMul y c))
+      (mulComm (natAdd x y) c)
+      (transEq Nat
+         (natMul c (natAdd x y))
+         (natAdd (natMul c x) (natMul c y))
+         (natAdd (natMul x c) (natMul y c))
+         (distribL c x y)
+         (cong2 Nat Nat Nat natAdd
+            (natMul c x) (natMul x c) (natMul c y) (natMul y c)
+            (mulComm c x) (mulComm c y)))
+  end
+end
+
+-- ASSOCIATIVITY, by induction on a:
+--   0:      both sides 0                                                          -> refl
+--   succ k: natMul (natMul (succ k) b) c = natMul (natAdd b (natMul k b)) c
+--           distribR b (k*b) c     : = natAdd (b*c) (natMul (k*b) c)
+--           cong (natAdd (b*c)) IH : = natAdd (b*c) (k*(b*c)) = natMul (succ k) (b*c)
+mulAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Nat (natMul (natMul a b) c) (natMul a (natMul b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natMul (natMul k b) c) (natMul k (natMul b c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMul (natMul k b) c) (natMul k (natMul b c))) is
+         transEq Nat
+           (natMul (natAdd b (natMul k b)) c)
+           (natAdd (natMul b c) (natMul (natMul k b) c))
+           (natAdd (natMul b c) (natMul k (natMul b c)))
+           (distribR b (natMul k b) c)
+           (cong Nat Nat (natAdd (natMul b c)) (natMul (natMul k b) c) (natMul k (natMul b c)) ih) end)
+      a
+  end
+end
+
+pow : Nat -> Nat -> Nat is
+  fn (b : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end)
+      (succ zero)
+      (fn (k : Nat) (ih : Nat) is natMul b ih end)
+      n
+  end
+end
+
+-- THE LAW, by induction on m:
+--   0:      pow b n = natMul 1 (pow b n) = natAdd (pow b n) 0  -> sym (addZeroR ..)
+--   succ k: natMul b (pow b (k+n)) ; cong (natMul b) IH then sym (mulAssoc b (pow b k)(pow b n))
+powAdd : (b : Nat) -> (m : Nat) -> (n : Nat) ->
+         Eq Nat (pow b (natAdd m n)) (natMul (pow b m) (pow b n)) is
+  fn (b : Nat) (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (pow b (natAdd x n)) (natMul (pow b x) (pow b n)) end)
+      (symEq Nat (natAdd (pow b n) zero) (pow b n) (addZeroR (pow b n)))
+      (fn (k : Nat) (ih : Eq Nat (pow b (natAdd k n)) (natMul (pow b k) (pow b n))) is
+         transEq Nat
+           (natMul b (pow b (natAdd k n)))
+           (natMul b (natMul (pow b k) (pow b n)))
+           (natMul (natMul b (pow b k)) (pow b n))
+           (cong Nat Nat (natMul b) (pow b (natAdd k n)) (natMul (pow b k) (pow b n)) ih)
+           (symEq Nat (natMul (natMul b (pow b k)) (pow b n)) (natMul b (natMul (pow b k) (pow b n)))
+              (mulAssoc b (pow b k) (pow b n))) end)
+      m
+  end
+end
+
+mulOneR : (b : Nat) -> Eq Nat (natMul b (succ zero)) b is
+  fn (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (natMul x (succ zero)) x end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMul k (succ zero)) k) is
+         cong Nat Nat succ (natMul k (succ zero)) k ih end)
+      b
+  end
+end
+
+-- pow b 1 = natMul b (pow b 0) = natMul b 1 = b.
+powOne : (b : Nat) -> Eq Nat (pow b (succ zero)) b is
+  fn (b : Nat) is mulOneR b end
+end
