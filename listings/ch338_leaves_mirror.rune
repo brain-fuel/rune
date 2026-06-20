@@ -1,0 +1,134 @@
+-- Chapter 338 — mirroring preserves the leaf count: countLeaves (mirror t) = countLeaves t.
+--
+-- Reflecting a tree swaps subtrees, and leaf-counting adds them, so commutativity of
+-- addition closes the node step. The arithmetic toolkit (addComm) is reused from ch245.
+-- Proof-only.
+--
+--   leavesMirror : (t : Tree) -> Eq Nat (countLeaves (mirror t)) (countLeaves t)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03/ch07.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+-- natAdd n 0 = n, by induction on n (base refl; step cong succ on IH).
+addZeroR : (n : Nat) -> Eq Nat (natAdd n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k zero) k) is cong Nat Nat succ (natAdd k zero) k ih end)
+      n
+  end
+end
+
+-- natAdd m (succ n) = succ (natAdd m n), by induction on m.
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+-- COMMUTATIVITY, by induction on a:
+--   base a=0: natAdd 0 b = b, natAdd b 0 = b (addZeroR), so b = natAdd b 0 by symmetry.
+--   step a=succ k: succ (natAdd k b) = natAdd b (succ k):
+--     cong succ (addComm k b) : succ (natAdd k b) = succ (natAdd b k)
+--     sym (addSuccR b k)      : succ (natAdd b k) = natAdd b (succ k)
+--     chained by transitivity.
+addComm : (a : Nat) -> (b : Nat) -> Eq Nat (natAdd a b) (natAdd b a) is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k b) (natAdd b k) end)
+      (symEq Nat (natAdd b zero) b (addZeroR b))
+      (fn (k : Nat) (ih : Eq Nat (natAdd k b) (natAdd b k)) is
+         transEq Nat (succ (natAdd k b)) (succ (natAdd b k)) (natAdd b (succ k))
+           (cong Nat Nat succ (natAdd k b) (natAdd b k) ih)
+           (symEq Nat (natAdd b (succ k)) (succ (natAdd b k)) (addSuccR b k)) end)
+      a
+  end
+end
+
+data Tree : U is
+  leaf : Tree
+| node : Tree -> Nat -> Tree -> Tree
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+mirror : Tree -> Tree is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Tree end)
+      leaf
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Tree) (ihr : Tree) is node ihr x ihl end)
+      t
+  end
+end
+
+countLeaves : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end)
+      (succ zero)
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Nat) (ihr : Nat) is natAdd ihl ihr end)
+      t
+  end
+end
+
+-- node step: countLeaves (mirror (node l x r)) = natAdd (cl (mirror r)) (cl (mirror l))
+--   cong2 natAdd IHr IHl : = natAdd (cl r) (cl l)
+--   addComm              : = natAdd (cl l) (cl r) = countLeaves (node l x r)
+leavesMirror : (t : Tree) -> Eq Nat (countLeaves (mirror t)) (countLeaves t) is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Nat (countLeaves (mirror x)) (countLeaves x) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Nat (countLeaves (mirror l)) (countLeaves l))
+          (ihr : Eq Nat (countLeaves (mirror r)) (countLeaves r)) is
+         transEq Nat
+           (natAdd (countLeaves (mirror r)) (countLeaves (mirror l)))
+           (natAdd (countLeaves r) (countLeaves l))
+           (natAdd (countLeaves l) (countLeaves r))
+           (cong2 Nat Nat Nat natAdd
+              (countLeaves (mirror r)) (countLeaves r)
+              (countLeaves (mirror l)) (countLeaves l) ihr ihl)
+           (addComm (countLeaves r) (countLeaves l)) end)
+      t
+  end
+end
