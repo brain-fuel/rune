@@ -1,0 +1,68 @@
+-- Chapter 359 — all/map fusion: all p (map f xs) = all (p . f) xs (proven tier).
+--
+-- The universal-quantifier companion to ch358: checking a predicate of every mapped element
+-- equals checking the composed predicate. One traversal. By induction on xs. Proof-only.
+--
+--   allMap : (p : Nat -> Bool) -> (f : Nat -> Nat) -> (xs : NatList)
+--          -> Eq Bool (all p (mapList f xs)) (all (pcomp p f) xs)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+pcomp : (Nat -> Bool) -> (Nat -> Nat) -> Nat -> Bool is
+  fn (p : Nat -> Bool) (f : Nat -> Nat) (x : Nat) is p (f x) end
+end
+
+all : (Nat -> Bool) -> NatList -> Bool is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Bool end)
+      true
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is andB (p h) ih end)
+      xs
+  end
+end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+allMap : (p : Nat -> Bool) -> (f : Nat -> Nat) -> (xs : NatList) ->
+         Eq Bool (all p (mapList f xs)) (all (pcomp p f) xs) is
+  fn (p : Nat -> Bool) (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Bool (all p (mapList f z)) (all (pcomp p f) z) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (all p (mapList f rest)) (all (pcomp p f) rest)) is
+         cong Bool Bool (andB (p (f h))) (all p (mapList f rest)) (all (pcomp p f) rest) ih end)
+      xs
+  end
+end
