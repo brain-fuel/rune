@@ -71,6 +71,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
 - `ch322_filter_length` — filter never increases length: `len (filter p xs) <= len xs`.
+- `ch323_filter_append` — filter distributes over append: `filter p (xs++ys) = filter p xs ++ filter p ys`.
 - `ch291_any_all_demorgan` — quantifier De Morgan: `any p xs = not (all (not . p) xs)`.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
 - `ch292_reverse_involution` — `reverse (append xs ys) = reverse ys ++ reverse xs` and

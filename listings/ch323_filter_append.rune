@@ -1,0 +1,80 @@
+-- Chapter 323 — filter distributes over append (proven tier).
+--
+-- Filtering a concatenation is the concatenation of the filters. A branch-aware induction:
+-- whichever way the head's test goes, the result agrees with the IH (kept heads commute
+-- with the leading append). Proof-only.
+--
+--   filterAppend : (p : Nat -> Bool) -> (xs ys : NatList)
+--                -> Eq NatList (filter p (append xs ys)) (append (filter p xs) (filter p ys))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+filter : (Nat -> Bool) -> NatList -> NatList is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end) (ncons h ih) ih (p h) end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs with a BoolElim on (p h):
+--   nnil:  filter p (append nnil ys) = filter p ys = append nnil (filter p ys)      -> refl
+--   keep:  ncons h (filter p (append t ys)) = ncons h (append (filter p t) (filter p ys)); cong (cons h) IH
+--   drop:  filter p (append t ys) = append (filter p t) (filter p ys) = IH
+filterAppend : (p : Nat -> Bool) -> (xs : NatList) -> (ys : NatList) ->
+               Eq NatList (filter p (append xs ys)) (append (filter p xs) (filter p ys)) is
+  fn (p : Nat -> Bool) (xs : NatList) (ys : NatList) is
+    NatListElim
+      (fn (z : NatList) is Eq NatList (filter p (append z ys)) (append (filter p z) (filter p ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq NatList (filter p (append rest ys)) (append (filter p rest) (filter p ys))) is
+         BoolElim
+           (fn (c : Bool) is
+              Eq NatList
+                (BoolElim (fn (d : Bool) is NatList end)
+                   (ncons h (filter p (append rest ys))) (filter p (append rest ys)) c)
+                (append (BoolElim (fn (d : Bool) is NatList end)
+                   (ncons h (filter p rest)) (filter p rest) c) (filter p ys)) end)
+           (cong NatList NatList (consWith h)
+              (filter p (append rest ys)) (append (filter p rest) (filter p ys)) ih)
+           ih
+           (p h) end)
+      xs
+  end
+end
