@@ -46,6 +46,8 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
+- `ch280_reverse_acc` — accumulator reverse equals naive reverse (`revAcc xs nnil = reverse xs`),
+  via the generalized spec `revAcc xs acc = reverse xs ++ acc` — an optimization-correctness result.
 
 ## Proven tier — a verified map (association list)
 
