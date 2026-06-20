@@ -94,6 +94,13 @@ adequacy story is closed end to end: over the fault calculus the runtime step
 provably emits no communication label, so every observation is a failure (the
 spec and runtime observable alphabets coincide).
 
+And it deploys to **live distributed actors**, not just a model: the verified
+replicated counter runs as two genuine BEAM processes that hold replica state,
+gossip it over `spawn`/`send`/`receive`, and merge to convergence (both replicas
+reach the same value), executed on `escript` from the same source that carries the
+convergence proof. That is the deploy half of the thesis on real distributed
+actors.
+
 ## v2.0.0
 
 v2 extends the equality stratum with **quotients**, and proves the extension
