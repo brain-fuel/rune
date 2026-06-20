@@ -1,0 +1,48 @@
+-- Chapter 400 — decidable equality is complete: a = b implies beqNat a b = true.
+--
+-- The converse of soundness (ch376): a propositional equality is reflected by the boolean
+-- test. Transport reflexivity of beqNat along the equality. With ch376 this fully
+-- characterizes decidable Nat equality in both directions. Proof-only.
+--
+--   beqNatComplete : (a b : Nat) -> Eq Nat a b -> Eq Bool (beqNat a b) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+beqNatRefl : (n : Nat) -> Eq Bool (beqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (beqNat x x) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (beqNat k k) true) is ih end)
+      n
+  end
+end
+
+beqNatComplete : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Bool (beqNat a b) true is
+  fn (a : Nat) (b : Nat) (h : Eq Nat a b) is
+    subst Nat a b h (fn (z : Nat) is Eq Bool (beqNat a z) true end) (beqNatRefl a)
+  end
+end
