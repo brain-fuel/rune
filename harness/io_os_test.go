@@ -260,3 +260,25 @@ func TestIOArgvExitConformance(t *testing.T) {
 		})
 	}
 }
+
+// TestIOFloatBlasConformance is the D3 machine-float gate: the IEEE-754 f64 element
+// type + the native dot-product BLAS kernel compute byte-identically across
+// js/py/go/erl. ch217 prints the dot product 3·1+4·2 = 11, a div/mul/sub chain
+// (7/2*4-1) = 13, a contract-guarded dot within budget (11, ok), and one over budget
+// (blame → 0). The guard is the R-FFI contract-GUARD tier: the foreign dot2 kernel is
+// assumed, its postcondition (≤ 100) checked at the boundary, the kernel blamed on
+// violation. (Rust excluded — its value domain has no float variant yet, parked.)
+func TestIOFloatBlasConformance(t *testing.T) {
+	const want = "11\n13\n11\n0\nunit"
+	for _, bk := range ioCLIBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch217_float_blas.rune", "main", ""); got != want {
+				t.Errorf("[%s] D3 float/BLAS run gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}

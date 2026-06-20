@@ -746,6 +746,24 @@ first and forces only on mismatch, so the fast path logs nothing.
     and no consumer; needs its own effect-shape design doc (PARKING-LOT). Distribution
     rides the proven process calculus (E1–E3), not raw sockets. (rust excluded from the
     String-marshalling prims — no packed-String host body yet, parked like ch213.)
+  - **D3 / R-FFI — MACHINE FLOATS (f64) + a contract-GUARDED BLAS kernel LANDED
+    (v3.22.0, ch217).** The proven-exact reals (ch121–149) gain a FAST native
+    counterpart: a foreign `Float : U` (host f64) + `fromNat`/`fadd`/`fsub`/`fmul`/
+    `fdiv`/`floatToNat`/`fleqN`, baked per backend (js Number / py float / go float64 /
+    erl float; pure host bodies, not IO — gated by `usesForeign`). A comparison returns
+    a `Nat` (1/0) the Rune side cases into `Bool`, so the host never builds a
+    constructor; `Float` itself is a foreign TYPE but survives erasure as `ok`/`err`'s
+    type argument, so it gets a trivial unit body (like ch205's `Pid`). The BLAS slice:
+    `dot2` (a fixed-width native dot product `a0*b0+a1*b1`) is the FIRST consumer of
+    R-FFI's contract-GUARD tier — `dotGuarded` assumes the kernel but CHECKS its
+    postcondition (≤ budget) at the boundary and BLAMES it (`Result Float Blame`, the
+    blame carrying the offending value — which also makes `Blame` structurally distinct
+    from `Unit`, dodging the one-nullary-ctor hash collision). ch217 →
+    `11\n13\n11\n0\nunit` byte-identical js/py/go/erl (`TestIOFloatBlasConformance`).
+    Unblocks D4 (the float element type was its prerequisite). REMAINING: arbitrary-
+    length ddot/gemm (array marshalling) + a real OpenBLAS bind (native backends) + the
+    `with post guard` surface sugar. (rust excluded — value domain has no float variant
+    yet, parked.)
 
 ## Standing rules
 

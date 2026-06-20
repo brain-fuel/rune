@@ -91,6 +91,35 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "exitWith") {
 		b.WriteString("ff_exitWith() -> fun(N) -> fun(_U) -> halt(N) end end.\n")
 	}
+	// D3 machine floats (f64) + the BLAS dot kernel — native Erlang float arithmetic.
+	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).
+	if usesForeign(p, "Float") {
+		b.WriteString("ff_Float() -> unit.\n")
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("ff_fromNat() -> fun(N) -> float(N) end.\n")
+	}
+	if usesForeign(p, "fadd") {
+		b.WriteString("ff_fadd() -> fun(A) -> fun(B) -> A + B end end.\n")
+	}
+	if usesForeign(p, "fsub") {
+		b.WriteString("ff_fsub() -> fun(A) -> fun(B) -> A - B end end.\n")
+	}
+	if usesForeign(p, "fmul") {
+		b.WriteString("ff_fmul() -> fun(A) -> fun(B) -> A * B end end.\n")
+	}
+	if usesForeign(p, "fdiv") {
+		b.WriteString("ff_fdiv() -> fun(A) -> fun(B) -> A / B end end.\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("ff_floatToNat() -> fun(X) -> trunc(X) end.\n")
+	}
+	if usesForeign(p, "fleqN") {
+		b.WriteString("ff_fleqN() -> fun(A) -> fun(B) -> case A =< B of true -> 1; false -> 0 end end end.\n")
+	}
+	if usesForeign(p, "dot2") {
+		b.WriteString("ff_dot2() -> fun(A0) -> fun(A1) -> fun(B0) -> fun(B1) -> A0 * B0 + A1 * B1 end end end end.\n")
+	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}

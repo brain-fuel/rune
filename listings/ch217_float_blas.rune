@@ -1,0 +1,109 @@
+-- Chapter 217 — MACHINE FLOATS + a contract-GUARDED BLAS kernel (D3 / R-FFI).
+--
+-- The reals are PROVEN exact (ch121–149: Cauchy reals, matrices, determinant). For
+-- numerics you also want FAST: IEEE-754 `f64`, the element type BLAS speaks. This
+-- chapter adds the machine-float type and a native dot-product kernel, bound across
+-- the FFI — the step from proven-exact down to fast-native, which D4 (NumPy/BLAS
+-- interop) rides on.
+--
+-- `Float` is a foreign (host) type; its values come from `fromNat` and the
+-- arithmetic ops, each a baked host body (js Number / py float / go float64 / erl
+-- float), so `rune run` computes in native f64 unaided. A comparison returns a `Nat`
+-- (1/0) the Rune side cases into `Bool` — the host never builds a constructor.
+--
+-- THE CONTRACT-GUARD TIER (R-FFI's third tier, whose first consumer is exactly this
+-- BLAS slice): the foreign `dot2` kernel is ASSUMED correct (no body to prove), but
+-- its POSTCONDITION is GUARDED at the boundary — `dotGuarded` checks the result
+-- against the contract `≤ 100` and BLAMES the kernel (`dotOverflow`) on violation,
+-- returning a `Result Float Blame` you must case on. Check-and-blame is the teachable
+-- middle between blind `assume` and full `discharge by <proof>`; the `with post guard`
+-- surface sugar is the follow-up (here the guard is written explicitly in-language).
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+-- the machine-float type (a foreign host type; values come from the kernels below).
+foreign Float : U end
+
+-- what the guard blames when the kernel breaks its contract. It CARRIES the
+-- offending result — which also makes it structurally distinct from `Unit` (a bare
+-- one-nullary-constructor `Blame` would be HASH-IDENTICAL to `Unit`, since identity
+-- is structure not names; carrying a `Float` gives it its own shape).
+data Blame : U is
+  dotOverflow : Float -> Blame
+end
+
+-- the float kernels (host bodies baked per backend).
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the BLAS kernel: a fixed-width (2-vector) dot product `a·b = a0*b0 + a1*b1`, one
+-- native f64 expression. Arbitrary-length ddot needs array marshalling (follow-up).
+foreign dot2       : Float -> Float -> Float -> Float -> Float end
+
+-- a real `<=` on floats: the host returns 1/0, cased into Bool here (no host ctor).
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+-- THE GUARD: trust `dot2` to compute, but verify its postcondition (result ≤ 100) at
+-- the boundary and blame the kernel on violation — the runtime contract-guard tier.
+dotGuarded : Float -> Float -> Float -> Float -> Result Float Blame is
+  fn (a0 : Float) (a1 : Float) (b0 : Float) (b1 : Float) is
+    case fleq (dot2 a0 a1 b0 b1) (fromNat 100) of
+    | true  -> ok  Float Blame (dot2 a0 a1 b0 b1)
+    | false -> err Float Blame (dotOverflow (dot2 a0 a1 b0 b1))
+    end
+  end
+end
+
+-- observe a guarded result as a Nat (the value truncated, or 0 on blame).
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end) -- blame → 0 sentinel (b carries the offending value)
+      r
+  end
+end
+
+-- prints: the dot product 3·1+4·2 = 11; a div/mul/sub chain (7/2*4-1) = 13;
+-- a guarded dot within contract (11, ok); a guarded dot over contract (blame → 0).
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (dot2 (fromNat 3) (fromNat 4) (fromNat 1) (fromNat 2)))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (floatToNat (fsub (fmul (fdiv (fromNat 7) (fromNat 2)) (fromNat 4)) (fromNat 1)))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (dotGuarded (fromNat 3) (fromNat 4) (fromNat 1) (fromNat 2)))) (fn (u3 : Nat) is
+        bindIO Nat Unit (printNat (resultToNat (dotGuarded (fromNat 10) (fromNat 10) (fromNat 10) (fromNat 10)))) (fn (u4 : Nat) is
+          pureIO Unit unit
+        end)
+      end)
+    end)
+  end)
+end

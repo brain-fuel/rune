@@ -83,6 +83,35 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "exitWith") {
 		b.WriteString("func exitWith() any { return func(n any) any { return func(_u any) any { os.Exit(int(n.(*big.Int).Int64())); return nil } } }\n")
 	}
+	// D3 machine floats (f64) + the BLAS dot kernel — a Float is a boxed float64.
+	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).
+	if usesForeign(p, "Float") {
+		b.WriteString("func Float() any { return nil }\n")
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("func fromNat() any { return func(n any) any { f, _ := new(big.Float).SetInt(n.(*big.Int)).Float64(); return f } }\n")
+	}
+	if usesForeign(p, "fadd") {
+		b.WriteString("func fadd() any { return func(a any) any { return func(b any) any { return a.(float64) + b.(float64) } } }\n")
+	}
+	if usesForeign(p, "fsub") {
+		b.WriteString("func fsub() any { return func(a any) any { return func(b any) any { return a.(float64) - b.(float64) } } }\n")
+	}
+	if usesForeign(p, "fmul") {
+		b.WriteString("func fmul() any { return func(a any) any { return func(b any) any { return a.(float64) * b.(float64) } } }\n")
+	}
+	if usesForeign(p, "fdiv") {
+		b.WriteString("func fdiv() any { return func(a any) any { return func(b any) any { return a.(float64) / b.(float64) } } }\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("func floatToNat() any { return func(x any) any { return big.NewInt(int64(x.(float64))) } }\n")
+	}
+	if usesForeign(p, "fleqN") {
+		b.WriteString("func fleqN() any { return func(a any) any { return func(b any) any { if a.(float64) <= b.(float64) { return big.NewInt(1) }; return big.NewInt(0) } } }\n")
+	}
+	if usesForeign(p, "dot2") {
+		b.WriteString("func dot2() any { return func(a0 any) any { return func(a1 any) any { return func(b0 any) any { return func(b1 any) any { return a0.(float64)*b0.(float64) + a1.(float64)*b1.(float64) } } } } }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatGo(&b, *p.Nat)

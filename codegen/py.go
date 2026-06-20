@@ -77,6 +77,35 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "exitWith") {
 		b.WriteString("def exitWith():\n    import sys\n    return lambda n: lambda _u: sys.exit(n)\n")
 	}
+	// D3 machine floats (f64) + the BLAS dot kernel — native float arithmetic.
+	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).
+	if usesForeign(p, "Float") {
+		b.WriteString("def Float():\n    return None\n")
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("def fromNat():\n    return lambda n: float(n)\n")
+	}
+	if usesForeign(p, "fadd") {
+		b.WriteString("def fadd():\n    return lambda a: lambda b: a + b\n")
+	}
+	if usesForeign(p, "fsub") {
+		b.WriteString("def fsub():\n    return lambda a: lambda b: a - b\n")
+	}
+	if usesForeign(p, "fmul") {
+		b.WriteString("def fmul():\n    return lambda a: lambda b: a * b\n")
+	}
+	if usesForeign(p, "fdiv") {
+		b.WriteString("def fdiv():\n    return lambda a: lambda b: a / b\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("def floatToNat():\n    return lambda x: int(x)\n")
+	}
+	if usesForeign(p, "fleqN") {
+		b.WriteString("def fleqN():\n    return lambda a: lambda b: (1 if a <= b else 0)\n")
+	}
+	if usesForeign(p, "dot2") {
+		b.WriteString("def dot2():\n    return lambda a0: lambda a1: lambda b0: lambda b1: a0 * b0 + a1 * b1\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatPy(&b, *p.Nat)

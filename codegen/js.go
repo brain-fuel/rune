@@ -76,6 +76,37 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "exitWith") {
 		b.WriteString("const exitWith = () => n => () => { process.exit(Number(n)); };\n")
 	}
+	// D3 machine floats (f64) + the BLAS dot kernel — pure host bodies (native
+	// Number arithmetic); a Float is a JS number, distinct from the BigInt Nat.
+	// `Float` is a foreign TYPE but survives erasure as ok/err's type argument, so it
+	// needs a trivial body (it is runtime-irrelevant, like ch205's Pid).
+	if usesForeign(p, "Float") {
+		b.WriteString("const Float = () => null;\n")
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("const fromNat = () => n => Number(n);\n")
+	}
+	if usesForeign(p, "fadd") {
+		b.WriteString("const fadd = () => a => b => a + b;\n")
+	}
+	if usesForeign(p, "fsub") {
+		b.WriteString("const fsub = () => a => b => a - b;\n")
+	}
+	if usesForeign(p, "fmul") {
+		b.WriteString("const fmul = () => a => b => a * b;\n")
+	}
+	if usesForeign(p, "fdiv") {
+		b.WriteString("const fdiv = () => a => b => a / b;\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("const floatToNat = () => x => BigInt(Math.trunc(x));\n")
+	}
+	if usesForeign(p, "fleqN") {
+		b.WriteString("const fleqN = () => a => b => (a <= b ? 1n : 0n);\n")
+	}
+	if usesForeign(p, "dot2") {
+		b.WriteString("const dot2 = () => a0 => a1 => b0 => b1 => a0 * b0 + a1 * b1;\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNat(&b, *p.Nat)

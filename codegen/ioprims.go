@@ -38,6 +38,17 @@ var ioPrims = map[string]bool{
 	"argCountCode": true, // argCountCode             : IO Nat          number of argv entries
 	"argAtCode":    true, // argAtCode     i          : Nat -> IO Nat   argv[i] code (1 if oob)
 	"exitWith":     true, // exitWith      code       : Nat -> IO Unit  terminate with status
+	// D3 machine floats (f64) + the BLAS dot kernel — PURE host bodies (native f64
+	// arithmetic), not IO. A Float is the host's native double; a comparison returns
+	// a Nat (1/0) the Rune side cases into Bool (no host constructor).
+	"fromNat":    true, // fromNat    n             : Nat -> Float
+	"fadd":       true, // fadd/fsub/fmul/fdiv a b   : Float -> Float -> Float
+	"fsub":       true,
+	"fmul":       true,
+	"fdiv":       true,
+	"floatToNat": true, // floatToNat x             : Float -> Nat   (truncate toward zero)
+	"fleqN":      true, // fleqN      a b           : Float -> Float -> Nat (1 if a<=b else 0)
+	"dot2":       true, // dot2       a0 a1 b0 b1    : Float^4 -> Float (a0*b0 + a1*b1)
 }
 
 // fileEnvPrims are the D6 prims whose host body needs the packed-String codec
