@@ -444,3 +444,69 @@ func TestD3BLASVector(t *testing.T) {
 		}
 	})
 }
+
+// TestD3GemmMatrix is the matrix-BLAS gate: two flat row-major Rune FLists (a 2×2 A and
+// a 2×2 B) are MARSHALLED across the FFI into C double[]s and run through cblas_dgemm
+// (real OpenBLAS), the product reduced to the SUM of its entries (scalar observable, no
+// host→Rune matrix construction). The tolerance contract binds the dgemm sum to a
+// portable in-language reference (ch220). A·B = [[19,22],[43,50]], entry sum 134; within
+// default ok; negative-tolerance blame: "134\n134\n0\nunit". Native-only (the dgemm
+// kernel + 2-D marshaller live in the C/LLVM runtimes).
+func TestD3GemmMatrix(t *testing.T) {
+	const want = "134\n134\n0\nunit"
+	s := loadListing(t, "ch220_gemm_matrix.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipNoBLAS := func(t *testing.T, out []byte, err error) {
+		if err != nil && strings.Contains(string(out)+err.Error(), "cblas") {
+			t.Skip("OpenBLAS/cblas.h not available")
+		}
+	}
+	t.Run("c", func(t *testing.T) {
+		if _, err := exec.LookPath("cc"); err != nil {
+			t.Skip("cc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.C{}.Emit(p)
+		f := filepath.Join(dir, "main.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		if out, err := exec.Command("cc", "-o", bin, f, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[c] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[c] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[c] dgemm sum gave %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if _, err := exec.LookPath("clang"); err != nil {
+			t.Skip("clang not in PATH")
+		}
+		dir := t.TempDir()
+		ll, _ := codegen.LL{}.Emit(p)
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		f := filepath.Join(dir, "main.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(ll), 0o644)
+		os.WriteFile(rtf, []byte(rt), 0o644)
+		if out, err := exec.Command("clang", f, rtf, "-o", bin, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[ll] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[ll] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[ll] dgemm sum gave %q, want %q", got, want)
+		}
+	})
+}

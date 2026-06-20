@@ -573,9 +573,14 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); return mkfloat(d < 0 ? -d : d); }\n")
 		b.WriteString("static Value fabsP(void) { return mkclo(&fabsP_c, 0); }\n")
 	}
-	// the OpenBLAS swap: the dot product(s) run through cblas_ddot, not a hand loop.
-	if usesForeign(p, "dot2") || usesForeign(p, "dotList") {
+	// the OpenBLAS swap: the dot/matrix product(s) run through cblas_*, not a hand loop.
+	if usesForeign(p, "dot2") || usesForeign(p, "dotList") || usesForeign(p, "gemmSum") {
 		b.WriteString("#include <cblas.h>\n")
+	}
+	// shared FList marshaller: walk a Rune FList (fcons tag 1, head slot 0, tail slot 1)
+	// into a C double[]. Used by both dotList (vectors) and gemmSum (flat matrices).
+	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") {
+		b.WriteString("static void fl_fill(Value lst, double* a) { int i = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { a[i++] = float_val(obj(lst)->slots[0]); lst = obj(lst)->slots[1]; } }\n")
 	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("static Value dot2_c4(Value b1, Value* env) { double X[2] = { float_val(env[0]), float_val(env[1]) }; double Y[2] = { float_val(env[2]), float_val(b1) }; return mkfloat(cblas_ddot(2, X, 1, Y, 1)); }\n")
@@ -589,10 +594,22 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// over the common prefix. This is the array-marshalling boundary D4 numerics need.
 	if usesForeign(p, "dotList") {
 		b.WriteString("static int fl_len(Value lst) { int n = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { n++; lst = obj(lst)->slots[1]; } return n; }\n")
-		b.WriteString("static void fl_fill(Value lst, double* a) { int i = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { a[i++] = float_val(obj(lst)->slots[0]); lst = obj(lst)->slots[1]; } }\n")
 		b.WriteString("static Value dotList_c2(Value ys, Value* env) { Value xs = env[0]; int n = fl_len(xs), m = fl_len(ys); int k = n < m ? n : m; double* X = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); double* Y = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); fl_fill(xs, X); fl_fill(ys, Y); double r = cblas_ddot(k, X, 1, Y, 1); free(X); free(Y); return mkfloat(r); }\n")
 		b.WriteString("static Value dotList_c1(Value xs, Value* env) { (void)env; Value c = mkclo(&dotList_c2, 1); clo_set(c, 0, xs); return c; }\n")
 		b.WriteString("static Value dotList(void) { return mkclo(&dotList_c1, 0); }\n")
+	}
+	// MATRIX BLAS: gemmSum m k n A B marshals two flat row-major Rune FLists into C
+	// double[]s, runs cblas_dgemm (C = A·B, A is m×k, B is k×n), and returns the SUM of
+	// all entries of the product as a scalar — a real dgemm + 2-D marshalling without
+	// host→Rune matrix construction (the observable stays a Float). The dims arrive as
+	// builtin-nats (big_to_double → int).
+	if usesForeign(p, "gemmSum") {
+		b.WriteString("static Value gemmSum_c5(Value Bm, Value* env) { int m = (int)big_to_double(env[0]), k = (int)big_to_double(env[1]), n = (int)big_to_double(env[2]); Value A = env[3]; int al = m*k, bl = k*n, cl = m*n; double* AA = (double*)malloc(sizeof(double)*(al>0?al:1)); double* BB = (double*)malloc(sizeof(double)*(bl>0?bl:1)); double* CC = (double*)malloc(sizeof(double)*(cl>0?cl:1)); fl_fill(A, AA); fl_fill(Bm, BB); cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, AA, k, BB, n, 0.0, CC, n); double s = 0; for (int i = 0; i < cl; i++) s += CC[i]; free(AA); free(BB); free(CC); return mkfloat(s); }\n")
+		b.WriteString("static Value gemmSum_c4(Value A, Value* env) { Value c = mkclo(&gemmSum_c5, 4); clo_set(c, 0, env[0]); clo_set(c, 1, env[1]); clo_set(c, 2, env[2]); clo_set(c, 3, A); return c; }\n")
+		b.WriteString("static Value gemmSum_c3(Value n, Value* env) { Value c = mkclo(&gemmSum_c4, 3); clo_set(c, 0, env[0]); clo_set(c, 1, env[1]); clo_set(c, 2, n); return c; }\n")
+		b.WriteString("static Value gemmSum_c2(Value k, Value* env) { Value c = mkclo(&gemmSum_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, k); return c; }\n")
+		b.WriteString("static Value gemmSum_c1(Value m, Value* env) { (void)env; Value c = mkclo(&gemmSum_c2, 1); clo_set(c, 0, m); return c; }\n")
+		b.WriteString("static Value gemmSum(void) { return mkclo(&gemmSum_c1, 0); }\n")
 	}
 }
 
