@@ -1,0 +1,72 @@
+-- Chapter 268 — sum of n copies is n times the value (proven tier).
+--
+-- replicate n x is the list of n copies of x; its sum is n * x. A clean bridge between a
+-- list operation, the fold `sum`, and multiplication — the cons step lines up exactly with
+-- natMul's own recursion, so it closes with a single congruence. Proof-only.
+--
+--   sumReplicate : (n x : Nat) -> Eq Nat (sum (replicate n x)) (natMul n x)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a
+  end
+end
+
+sum : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is natAdd h ih end)
+      xs
+  end
+end
+
+-- replicate n x = [x, x, ..., x]  (n copies).
+replicate : Nat -> Nat -> NatList is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is NatList end)
+      nnil
+      (fn (k : Nat) (ih : NatList) is ncons x ih end)
+      n
+  end
+end
+
+-- THE THEOREM, by induction on n:
+--   zero:  sum (replicate 0 x) = 0 = natMul 0 x                               -> refl
+--   succ:  sum (replicate (succ k) x) = natAdd x (sum (replicate k x))
+--          natMul (succ k) x          = natAdd x (natMul k x)   (definitionally)
+--          so cong (natAdd x) on the IH closes it.
+sumReplicate : (n : Nat) -> (x : Nat) -> Eq Nat (sum (replicate n x)) (natMul n x) is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (sum (replicate k x)) (natMul k x) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (sum (replicate k x)) (natMul k x)) is
+         cong Nat Nat (natAdd x) (sum (replicate k x)) (natMul k x) ih end)
+      n
+  end
+end

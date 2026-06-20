@@ -44,6 +44,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
+- `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 
 ## Proven tier — sorting correctness (insertion sort)
 
