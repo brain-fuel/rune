@@ -1,0 +1,44 @@
+-- Chapter 236, LWW is NOT a CvRDT: a refutation (E3/E4).
+--
+-- examples/lww.rune and the simulator's law linter REPORT that a last-writer-wins
+-- register (merge takes the peer) is not convergent. This PROVES it: merge is not
+-- commutative, by a counterexample. merge (lw 0) (lw 1) = lw 1 but merge (lw 1)
+-- (lw 0) = lw 0, and lw 1 = lw 0 is absurd (a discriminator on the tag). So assuming
+-- commutativity at this instance yields false = true. The refutation companion to the
+-- affirmative convergence proofs (ch72/ch233/ch235). Proof-only.
+--
+--   lwwNotCommutative : Eq LW (merge (lw one) (lw zero)) (merge (lw zero) (lw one))
+--                       -> Eq Bool true false
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data LW   : U is lw : Nat -> LW end
+
+one : Nat is succ zero end
+
+getLW : LW -> Nat is fn (s : LW) is LWElim (fn (w : LW) is Nat end) (fn (a : Nat) is a end) s end end
+
+-- last-writer-wins merge: take the peer's value. NOT a join.
+merge : LW -> LW -> LW is fn (x : LW) (y : LW) is y end end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+-- the tag discriminator: isZero zero = true, isZero (succ _) = false.
+isZero : Nat -> Bool is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n end
+end
+
+-- THE REFUTATION. merge (lw one) (lw zero) = lw zero and merge (lw zero) (lw one) =
+-- lw one; commutativity would force lw zero = lw one. Apply getLW then isZero: true =
+-- false. So LWW merge is not commutative, hence not a CvRDT.
+lwwNotCommutative :
+    Eq LW (merge (lw one) (lw zero)) (merge (lw zero) (lw one)) -> Eq Bool true false is
+  fn (h : Eq LW (merge (lw one) (lw zero)) (merge (lw zero) (lw one))) is
+    cong Nat Bool isZero (getLW (merge (lw one) (lw zero))) (getLW (merge (lw zero) (lw one)))
+      (cong LW Nat getLW (merge (lw one) (lw zero)) (merge (lw zero) (lw one)) h)
+  end
+end
