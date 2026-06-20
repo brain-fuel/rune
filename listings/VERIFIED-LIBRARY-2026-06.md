@@ -388,6 +388,12 @@ equation).
   2 (not just its own increment) by anti-entropy. With ch433 (converge) + ch434 (durability)
   this completes the fault-tolerance trilogy. `recovered` carries the proof; runs on escript
   (TestListingsReplicaRecoveryBeam).
+- `ch436_generic_replica`: the CRDT-GENERIC projection - ONE replica loop `serveG`,
+  parametric over the state type S and its (merge, tick, value), via a parametric mailbox
+  `Msg : U -> U`. Deployed live at the G-Counter (two replicas converge, sum 4) AND
+  type-checked at a G-Set (`gsetReplica`), so the protocol->actors projection is uniform
+  across CvRDTs - the general projection as a LIBRARY (higher-order function), not gated
+  surface syntax. Runs on escript (TestListingsGenericReplicaBeam).
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl

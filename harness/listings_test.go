@@ -538,6 +538,42 @@ func TestListingsReplicaRecoveryBeam(t *testing.T) {
 	}
 }
 
+// TestListingsGenericReplicaBeam is the E4 generic-projection gate: ONE replica loop
+// (serveG), parametric over the state type S and its (merge, tick, value), deployed live.
+// ch436 instantiates it at the G-Counter and runs two replicas to convergence on genuine
+// BEAM processes (sum 4), while gsetReplica instantiates the SAME serveG at a G-Set - so
+// the protocol->actors projection is uniform across CvRDTs, expressed as a library rather
+// than gated surface syntax. BEAM-only.
+func TestListingsGenericReplicaBeam(t *testing.T) {
+	if _, err := exec.LookPath("escript"); err != nil {
+		t.Skip("escript not in PATH")
+	}
+	s := loadListing(t, "ch436_generic_replica.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Beam{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "ch436.erl")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("escript", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("escript run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ (succ (succ (succ zero)))"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("generic replica on BEAM printed %q, want %q (two G-Counter replicas via the generic serveG should converge)", got, want)
+	}
+}
+
 // TestListingsOTPFaultLiveBeam is the D5 / R-OTP Layer-R2 LIVE-fault gate: the
 // fault primitives ch206 SPECIFIED (CRASH/DETECT + bounded restart-liveness) now
 // RUN as real BEAM signals. ch214 spawns a worker that crashes itself
