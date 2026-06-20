@@ -43,6 +43,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch240_map_append` — `mapList f (xs ++ ys) = mapList f xs ++ mapList f ys`.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
+- `ch291_any_all_demorgan` — quantifier De Morgan: `any p xs = not (all (not . p) xs)`.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.

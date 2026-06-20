@@ -1,0 +1,122 @@
+-- Chapter 291 — De Morgan for list quantifiers: any p = not (all (not . p)) (proven tier).
+--
+-- The quantifier duality lifted to lists: some element satisfies p iff not every element
+-- fails p. The induction step is a pointwise De Morgan (ch255) plus the not-involution,
+-- threaded through the fold. Proof-only.
+--
+--   anyDual : (p : Nat -> Bool) -> (xs : NatList)
+--           -> Eq Bool (anyP p xs) (notB (allP (negP p) xs))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+notB : Bool -> Bool is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Bool end) false true a end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+notNot : (b : Bool) -> Eq Bool (notB (notB b)) b is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (notB (notB x)) x end) refl refl b end
+end
+
+deMorgan1 : (a : Bool) -> (b : Bool) -> Eq Bool (notB (andB a b)) (orB (notB a) (notB b)) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (notB (andB x b)) (orB (notB x) (notB b)) end) refl refl a
+  end
+end
+
+negP : (Nat -> Bool) -> Nat -> Bool is
+  fn (p : Nat -> Bool) (x : Nat) is notB (p x) end
+end
+
+anyP : (Nat -> Bool) -> NatList -> Bool is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Bool end)
+      false
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is orB (p h) ih end)
+      xs
+  end
+end
+
+allP : (Nat -> Bool) -> NatList -> Bool is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Bool end)
+      true
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is andB (p h) ih end)
+      xs
+  end
+end
+
+-- orFix W is the function (fn z -> orB z W), the f for congruence on the left of an or.
+orFix : Bool -> Bool -> Bool is fn (w : Bool) (z : Bool) is orB z w end end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  anyP p nnil = false ; notB (allP (negP p) nnil) = notB true = false      -> refl
+--   ncons: anyP p (h::t) = orB (p h) (anyP p t)
+--          cong (orB (p h)) IH : = orB (p h) (notB (allP (negP p) t))
+--          cong (orB _ W) (sym notNot) : = orB (notB (notB (p h))) (notB (allP (negP p) t))
+--          sym deMorgan1 : = notB (andB (notB (p h)) (allP (negP p) t)) = RHS
+anyDual : (p : Nat -> Bool) -> (xs : NatList) ->
+          Eq Bool (anyP p xs) (notB (allP (negP p) xs)) is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Bool (anyP p z) (notB (allP (negP p) z)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (anyP p rest) (notB (allP (negP p) rest))) is
+         transEq Bool
+           (orB (p h) (anyP p rest))
+           (orB (p h) (notB (allP (negP p) rest)))
+           (notB (andB (notB (p h)) (allP (negP p) rest)))
+           (cong Bool Bool (orB (p h)) (anyP p rest) (notB (allP (negP p) rest)) ih)
+           (transEq Bool
+              (orB (p h) (notB (allP (negP p) rest)))
+              (orB (notB (notB (p h))) (notB (allP (negP p) rest)))
+              (notB (andB (notB (p h)) (allP (negP p) rest)))
+              (cong Bool Bool (orFix (notB (allP (negP p) rest)))
+                 (p h) (notB (notB (p h))) (symEq Bool (notB (notB (p h))) (p h) (notNot (p h))))
+              (symEq Bool
+                 (notB (andB (notB (p h)) (allP (negP p) rest)))
+                 (orB (notB (notB (p h))) (notB (allP (negP p) rest)))
+                 (deMorgan1 (notB (p h)) (allP (negP p) rest)))) end)
+      xs
+  end
+end
