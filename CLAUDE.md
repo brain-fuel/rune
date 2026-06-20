@@ -778,8 +778,20 @@ first and forces only on mismatch, so the fast path logs nothing.
     of the in-language reference dot, else blame — parity defined at the CONTRACT, not the
     bits. ch218 → `11\n11\n0\nunit` byte-identical across js/py/go/erl AND C/LLVM-via-
     OpenBLAS (`TestD3OpenBLASTolerance`). The C backend also gained a baked `printNat`
-    (the native backends lacked the ioPrims). REMAINING D3: arbitrary-length ddot/gemm
-    (array marshalling) + the `with post guard` surface sugar + rust/jvm float bodies.
+    (the native backends lacked the ioPrims). **ARRAY MARSHALLING LANDED (v3.24.0,
+    ch219):** `dotList` walks a Rune `FList` of floats (fnil tag 0 | fcons tag 1, the
+    Float in slot 0) into a malloc'd C `double[]` and runs `cblas_ddot` at ARBITRARY
+    length on C/LLVM (the FFI array boundary D4 interop needs), tolerance-bound to an
+    in-language reference fold `refDotList` (`TestD3BLASVector`). REMAINING D3:
+    gemm/matrix BLAS + the `with post guard` surface sugar + rust/jvm float bodies.
+  - **REPL feature parity with the file loader (v3.24.0).** `runForm` now routes EVERY
+    top-level declaration form through the session's Add* methods (the same pipeline as
+    `LoadSource`): not just `name :` defs and `data`, but `foreign`/`partial`/`instance`/
+    `builtin`/`module` too (`looksLikeDecl` dispatches on the leading keyword + the
+    `name :` shape). REDEFINITION is editing — `AddDef` overwrites `s.refs[name]`, so a
+    re-entered def is latest-wins. Multi-line works for all forms (the parser's
+    `ErrIncomplete` drives the continuation loop). So the REPL can make/edit types,
+    functions, foreign axioms, instances, and multi-line blocks — `TestREPLDeclParity`.
 
 ## Standing rules
 

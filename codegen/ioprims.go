@@ -50,6 +50,7 @@ var ioPrims = map[string]bool{
 	"floatToNat": true, // floatToNat x             : Float -> Nat   (truncate toward zero)
 	"fleqN":      true, // fleqN      a b           : Float -> Float -> Nat (1 if a<=b else 0)
 	"dot2":       true, // dot2       a0 a1 b0 b1    : Float^4 -> Float (a0*b0 + a1*b1)
+	"dotList":    true, // dotList    xs ys          : FList -> FList -> Float (cblas_ddot over a marshalled double[]; C/LLVM)
 }
 
 // fileEnvPrims are the D6 prims whose host body needs the packed-String codec

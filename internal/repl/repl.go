@@ -135,25 +135,14 @@ func expandResultRefs(src string, last int) string {
 // prompt for continuation.
 func runForm(s *session.Session, st *replState, src string, out io.Writer) error {
 	src = expandResultRefs(src, st.lastResult)
-	if looksLikeDef(src) || looksLikeData(src) {
+	if looksLikeDecl(src) {
 		items, err := surface.ParseProgram(src)
 		if err != nil {
 			return err
 		}
 		for _, it := range items {
-			switch d := it.(type) {
-			case surface.Def:
-				rd, err := s.AddDef(d)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(out, "defined %s\n", rd.Name)
-			case surface.DataDef:
-				names, err := s.AddData(d)
-				if err != nil {
-					return err
-				}
-				fmt.Fprintf(out, "declared %s\n", strings.Join(names, " "))
+			if err := addItem(s, it, out); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -163,6 +152,46 @@ func runForm(s *session.Session, st *replState, src string, out io.Writer) error
 		return err
 	}
 	return runExpr(s, st, e, out)
+}
+
+// addItem adds one parsed top-level form to the session, using the SAME session
+// methods as the file loader (session.LoadSource), so the REPL has full parity with
+// the compiler/interpreter: data types, functions, `foreign`/`instance`/`partial`
+// definitions, `builtin` bindings, and `module` blocks all work, and a redefinition
+// rebinds the name (AddDef overwrites s.refs — editing is latest-wins).
+func addItem(s *session.Session, it surface.Item, out io.Writer) error {
+	switch d := it.(type) {
+	case surface.Def:
+		rd, err := s.AddDef(d)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "defined %s\n", rd.Name)
+	case surface.DataDef:
+		names, err := s.AddData(d)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "declared %s\n", strings.Join(names, " "))
+	case surface.BuiltinNat:
+		if err := s.AddBuiltinNat(d); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "registered builtin nat %s\n", d.TyName)
+	case surface.BuiltinNatOp:
+		if err := s.AddBuiltinNatOp(d); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "registered builtin accel")
+	case surface.BuiltinNumInj:
+		if err := s.AddBuiltinNumInj(d); err != nil {
+			return err
+		}
+		fmt.Fprintln(out, "registered builtin numinj")
+	default:
+		return fmt.Errorf("unsupported top-level form")
+	}
+	return nil
 }
 
 // runExpr is the SINGLE dispatch point for "what to do with a complete expression".
@@ -186,10 +215,21 @@ func runExpr(s *session.Session, st *replState, e surface.Exp, out io.Writer) er
 	return nil
 }
 
-// looksLikeData reports whether src begins with the `data` keyword.
-func looksLikeData(src string) bool {
+// looksLikeDecl reports whether src begins a top-level DECLARATION (so it is routed
+// to the program parser, not the expression parser): any of the declaration-leading
+// keywords, or the `name :` definition shape. This is what gives the REPL parity with
+// the file loader — every form `rune` accepts in a source file works here too.
+func looksLikeDecl(src string) bool {
 	t := strings.TrimSpace(src)
-	return t == "data" || strings.HasPrefix(t, "data ") || strings.HasPrefix(t, "data\t")
+	i := 0
+	for i < len(t) && isIdentByte(t[i]) {
+		i++
+	}
+	switch t[:i] {
+	case "data", "foreign", "builtin", "instance", "partial", "module":
+		return true
+	}
+	return looksLikeDef(src)
 }
 
 // looksLikeDef reports whether src has the shape `Ident :` — an identifier head
@@ -335,7 +375,9 @@ func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "commands:")
 	fmt.Fprintln(out, "  <expr>          elaborate, normalize, and print as $N ==> value : type")
 	fmt.Fprintln(out, "  $N  /  $        recall the result of line N, or a bare $ for the latest")
-	fmt.Fprintln(out, "  <name> : T is e end   add a definition to the session")
+	fmt.Fprintln(out, "  <name> : T is e end   add/REDEFINE a definition (latest wins; multi-line ok)")
+	fmt.Fprintln(out, "  data … end            declare a datatype (+ its constructors and eliminator)")
+	fmt.Fprintln(out, "  foreign x : T end     declare a typed FFI axiom; partial/instance/builtin/module too")
 	fmt.Fprintln(out, "  :core <expr>    show the resolved core in explicit de Bruijn form")
 	fmt.Fprintln(out, "  :ast <expr>     show the resolved core as a named structural tree (hashless :core)")
 	fmt.Fprintln(out, "  :hash <expr>    show the content hash of the resolved core")

@@ -58,6 +58,51 @@ func TestREPLSession(t *testing.T) {
 	}
 }
 
+// TestREPLDeclParity checks the REPL has FULL parity with the file loader on
+// top-level forms: a multi-line `data` declaration, a `foreign` axiom, a `partial`
+// definition, REDEFINITION (editing — latest wins), and a `module` block. Every form
+// `rune` accepts in a source file works interactively.
+func TestREPLDeclParity(t *testing.T) {
+	script := []string{
+		"data Nat : U is",
+		"  zero : Nat",
+		"| succ : Nat -> Nat",
+		"end",
+		"foreign hp : Nat -> Nat end",
+		"partial loopz : Nat -> Nat is fn (n : Nat) is loopz n end end",
+		"dbl : Nat -> Nat is fn (n : Nat) is succ (succ n) end end",
+		"dbl zero",
+		// EDIT: redefine dbl; the new body must take effect (latest wins).
+		"dbl : Nat -> Nat is fn (n : Nat) is succ (succ (succ n)) end end",
+		"dbl zero",
+		"module M is",
+		"  k : Nat is succ zero end",
+		"end",
+		"M.k",
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"declared Nat zero succ NatElim", // multi-line data
+		"defined hp",                     // foreign axiom
+		"defined loopz",                  // partial definition
+		"defined dbl",                    // function definition
+		"succ (succ zero)",               // dbl zero with the FIRST body
+		"succ (succ (succ zero))",        // dbl zero with the REDEFINED body (editing works)
+		"defined M.k",                    // module block (qualified name)
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}
+
 // TestREPLPrelude checks the default REPL behaves like a calculator: the prelude
 // binds numerals and the five operators, results print as digits, definitions on
 // top of the prelude work, and :reset brings the prelude back.

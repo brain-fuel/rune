@@ -1,0 +1,128 @@
+-- Chapter 219 — ARBITRARY-LENGTH BLAS via array marshalling (D3 / R-FFI / R-NATIVE).
+--
+-- ch218 bound a fixed 2-vector dot through OpenBLAS. The real BLAS interface is over
+-- VECTORS of any length — `cblas_ddot(n, X, 1, Y, 1)` — which means MARSHALLING a Rune
+-- list of floats across the FFI boundary into a C `double[]`. On the native backends
+-- (C/LLVM) `dotList` walks the `FList` into a malloc'd buffer and calls cblas_ddot;
+-- the portable reference `refDotList` is an ordinary in-language fold. The tolerance
+-- contract binds them: the OpenBLAS result must be within `eps` of the reference fold,
+-- configurable with the `defaultEps` (1e-9) default — so the swap stays sound even as
+-- the summation grows long enough for OpenBLAS's blocked/SIMD order to diverge from a
+-- naive left-to-right sum. This is the array-marshalling boundary D4 interop rides on.
+--
+-- Observable (native backends): the dot of [1,2,3,4]·[1,1,1,1] = 10, a within-default-
+-- tolerance ok (10), and a negative-tolerance blame (0): "10\n10\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+-- the float vector. `fnil` MUST be the first constructor (tag 0) and `fcons` second
+-- (tag 1): the native marshaller hardcodes that layout when walking the list.
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the arbitrary-length BLAS kernel: cblas_ddot over a marshalled double[] (C/LLVM).
+foreign dotList    : FList -> FList -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+-- the portable reference dot: an in-language fold over the two lists (recurse on xs,
+-- peel ys in lockstep). This is what the OpenBLAS result is checked against.
+refDotList : FList -> FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is FList -> Float end)
+      (fn (ys : FList) is fromNat 0 end)
+      (fn (x : Float) (rest : FList) (ih : FList -> Float) is
+         fn (ys : FList) is
+           FListElim (fn (y : FList) is Float end)
+             (fromNat 0)
+             (fn (y : Float) (yrest : FList) (ih2 : Float) is
+                fadd (fmul x y) (ih yrest) end)
+             ys
+         end
+       end)
+      xs
+  end
+end
+
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+-- THE CONTRACT: the (OpenBLAS) `dotList` must be within `eps` of the reference fold.
+dotListChecked : Float -> FList -> FList -> Result Float Blame is
+  fn (eps : Float) (xs : FList) (ys : FList) is
+    case withinTol eps (dotList xs ys) (refDotList xs ys) of
+    | true  -> ok  Float Blame (dotList xs ys)
+    | false -> err Float Blame (driftBlame (dotList xs ys))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+-- xs = [1,2,3,4], ys = [1,1,1,1]; xs·ys = 1+2+3+4 = 10.
+xs : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+ys : FList is fcons (fromNat 1) (fcons (fromNat 1) (fcons (fromNat 1) (fcons (fromNat 1) fnil))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (dotList xs ys))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (dotListChecked defaultEps xs ys))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (dotListChecked (fsub (fromNat 0) (fromNat 1)) xs ys))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
