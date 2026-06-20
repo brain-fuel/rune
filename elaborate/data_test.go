@@ -198,7 +198,7 @@ func TestCtorDisjointness(t *testing.T) {
 	s := session.New()
 	src := natDecl + `bad : Eq Nat zero (succ zero) is refl end`
 	_, err := s.LoadSource(src)
-	if err == nil || !strings.Contains(err.Error(), "not definitionally equal") {
+	if err == nil || !strings.Contains(err.Error(), "does not prove the equation") {
 		t.Fatalf("zero = succ zero accepted by refl (err=%v)", err)
 	}
 }

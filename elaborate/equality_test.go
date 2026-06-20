@@ -54,14 +54,14 @@ uipproof : Eq (Eq U1 U U) (refl U) (refl U) is refl end`,
 func TestEqualityErrors(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// refl cannot prove a false (non-convertible) equation.
-		{`bad : Eq U1 U (U -> U) is refl end`, "not definitionally equal"},
+		{`bad : Eq U1 U (U -> U) is refl end`, "does not prove the equation"},
 		// Eq needs its type argument to be a type.
 		{`f : U -> U is fn (x : U) is x end end
 bad : Prop is Eq f f f end`, "not a type"},
 		// Under-applied former.
 		{`bad : Prop is Eq U1 U end`, "3 arguments"},
 		// Prop is a universe, not a proposition: refl U : Eq U U U, not Prop itself.
-		{`bad : U -> U is refl end`, "not an equality type"},
+		{`bad : U -> U is refl end`, "expected type is not an equation"},
 	}
 	for i, c := range cases {
 		s := session.New()

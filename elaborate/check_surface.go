@@ -588,10 +588,10 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 		// arriving here under binders.
 		eq, ok := fw.(core.VEq)
 		if !ok {
-			return nil, fmt.Errorf("refl checked against %s, which is not an equality type", e.pretty(c, want))
+			return nil, e.reflNonEqError(c, want)
 		}
 		if !e.M.Conv(c.Lvl(), eq.L, eq.R) {
-			return nil, fmt.Errorf("refl does not prove %s: the sides are not definitionally equal", e.pretty(c, fw))
+			return nil, e.reflMismatchError(c, eq)
 		}
 		return core.Refl{Tm: e.M.Quote(c.Lvl(), eq.L)}, nil
 	case surface.ELam:

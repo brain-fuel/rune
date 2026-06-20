@@ -194,6 +194,56 @@ func (e *Elaborator) typeMismatchError(c *Ctx, want, got core.Val, cause error) 
 	return d
 }
 
+// reflMismatchError builds the diagnostic for a `refl` whose two sides are not
+// definitionally equal — the daily error of a proof author. It shows what each side
+// reduces to (the NbE normal form, so the reader sees exactly where they diverge)
+// and asks the deciding question: are they really equal (rewrite, don't refl) or
+// genuinely different (the statement is false)?
+func (e *Elaborator) reflMismatchError(c *Ctx, eq core.VEq) error {
+	lhs := e.pretty(c, eq.L)
+	rhs := e.pretty(c, eq.R)
+	d := &Diagnostic{Summary: "This `refl` does not prove the equation."}
+	if lhs == rhs {
+		d.Body = []string{
+			"`refl` proves only that a thing equals itself. The two sides print the same " +
+				"(`" + lhs + "`) yet are not definitionally equal — they differ in a detail " +
+				"the printer hides (a universe level, an implicit argument, or a stuck term " +
+				"that has not reduced).",
+		}
+	} else {
+		d.Body = []string{
+			"`refl` proves only that a thing equals itself, so both sides of the equation " +
+				"must reduce to the SAME normal form — and these do not: the left-hand side " +
+				"reduces to `" + lhs + "`, while the right-hand side reduces to `" + rhs + "`.",
+		}
+	}
+	d.Hints = []string{
+		"Either the two sides really are equal and rune cannot see it yet — then rewrite " +
+			"one into the other with a lemma (`subst`, `cong`, or the relevant eliminator) " +
+			"rather than `refl` — or they are genuinely different and the statement does not " +
+			"hold. Which of the two is it?",
+	}
+	return d
+}
+
+// reflNonEqError builds the diagnostic for a `refl` checked against a type that is
+// not an equality at all.
+func (e *Elaborator) reflNonEqError(c *Ctx, want core.Val) error {
+	return &Diagnostic{
+		Summary: "`refl` was used where the expected type is not an equation.",
+		Body: []string{
+			"This position expects a value of type `" + e.pretty(c, want) + "`, but `refl` " +
+				"only ever builds a proof of an equality `Eq T a a`. There is nothing for it " +
+				"to prove here.",
+		},
+		Hints: []string{
+			"If you meant to prove an equation, check the goal — it may have reduced to " +
+				"something other than an `Eq`. Otherwise you want a different constructor or " +
+				"a value of `" + e.pretty(c, want) + "`, not `refl`.",
+		},
+	}
+}
+
 // isUniverseMismatch reports whether a unifier error is a universe-level clash, so
 // the diagnostic can switch to the level-aware explanation.
 func isUniverseMismatch(err error) bool {

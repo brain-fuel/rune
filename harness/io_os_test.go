@@ -1477,7 +1477,7 @@ func TestFurnaceTierBridge(t *testing.T) {
 
 // TestD4ShapeProven realizes the R-INTEROP headline (shapes proven, not checked) on the
 // current substrate: safeDot requires a proof Eq Nat (len xs) (len ys), so a mismatched
-// call is a compile error (verified manually: "refl does not prove ..."), and the dot is
+// call is a compile error (verified manually: "refl does not prove the equation"), and the dot is
 // computed in exact Nat arithmetic. [1,2,3]·[4,5,6] = 32: "32\nunit" on all seven
 // backends — pure Rune, no foreign libs (plain compile, no -lm/-lopenblas).
 func TestD4ShapeProven(t *testing.T) {
