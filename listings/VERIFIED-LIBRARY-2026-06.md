@@ -369,6 +369,13 @@ equation).
   `r2Canonical` + `roundConverges01/02` prove all three end holding the IDENTICAL state
   (convergence reached, not just possible) for any commutative+associative merge. Proves
   what the simulator's `Stabilize` checks operationally. Purely equational.
+- `ch433_replicated_actors`: the E4 LIVE-ACTOR projection slice (on D5). The verified
+  replicated counter runs as TWO genuine BEAM processes that hold replica state, gossip it
+  (primSpawn/primSend/primReceive, the landed OTP runtime), and merge. The coordinator
+  ticks each replica's own slot, cross-feeds their states, and collects both values - after
+  gossip both converged to 2 (sum 4). `convergedCorrect` carries the proof; runs live on
+  escript (TestListingsReplicatedActorsBeam). The deploy half of better-than-Winglang on
+  real distributed actors, not a model - using existing primitives, no new machinery.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl

@@ -1,0 +1,124 @@
+-- Chapter 433, a replicated counter as LIVE gossiping BEAM actors (E4 / D5).
+--
+-- ch72 proved a G-Counter converges and deployed its `converged` VALUE; ch205 ran a
+-- single stateful actor on the BEAM. This chapter joins them: it projects the verified
+-- replicated counter onto TWO genuine BEAM processes that hold replica state, GOSSIP their
+-- states, and MERGE - the live-actor side of the better-than-Winglang thesis (E4), built
+-- on the landed OTP runtime (D5, primSpawn/primSend/primReceive) with no new machinery.
+--
+-- Choreography (FIFO-deterministic, so the observed result is fixed): the coordinator
+-- spawns replicas A and B, tells each to tick its own slot, pulls each replica's state,
+-- cross-feeds them as merges, then asks each for its value. After gossip BOTH replicas
+-- hold {1,1} and report 2, so their sum is 4 - witnessing that the two divergent replicas
+-- CONVERGED to the same value. `convergedCorrect` carries the proof; the BEAM run confirms
+-- it live. Runs under `rune run ... --target erl`; gated by TestListingsReplicatedActorsBeam.
+
+data Unit : U is unit : Unit end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data GC   : U is gc : Nat -> Nat -> GC end
+
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Nat end)
+      (fn (b : Nat) is b end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Nat end) (succ k) (fn (j : Nat) (ihj : Nat) is succ (ih j) end) b
+         end
+       end)
+      a
+  end
+end
+
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+g0 : GC -> Nat is fn (s : GC) is GCElim (fn (w : GC) is Nat end) (fn (a : Nat) (b : Nat) is a end) s end end
+g1 : GC -> Nat is fn (s : GC) is GCElim (fn (w : GC) is Nat end) (fn (a : Nat) (b : Nat) is b end) s end end
+
+merge : GC -> GC -> GC is
+  fn (x : GC) (y : GC) is gc (max (g0 x) (g0 y)) (max (g1 x) (g1 y)) end
+end
+inc0 : GC -> GC is fn (s : GC) is gc (succ (g0 s)) (g1 s) end end
+inc1 : GC -> GC is fn (s : GC) is gc (g0 s) (succ (g1 s)) end end
+value : GC -> Nat is fn (s : GC) is add (g0 s) (g1 s) end end
+init : GC is gc zero zero end
+
+-- the proof carried alongside the deployment: after A ({1,0}) and B ({0,1}) gossip, the
+-- merged value is 2 - the convergence ch72 proves in general, here for this scenario.
+convergedCorrect : Eq Nat (value (merge (gc (succ zero) zero) (gc zero (succ zero)))) (succ (succ zero)) is
+  refl
+end
+
+-- the live OTP primitives (D5, Layer R0), as ch205.
+foreign Pid : U -> U end
+foreign primSelf    : (M : U) -> IO (Pid M) end
+foreign primSpawn   : (M : U) -> (Pid M -> IO Unit) -> IO (Pid M) end
+foreign primSend    : (M : U) -> Pid M -> M -> IO Unit end
+foreign primReceive : (M : U) -> IO M end
+
+-- a replica's mailbox alphabet: tick its own slot, hand its state to an address, merge an
+-- incoming state, or report its value to an address.
+data Msg : U is
+  tick     : Msg
+| getState : Pid GC -> Msg
+| mergeM   : GC -> Msg
+| report   : Pid Nat -> Msg
+end
+
+-- the replica loop (R-PART/C4 partial receive loop): `tickFn` picks which slot this
+-- replica increments (inc0 for A, inc1 for B). It keeps serving after every message
+-- except `report`, which answers and stops.
+partial serve : (GC -> GC) -> GC -> IO Unit is
+  fn (tickFn : GC -> GC) (s : GC) is
+    bindIO Msg Unit (primReceive Msg) (fn (m : Msg) is
+      MsgElim (fn (x : Msg) is IO Unit end)
+        (serve tickFn (tickFn s))
+        (fn (rp : Pid GC) is bindIO Unit Unit (primSend GC rp s) (fn (u : Unit) is serve tickFn s end) end)
+        (fn (delta : GC) is serve tickFn (merge s delta) end)
+        (fn (rp : Pid Nat) is primSend Nat rp (value s) end)
+        m
+    end)
+  end
+end
+
+-- the coordinator: spawn the two replicas, tick each, pull and cross-feed their states,
+-- then collect both reported values. The sum is 4 (each converged replica reports 2).
+main : IO Nat is
+  bindIO (Pid GC) Nat (primSelf GC) (fn (selfGC : Pid GC) is
+    bindIO (Pid Nat) Nat (primSelf Nat) (fn (selfNat : Pid Nat) is
+      bindIO (Pid Msg) Nat (primSpawn Msg (fn (sa : Pid Msg) is serve inc0 init end)) (fn (a : Pid Msg) is
+        bindIO (Pid Msg) Nat (primSpawn Msg (fn (sb : Pid Msg) is serve inc1 init end)) (fn (b : Pid Msg) is
+          bindIO Unit Nat (primSend Msg a tick) (fn (u1 : Unit) is
+            bindIO Unit Nat (primSend Msg b tick) (fn (u2 : Unit) is
+              bindIO Unit Nat (primSend Msg a (getState selfGC)) (fn (u3 : Unit) is
+                bindIO GC Nat (primReceive GC) (fn (sA : GC) is
+                  bindIO Unit Nat (primSend Msg b (getState selfGC)) (fn (u4 : Unit) is
+                    bindIO GC Nat (primReceive GC) (fn (sB : GC) is
+                      bindIO Unit Nat (primSend Msg a (mergeM sB)) (fn (u5 : Unit) is
+                        bindIO Unit Nat (primSend Msg b (mergeM sA)) (fn (u6 : Unit) is
+                          bindIO Unit Nat (primSend Msg a (report selfNat)) (fn (u7 : Unit) is
+                            bindIO Nat Nat (primReceive Nat) (fn (vA : Nat) is
+                              bindIO Unit Nat (primSend Msg b (report selfNat)) (fn (u8 : Unit) is
+                                bindIO Nat Nat (primReceive Nat) (fn (vB : Nat) is
+                                  pureIO Nat (add vA vB)
+                                end)
+                              end)
+                            end)
+                          end)
+                        end)
+                      end)
+                    end)
+                  end)
+                end)
+              end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end
