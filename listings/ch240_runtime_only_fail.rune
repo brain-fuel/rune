@@ -1,0 +1,140 @@
+-- Chapter 240, E3 adequacy COMPLETENESS (runtime side, fault alphabet).
+--
+-- ch229 proved the runtime trace stays in the observable alphabet (visibleRunVisible)
+-- and the SPEC alphabet is exactly failures (projectOnlyFail). This is the runtime
+-- companion to projectOnlyFail: over the FAULT alphabet - the setting ch207/ch209
+-- fix, where communication is internal (tau) and the observable events are failures
+-- (lfail) - every observation the runtime emits is a failure. Because the fault LTS's
+-- label type is exactly {ltau, lfail}, "every label is tau-or-fail" holds by the type,
+-- so the result follows by the same fuel induction as visibleRunVisible, with a
+-- two-case consVisFail. Proof-only.
+--
+--   visibleRunOnlyFail : (k : Nat) (p : Proc) -> allFail (visibleRun k p) = true
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+
+-- the fault alphabet: silent internal step, or an observable failure. Exactly two.
+data Label : U is ltau : Label | lfail : Label end
+
+data Proc  : U is halt : Proc | mon : Proc -> Proc | par : Proc -> Proc -> Proc | crash : Proc end
+data Trans : U is tr : Label -> Proc -> Trans end
+
+labelOf : Trans -> Label is fn (t : Trans) is TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t end end
+procOf  : Trans -> Proc  is fn (t : Trans) is TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t end end
+
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end) true x
+  end
+end
+
+isMon : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false (fn (p : Proc) (ih : Bool) is true end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end) false x
+  end
+end
+
+-- a representative fault step: a crashed worker beside a monitor is DETECTed (lfail);
+-- anything else either takes a silent step or is stuck. The point of this chapter is
+-- not the exact dynamics but that EVERY label it can emit is in {ltau, lfail}.
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+         BoolElim (fn (w : Bool) is Option Trans end)
+           (BoolElim (fn (w : Bool) is Option Trans end)
+              (some Trans (tr lfail halt))
+              (some Trans (tr ltau (par a b)))
+              (isMon b))
+           (some Trans (tr ltau (par a b)))
+           (isCrash a)
+       end)
+      (none Trans)
+      x
+  end
+end
+
+visible : Label -> Bool is
+  fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false true l end
+end
+
+isFail : Label -> Bool is
+  fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false true l end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is
+    BoolElim (fn (w : Bool) is List Label end) (cons Label l rest) rest (visible l)
+  end
+end
+
+allFail : List Label -> Bool is
+  fn (xs : List Label) is
+    ListElim Label (fn (w : List Label) is Bool end)
+      true (fn (l : Label) (t : List Label) (ih : Bool) is andB (isFail l) ih end) xs
+  end
+end
+
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (okStep p)
+         end
+       end)
+      n
+  end
+end
+
+-- consing a label keeps allFail: ltau is dropped by consVis (so the tail's allFail
+-- carries), lfail is kept but isFail lfail = true. Two cases, both from the tail.
+consVisFail : (l : Label) -> (rest : List Label) -> Eq Bool (allFail rest) true
+   -> Eq Bool (allFail (consVis l rest)) true is
+  fn (l : Label) (rest : List Label) (h : Eq Bool (allFail rest) true) is
+    LabelElim (fn (w : Label) is Eq Bool (allFail (consVis w rest)) true end) h h l
+  end
+end
+
+-- COMPLETENESS: every observation the runtime emits is a failure. Induction on fuel.
+visibleRunOnlyFail : (k : Nat) -> (p : Proc) -> Eq Bool (allFail (visibleRun k p)) true is
+  fn (k : Nat) is
+    NatElim (fn (n : Nat) is (p : Proc) -> Eq Bool (allFail (visibleRun n p)) true end)
+      (fn (p : Proc) is refl end)
+      (fn (k0 : Nat) (ih : (p : Proc) -> Eq Bool (allFail (visibleRun k0 p)) true) is
+         fn (p : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq Bool
+                  (allFail (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun k0 (procOf t)) end)
+                     o))
+                  true
+              end)
+             refl
+             (fn (t : Trans) is
+                consVisFail (labelOf t) (visibleRun k0 (procOf t)) (ih (procOf t)) end)
+             (okStep p)
+         end
+       end)
+      k
+  end
+end
