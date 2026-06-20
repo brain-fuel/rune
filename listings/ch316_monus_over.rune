@@ -1,0 +1,42 @@
+-- Chapter 316 — over-subtraction is zero: monus a (a + b) = 0 (proven tier).
+--
+-- Subtracting at least as much as you have clamps to zero. By induction on a: each step
+-- reduces monus (succ k) (succ (k + b)) to monus k (k + b), exactly the IH. Proof-only.
+--
+--   monusOver : (a b : Nat) -> Eq Nat (monus a (natAdd a b)) zero
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (monK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is monK j end) m
+         end
+       end)
+      a b
+  end
+end
+
+monusOver : (a : Nat) -> (b : Nat) -> Eq Nat (monus a (natAdd a b)) zero is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (monus x (natAdd x b)) zero end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (monus k (natAdd k b)) zero) is ih end)
+      a
+  end
+end
