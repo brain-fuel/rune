@@ -1,0 +1,26 @@
+-- Chapter 407 — implication truths (proven tier).
+--
+-- implb a true = true (anything implies a truth) and implb false b = true (ex falso
+-- quodlibet, definitional). By case analysis. Proof-only.
+--
+--   implbTrueR  : (a : Bool) -> Eq Bool (implb a true) true
+--   implbFalseL : (b : Bool) -> Eq Bool (implb false b) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+implb : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b true a end
+end
+
+implbTrueR : (a : Bool) -> Eq Bool (implb a true) true is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (implb x true) true end) refl refl a end
+end
+
+implbFalseL : (b : Bool) -> Eq Bool (implb false b) true is
+  fn (b : Bool) is refl end
+end

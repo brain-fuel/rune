@@ -256,6 +256,7 @@ equation).
 - `ch403_not_inj` — negation injective: `notB a = notB b -> a = b`.
 - `ch343_eqbool` — boolean equality (XNOR) reflexive + symmetric: `eqBool a a = true`, `eqBool a b = eqBool b a`.
 - `ch345_implb` — boolean implication: `implb a a = true`, `implb a b = ¬a ∨ b`.
+- `ch407_implb_truths` — implication truths: `implb a true = true`, `implb false b = true`.
 - `ch350_bool_lem` — excluded middle + non-contradiction: `b || ¬b = true`, `b && ¬b = false`.
 - `ch386_bool_distrib` — boolean distributive laws: `a&&(b||c) = (a&&b)||(a&&c)`, and dual.
 - `ch387_bool_absorb` — boolean absorption: `a&&(a||b) = a`, `a||(a&&b) = a` (Bool is a boolean algebra).
