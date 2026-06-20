@@ -1,0 +1,62 @@
+-- Chapter 362 — foldr over an append is a nested fold (proven tier).
+--
+-- foldr f z (append xs ys) = foldr f (foldr f z ys) xs: folding a concatenation folds the
+-- right part first, then the left over that result. Generic in the result type B. By
+-- induction on xs. Proof-only.
+--
+--   foldrAppend : (B : U) -> (f : Nat -> B -> B) -> (z : B) -> (xs ys : NatList)
+--               -> Eq B (foldr B f z (append xs ys)) (foldr B f (foldr B f z ys) xs)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+foldr : (B : U) -> (Nat -> B -> B) -> B -> NatList -> B is
+  fn (B : U) (f : Nat -> B -> B) (z : B) (xs : NatList) is
+    NatListElim (fn (x : NatList) is B end)
+      z
+      (fn (h : Nat) (rest : NatList) (ih : B) is f h ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  foldr f z ys = foldr f z ys                                              -> refl
+--   ncons: f h (foldr f z (append t ys)) vs f h (foldr f (foldr f z ys) t); cong (f h) IH
+foldrAppend : (B : U) -> (f : Nat -> B -> B) -> (z : B) -> (xs : NatList) -> (ys : NatList) ->
+              Eq B (foldr B f z (append xs ys)) (foldr B f (foldr B f z ys) xs) is
+  fn (B : U) (f : Nat -> B -> B) (z : B) (xs : NatList) (ys : NatList) is
+    NatListElim
+      (fn (x : NatList) is Eq B (foldr B f z (append x ys)) (foldr B f (foldr B f z ys) x) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq B (foldr B f z (append rest ys)) (foldr B f (foldr B f z ys) rest)) is
+         cong B B (f h)
+           (foldr B f z (append rest ys)) (foldr B f (foldr B f z ys) rest) ih end)
+      xs
+  end
+end
