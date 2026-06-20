@@ -617,6 +617,11 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value npVar_c(Value xs, Value* env) { (void)env; double s = 0; int n = 0; Value t = xs; while (!IS_INT(t) && obj(t)->kind == K_CON && obj(t)->tag == 1) { s += float_val(obj(t)->slots[0]); n++; t = obj(t)->slots[1]; } double m = n > 0 ? s / n : 0; double v = 0; Value u = xs; while (!IS_INT(u) && obj(u)->kind == K_CON && obj(u)->tag == 1) { double d = float_val(obj(u)->slots[0]) - m; v += d * d; u = obj(u)->slots[1]; } return mkfloat(n > 0 ? v / n : 0); }\n")
 		b.WriteString("static Value npVar(void) { return mkclo(&npVar_c, 0); }\n")
 	}
+	// D4 interop: npMax — fold-max hand body (no BLAS); py serves real numpy.max.
+	if usesForeign(p, "npMax") {
+		b.WriteString("static Value npMax_c(Value xs, Value* env) { (void)env; double m = 0; int first = 1; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { double x = float_val(obj(xs)->slots[0]); if (first || x > m) { m = x; first = 0; } xs = obj(xs)->slots[1]; } return mkfloat(m); }\n")
+		b.WriteString("static Value npMax(void) { return mkclo(&npMax_c, 0); }\n")
+	}
 	// MATRIX BLAS: gemmSum m k n A B marshals two flat row-major Rune FLists into C
 	// double[]s, runs cblas_dgemm (C = A·B, A is m×k, B is k×n), and returns the SUM of
 	// all entries of the product as a scalar — a real dgemm + 2-D marshalling without

@@ -1,0 +1,122 @@
+-- Chapter 225 — NumPy order reduction: numpy.max behind a contract (D4 / R-INTEROP).
+--
+-- Not every reduction is arithmetic. `npMax` binds `numpy.max` on the python backend; a
+-- fold-max floor everywhere else. The in-language reference folds `fmax` (a `<=` pick via
+-- the host comparison cased into Bool) over the list. Same interop discipline: run the
+-- library, check it against the reference within `eps`, blame a drift.
+--
+-- Observable: max[3,1,4,1,5,9,2,6] = 9, a within-default ok (9), and a negative-
+-- tolerance blame (0): "9\n9\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the interop kernel: numpy.max on py; a fold-max floor elsewhere.
+foreign npMax      : FList -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+-- the larger of two floats (a <= b picks b, else a).
+fmax : Float -> Float -> Float is
+  fn (a : Float) (b : Float) is
+    case fleq a b of
+    | true  -> b
+    | false -> a
+    end
+  end
+end
+
+-- the in-language reference: fold fmax over the list (base 0; data here is positive).
+refMax : FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Float end)
+      (fromNat 0)
+      (fn (x : Float) (rest : FList) (ih : Float) is fmax x ih end)
+      xs
+  end
+end
+
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+-- THE INTEROP CONTRACT: accept numpy.max only within `eps` of the reference max.
+npMaxChecked : Float -> FList -> Result Float Blame is
+  fn (eps : Float) (xs : FList) is
+    case withinTol eps (npMax xs) (refMax xs) of
+    | true  -> ok  Float Blame (npMax xs)
+    | false -> err Float Blame (driftBlame (npMax xs))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+xs : FList is
+  fcons (fromNat 3) (fcons (fromNat 1) (fcons (fromNat 4) (fcons (fromNat 1)
+    (fcons (fromNat 5) (fcons (fromNat 9) (fcons (fromNat 2) (fcons (fromNat 6) fnil)))))))
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npMax xs))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (npMaxChecked defaultEps xs))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (npMaxChecked (fsub (fromNat 0) (fromNat 1)) xs))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

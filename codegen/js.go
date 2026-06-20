@@ -131,6 +131,10 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("const gemmSum = () => m => k => n => A => B => { const a = [], b2 = []; for (let t = A; t.tag === 1; t = t.args[1]) a.push(t.args[0]); for (let t = B; t.tag === 1; t = t.args[1]) b2.push(t.args[0]); const M = Number(m), K = Number(k), N = Number(n); let s = 0; for (let i = 0; i < M; i++) for (let j = 0; j < N; j++) for (let l = 0; l < K; l++) s += a[i * K + l] * b2[l * N + j]; return s; };\n")
 	}
+	// D4 interop: npMax — the fold-max reference floor (base 0); py serves real numpy.max.
+	if usesForeign(p, "npMax") {
+		b.WriteString("const npMax = () => xs => { let m = 0, t = xs, first = true; while (t.tag === 1) { if (first || t.args[0] > m) { m = t.args[0]; first = false; } t = t.args[1]; } return m; };\n")
+	}
 	// D4 interop: npVar — the 2-pass reference floor (mean, then mean of sq deviations).
 	if usesForeign(p, "npVar") {
 		b.WriteString("const npVar = () => xs => { let s = 0, n = 0, t = xs; while (t.tag === 1) { s += t.args[0]; n++; t = t.args[1]; } const m = n > 0 ? s / n : 0; let v = 0, u = xs; while (u.tag === 1) { const d = u.args[0] - m; v += d * d; u = u.args[1]; } return n > 0 ? v / n : 0; };\n")

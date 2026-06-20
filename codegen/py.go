@@ -124,6 +124,10 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npMean") {
 		b.WriteString("def npMean():\n    import numpy as np\n    def _m(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.mean(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _m(xs)\n")
 	}
+	// D4 interop: npMax binds REAL numpy.max on the py backend (order reduction).
+	if usesForeign(p, "npMax") {
+		b.WriteString("def npMax():\n    import numpy as np\n    def _x(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.max(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _x(xs)\n")
+	}
 	// D4 interop: npVar binds REAL numpy.var on the py backend (population variance).
 	if usesForeign(p, "npVar") {
 		b.WriteString("def npVar():\n    import numpy as np\n    def _v(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.var(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _v(xs)\n")
