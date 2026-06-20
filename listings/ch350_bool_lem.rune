@@ -1,0 +1,39 @@
+-- Chapter 350 — excluded middle and non-contradiction for Bool (proven tier).
+--
+-- The two classical laws, decidable on Bool: b or not b is always true, b and not b is
+-- always false. (Decidable predicates like `even` satisfy LEM by instantiation.) By case
+-- analysis. Proof-only.
+--
+--   boolLEM : (b : Bool) -> Eq Bool (orB  b (notB b)) true
+--   boolNC  : (b : Bool) -> Eq Bool (andB b (notB b)) false
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+boolLEM : (b : Bool) -> Eq Bool (orB b (notB b)) true is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB x (notB x)) true end) refl refl b
+  end
+end
+
+boolNC : (b : Bool) -> Eq Bool (andB b (notB b)) false is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB x (notB x)) false end) refl refl b
+  end
+end
