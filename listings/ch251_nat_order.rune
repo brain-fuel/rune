@@ -1,0 +1,64 @@
+-- Chapter 251 — decidable Nat order and monotonicity of addition (proven tier).
+--
+-- A Boolean order test leb (<=) and two of its theorems: reflexivity, and that adding only
+-- ever increases (a <= a + b). Both fall out cleanly because leb and natAdd recurse in
+-- lockstep — each induction step reduces definitionally to the predecessor case, so the IH
+-- closes it directly. Proof-only.
+--
+--   lebRefl : (n : Nat)        -> Eq Bool (leb n n) true
+--   lebAddR : (a b : Nat)      -> Eq Bool (leb a (natAdd a b)) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+-- leb 0 m = true; leb (succ k) 0 = false; leb (succ k) (succ j) = leb k j.
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+-- REFLEXIVE: leb n n = true. Step: leb (succ k) (succ k) reduces to leb k k, so the IH is
+-- exactly the goal.
+lebRefl : (n : Nat) -> Eq Bool (leb n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (leb x x) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (leb k k) true) is ih end)
+      n
+  end
+end
+
+-- MONOTONE: a <= a + b. Step: natAdd (succ k) b = succ (natAdd k b) and leb (succ k)
+-- (succ (natAdd k b)) = leb k (natAdd k b), so again the IH is the goal.
+lebAddR : (a : Nat) -> (b : Nat) -> Eq Bool (leb a (natAdd a b)) true is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (leb x (natAdd x b)) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (leb k (natAdd k b)) true) is ih end)
+      a
+  end
+end
