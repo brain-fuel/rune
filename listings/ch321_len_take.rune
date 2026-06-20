@@ -1,0 +1,85 @@
+-- Chapter 321 — take caps the length at n: len (take n xs) = min n (len xs) (proven tier).
+--
+-- Taking the first n elements yields a prefix of length min(n, len xs). The dual of the
+-- drop-length law (ch320). By induction on n then case on the list. Proof-only.
+--
+--   lenTake : (n : Nat) -> (xs : NatList) -> Eq Nat (len (take n xs)) (natMin n (len xs))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+natMin : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (minK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) zero (fn (j : Nat) (ih2 : Nat) is succ (minK j) end) m
+         end
+       end)
+      a b
+  end
+end
+
+take : Nat -> NatList -> NatList is
+  fn (n : Nat) (xs : NatList) is
+    NatElim (fn (k : Nat) is NatList -> NatList end)
+      (fn (ys : NatList) is nnil end)
+      (fn (k : Nat) (takeK : NatList -> NatList) is
+         fn (ys : NatList) is
+           NatListElim (fn (z : NatList) is NatList end)
+             nnil
+             (fn (h : Nat) (t : NatList) (ih : NatList) is ncons h (takeK t) end)
+             ys
+         end
+       end)
+      n xs
+  end
+end
+
+-- THE THEOREM, by induction on n then case on xs:
+--   n=0:      len (take 0 xs) = 0 = min 0 (len xs)                                -> refl
+--   succ k, nnil:  len nnil = 0 = min (succ k) 0                                   -> refl
+--   succ k, ncons h t: len (take (succ k) (h::t)) = succ (len (take k t));
+--                      min (succ k) (succ (len t)) = succ (min k (len t)); cong succ (IH at t).
+lenTake : (n : Nat) -> (xs : NatList) -> Eq Nat (len (take n xs)) (natMin n (len xs)) is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is (xs : NatList) -> Eq Nat (len (take k xs)) (natMin k (len xs)) end)
+      (fn (xs : NatList) is refl end)
+      (fn (k : Nat) (ih : (xs : NatList) -> Eq Nat (len (take k xs)) (natMin k (len xs))) is
+         fn (xs : NatList) is
+           NatListElim (fn (z : NatList) is Eq Nat (len (take (succ k) z)) (natMin (succ k) (len z)) end)
+             refl
+             (fn (h : Nat) (t : NatList) (ih2 : Eq Nat (len (take (succ k) t)) (natMin (succ k) (len t))) is
+                cong Nat Nat succ (len (take k t)) (natMin k (len t)) (ih t) end)
+             xs
+         end
+       end)
+      n
+  end
+end
