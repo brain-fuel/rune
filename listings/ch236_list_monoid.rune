@@ -1,0 +1,74 @@
+-- Chapter 236 — NatList is a MONOID under append (proven tier).
+--
+-- append has a left identity definitionally (append nnil ys = ys, by its recursion). The
+-- monoid laws that need PROOF are the right identity and associativity — both by induction
+-- on the first list. Together with the definitional left identity, NatList is a monoid
+-- under append with unit nnil. Proof-only, machine-checked.
+--
+--   appendNnilR : (xs)       -> Eq NatList (append xs nnil) xs
+--   appendAssoc : (xs ys zs) -> Eq NatList (append (append xs ys) zs)
+--                                          (append xs (append ys zs))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03/ch07.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+-- consWith h is the function (ncons h) — the f for the cons-step congruence.
+consWith : Nat -> NatList -> NatList is
+  fn (h : Nat) (t : NatList) is ncons h t end
+end
+
+-- RIGHT IDENTITY: append xs nnil = xs, by induction on xs.
+--   nnil:  append nnil nnil = nnil                         -> refl
+--   ncons: append (ncons h rest) nnil = ncons h (append rest nnil); cong (ncons h) IH.
+appendNnilR : (xs : NatList) -> Eq NatList (append xs nnil) xs is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Eq NatList (append x nnil) x end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (append rest nnil) rest) is
+         cong NatList NatList (consWith h) (append rest nnil) rest ih end)
+      xs
+  end
+end
+
+-- ASSOCIATIVITY: (xs ++ ys) ++ zs = xs ++ (ys ++ zs), by induction on xs.
+--   nnil:  both sides = append ys zs                       -> refl
+--   ncons: both sides = ncons h (...); cong (ncons h) IH.
+appendAssoc : (xs : NatList) -> (ys : NatList) -> (zs : NatList) ->
+              Eq NatList (append (append xs ys) zs) (append xs (append ys zs)) is
+  fn (xs : NatList) (ys : NatList) (zs : NatList) is
+    NatListElim
+      (fn (x : NatList) is
+         Eq NatList (append (append x ys) zs) (append x (append ys zs)) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq NatList (append (append rest ys) zs) (append rest (append ys zs))) is
+         cong NatList NatList (consWith h)
+           (append (append rest ys) zs) (append rest (append ys zs)) ih end)
+      xs
+  end
+end
