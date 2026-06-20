@@ -1,0 +1,51 @@
+-- Chapter 237, the add-merge counter is NOT a CvRDT: a refutation (E3/E4).
+--
+-- examples/badcounter.rune merges by ADDING the two counts instead of taking the
+-- max, so it double-counts shared history. The linter reports it is not idempotent;
+-- this PROVES it. merge (c 1) (c 1) = c 2, but idempotence demands c 1, and c 2 = c 1
+-- is absurd (pred then the isZero tag discriminate). The refutation companion to
+-- ch236 (LWW not commutative). Proof-only.
+--
+--   addMergeNotIdempotent : Eq C (merge (c one) (c one)) (c one) -> Eq Bool false true
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data C    : U is c : Nat -> C end
+
+one : Nat is succ zero end
+
+getC : C -> Nat is fn (s : C) is CElim (fn (w : C) is Nat end) (fn (a : Nat) is a end) s end end
+
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+-- THE BUG: merge adds instead of taking the max. Not idempotent.
+merge : C -> C -> C is fn (x : C) (y : C) is c (add (getC x) (getC y)) end end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is k end) n end
+end
+
+isZero : Nat -> Bool is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n end
+end
+
+-- THE REFUTATION. merge (c one) (c one) = c (add 1 1) = c 2; idempotence would force
+-- c 2 = c 1. getC gives Nat 2 = 1; pred gives 1 = 0; isZero gives false = true.
+addMergeNotIdempotent :
+    Eq C (merge (c one) (c one)) (c one) -> Eq Bool false true is
+  fn (h : Eq C (merge (c one) (c one)) (c one)) is
+    cong Nat Bool isZero (pred (getC (merge (c one) (c one)))) (pred (getC (c one)))
+      (cong Nat Nat pred (getC (merge (c one) (c one))) (getC (c one))
+        (cong C Nat getC (merge (c one) (c one)) (c one) h))
+  end
+end
