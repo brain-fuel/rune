@@ -1,0 +1,35 @@
+-- Chapter 387 — the boolean absorption laws (proven tier).
+--
+-- andB a (orB a b) = a and orB a (andB a b) = a. With distributivity (ch386) and the lattice
+-- laws, Bool is a (distributive, complemented) lattice — a boolean algebra. By case analysis
+-- on a. Proof-only.
+--
+--   andAbsorb : (a b : Bool) -> Eq Bool (andB a (orB a b)) a
+--   orAbsorb  : (a b : Bool) -> Eq Bool (orB a (andB a b)) a
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+andAbsorb : (a : Bool) -> (b : Bool) -> Eq Bool (andB a (orB a b)) a is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB x (orB x b)) x end) refl refl a
+  end
+end
+
+orAbsorb : (a : Bool) -> (b : Bool) -> Eq Bool (orB a (andB a b)) a is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB x (andB x b)) x end) refl refl a
+  end
+end
