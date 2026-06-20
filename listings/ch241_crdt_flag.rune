@@ -1,0 +1,55 @@
+-- Chapter 241 — a grow-only Boolean flag CRDT: convergence by the semilattice laws (E3).
+--
+-- The simplest CvRDT: a flag that only ever moves false -> true, whose merge is logical OR.
+-- A CvRDT converges iff its merge is a join-SEMILATTICE — idempotent, commutative, and
+-- associative — so replicas that have seen the same set of updates agree regardless of
+-- delivery order or duplication. Here those three laws are machine-checked by case
+-- analysis. This is the convergence core of the OR-set / enable-flag CRDTs (E3). Proof-only.
+--
+--   mergeIdem  : merge a a = a               (re-delivery is safe)
+--   mergeComm  : merge a b = merge b a       (order-independent)
+--   mergeAssoc : merge (merge a b) c = merge a (merge b c)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+-- the CRDT merge: logical OR (a flag, once true, stays true under merge).
+merge : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- IDEMPOTENT: merging a replica with itself changes nothing (duplicate-delivery safe).
+--   true:  merge true true = true ; false: merge false false = false   -> refl each.
+mergeIdem : (a : Bool) -> Eq Bool (merge a a) a is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (merge x x) x end) refl refl a
+  end
+end
+
+-- COMMUTATIVE: merge is order-independent. Case on a, then on b — four refl leaves.
+mergeComm : (a : Bool) -> (b : Bool) -> Eq Bool (merge a b) (merge b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (merge x b) (merge b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (merge true y) (merge y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (merge false y) (merge y false) end) refl refl b)
+      a
+  end
+end
+
+-- ASSOCIATIVE: case on a suffices — merge true _ = true and merge false x = x both reduce
+-- definitionally, collapsing each branch to refl.
+mergeAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+             Eq Bool (merge (merge a b) c) (merge a (merge b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (merge (merge x b) c) (merge x (merge b c)) end)
+      refl
+      refl
+      a
+  end
+end
