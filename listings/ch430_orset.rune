@@ -1,0 +1,169 @@
+-- Chapter 430, Observed-Remove Set (OR-Set): the add-wins CRDT (E3/E4).
+--
+-- Completes the set-CRDT story: ch413's G-Set is grow-only (no remove); ch422's 2P-Set
+-- removes but a remove is PERMANENT (remove-wins, an element can never come back). The
+-- OR-Set is the production-grade CRDT (Riak, Redis) that fixes both: a remove only
+-- tombstones the add-TAGS it has OBSERVED, so (a) an element can be RE-ADDED after removal
+-- with a fresh tag, and (b) an add CONCURRENT with a remove survives - ADD WINS. Modelled
+-- over one element with one add-tag per replica: ai = replica i's add-tag is present,
+-- ri = that tag has been tombstoned; the element is present iff some add-tag survives.
+--
+--   mergeComm/mergeIdem/mergeAssoc : convergence (the OR-join, as every set CRDT).
+--   reAddWins      : tombstone the only tag, then add a fresh one -> present again.
+--   addWinsConcurrent : an add concurrent with a remove survives the merge (add wins).
+--
+-- Proof-only over the ambient Eq/refl/subst.
+
+data Bool : U is true : Bool | false : Bool end
+-- (a0,a1) add-tags present per replica; (r0,r1) those tags tombstoned.
+data OR : U is orset : Bool -> Bool -> Bool -> Bool -> OR end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+notB : Bool -> Bool is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Bool end) false true a end
+end
+
+orComm : (a : Bool) -> (b : Bool) -> Eq Bool (orB a b) (orB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB w b) (orB b w) end)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB true w) (orB w true) end) refl refl b)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB false w) (orB w false) end) refl refl b)
+      a
+  end
+end
+
+orIdem : (a : Bool) -> Eq Bool (orB a a) a is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Eq Bool (orB w w) w end) refl refl a end
+end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool)
+   -> Eq Bool (orB (orB a b) c) (orB a (orB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB (orB w b) c) (orB w (orB b c)) end)
+      refl
+      (BoolElim (fn (w : Bool) is Eq Bool (orB (orB false w) c) (orB false (orB w c)) end) refl refl b)
+      a
+  end
+end
+
+a0 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is a end) s end end
+a1 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is b end) s end end
+r0 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is c end) s end end
+r1 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is d end) s end end
+
+-- present iff some add-tag survives (is present and not tombstoned).
+present : OR -> Bool is
+  fn (s : OR) is orB (andB (a0 s) (notB (r0 s))) (andB (a1 s) (notB (r1 s))) end
+end
+
+-- merge: pointwise OR of all four flags (both grow-only tag-sets joined).
+merge : OR -> OR -> OR is
+  fn (g : OR) (h : OR) is
+    ORElim (fn (x : OR) is OR end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         ORElim (fn (y : OR) is OR end)
+           (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is
+              orset (orB a e) (orB b f) (orB c i) (orB d j) end)
+           h
+       end)
+      g
+  end
+end
+
+cong4 : (a : Bool) -> (b : Bool) -> (c : Bool) -> (d : Bool) ->
+        (e : Bool) -> (f : Bool) -> (g : Bool) -> (h : Bool) ->
+        Eq Bool a e -> Eq Bool b f -> Eq Bool c g -> Eq Bool d h ->
+        Eq OR (orset a b c d) (orset e f g h) is
+  fn (a : Bool) (b : Bool) (c : Bool) (d : Bool)
+     (e : Bool) (f : Bool) (g : Bool) (h : Bool)
+     (p1 : Eq Bool a e) (p2 : Eq Bool b f) (p3 : Eq Bool c g) (p4 : Eq Bool d h) is
+    subst Bool a e p1 (fn (w : Bool) is Eq OR (orset a b c d) (orset w f g h) end)
+      (subst Bool b f p2 (fn (w : Bool) is Eq OR (orset a b c d) (orset a w g h) end)
+        (subst Bool c g p3 (fn (w : Bool) is Eq OR (orset a b c d) (orset a b w h) end)
+          (subst Bool d h p4 (fn (w : Bool) is Eq OR (orset a b c d) (orset a b c w) end) refl)))
+  end
+end
+
+-- ===== convergence: merge is a join-semilattice =====
+
+mergeComm : (g : OR) -> (h : OR) -> Eq OR (merge g h) (merge h g) is
+  fn (g : OR) is
+    ORElim (fn (x : OR) is (h : OR) -> Eq OR (merge x h) (merge h x) end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         fn (h : OR) is
+           ORElim (fn (y : OR) is Eq OR (merge (orset a b c d) y) (merge y (orset a b c d)) end)
+             (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is
+                cong4 (orB a e) (orB b f) (orB c i) (orB d j)
+                      (orB e a) (orB f b) (orB i c) (orB j d)
+                      (orComm a e) (orComm b f) (orComm c i) (orComm d j) end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+mergeIdem : (g : OR) -> Eq OR (merge g g) g is
+  fn (g : OR) is
+    ORElim (fn (x : OR) is Eq OR (merge x x) x end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         cong4 (orB a a) (orB b b) (orB c c) (orB d d) a b c d
+               (orIdem a) (orIdem b) (orIdem c) (orIdem d) end)
+      g
+  end
+end
+
+mergeAssoc : (g : OR) -> (h : OR) -> (k : OR)
+   -> Eq OR (merge (merge g h) k) (merge g (merge h k)) is
+  fn (g : OR) is
+    ORElim (fn (x : OR) is (h : OR) -> (k : OR)
+        -> Eq OR (merge (merge x h) k) (merge x (merge h k)) end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         fn (h : OR) is
+           ORElim (fn (y : OR) is (k : OR)
+               -> Eq OR (merge (merge (orset a b c d) y) k) (merge (orset a b c d) (merge y k)) end)
+             (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is
+                fn (k : OR) is
+                  ORElim (fn (z : OR) is
+                      Eq OR (merge (merge (orset a b c d) (orset e f i j)) z)
+                            (merge (orset a b c d) (merge (orset e f i j) z)) end)
+                    (fn (p : Bool) (q : Bool) (s : Bool) (t : Bool) is
+                       cong4 (orB (orB a e) p) (orB (orB b f) q) (orB (orB c i) s) (orB (orB d j) t)
+                             (orB a (orB e p)) (orB b (orB f q)) (orB c (orB i s)) (orB d (orB j t))
+                             (orAssoc a e p) (orAssoc b f q) (orAssoc c i s) (orAssoc d j t) end)
+                    k
+                end
+              end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+-- ===== the add-wins semantics =====
+-- operations on the single element: add via each replica's tag, and an observed-remove
+-- that tombstones exactly the add-tags currently present (r := a).
+
+empty : OR is orset false false false false end
+addTag0 : OR -> OR is fn (s : OR) is orset true (a1 s) (r0 s) (r1 s) end end
+addTag1 : OR -> OR is fn (s : OR) is orset (a0 s) true (r0 s) (r1 s) end end
+-- remove tombstones the tags it observes (sets each ri to the observed ai).
+removeObs : OR -> OR is fn (s : OR) is orset (a0 s) (a1 s) (a0 s) (a1 s) end end
+
+-- RE-ADD: add tag0, observe-remove it (now absent), then add a fresh tag1 -> present.
+-- A 2P-Set could not do this (its remove is permanent); the OR-Set can.
+reAddWins : Eq Bool (present (addTag1 (removeObs (addTag0 empty)))) true is refl end
+
+-- and the element is genuinely ABSENT right after the observed-remove (no fresh tag yet).
+removedAbsent : Eq Bool (present (removeObs (addTag0 empty))) false is refl end
+
+-- ADD WINS: replica 0 adds tag0 then observe-removes it; replica 1 CONCURRENTLY adds
+-- tag1 (a tag replica 0's remove never saw). After merge the element is present - the
+-- concurrent add survives the remove. (The defining OR-Set guarantee.)
+addWinsConcurrent : Eq Bool (present (merge (removeObs (addTag0 empty)) (addTag1 empty))) true is refl end

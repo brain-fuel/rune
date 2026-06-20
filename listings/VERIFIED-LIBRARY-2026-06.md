@@ -353,6 +353,12 @@ equation).
   writes both survive - what a LWW register wrongly discards), `dominatedDropA`/
   `dominatedKeepTop` (a superseded write drops, its successor survives). The real-world
   use of vector clocks inside a CRDT.
+- `ch430_orset`: Observed-Remove Set (OR-Set), the production-grade add-wins CRDT -
+  completes the set story (G-Set grow-only / 2P-Set remove-permanent / OR-Set re-addable).
+  A remove only tombstones OBSERVED tags. Convergence (OR-join, cong4) + `reAddWins`
+  (tombstone the tag then add a fresh one -> present again, which a 2P-Set cannot) +
+  `removedAbsent` + `addWinsConcurrent` (an add concurrent with a remove survives the
+  merge - add wins). Scenario theorems by refl (concrete computation).
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
