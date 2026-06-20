@@ -1,0 +1,98 @@
+-- Chapter 232, G-Counter STABILITY: re-merging an absorbed peer is a no-op (E3/E4).
+--
+-- Convergence (ch72, liveness) says replicas agree; monotonicity (ch230/ch231,
+-- safety) says the value never drops; this adds QUIESCENCE: once a replica has merged
+-- in a peer h, merging h again changes nothing - the system reaches a fixpoint and
+-- stays there (no perpetual churn). Per slot it is the absorption law
+-- max (max a c) c = max a c. Proof-only.
+--
+--   mergeStable : (g h : GC) -> Eq GC (merge (merge g h) h) (merge g h)
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+data GC  : U is gc : Nat -> Nat -> GC end
+
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Nat end)
+      (fn (b : Nat) is b end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Nat end) (succ k) (fn (j : Nat) (ihj : Nat) is succ (ih j) end) b
+         end
+       end)
+      a
+  end
+end
+
+congSucc : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) refl
+  end
+end
+
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Eq Nat (max w w) w end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (max k k) k) is congSucc (max k k) k ih end)
+      a
+  end
+end
+
+-- absorption: max (max a c) c = max a c. Double induction; a=0 uses maxIdem,
+-- a=succ/c=0 is refl, a=succ/c=succ recurses by succ-congruence.
+maxAbsorb : (a : Nat) -> (c : Nat) -> Eq Nat (max (max a c) c) (max a c) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (c : Nat) -> Eq Nat (max (max x c) c) (max x c) end)
+      (fn (c : Nat) is maxIdem c end)
+      (fn (k : Nat) (ih : (c : Nat) -> Eq Nat (max (max k c) c) (max k c)) is
+         fn (c : Nat) is
+           NatElim (fn (x : Nat) is Eq Nat (max (max (succ k) x) x) (max (succ k) x) end)
+             refl
+             (fn (j : Nat) (ihj : Eq Nat (max (max (succ k) j) j) (max (succ k) j)) is
+                congSucc (max (max k j) j) (max k j) (ih j) end)
+             c
+         end
+       end)
+      a
+  end
+end
+
+congGC : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> Eq Nat a c -> Eq Nat b d -> Eq GC (gc a b) (gc c d) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e1 : Eq Nat a c) (e2 : Eq Nat b d) is
+    subst Nat a c e1 (fn (x : Nat) is Eq GC (gc a b) (gc x d) end)
+      (subst Nat b d e2 (fn (y : Nat) is Eq GC (gc a b) (gc a y) end) refl)
+  end
+end
+
+merge : GC -> GC -> GC is
+  fn (g : GC) (h : GC) is
+    GCElim (fn (x : GC) is GC end)
+      (fn (a : Nat) (b : Nat) is
+         GCElim (fn (y : GC) is GC end)
+           (fn (c : Nat) (d : Nat) is gc (max a c) (max b d) end)
+           h
+       end)
+      g
+  end
+end
+
+-- STABILITY / QUIESCENCE: merging h a second time changes nothing.
+-- merge (merge g h) h reduces to gc (max (max a c) c) (max (max b d) d); each slot
+-- absorbs by maxAbsorb back to gc (max a c) (max b d) = merge g h.
+mergeStable : (g : GC) -> (h : GC) -> Eq GC (merge (merge g h) h) (merge g h) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> Eq GC (merge (merge x h) h) (merge x h) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is Eq GC (merge (merge (gc a b) y) y) (merge (gc a b) y) end)
+             (fn (c : Nat) (d : Nat) is
+                congGC (max (max a c) c) (max (max b d) d) (max a c) (max b d)
+                  (maxAbsorb a c) (maxAbsorb b d) end)
+             h
+         end
+       end)
+      g
+  end
+end
