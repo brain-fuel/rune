@@ -261,6 +261,7 @@ equation).
 - `ch386_bool_distrib` — boolean distributive laws: `a&&(b||c) = (a&&b)||(a&&c)`, and dual.
 - `ch387_bool_absorb` — boolean absorption: `a&&(a||b) = a`, `a||(a&&b) = a` (Bool is a boolean algebra).
 - `ch394_bool_units` — and/or right identities: `a && true = a`, `a || false = a`.
+- `ch408_bool_absorbing` — absorbing elements: `a || true = true`, `a && false = false`.
 - `ch395_bool_comm` — and/or commutativity: `a&&b = b&&a`, `a||b = b||a` (commutative monoids).
 - `ch404_bool_idem` — and/or idempotent: `a&&a = a`, `a||a = a` (lattice idempotence).
 - `ch405_xor_const` — xor constants: `xor a true = not a`, `xor a false = a`.

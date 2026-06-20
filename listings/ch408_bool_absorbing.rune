@@ -1,0 +1,30 @@
+-- Chapter 408 — and/or absorbing elements (proven tier).
+--
+-- orB a true = true (true absorbs disjunction) and andB a false = false (false absorbs
+-- conjunction). By case analysis. Proof-only.
+--
+--   orTrueR   : (a : Bool) -> Eq Bool (orB a true) true
+--   andFalseR : (a : Bool) -> Eq Bool (andB a false) false
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+orTrueR : (a : Bool) -> Eq Bool (orB a true) true is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (orB x true) true end) refl refl a end
+end
+
+andFalseR : (a : Bool) -> Eq Bool (andB a false) false is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (andB x false) false end) refl refl a end
+end
