@@ -26,6 +26,22 @@ func TestRunSimulateGCounter(t *testing.T) {
 	}
 }
 
+// TestRunSimulateThreeReplicas checks the simulator scales past two nodes: the
+// three-replica G-Counter converges after the partition heals.
+func TestRunSimulateThreeReplicas(t *testing.T) {
+	src, err := os.ReadFile("../../examples/gcounter3.rune")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	var out strings.Builder
+	if err := runSimulate(string(src), 3, &out); err != nil {
+		t.Fatalf("runSimulate: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "verdict: CONVERGED") {
+		t.Errorf("3-replica G-Counter should converge:\n%s", got)
+	}
+}
+
 // TestRunSimulateLWW drives it over the LWW example: a register with no join must
 // be reported as non-convergent.
 func TestRunSimulateLWW(t *testing.T) {
