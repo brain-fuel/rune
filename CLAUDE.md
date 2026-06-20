@@ -700,12 +700,17 @@ first and forces only on mismatch, so the fast path logs nothing.
     the count, and the whole thing RUNS on escript to 3 (FIFO-deterministic), gated by
     `TestListingsOTPLiveBeam`. The runtime ships WITH the compiler (Lambert's deployed
     artifact; BEAM's own scheduler is the "near-free" gift — no hand-rolled scheduler).
-    PARKED (PARKING-LOT.md): `primMonitor`/`primExit` (DOWN/Reason fault detection),
-    the non-BEAM JS/Go cooperative scheduler shim, and Layer-R2 guarantee-transfer
-    (bisimulating live processes to the ch114/115 models — needs the R-CALC fault LTS,
-    E3/per-protocol). The verified-OTP supervisor LIVENESS guarantee still waits on
-    that fault LTS + E2; the models + the live runtime exist, the bridge between them
-    is the open research.
+    **LIVE FAULTS LANDED (Layer R2, ch214):** `primExit`→`exit(p, crashed)` injects a
+    CRASH, and `primMonitor`→`erlang:monitor(process, p)` + a blocking `receive {'DOWN',
+    …}` IS the DETECT rule (robust to the crash-before-monitor race — monitoring a dead
+    pid delivers an immediate DOWN/noproc, so the failure is observed exactly once). ch214
+    spawns a worker that crashes itself, the supervisor detects the DOWN and RESTARTS a
+    fresh worker that takes one `bump` and replies — `eventuallyRestarted` (ch206, witness
+    k=1) RUNS on escript to `succ zero` (`TestListingsOTPFaultLiveBeam`). This is the live
+    half of the ch206 fault LTS and the executable tie ch207/ch209 adequacy was proven
+    against (the CRASH/DETECT projection now runs, not just specified). PARKED: the
+    non-BEAM JS/Go cooperative scheduler shim, the FULL coinductive Eventually over an
+    unbounded fault stream, and a fully-general all-P (vs per-shape/refl) adequacy lemma.
   - **D6 / R-EFFECT — STANDARD OS/IO VOCABULARY (in + out + time) LANDED.** The IO
     monad (ch43) sequences effects; ch59 proved one host op runs cross-backend. D6
     grows the STANDARD host-op vocabulary and ships it WITH the compiler (like D5's

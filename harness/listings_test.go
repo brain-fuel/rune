@@ -429,6 +429,45 @@ func TestListingsOTPLiveBeam(t *testing.T) {
 	}
 }
 
+// TestListingsOTPFaultLiveBeam is the D5 / R-OTP Layer-R2 LIVE-fault gate: the
+// fault primitives ch206 SPECIFIED (CRASH/DETECT + bounded restart-liveness) now
+// RUN as real BEAM signals. ch214 spawns a worker that crashes itself
+// (primExit ~> exit(self, crashed)), the supervisor detects the death through the
+// monitor's DOWN (primMonitor ~> erlang:monitor + receive DOWN), then RESTARTS a
+// fresh worker that takes one bump and reports — so the observed total is
+// `succ zero` (1): the crashed original never replied, recovery came from the
+// restart. This makes the ch206 `eventuallyRestarted` (witness k=1) executable, and
+// is the LIVE tie ch207/ch209 adequacy was proven against. BEAM-only, like ch205.
+func TestListingsOTPFaultLiveBeam(t *testing.T) {
+	if _, err := exec.LookPath("escript"); err != nil {
+		t.Skip("escript not in PATH")
+	}
+	s := loadListing(t, "ch214_otp_fault_live.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Beam{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "ch214.erl")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("escript", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("escript run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ zero"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("live fault-tolerant OTP on BEAM printed %q, want %q (crash→detect→restart→1)", got, want)
+	}
+}
+
 // TestCongConsGLaterGeneralizesCongConsG pins the per-clock E2-converse increment
 // (telos-4/M7): `congConsGLater` — the DELAYED-tail consG-congruence — is a strict
 // generalization of `congConsG`. The guarded recursive call yields the tail-path

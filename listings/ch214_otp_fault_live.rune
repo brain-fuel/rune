@@ -1,0 +1,82 @@
+-- Chapter 214 — FAULT-TOLERANT OTP, LIVE on the BEAM (D5 / R-OTP, Layer R2).
+--
+-- ch205 ran spawn/send/receive/self as genuine BEAM processes (Layer R0+R1).
+-- ch206 then SPECIFIED faults as a computing LTS `lstep : Fault -> Proc -> ...`
+-- with CRASH/LOSS/DETECT and a bounded restart-liveness theorem
+-- (`eventuallyRestarted : Σ k. runN k supervised ≡ restarted`, witness k = 1) —
+-- but only as a proven MODEL. This chapter closes the gap: the fault primitives
+-- now have a LIVE runtime, so the DETECT-and-restart story RUNS.
+--
+-- Two new live primitives (the BEAM ships their host bodies):
+--   primExit    M p  ~> exit(p, crashed)            — inject a CRASH (terminate p).
+--   primMonitor M p  ~> monitor(process, p); await its DOWN — the DETECT rule:
+--                       a supervisor observes the peer's failure exactly once
+--                       (robust to the crash-before-monitor race via DOWN/noproc).
+--
+-- The scenario IS the live D5-R2 guarantee: a worker is spawned, it CRASHES
+-- (an injected fault), the supervisor DETECTS the death (the monitor's DOWN),
+-- and RESTARTS a fresh worker which then does real work and answers. The observed
+-- total is `succ zero` (1): the restarted worker took one `bump` and reported it —
+-- the crashed original never replied. Recovery happened, on a real BEAM, not in a
+-- model. BEAM-only (the concurrency/fault primitives' natural home).
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- The live-runtime primitives. The first five are ch205's (Layer R0+R1); the last
+-- two are the fault layer (Layer R2). All are effectful (IO), their meaning
+-- supplied by the BEAM host bindings.
+foreign Pid : U -> U end
+foreign primSelf    : (M : U) -> IO (Pid M) end
+foreign primSpawn   : (M : U) -> (Pid M -> IO Unit) -> IO (Pid M) end
+foreign primSend    : (M : U) -> Pid M -> M -> IO Unit end
+foreign primReceive : (M : U) -> IO M end
+foreign primExit    : (M : U) -> Pid M -> IO Unit end
+foreign primMonitor : (M : U) -> Pid M -> IO Unit end
+
+-- The worker's mailbox alphabet: bump the count, or report it to a reply address.
+data Msg : U is
+  bump    : Msg
+| report : Pid Nat -> Msg
+end
+
+-- The stateful receive loop (R-PART / C4): receive one message and either keep
+-- looping with a new state, or answer the reporter and stop. The restarted worker
+-- runs this; the FIRST worker crashes before it ever loops.
+partial serve : Nat -> IO Unit is
+  fn (s : Nat) is
+    bindIO Msg Unit (primReceive Msg) (fn (m : Msg) is
+      MsgElim (fn (x : Msg) is IO Unit end)
+        (serve (succ s))
+        (fn (rp : Pid Nat) is primSend Nat rp s end)
+        m
+    end)
+  end
+end
+
+-- The supervisor: spawn a worker that immediately CRASHES itself (exit(self,
+-- crashed) — an injected fault), monitor it and block until the DOWN arrives
+-- (DETECT), then RESTART a fresh worker, drive it with one bump + a report, and
+-- block for the answer. The crashed original is gone; the answer comes from the
+-- restarted worker: succ zero.
+main : IO Nat is
+  bindIO (Pid Nat) Nat (primSelf Nat) (fn (me : Pid Nat) is
+    bindIO (Pid Msg) Nat (primSpawn Msg (fn (selfp : Pid Msg) is primExit Msg selfp end)) (fn (w : Pid Msg) is
+      bindIO Unit Nat (primMonitor Msg w) (fn (down : Unit) is
+        bindIO (Pid Msg) Nat (primSpawn Msg (fn (selfp : Pid Msg) is serve zero end)) (fn (w2 : Pid Msg) is
+          bindIO Unit Nat (primSend Msg w2 bump) (fn (u1 : Unit) is
+            bindIO Unit Nat (primSend Msg w2 (report me)) (fn (u2 : Unit) is
+              primReceive Nat
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

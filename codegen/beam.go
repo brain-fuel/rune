@@ -339,6 +339,8 @@ var otpPrims = map[string]bool{
 	"primSelf":    true,
 	"primSend":    true,
 	"primReceive": true,
+	"primMonitor": true,
+	"primExit":    true,
 }
 
 // usesOTP reports whether the program references an OTP runtime primitive (a
@@ -389,9 +391,21 @@ func usesOTP(p Program) bool {
 //	primSpawn   M body   ~> spawn a process running `body self()`; return its pid
 //	primSend    M p x    ~> p ! x  (async, fire-and-forget; FIFO per sender)
 //	primReceive M        ~> receive the next message (FIFO)
+//
+// The FAULT layer (D5 / R-OTP Layer R2 — the live half of the ch206 fault LTS):
+//
+//	primExit    M p      ~> exit(p, crashed)  — inject a CRASH: terminate process p
+//	                        with reason `crashed` (untrapped ⇒ the process dies).
+//	primMonitor M p      ~> erlang:monitor(process, p), then block until p dies and
+//	                        consume the DOWN — the DETECT rule made live. Robust to
+//	                        the crash-before-monitor race: monitoring an already-dead
+//	                        pid delivers an immediate DOWN (reason `noproc`), so the
+//	                        supervisor always observes the failure exactly once.
 const beamOTPRuntime = `ff_Pid() -> fun(_M) -> unit end.
 ff_primSelf() -> fun(_M) -> fun(_U) -> self() end end.
 ff_primSpawn() -> fun(_M) -> fun(B) -> fun(_U) -> spawn(fun() -> ap(ap(B, self()), unit) end) end end end.
 ff_primSend() -> fun(_M) -> fun(P) -> fun(X) -> fun(_U) -> begin P ! X, unit end end end end end.
 ff_primReceive() -> fun(_M) -> fun(_U) -> receive Msg -> Msg end end end.
+ff_primExit() -> fun(_M) -> fun(P) -> fun(_U) -> begin exit(P, crashed), unit end end end end.
+ff_primMonitor() -> fun(_M) -> fun(P) -> fun(_U) -> begin erlang:monitor(process, P), receive {'DOWN', _Ref, process, _Pid, _Reason} -> unit end end end end end.
 `
