@@ -1,0 +1,30 @@
+-- Chapter 399 — successor is injective: succ a = succ b implies a = b (proven tier).
+--
+-- Apply pred to both sides; pred (succ x) reduces to x, so the equality descends. The other
+-- foundational constructor fact (with disjointness ch398). Proof-only.
+--
+--   succInj : (a b : Nat) -> Eq Nat (succ a) (succ b) -> Eq Nat a b
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is k end) n end
+end
+
+succInj : (a : Nat) -> (b : Nat) -> Eq Nat (succ a) (succ b) -> Eq Nat a b is
+  fn (a : Nat) (b : Nat) (h : Eq Nat (succ a) (succ b)) is
+    cong Nat Nat pred (succ a) (succ b) h
+  end
+end
