@@ -502,6 +502,42 @@ func TestListingsFaultTolerantReplicaBeam(t *testing.T) {
 	}
 }
 
+// TestListingsReplicaRecoveryBeam is the E4 recovery gate (E4 + D5 faults): a crashed
+// replica is RESTARTED fresh and catches up to the full converged state by anti-entropy
+// from a live peer. ch435 has A and B tick and gossip (B holds {1,1}), crashes A
+// (primExit) and detects it (primMonitor), then restarts a fresh A that pulls B's state
+// and recovers the full value 2 - not just its own increment. Runs on escript and prints
+// succ (succ zero). BEAM-only, like ch205/ch214/ch433/ch434.
+func TestListingsReplicaRecoveryBeam(t *testing.T) {
+	if _, err := exec.LookPath("escript"); err != nil {
+		t.Skip("escript not in PATH")
+	}
+	s := loadListing(t, "ch435_replica_recovery.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Beam{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "ch435.erl")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("escript", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("escript run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ (succ zero)"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("recovered replica on BEAM printed %q, want %q (should re-sync the full state from its peer)", got, want)
+	}
+}
+
 // TestListingsOTPFaultLiveBeam is the D5 / R-OTP Layer-R2 LIVE-fault gate: the
 // fault primitives ch206 SPECIFIED (CRASH/DETECT + bounded restart-liveness) now
 // RUN as real BEAM signals. ch214 spawns a worker that crashes itself

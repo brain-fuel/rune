@@ -382,6 +382,12 @@ equation).
   reports it (answer 1) - DURABILITY under a crash, the real distributed-systems claim.
   Combines ch214's live faults with ch433's replication. `durable` carries the proof; runs
   on escript (TestListingsFaultTolerantReplicaBeam).
+- `ch435_replica_recovery`: replica RECOVERY on live BEAM (the other half of fault
+  tolerance). A and B tick and gossip (B holds {1,1}); A CRASHES (primExit) and is DETECTed
+  (primMonitor), then a FRESH A is restarted and re-syncs from B, recovering the full value
+  2 (not just its own increment) by anti-entropy. With ch433 (converge) + ch434 (durability)
+  this completes the fault-tolerance trilogy. `recovered` carries the proof; runs on escript
+  (TestListingsReplicaRecoveryBeam).
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
