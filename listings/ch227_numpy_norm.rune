@@ -1,0 +1,116 @@
+-- Chapter 227 — NumPy linalg: numpy.linalg.norm behind a contract (D4 / R-INTEROP).
+--
+-- The first interop op to USE `fsqrt` (ch226): the Euclidean L2 norm. `npNorm` is
+-- `numpy.linalg.norm` on the python backend; everywhere else `sqrt(sum of squares)`. The
+-- in-language reference computes the same from `fsqrt` and a sum-of-squares fold, and the
+-- contract checks the library against it. This closes the sqrt → norm arc and shows the
+-- interop discipline reaching genuine `numpy.linalg`.
+--
+-- Observable: ‖[3,4]‖ = 5, a within-default ok (5), and a negative-tolerance blame (0):
+-- "5\n5\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign fsqrt      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the interop kernel: numpy.linalg.norm on py; sqrt(sum of squares) elsewhere.
+foreign npNorm     : FList -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+-- sum of squares (the fold), then the reference norm = sqrt of it.
+sumSq : FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Float end)
+      (fromNat 0)
+      (fn (x : Float) (rest : FList) (ih : Float) is fadd (fmul x x) ih end)
+      xs
+  end
+end
+
+refNorm : FList -> Float is
+  fn (xs : FList) is fsqrt (sumSq xs) end
+end
+
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+-- THE INTEROP CONTRACT: accept numpy.linalg.norm only within `eps` of the reference.
+npNormChecked : Float -> FList -> Result Float Blame is
+  fn (eps : Float) (xs : FList) is
+    case withinTol eps (npNorm xs) (refNorm xs) of
+    | true  -> ok  Float Blame (npNorm xs)
+    | false -> err Float Blame (driftBlame (npNorm xs))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+xs : FList is fcons (fromNat 3) (fcons (fromNat 4) fnil) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npNorm xs))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (npNormChecked defaultEps xs))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (npNormChecked (fsub (fromNat 0) (fromNat 1)) xs))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

@@ -147,6 +147,10 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("ff_gemmSum() -> fun(M) -> fun(K) -> fun(N) -> fun(A) -> fun(B) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, AL = Col(A), BL = Col(B), lists:sum([ lists:nth(I * K + P + 1, AL) * lists:nth(P * N + J + 1, BL) || I <- lists:seq(0, M - 1), J <- lists:seq(0, N - 1), P <- lists:seq(0, K - 1) ]) end end end end end.\n")
 	}
+	// D4 interop: npNorm — the sqrt(sum of squares) floor; py serves numpy.linalg.norm.
+	if usesForeign(p, "npNorm") {
+		b.WriteString("ff_npNorm() -> fun(Xs) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, math:sqrt(lists:sum([ X * X || X <- Col(Xs) ])) end.\n")
+	}
 	// D4 interop: npMax — the fold-max reference floor (base 0); py serves real numpy.max.
 	if usesForeign(p, "npMax") {
 		b.WriteString("ff_npMax() -> fun(Xs) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, AL = Col(Xs), case AL of [] -> 0.0; _ -> lists:max(AL) end end.\n")

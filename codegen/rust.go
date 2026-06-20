@@ -104,6 +104,10 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("fn gemmSum() -> Rc<V> { vfun(|m: Rc<V>| vfun(move |k: Rc<V>| { let m = m.clone(); vfun(move |n: Rc<V>| { let m = m.clone(); let k = k.clone(); vfun(move |a: Rc<V>| { let m = m.clone(); let k = k.clone(); let n = n.clone(); vfun(move |bm: Rc<V>| { let mm: usize = _big_to_string(_nat(&m)).parse().unwrap(); let kk: usize = _big_to_string(_nat(&k)).parse().unwrap(); let nn: usize = _big_to_string(_nat(&n)).parse().unwrap(); let av = _flvec(a.clone()); let bv = _flvec(bm.clone()); let mut s = 0.0; for i in 0..mm { for j in 0..nn { for l in 0..kk { s += av[i * kk + l] * bv[l * nn + j]; } } } Rc::new(V::Float(s)) }) }) }) })) }\n")
 	}
+	// D4 interop: npNorm — the sqrt(sum of squares) floor; py serves numpy.linalg.norm.
+	if usesForeign(p, "npNorm") {
+		b.WriteString("fn npNorm() -> Rc<V> { vfun(|xs: Rc<V>| { let v = _flvec(xs.clone()); let s: f64 = v.iter().map(|x| x * x).sum(); Rc::new(V::Float(s.sqrt())) }) }\n")
+	}
 	// D4 interop: npMax — the fold-max reference floor (base 0); py serves real numpy.max.
 	if usesForeign(p, "npMax") {
 		b.WriteString("fn npMax() -> Rc<V> { vfun(|xs: Rc<V>| { let v = _flvec(xs.clone()); let m = v.iter().cloned().fold(None, |acc: Option<f64>, x| Some(match acc { Some(a) if a >= x => a, _ => x })).unwrap_or(0.0); Rc::new(V::Float(m)) }) }\n")

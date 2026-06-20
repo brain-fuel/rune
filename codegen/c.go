@@ -627,6 +627,14 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value npMax_c(Value xs, Value* env) { (void)env; double m = 0; int first = 1; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { double x = float_val(obj(xs)->slots[0]); if (first || x > m) { m = x; first = 0; } xs = obj(xs)->slots[1]; } return mkfloat(m); }\n")
 		b.WriteString("static Value npMax(void) { return mkclo(&npMax_c, 0); }\n")
 	}
+	// D4 interop: npNorm — sqrt(sum of squares) hand body (math.h, -lm); py serves numpy.linalg.norm.
+	if usesForeign(p, "npNorm") {
+		if !usesForeign(p, "fsqrt") {
+			b.WriteString("#include <math.h>\n")
+		}
+		b.WriteString("static Value npNorm_c(Value xs, Value* env) { (void)env; double s = 0; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { double x = float_val(obj(xs)->slots[0]); s += x * x; xs = obj(xs)->slots[1]; } return mkfloat(sqrt(s)); }\n")
+		b.WriteString("static Value npNorm(void) { return mkclo(&npNorm_c, 0); }\n")
+	}
 	// MATRIX BLAS: gemmSum m k n A B marshals two flat row-major Rune FLists into C
 	// double[]s, runs cblas_dgemm (C = A·B, A is m×k, B is k×n), and returns the SUM of
 	// all entries of the product as a scalar — a real dgemm + 2-D marshalling without

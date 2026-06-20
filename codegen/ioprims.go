@@ -63,6 +63,7 @@ var ioPrims = map[string]bool{
 	"npMatSum": true, // npMatSum   m k n A B       : Nat^3 -> FList -> FList -> Float (numpy matmul (A@B).sum() on py; cblas_dgemm on C/LLVM; triple loop elsewhere)
 	"npVar":    true, // npVar      xs             : FList -> Float (numpy.var on py; hand 2-pass mean/sq-dev elsewhere — no BLAS)
 	"npMax":    true, // npMax      xs             : FList -> Float (numpy.max on py; fold-max elsewhere — no BLAS)
+	"npNorm":   true, // npNorm     xs             : FList -> Float (numpy.linalg.norm on py; sqrt(sum sq) elsewhere — native -lm)
 }
 
 // fileEnvPrims are the D6 prims whose host body needs the packed-String codec

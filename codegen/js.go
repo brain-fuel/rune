@@ -134,6 +134,10 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("const gemmSum = () => m => k => n => A => B => { const a = [], b2 = []; for (let t = A; t.tag === 1; t = t.args[1]) a.push(t.args[0]); for (let t = B; t.tag === 1; t = t.args[1]) b2.push(t.args[0]); const M = Number(m), K = Number(k), N = Number(n); let s = 0; for (let i = 0; i < M; i++) for (let j = 0; j < N; j++) for (let l = 0; l < K; l++) s += a[i * K + l] * b2[l * N + j]; return s; };\n")
 	}
+	// D4 interop: npNorm — the sqrt(sum of squares) floor; py serves numpy.linalg.norm.
+	if usesForeign(p, "npNorm") {
+		b.WriteString("const npNorm = () => xs => { let s = 0; while (xs.tag === 1) { s += xs.args[0] * xs.args[0]; xs = xs.args[1]; } return Math.sqrt(s); };\n")
+	}
 	// D4 interop: npMax — the fold-max reference floor (base 0); py serves real numpy.max.
 	if usesForeign(p, "npMax") {
 		b.WriteString("const npMax = () => xs => { let m = 0, t = xs, first = true; while (t.tag === 1) { if (first || t.args[0] > m) { m = t.args[0]; first = false; } t = t.args[1]; } return m; };\n")

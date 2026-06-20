@@ -35,7 +35,7 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesOS(p) {
 		imports += "\t\"os\"\n"
 	}
-	if usesForeign(p, "fsqrt") {
+	if usesForeign(p, "fsqrt") || usesForeign(p, "npNorm") {
 		imports += "\t\"math\"\n"
 	}
 	b.WriteString("package main\n\nimport (\n" + imports + ")\n\n")
@@ -139,6 +139,10 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	// portable triple-loop reference (native backends use cblas_dgemm).
 	if usesForeign(p, "gemmSum") {
 		b.WriteString("func gemmSum() any { return func(m any) any { return func(k any) any { return func(n any) any { return func(A any) any { return func(B any) any { var a, b2 []float64; for t := A; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); a = append(a, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; for t := B; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); b2 = append(b2, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; M := int(m.(*big.Int).Int64()); K := int(k.(*big.Int).Int64()); N := int(n.(*big.Int).Int64()); s := 0.0; for i := 0; i < M; i++ { for j := 0; j < N; j++ { for l := 0; l < K; l++ { s += a[i*K+l] * b2[l*N+j] } } }; return s } } } } } }\n")
+	}
+	// D4 interop: npNorm — the sqrt(sum of squares) floor; py serves numpy.linalg.norm.
+	if usesForeign(p, "npNorm") {
+		b.WriteString("func npNorm() any { return func(xs any) any { s := 0.0; for t := xs; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); x := mt[\"args\"].([]any)[0].(float64); s += x * x; t = mt[\"args\"].([]any)[1] }; return math.Sqrt(s) } }\n")
 	}
 	// D4 interop: npMax — the fold-max reference floor (base 0); py serves real numpy.max.
 	if usesForeign(p, "npMax") {
