@@ -639,6 +639,46 @@ func TestREPLParseFromString(t *testing.T) {
 	}
 }
 
+// TestREPLStringDisplay is the acceptance test for goal-1: a string literal must
+// READ BACK as a string, not as the packed bignum it desugars to. It covers a plain
+// literal, escape round-tripping (\n \t \" \\), the empty string, multi-byte content
+// past int64 (so the *big.Int decode path is exercised), and that the prelude string
+// ops (strTail, strApp) return values that also fold to literals.
+func TestREPLStringDisplay(t *testing.T) {
+	script := []string{
+		`"hello"`,                            // a plain literal folds to itself
+		`"tab\there\nand\"quote\"\\end"`,     // every escape round-trips
+		`""`,                                 // the empty string (just the sentinel)
+		`"this is a fairly long string well past sixty-four bits of packing"`,
+		`strTail "abc"`,                      // a computed string still folds
+		`strApp "foo" "bar"`,                 // concatenation folds
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		`"hello" : Bytes`,
+		`"tab\there\nand\"quote\"\\end" : Bytes`,
+		`"" : Bytes`,
+		`"this is a fairly long string well past sixty-four bits of packing" : Bytes`,
+		`"bc" : Bytes`,
+		`"foobar" : Bytes`,
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	// The raw packed form must NOT leak through anywhere.
+	if strings.Contains(got, "bytes ") {
+		t.Errorf("packed `bytes <n>` form leaked instead of a string literal\n%s", got)
+	}
+}
+
 // TestREPLBinaryRoundTrip is the acceptance test for the "both / only better" half:
 // a Binary class (encode + a TOTAL decoder) over the packed-Bytes string, and the
 // round-trip decode∘encode = id shown COMPUTING. `encode` dispatches on the tower
@@ -660,7 +700,7 @@ func TestREPLBinaryRoundTrip(t *testing.T) {
 	}
 	got := out.String()
 	wants := []string{
-		"bytes 78388 : Bytes",            // encode 42 (packed "42")
+		`"42" : Bytes`,                   // encode 42 (packed "42", folded to its literal)
 		"ok 42 : Result Whole ParseErr",  // roundWhole 42
 		"ok -3 : Result Int ParseErr",    // roundInt (2-5)
 		"ok -1/3 : Result Frac ParseErr", // roundFrac (1/3-2/3)

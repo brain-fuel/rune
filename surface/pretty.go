@@ -1,8 +1,10 @@
 package surface
 
 import (
+	"math/big"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"goforge.dev/rune/v3/core"
 )
@@ -75,7 +77,11 @@ type DecConfig struct {
 	Int, Ok, Err                  core.Hash
 	// ArithErr variant hashes: the Result error payload is folded to a message.
 	DivByZero, NotIntegral, Negative, NotCounting core.Hash
-	On                                            bool
+	// Bytes is the prelude's packed-String constructor (`bytes : Whole -> Bytes`):
+	// a saturated `bytes <packed numeral>` folds back to a quoted string literal,
+	// the inverse of the lexer's string desugaring. Off when unset.
+	Bytes core.Hash
+	On    bool
 }
 
 // PrettyNat is PrettyWith with a registered `builtin nat` binding: saturated
@@ -242,6 +248,90 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 	return "", false
 }
 
+// wholeBig reads a Whole as a *big.Int — the full-precision sibling of wholeVal,
+// needed because a packed string overflows int64 after a handful of bytes. It sees
+// a compressed NatLit, a folded succ-chain, or a Nat Σ-pair (folds to its first
+// component). Returns ok=false for anything else.
+func (p *printer) wholeBig(t core.Tm) (*big.Int, bool) {
+	if nl, ok := t.(core.NatLit); ok {
+		return nl.N, true
+	}
+	if n, ok := p.numeralOf(t); ok {
+		return big.NewInt(int64(n)), true
+	}
+	if pr, ok := t.(core.Pair); ok {
+		return p.wholeBig(pr.A)
+	}
+	return nil, false
+}
+
+// stringStr folds a saturated `bytes <packed>` application back to the quoted
+// string literal it desugared from — the exact inverse of surface.strLit. The
+// packing is low-byte-first with a 0x01 sentinel on top (n = 256^k + Σ cᵢ·256ⁱ),
+// so the decode peels bytes via mod/div 256 until only the sentinel (n ≤ 1)
+// remains. Folds ONLY when the bytes are valid UTF-8 (so the literal round-trips);
+// otherwise the value prints structurally as `bytes <n>` and stays honest.
+func (p *printer) stringStr(t core.Tm) (string, bool) {
+	if !p.dec.On || p.dec.Bytes == (core.Hash{}) {
+		return "", false
+	}
+	head, args := spineExpl(t)
+	ref, ok := head.(core.Ref)
+	if !ok || ref.Hash != p.dec.Bytes || len(args) != 1 {
+		return "", false
+	}
+	n, ok := p.wholeBig(args[0])
+	if !ok || n.Sign() < 0 {
+		return "", false
+	}
+	acc := new(big.Int).Set(n)
+	c256 := big.NewInt(256)
+	one := big.NewInt(1)
+	mod := new(big.Int)
+	var bs []byte
+	for acc.Cmp(one) > 0 {
+		acc.DivMod(acc, c256, mod)
+		bs = append(bs, byte(mod.Int64()))
+	}
+	// A well-formed packed string ends on exactly the sentinel (acc == 1); anything
+	// else (acc == 0, i.e. no sentinel) is not a string we produced — print raw.
+	if acc.Cmp(one) != 0 {
+		return "", false
+	}
+	if !utf8.Valid(bs) {
+		return "", false
+	}
+	return quoteString(string(bs)), true
+}
+
+// quoteString renders a Go string as a Rune string literal, escaping exactly the
+// characters the lexer's scanString decodes (\n \t \r \\ \" \0) so the result
+// re-lexes to the same bytes.
+func quoteString(s string) string {
+	var sb strings.Builder
+	sb.WriteByte('"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '"':
+			sb.WriteString("\\\"")
+		case '\\':
+			sb.WriteString("\\\\")
+		case '\n':
+			sb.WriteString("\\n")
+		case '\t':
+			sb.WriteString("\\t")
+		case '\r':
+			sb.WriteString("\\r")
+		case 0:
+			sb.WriteString("\\0")
+		default:
+			sb.WriteByte(c)
+		}
+	}
+	sb.WriteByte('"')
+	return sb.String()
+}
+
 // arithErrStr renders an ArithErr value (a Result's error payload) as a human
 // message — the Show boundary for the prelude's arithmetic-error union. Each
 // constructor carries its operands; the message reads them back out. Returns
@@ -382,6 +472,11 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		}
 		// A prelude fraction/decimal result folds to positional notation.
 		if s, ok := p.decimalStr(x); ok {
+			sb.WriteString(s)
+			return
+		}
+		// A packed `bytes <n>` folds back to its quoted string literal.
+		if s, ok := p.stringStr(x); ok {
 			sb.WriteString(s)
 			return
 		}

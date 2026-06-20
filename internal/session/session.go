@@ -701,6 +701,7 @@ func (s *Session) decConfig() surface.DecConfig {
 		NotIntegral: s.refs["notIntegral"],
 		Negative:    s.refs["negative"],
 		NotCounting: s.refs["notCounting"],
+		Bytes:       s.refs["bytes"],
 		On:          ok1 && ok2 && ok3 && ok4 && ok5,
 	}
 }
