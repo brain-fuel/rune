@@ -1,0 +1,113 @@
+-- Chapter 312 — membership distributes over append (proven tier).
+--
+-- x is in a concatenation iff it is in one of the parts: elem x (xs ++ ys) = elem x xs ||
+-- elem x ys. The cons step re-associates with associativity of or. The boolean analogue of
+-- the count homomorphism (ch310). Proof-only.
+--
+--   elemAppend : (x : Nat) -> (xs ys : NatList)
+--              -> Eq Bool (elem x (append xs ys)) (orB (elem x xs) (elem x ys))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+          Eq Bool (orB (orB a b) c) (orB a (orB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB (orB x b) c) (orB x (orB b c)) end) refl refl a
+  end
+end
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+elem : Nat -> NatList -> Bool is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Bool end)
+      false
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is orB (beqNat x h) ih end)
+      xs
+  end
+end
+
+orFix : Bool -> Bool -> Bool is fn (w : Bool) (z : Bool) is orB z w end end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  elem x (append nnil ys) = elem x ys = orB false (elem x ys)              -> refl
+--   ncons h t: elem x (append (h::t) ys) = orB (beqNat x h) (elem x (append t ys))
+--          cong (orB (beqNat x h)) IH : = orB (beqNat x h) (orB (elem x t) (elem x ys))
+--          sym (orAssoc ...)           : = orB (orB (beqNat x h) (elem x t)) (elem x ys)
+elemAppend : (x : Nat) -> (xs : NatList) -> (ys : NatList) ->
+             Eq Bool (elem x (append xs ys)) (orB (elem x xs) (elem x ys)) is
+  fn (x : Nat) (xs : NatList) (ys : NatList) is
+    NatListElim
+      (fn (z : NatList) is Eq Bool (elem x (append z ys)) (orB (elem x z) (elem x ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (elem x (append rest ys)) (orB (elem x rest) (elem x ys))) is
+         transEq Bool
+           (orB (beqNat x h) (elem x (append rest ys)))
+           (orB (beqNat x h) (orB (elem x rest) (elem x ys)))
+           (orB (orB (beqNat x h) (elem x rest)) (elem x ys))
+           (cong Bool Bool (orB (beqNat x h)) (elem x (append rest ys)) (orB (elem x rest) (elem x ys)) ih)
+           (symEq Bool
+              (orB (orB (beqNat x h) (elem x rest)) (elem x ys))
+              (orB (beqNat x h) (orB (elem x rest) (elem x ys)))
+              (orAssoc (beqNat x h) (elem x rest) (elem x ys))) end)
+      xs
+  end
+end

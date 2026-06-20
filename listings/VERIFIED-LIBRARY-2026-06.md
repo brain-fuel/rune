@@ -84,6 +84,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
   via `sumL acc xs = acc + sum xs` — fold-direction independence for the additive monoid.
 - `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
 - `ch288_elem_snoc` — appending x makes it a member: `elem x (snoc xs x) = true`.
+- `ch312_elem_append` — membership distributes over append: `elem x (xs++ys) = elem x xs || elem x ys`.
 - `ch309_count_snoc` — appending x increments its count: `countOccur x (snoc xs x) = succ (countOccur x xs)`.
 - `ch310_count_append` — count is additive over append: `countOccur x (xs++ys) = countOccur x xs + countOccur x ys` (multiset homomorphism).
 - `ch311_count_replicate` — `countOccur x (replicate n x) = n` (n copies contain x n times).
