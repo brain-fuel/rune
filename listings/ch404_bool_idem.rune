@@ -1,0 +1,30 @@
+-- Chapter 404 — and/or are idempotent (proven tier).
+--
+-- andB a a = a and orB a a = a — the idempotence laws of the boolean lattice. By case
+-- analysis. Proof-only.
+--
+--   andIdem : (a : Bool) -> Eq Bool (andB a a) a
+--   orIdem  : (a : Bool) -> Eq Bool (orB  a a) a
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+andIdem : (a : Bool) -> Eq Bool (andB a a) a is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (andB x x) x end) refl refl a end
+end
+
+orIdem : (a : Bool) -> Eq Bool (orB a a) a is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (orB x x) x end) refl refl a end
+end
