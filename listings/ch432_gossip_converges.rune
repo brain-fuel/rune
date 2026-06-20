@@ -1,0 +1,93 @@
+-- Chapter 432, gossip converges: a synchronous round reaches agreement (E3/E4).
+--
+-- The CRDT corpus proves SAFETY (replicas that absorbed the same updates agree, and
+-- never disagree once merged). This is the LIVENESS companion: that gossip actually MAKES
+-- progress. Model one synchronous all-to-all round over three replicas holding s0, s1, s2:
+-- each replica merges in the other two. We prove every replica ends the round holding the
+-- IDENTICAL state - convergence is reached, not merely possible - for ANY merge that is a
+-- join (commutative + associative, taken as hypotheses, as ch423/427).
+--
+--   r1Canonical/r2Canonical : replicas 1 and 2 end equal to replica 0's state.
+--   roundConverges          : so all three replicas agree after the round.
+--
+-- The simulator's `Stabilize` checks this operationally (a fixpoint under fair gossip);
+-- this proves it. Proof-only, purely equational.
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (w : A) is Eq A w x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- replica 0 ends the round holding mrg (mrg s0 s1) s2 - take that as the canonical state.
+-- replica 1 holds mrg (mrg s1 s0) s2; it equals the canonical state by commuting s1, s0.
+r1Canonical : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (s0 : S) -> (s1 : S) -> (s2 : S) ->
+    Eq S (mrg (mrg s1 s0) s2) (mrg (mrg s0 s1) s2) is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (s0 : S) (s1 : S) (s2 : S) is
+    cong S S (fn (w : S) is mrg w s2 end) (mrg s1 s0) (mrg s0 s1) (comm s1 s0)
+  end
+end
+
+-- replica 2 holds mrg (mrg s2 s0) s1; it equals the canonical state by commuting and
+-- re-associating (the genuinely multi-step case).
+r2Canonical : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (s0 : S) -> (s1 : S) -> (s2 : S) ->
+    Eq S (mrg (mrg s2 s0) s1) (mrg (mrg s0 s1) s2) is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (s0 : S) (s1 : S) (s2 : S) is
+    transEq S (mrg (mrg s2 s0) s1) (mrg (mrg s0 s2) s1) (mrg (mrg s0 s1) s2)
+      (cong S S (fn (w : S) is mrg w s1 end) (mrg s2 s0) (mrg s0 s2) (comm s2 s0))
+      (transEq S (mrg (mrg s0 s2) s1) (mrg s0 (mrg s2 s1)) (mrg (mrg s0 s1) s2)
+         (assoc s0 s2 s1)
+         (transEq S (mrg s0 (mrg s2 s1)) (mrg s0 (mrg s1 s2)) (mrg (mrg s0 s1) s2)
+            (cong S S (fn (w : S) is mrg s0 w end) (mrg s2 s1) (mrg s1 s2) (comm s2 s1))
+            (symEq S (mrg (mrg s0 s1) s2) (mrg s0 (mrg s1 s2)) (assoc s0 s1 s2))))
+  end
+end
+
+-- so after one round all three replicas hold the same state: replica 1 agrees with
+-- replica 0 (here stated the other way, by symmetry) and replica 2 agrees with replica 0.
+-- Convergence is REACHED in a single synchronous round.
+roundConverges01 : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (s0 : S) -> (s1 : S) -> (s2 : S) ->
+    Eq S (mrg (mrg s0 s1) s2) (mrg (mrg s1 s0) s2) is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (s0 : S) (s1 : S) (s2 : S) is
+    symEq S (mrg (mrg s1 s0) s2) (mrg (mrg s0 s1) s2) (r1Canonical S mrg comm s0 s1 s2)
+  end
+end
+
+roundConverges02 : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (s0 : S) -> (s1 : S) -> (s2 : S) ->
+    Eq S (mrg (mrg s0 s1) s2) (mrg (mrg s2 s0) s1) is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (s0 : S) (s1 : S) (s2 : S) is
+    symEq S (mrg (mrg s2 s0) s1) (mrg (mrg s0 s1) s2) (r2Canonical S mrg comm assoc s0 s1 s2)
+  end
+end

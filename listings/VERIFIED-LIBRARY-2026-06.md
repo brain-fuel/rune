@@ -364,6 +364,11 @@ equation).
   update never moves a replica down the lattice), via `maxIdem` + `maxSuccR` + `congGC`.
   With ch72's join laws this is the full state-based convergence criterion (join-semilattice
   of states + monotone updates); the linter checks observationally what this proves.
+- `ch432_gossip_converges`: the LIVENESS companion to the safety corpus - gossip makes
+  progress. Model one synchronous all-to-all round over three replicas; `r1Canonical`/
+  `r2Canonical` + `roundConverges01/02` prove all three end holding the IDENTICAL state
+  (convergence reached, not just possible) for any commutative+associative merge. Proves
+  what the simulator's `Stabilize` checks operationally. Purely equational.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
