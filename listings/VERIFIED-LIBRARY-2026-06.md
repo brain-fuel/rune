@@ -41,6 +41,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch238_map_fusion` — `mapList g (mapList f xs) = mapList (g . f) xs`.
 - `ch295_map_id` — list functor identity: `mapList id xs = xs` (with ch238, the functor laws).
 - `ch239_sum_homomorphism` — `sum (xs ++ ys) = sum xs + sum ys`.
+- `ch297_prod_append` — `prod (xs ++ ys) = prod xs * prod ys` (product homomorphism).
 - `ch240_map_append` — `mapList f (xs ++ ys) = mapList f xs ++ mapList f ys`.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
