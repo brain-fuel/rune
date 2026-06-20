@@ -1,0 +1,174 @@
+// Package sim is the "better-than-Winglang" simulator (E4 / C-INFRA), the first
+// slice of the infra-as-code surface. It is SHADOW TOOLING, a consumer of the
+// kernel, never part of core/store: it drives a replicated protocol forward by
+// folding the protocol's OWN verified Rune operations (merge, the local actions,
+// the observable value) under a pluggable fault policy, and surfaces each step as
+// an Event the REPL/CLI can print.
+//
+// The point (Lambert's teachable gate): the SAME verified source that carries the
+// convergence proof is what the simulator runs, so a learner watches replicas
+// diverge under a network partition and then re-converge after it heals, and the
+// simulator DISTINGUISHES a convergent protocol (a CvRDT whose merge is a join)
+// from a non-convergent one (a last-writer-wins register), with no appeal to the
+// proof, just the observed behaviour.
+package sim
+
+import (
+	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/internal/session"
+	"goforge.dev/rune/v3/surface"
+)
+
+// Event is one observable moment of a run, for printing or assertion.
+type Event struct {
+	Step    int
+	Kind    string // "local" | "gossip" | "drop" | "observe"
+	Replica int    // the replica acted on (-1 for whole-system events)
+	Peer    int    // the gossip peer (-1 when not applicable)
+	Detail  string // a human note, e.g. the observed value
+}
+
+// FaultPolicy perturbs the network. Partitioned reports whether, at a given step,
+// replica i cannot hear from replica j (so anti-entropy gossip i<-j is dropped).
+// A nil Partitioned is a healthy network.
+type FaultPolicy struct {
+	Partitioned func(step, i, j int) bool
+}
+
+func (p FaultPolicy) cut(step, i, j int) bool {
+	return p.Partitioned != nil && p.Partitioned(step, i, j)
+}
+
+// Round is one simulated time step: each replica optionally performs a local
+// action (a unary Rune function applied to its own state), then, if Gossip is set,
+// an anti-entropy round merges every replica's state with each peer it can hear.
+type Round struct {
+	Local  map[int]string // replica index -> unary op function name (the local action)
+	Gossip bool
+}
+
+// Run is the outcome of a simulation: the event log plus the final observed value
+// at each replica (pretty-printed through the protocol's `value` function).
+type Run struct {
+	Events []Event
+	Final  []string
+}
+
+// Converged reports whether every replica ended at the same observed value.
+func (r *Run) Converged() bool {
+	for i := 1; i < len(r.Final); i++ {
+		if r.Final[i] != r.Final[0] {
+			return false
+		}
+	}
+	return len(r.Final) > 0
+}
+
+// Simulate drives n replicas through the given rounds. init is a closed Rune
+// expression for a replica's initial state; mergeFn is a binary join, valueFn a
+// unary observable, all resolved from the session. Every state transition is the
+// kernel normalizing the protocol's own terms, so the simulator runs exactly the
+// verified source.
+func Simulate(sess *session.Session, init, mergeFn, valueFn string, n int, rounds []Round, pol FaultPolicy) (*Run, error) {
+	d := &driver{sess: sess}
+	mergeRef, err := d.ref(mergeFn)
+	if err != nil {
+		return nil, err
+	}
+	valueRef, err := d.ref(valueFn)
+	if err != nil {
+		return nil, err
+	}
+	state0, err := d.eval(init)
+	if err != nil {
+		return nil, err
+	}
+	states := make([]core.Tm, n)
+	for i := range states {
+		states[i] = state0
+	}
+
+	run := &Run{}
+	observe := func(step int) {
+		for i := 0; i < n; i++ {
+			run.Events = append(run.Events, Event{
+				Step: step, Kind: "observe", Replica: i, Peer: -1,
+				Detail: sess.Pretty(d.apply1(valueRef, states[i])),
+			})
+		}
+	}
+
+	for step, rd := range rounds {
+		// Local actions first.
+		for i := 0; i < n; i++ {
+			fn, ok := rd.Local[i]
+			if !ok {
+				continue
+			}
+			ref, err := d.ref(fn)
+			if err != nil {
+				return nil, err
+			}
+			states[i] = d.apply1(ref, states[i])
+			run.Events = append(run.Events, Event{Step: step, Kind: "local", Replica: i, Peer: -1, Detail: fn})
+		}
+		// Anti-entropy gossip: snapshot, then each replica merges in every peer it
+		// can hear (a partitioned peer's update is dropped).
+		if rd.Gossip {
+			snap := make([]core.Tm, n)
+			copy(snap, states)
+			for i := 0; i < n; i++ {
+				for j := 0; j < n; j++ {
+					if i == j {
+						continue
+					}
+					if pol.cut(step, i, j) {
+						run.Events = append(run.Events, Event{Step: step, Kind: "drop", Replica: i, Peer: j})
+						continue
+					}
+					states[i] = d.apply2(mergeRef, states[i], snap[j])
+					run.Events = append(run.Events, Event{Step: step, Kind: "gossip", Replica: i, Peer: j})
+				}
+			}
+		}
+		observe(step)
+	}
+
+	run.Final = make([]string, n)
+	for i := range states {
+		run.Final[i] = sess.Pretty(d.apply1(valueRef, states[i]))
+	}
+	return run, nil
+}
+
+// driver bundles the session-evaluation helpers the simulator uses to run Rune
+// terms: resolving a name to its reference, evaluating a closed source expression,
+// and applying a function reference to already-normalized argument terms.
+type driver struct {
+	sess *session.Session
+}
+
+func (d *driver) ref(name string) (core.Tm, error) {
+	return d.sess.ResolveExpr(surface.EVar{Name: name})
+}
+
+func (d *driver) eval(src string) (core.Tm, error) {
+	e, err := d.sess.ParseSrcExpr(src)
+	if err != nil {
+		return nil, err
+	}
+	tm, _, err := d.sess.ElabExpr(e)
+	if err != nil {
+		return nil, err
+	}
+	return d.sess.NormalizeExpr(tm), nil
+}
+
+func (d *driver) apply1(f, x core.Tm) core.Tm {
+	return d.sess.NormalizeExpr(core.App{Fn: f, Arg: x, Icit: core.Expl})
+}
+
+func (d *driver) apply2(f, x, y core.Tm) core.Tm {
+	inner := core.App{Fn: f, Arg: x, Icit: core.Expl}
+	return d.sess.NormalizeExpr(core.App{Fn: inner, Arg: y, Icit: core.Expl})
+}
