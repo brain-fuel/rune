@@ -1,0 +1,115 @@
+-- Chapter 304 — <= is monotone in the upper bound: a <= b implies a <= b + c (proven tier).
+--
+-- Enlarging the bound by any amount preserves a <= bound. By induction on the added amount
+-- c: the base transports the hypothesis along (b + 0 = b); the step weakens once (lebSuccR)
+-- and transports along (b + succ k = succ (b + k)). Proof-only.
+--
+--   lebAddMonoR : (a b : Nat) -> leb a b = true -> (c : Nat) -> leb a (natAdd b c) = true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+everythingTrue : Eq Bool false true -> (x : Bool) -> Eq Bool x true is
+  fn (h : Eq Bool false true) (x : Bool) is
+    BoolElim (fn (z : Bool) is Eq Bool z true end) refl h x
+  end
+end
+
+lebSuccR : (a : Nat) -> (b : Nat) -> Eq Bool (leb a b) true -> Eq Bool (leb a (succ b)) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (leb x b) true -> Eq Bool (leb x (succ b)) true end)
+      (fn (b : Nat) (h : Eq Bool (leb zero b) true) is refl end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> Eq Bool (leb k b) true -> Eq Bool (leb k (succ b)) true) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is
+                      Eq Bool (leb (succ k) y) true -> Eq Bool (leb (succ k) (succ y)) true end)
+             (fn (h : Eq Bool (leb (succ k) zero) true) is everythingTrue h (leb (succ k) (succ zero)) end)
+             (fn (j : Nat)
+                 (ihj : Eq Bool (leb (succ k) j) true -> Eq Bool (leb (succ k) (succ j)) true) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) true) is ih j h end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addZeroR : (n : Nat) -> Eq Nat (natAdd n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k zero) k) is cong Nat Nat succ (natAdd k zero) k ih end)
+      n
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+-- THE MONOTONICITY, by induction on c (a, b, the hypothesis h all fixed):
+--   c=0:      transport h along (b + 0 = b)
+--   c=succ k: weaken the IH once (lebSuccR), then transport along (b + succ k = succ (b + k))
+lebAddMonoR : (a : Nat) -> (b : Nat) -> Eq Bool (leb a b) true ->
+              (c : Nat) -> Eq Bool (leb a (natAdd b c)) true is
+  fn (a : Nat) (b : Nat) (h : Eq Bool (leb a b) true) (c : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (leb a (natAdd b x)) true end)
+      (subst Nat b (natAdd b zero) (symEq Nat (natAdd b zero) b (addZeroR b))
+         (fn (z : Nat) is Eq Bool (leb a z) true end) h)
+      (fn (k : Nat) (ih : Eq Bool (leb a (natAdd b k)) true) is
+         subst Nat (succ (natAdd b k)) (natAdd b (succ k))
+           (symEq Nat (natAdd b (succ k)) (succ (natAdd b k)) (addSuccR b k))
+           (fn (z : Nat) is Eq Bool (leb a z) true end)
+           (lebSuccR a (natAdd b k) ih) end)
+      c
+  end
+end
