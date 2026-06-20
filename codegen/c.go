@@ -607,6 +607,11 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value npDot_c1(Value xs, Value* env) { (void)env; Value c = mkclo(&npDot_c2, 1); clo_set(c, 0, xs); return c; }\n")
 		b.WriteString("static Value npDot(void) { return mkclo(&npDot_c1, 0); }\n")
 	}
+	// D4 interop: npMean — hand sum/count (no BLAS); py serves real numpy.mean.
+	if usesForeign(p, "npMean") {
+		b.WriteString("static Value npMean_c(Value xs, Value* env) { (void)env; double s = 0; int n = 0; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { s += float_val(obj(xs)->slots[0]); n++; xs = obj(xs)->slots[1]; } return mkfloat(n > 0 ? s / n : 0); }\n")
+		b.WriteString("static Value npMean(void) { return mkclo(&npMean_c, 0); }\n")
+	}
 	// MATRIX BLAS: gemmSum m k n A B marshals two flat row-major Rune FLists into C
 	// double[]s, runs cblas_dgemm (C = A·B, A is m×k, B is k×n), and returns the SUM of
 	// all entries of the product as a scalar — a real dgemm + 2-D marshalling without

@@ -281,6 +281,11 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value npDot_c1(Value xs, Value* env) { (void)env; Value c = rt_mkclo(&npDot_c2, 1); rt_clo_set(c, 0, xs); return c; }\n")
 		b.WriteString("Value npDot(void) { return rt_mkclo(&npDot_c1, 0); }\n")
 	}
+	// D4 interop: npMean — hand sum/count (no BLAS); py serves real numpy.mean.
+	if usesForeign(p, "npMean") {
+		b.WriteString("static Value npMean_c(Value xs, Value* env) { (void)env; double s = 0; int n = 0; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { s += float_val(obj(xs)->slots[0]); n++; xs = obj(xs)->slots[1]; } return mkfloat(n > 0 ? s / n : 0); }\n")
+		b.WriteString("Value npMean(void) { return rt_mkclo(&npMean_c, 0); }\n")
+	}
 	// MATRIX BLAS: gemmSum m k n A B — cblas_dgemm over two flat row-major FLists,
 	// returning the SUM of all product entries (scalar observable; no host→Rune matrix).
 	if usesForeign(p, "gemmSum") {

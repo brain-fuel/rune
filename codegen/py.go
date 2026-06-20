@@ -120,6 +120,10 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npDot") {
 		b.WriteString("def npDot():\n    import numpy as np\n    def _np(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return np.array(a, dtype=float)\n    return lambda xs: lambda ys: float(np.dot(_np(xs), _np(ys)))\n")
 	}
+	// D4 interop: npMean binds REAL numpy.mean on the py backend (no BLAS needed).
+	if usesForeign(p, "npMean") {
+		b.WriteString("def npMean():\n    import numpy as np\n    def _m(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.mean(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _m(xs)\n")
+	}
 	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
 	// portable triple-loop reference (native backends use cblas_dgemm).
 	if usesForeign(p, "gemmSum") {

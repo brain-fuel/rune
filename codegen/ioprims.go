@@ -57,7 +57,8 @@ var ioPrims = map[string]bool{
 	// backends OpenBLAS (cblas_ddot), the rest a portable reference floor. Parity is of
 	// the CONTRACT, not the library — the guard checks each impl against an in-language
 	// reference, so a divergent third-party result is BLAMED, never trusted blindly.
-	"npDot": true, // npDot      xs ys          : FList -> FList -> Float (NumPy on py; OpenBLAS on C/LLVM; reference elsewhere)
+	"npDot":  true, // npDot      xs ys          : FList -> FList -> Float (NumPy on py; OpenBLAS on C/LLVM; reference elsewhere)
+	"npMean": true, // npMean     xs             : FList -> Float (numpy.mean on py; hand sum/count elsewhere — no BLAS)
 }
 
 // fileEnvPrims are the D6 prims whose host body needs the packed-String codec

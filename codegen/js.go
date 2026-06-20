@@ -121,6 +121,10 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npDot") {
 		b.WriteString("const npDot = () => xs => ys => { let s = 0; while (xs.tag === 1 && ys.tag === 1) { s += xs.args[0] * ys.args[0]; xs = xs.args[1]; ys = ys.args[1]; } return s; };\n")
 	}
+	// D4 interop: npMean — the reference floor (hand sum/count); py serves real numpy.mean.
+	if usesForeign(p, "npMean") {
+		b.WriteString("const npMean = () => xs => { let s = 0, n = 0; while (xs.tag === 1) { s += xs.args[0]; n++; xs = xs.args[1]; } return n > 0 ? s / n : 0; };\n")
+	}
 	// Matrix product sum: flat row-major A (m×k) and B (k×n) as Rune FLists; sum all
 	// entries of A·B. The native backends route this through cblas_dgemm; on the source
 	// backends it is the portable triple-loop reference.

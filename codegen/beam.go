@@ -134,6 +134,10 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npDot") {
 		b.WriteString("ff_npDot() -> fun(Xs) -> fun(Ys) -> (fun D(A, B, Acc) -> case {A, B} of {{c, 1, _, [X, Xr]}, {c, 1, _, [Y, Yr]}} -> D(Xr, Yr, Acc + X * Y); _ -> Acc end end)(Xs, Ys, 0.0) end end.\n")
 	}
+	// D4 interop: npMean — the reference floor (hand sum/count); py serves real numpy.mean.
+	if usesForeign(p, "npMean") {
+		b.WriteString("ff_npMean() -> fun(Xs) -> (fun M(L, S, N) -> case L of {c, 1, _, [X, Xr]} -> M(Xr, S + X, N + 1); _ -> case N of 0 -> 0.0; _ -> S / N end end end)(Xs, 0.0, 0) end.\n")
+	}
 	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
 	// portable triple-loop reference (native backends use cblas_dgemm). Col flattens an
 	// FList to an Erlang (1-indexed) list; the comprehension sums A[i*K+P]·B[P*N+J].
