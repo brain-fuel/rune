@@ -56,6 +56,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch244_tree_mirror` — `mirror (mirror t) = t`.
 - `ch246_tree_size_mirror` — `size (mirror t) = size t` (uses addComm).
 - `ch260_flatten_size` — `len (flatten t) = size t` (inorder length = size).
+- `ch267_tree_functor` — tree functor: `tmap id = id` + `size (tmap f t) = size t`.
 
 ## Proven tier — arithmetic & order
 
