@@ -1,26 +1,127 @@
--- A grow-only counter (G-Counter CvRDT) over two replicas, in the convention the
--- `rune simulate` verb expects: init / merge / value / op0 / op1.
+-- examples/gcounter.rune: a G-Counter CvRDT, PROVED convergent AND simulated from
+-- ONE verified source (the E4 "better than Winglang" thesis). Two replicas each
+-- count locally; merge is the pointwise MAXIMUM (the CvRDT join) and the observed
+-- value is their sum.
 --
--- merge is pairwise max, a join (commutative, associative, idempotent), so the
--- counter converges under drop / duplicate / reorder / partition. Run it:
+-- PREFLIGHT (checked when this file loads): merge is commutative, idempotent, and
+-- associative (mergeComm / mergeIdem / mergeAssoc), the join-semilattice laws that
+-- make it converge, each proven by induction over the ambient `Eq`/`refl`/`subst`.
 --
+-- INFLIGHT (what the simulator folds forward): init / merge / value / op0 / op1.
 --   rune simulate examples/gcounter.rune 2
---
--- and watch the two replicas diverge while the network is cut, then re-converge to
--- the correct total once it heals.
+-- drives it under a partition fault policy: the replicas diverge while the network
+-- is cut, then re-converge to the correct total once it heals. Same source, proved
+-- and run.
 
-data Nat : U is zero : Nat | succ : Nat -> Nat end
-data GC : U is gc : Nat -> Nat -> GC end
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
 
+-- addition (the observed value combines the two replicas' counts).
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- MAX, the CRDT join on a single slot: max 0 n = n, max (succ m) 0 = succ m,
+-- max (succ m) (succ n) = succ (max m n). Recursion on the first argument (IH is max m), casing
+-- the second. All three equations hold DEFINITIONALLY (the eliminators compute).
 max : Nat -> Nat -> Nat is
-  fn (a : Nat) is
-    NatElim (fn (w : Nat) is Nat -> Nat end)
-      (fn (b : Nat) is b end)
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is n end)
       (fn (k : Nat) (ih : Nat -> Nat) is
-         fn (b : Nat) is
-           NatElim (fn (w : Nat) is Nat end)
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end)
              (succ k)
              (fn (j : Nat) (ihj : Nat) is succ (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- symmetry and a succ-congruence over the ambient Eq, by `subst` (Leibniz transport).
+symNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat b a is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat z a end) (refl a)
+  end
+end
+
+congSucc : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) (refl (succ a))
+  end
+end
+
+-- max m 0 = m, by `refl` on each constructor (both equations are definitional: max 0 0 ~> 0 and
+-- max (succ k) 0 ~> succ k), assembled by induction so it holds for every m.
+maxZeroR : (m : Nat) -> Eq Nat (max m zero) m is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k zero) k) is refl (succ k) end)
+      m
+  end
+end
+
+-- MAX IS COMMUTATIVE, the heart of CRDT convergence (the join is order-independent). Double
+-- induction: m = 0 uses `max n 0 = n` (maxZeroR, flipped by symNat); the succ/succ step is
+-- succ-congruence on the IH.
+maxComm : (m : Nat) -> (n : Nat) -> Eq Nat (max m n) (max n m) is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Nat (max x n) (max n x) end)
+      (fn (n : Nat) is symNat (max n zero) n (maxZeroR n) end)
+      (fn (k : Nat) (ih : (n : Nat) -> Eq Nat (max k n) (max n k)) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Eq Nat (max (succ k) x) (max x (succ k)) end)
+             (refl (succ k))
+             (fn (j : Nat) (ihj : Eq Nat (max (succ k) j) (max j (succ k))) is
+                congSucc (max k j) (max j k) (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- MAX IS IDEMPOTENT, `max a a = a`. By induction: base `max 0 0 ~> 0`; step `max (succ k)
+-- (succ k) ~> succ (max k k)`, succ-congruence on the IH. (Join idempotence: merging a replica
+-- with itself is a no-op.)
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x x) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k k) k) is congSucc (max k k) k ih end)
+      a
+  end
+end
+
+-- MAX IS ASSOCIATIVE, `max (max a b) c = max a (max b c)`. Triple induction; every boundary
+-- (any argument 0) is `refl` by the definitional max equations, and the succ/succ/succ case is
+-- succ-congruence on the outer IH at the predecessors. (Join associativity: gossip grouping is
+-- irrelevant.)
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (max (max a b) c) (max a (max b c)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (max (max x b) c) (max x (max b c)) end)
+      (fn (b : Nat) (c : Nat) is refl (max b c) end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (max (max k b) c) (max k (max b c))) is
+         fn (b : Nat) is
+           NatElim (fn (x : Nat) is (c : Nat) -> Eq Nat (max (max (succ k) x) c) (max (succ k) (max x c)) end)
+             (fn (c : Nat) is refl (max (succ k) c) end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (max (max (succ k) j) c) (max (succ k) (max j c))) is
+                fn (c : Nat) is
+                  NatElim (fn (x : Nat) is Eq Nat (max (max (succ k) (succ j)) x) (max (succ k) (max (succ j) x)) end)
+                    (refl (succ (max k j)))
+                    (fn (i : Nat) (ihc : Eq Nat (max (max (succ k) (succ j)) i) (max (succ k) (max (succ j) i))) is
+                       congSucc (max (max k j) i) (max k (max j i)) (ih j i) end)
+                    c
+                end
+              end)
              b
          end
        end)
@@ -28,19 +129,122 @@ max : Nat -> Nat -> Nat is
   end
 end
 
-add : Nat -> Nat -> Nat is
-  fn (a : Nat) (b : Nat) is
-    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+-- A REPLICATED COUNTER: two replicas' local counts. value = their sum; merge = pointwise max.
+data GC : U is
+  gc : Nat -> Nat -> GC
+end
+
+value : GC -> Nat is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is Nat end) (fn (a : Nat) (b : Nat) is add a b end) g
   end
 end
 
-g0 : GC -> Nat is fn (s : GC) is GCElim (fn (w : GC) is Nat end) (fn (a : Nat) (b : Nat) is a end) s end end
-g1 : GC -> Nat is fn (s : GC) is GCElim (fn (w : GC) is Nat end) (fn (a : Nat) (b : Nat) is b end) s end end
+merge : GC -> GC -> GC is
+  fn (g : GC) (h : GC) is
+    GCElim (fn (x : GC) is GC end)
+      (fn (a : Nat) (b : Nat) is
+         GCElim (fn (y : GC) is GC end)
+           (fn (c : Nat) (d : Nat) is gc (max a c) (max b d) end)
+           h
+       end)
+      g
+  end
+end
+
+-- GC-congruence in both slots, by two `subst`s.
+congGC : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> Eq Nat a c -> Eq Nat b d -> Eq GC (gc a b) (gc c d) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e1 : Eq Nat a c) (e2 : Eq Nat b d) is
+    subst Nat a c e1 (fn (x : Nat) is Eq GC (gc a b) (gc x d) end)
+      (subst Nat b d e2 (fn (y : Nat) is Eq GC (gc a b) (gc a y) end)
+         (refl (gc a b)))
+  end
+end
+
+-- CONVERGENCE: merge is COMMUTATIVE, gossiping in either order reaches the same state, so all
+-- replicas converge (eventual consistency). By `maxComm` on each slot + GC-congruence.
+mergeComm : (g : GC) -> (h : GC) -> Eq GC (merge g h) (merge h g) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> Eq GC (merge x h) (merge h x) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is Eq GC (merge (gc a b) y) (merge y (gc a b)) end)
+             (fn (c : Nat) (d : Nat) is
+                congGC (max a c) (max b d) (max c a) (max d b)
+                  (maxComm a c) (maxComm b d) end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+-- MERGE IS IDEMPOTENT, `merge g g = g` (re-merging a replica with itself is a no-op). By
+-- `maxIdem` on each slot + GC-congruence.
+mergeIdem : (g : GC) -> Eq GC (merge g g) g is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is Eq GC (merge x x) x end)
+      (fn (a : Nat) (b : Nat) is congGC (max a a) (max b b) a b (maxIdem a) (maxIdem b) end)
+      g
+  end
+end
+
+-- MERGE IS ASSOCIATIVE, `merge (merge g h) k = merge g (merge h k)` (gossip grouping is
+-- irrelevant). By `maxAssoc` on each slot + GC-congruence.
+mergeAssoc : (g : GC) -> (h : GC) -> (k : GC)
+   -> Eq GC (merge (merge g h) k) (merge g (merge h k)) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> (k : GC) -> Eq GC (merge (merge x h) k) (merge x (merge h k)) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is (k : GC) -> Eq GC (merge (merge (gc a b) y) k) (merge (gc a b) (merge y k)) end)
+             (fn (c : Nat) (d : Nat) is
+                fn (k : GC) is
+                  GCElim (fn (z : GC) is Eq GC (merge (merge (gc a b) (gc c d)) z) (merge (gc a b) (merge (gc c d) z)) end)
+                    (fn (e : Nat) (ff : Nat) is
+                       congGC (max (max a c) e) (max (max b d) ff) (max a (max c e)) (max b (max d ff))
+                         (maxAssoc a c e) (maxAssoc b d ff) end)
+                    k
+                end
+              end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+-- So (GC, merge) is a JOIN-SEMILATTICE, commutative (mergeComm), idempotent (mergeIdem),
+-- associative (mergeAssoc), exactly the state-based CRDT (CvRDT) correctness criterion. The
+-- replicated counter is a VERIFIED convergent replicated data type.
+
+-- THE DEPLOYED SCENARIO: replica A counts 2 in its slot (gc 2 0), replica B counts 1 in its slot
+-- (gc 0 1). After gossip (merge), both hold (gc 2 1), and the observed value is 3. `converged`
+-- DEPLOYS + RUNS on a real backend, printing the succ-chain for 3. The certificate rides along:
+-- `convergedCorrect` is `refl`, and `mergeComm` proves the result is gossip-order-independent.
+replicaA : GC is gc (succ (succ zero)) zero end
+replicaB : GC is gc zero (succ zero) end
+
+converged : Nat is value (merge replicaA replicaB) end
+
+convergedCorrect : Eq Nat converged (succ (succ (succ zero))) is
+  refl (succ (succ (succ zero)))
+end
+
+-- ===== The infra-as-code surface (E4): the SAME source `rune simulate` runs =====
+-- These three defs let `rune simulate examples/gcounter.rune 2` drive the protocol
+-- under a fault policy. So this single file is PREFLIGHT (the convergence proofs
+-- above, checked when it loads) and INFLIGHT (the operations the simulator folds
+-- forward): proved correct AND simulated from one verified source.
+--   rune simulate examples/gcounter.rune 2
 
 init : GC is gc zero zero end
 
-op0 : GC -> GC is fn (s : GC) is gc (succ (g0 s)) (g1 s) end end
-op1 : GC -> GC is fn (s : GC) is gc (g0 s) (succ (g1 s)) end end
+op0 : GC -> GC is
+  fn (s : GC) is GCElim (fn (x : GC) is GC end) (fn (a : Nat) (b : Nat) is gc (succ a) b end) s end
+end
 
-merge : GC -> GC -> GC is fn (x : GC) (y : GC) is gc (max (g0 x) (g0 y)) (max (g1 x) (g1 y)) end end
-value : GC -> Nat is fn (s : GC) is add (g0 s) (g1 s) end end
+op1 : GC -> GC is
+  fn (s : GC) is GCElim (fn (x : GC) is GC end) (fn (a : Nat) (b : Nat) is gc a (succ b) end) s end
+end
