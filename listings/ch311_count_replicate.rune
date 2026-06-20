@@ -1,0 +1,99 @@
+-- Chapter 311 — n copies of x contain x exactly n times (proven tier).
+--
+-- countOccur x (replicate n x) = n: replicating x and counting it recovers the count. Each
+-- induction step selects the matching branch of the count via reflexivity of the equality
+-- test, then succ-congruence on the IH. Proof-only.
+--
+--   countReplicate : (x n : Nat) -> Eq Nat (countOccur x (replicate n x)) n
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+beqNatRefl : (n : Nat) -> Eq Bool (beqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (beqNat x x) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (beqNat k k) true) is ih end)
+      n
+  end
+end
+
+countOccur : Nat -> NatList -> Nat is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is
+         BoolElim (fn (c : Bool) is Nat end) (succ ih) ih (beqNat x h) end)
+      xs
+  end
+end
+
+replicate : Nat -> Nat -> NatList is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is NatList end)
+      nnil
+      (fn (k : Nat) (ih : NatList) is ncons x ih end)
+      n
+  end
+end
+
+-- THE THEOREM, by induction on n:
+--   0:      countOccur x (replicate 0 x) = 0                                       -> refl
+--   succ k: countOccur x (ncons x (replicate k x)) selects the true branch (beqNat x x),
+--           giving succ (countOccur x (replicate k x)) = succ k by the IH.
+countReplicate : (x : Nat) -> (n : Nat) -> Eq Nat (countOccur x (replicate n x)) n is
+  fn (x : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (countOccur x (replicate k x)) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (countOccur x (replicate k x)) k) is
+         subst Bool true (beqNat x x)
+           (symEq Bool (beqNat x x) true (beqNatRefl x))
+           (fn (c : Bool) is
+              Eq Nat
+                (BoolElim (fn (d : Bool) is Nat end)
+                   (succ (countOccur x (replicate k x))) (countOccur x (replicate k x)) c)
+                (succ k) end)
+           (cong Nat Nat succ (countOccur x (replicate k x)) k ih) end)
+      n
+  end
+end

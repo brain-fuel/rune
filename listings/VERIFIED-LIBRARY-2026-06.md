@@ -86,6 +86,10 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch288_elem_snoc` — appending x makes it a member: `elem x (snoc xs x) = true`.
 - `ch309_count_snoc` — appending x increments its count: `countOccur x (snoc xs x) = succ (countOccur x xs)`.
 - `ch310_count_append` — count is additive over append: `countOccur x (xs++ys) = countOccur x xs + countOccur x ys` (multiset homomorphism).
+- `ch311_count_replicate` — `countOccur x (replicate n x) = n` (n copies contain x n times).
+  (The full sort-by-count permutation theorem is NOT reachable: it needs a count-swap lemma
+  commuting two conditionals on different scrutinees, which hits the no-scrutinee-equation limit;
+  sort-by-sum (ch266) + sort-by-length (ch289) are the reachable permutation evidence.)
 
 ## Proven tier — a verified queue
 
