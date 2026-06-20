@@ -64,6 +64,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch264_insert_length` — `len (insert x xs) = succ (len xs)` (insert adds one).
 - `ch265_insert_sum` — `sum (insert x xs) = x + sum xs` (insert preserves the multiset).
 - `ch266_sort_sum` — `sum (insertSort xs) = sum xs` (insertion sort is a permutation).
+- `ch289_sort_length` — `len (insertSort xs) = len xs` (sort preserves length).
 
 ## Proven tier — trees
 

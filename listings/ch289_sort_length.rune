@@ -1,0 +1,126 @@
+-- Chapter 289 — insertion sort preserves length (proven tier, sorting correctness).
+--
+-- The length half of "insertion sort is a permutation" (the sum half is ch266): sorting
+-- neither loses nor duplicates elements, so the output has the same length as the input.
+-- Built on insertLen (insert adds exactly one); the insert/leb machinery is reused
+-- verbatim from ch264. Proof-only.
+--
+--   sortLen : (xs : NatList) -> Eq Nat (len (insertSort xs)) (len xs)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- insert x into xs at the first place where x <= head (else keep descending).
+insert : Nat -> NatList -> NatList is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is NatList end)
+      (ncons x nnil)
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end)
+           (ncons x (ncons h rest))
+           (ncons h ih)
+           (leb x h) end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  insert x nnil = ncons x nnil, len = 1 = succ 0                       -> refl
+--   ncons: insert branches on (leb x h); BoolElim on the SAME comparison:
+--     true  -> ncons x (ncons h rest), len = succ (succ (len rest))            -> refl
+--     false -> ncons h (insert x rest), len = succ (len (insert x rest));
+--              cong succ on the IH gives succ (succ (len rest)).
+insertLen : (x : Nat) -> (xs : NatList) -> Eq Nat (len (insert x xs)) (succ (len xs)) is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is Eq Nat (len (insert x w)) (succ (len w)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (len (insert x rest)) (succ (len rest))) is
+         BoolElim (fn (c : Bool) is
+                     Eq Nat
+                       (len (BoolElim (fn (d : Bool) is NatList end)
+                               (ncons x (ncons h rest)) (ncons h (insert x rest)) c))
+                       (succ (succ (len rest))) end)
+           refl
+           (cong Nat Nat succ (len (insert x rest)) (succ (len rest)) ih)
+           (leb x h) end)
+      xs
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+insertSort : NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (w : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is insert h ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  len (insertSort nnil) = 0 = len nnil                                  -> refl
+--   ncons: len (insertSort (h::rest)) = len (insert h (insertSort rest))
+--          insertLen h (insertSort rest) : = succ (len (insertSort rest))
+--          cong succ IH                   : = succ (len rest) = len (h::rest)
+sortLen : (xs : NatList) -> Eq Nat (len (insertSort xs)) (len xs) is
+  fn (xs : NatList) is
+    NatListElim (fn (w : NatList) is Eq Nat (len (insertSort w)) (len w) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (len (insertSort rest)) (len rest)) is
+         transEq Nat
+           (len (insert h (insertSort rest)))
+           (succ (len (insertSort rest)))
+           (succ (len rest))
+           (insertLen h (insertSort rest))
+           (cong Nat Nat succ (len (insertSort rest)) (len rest) ih) end)
+      xs
+  end
+end
