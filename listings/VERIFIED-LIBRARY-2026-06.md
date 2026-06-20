@@ -251,6 +251,7 @@ equation).
 - `ch350_bool_lem` — excluded middle + non-contradiction: `b || ¬b = true`, `b && ¬b = false`.
 - `ch386_bool_distrib` — boolean distributive laws: `a&&(b||c) = (a&&b)||(a&&c)`, and dual.
 - `ch387_bool_absorb` — boolean absorption: `a&&(a||b) = a`, `a||(a&&b) = a` (Bool is a boolean algebra).
+- `ch394_bool_units` — and/or right identities: `a && true = a`, `a || false = a`.
 - `ch306_bool_to_nat` — the 0/1 embedding: `b2n (a∧b) = min`, `b2n (a∨b) = max` (Bool→Nat lattice).
 - `ch307_bool_nat_roundtrip` — `n2b (b2n b) = b` (left inverse) + `b2n (¬b) = 1 - b2n b`.
 

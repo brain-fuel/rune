@@ -1,0 +1,30 @@
+-- Chapter 394 — and/or right identities (proven tier).
+--
+-- andB a true = a and orB a false = a: true is the unit of conjunction, false of
+-- disjunction (the left units hold definitionally). By case analysis. Proof-only.
+--
+--   andTrueR : (a : Bool) -> Eq Bool (andB a true) a
+--   orFalseR : (a : Bool) -> Eq Bool (orB a false) a
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+andTrueR : (a : Bool) -> Eq Bool (andB a true) a is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (andB x true) x end) refl refl a end
+end
+
+orFalseR : (a : Bool) -> Eq Bool (orB a false) a is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (orB x false) x end) refl refl a end
+end
