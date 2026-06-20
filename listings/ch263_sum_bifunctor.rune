@@ -1,0 +1,62 @@
+-- Chapter 263 — the sum type is a bifunctor, machine-checked (proven tier).
+--
+-- Sum A B (a.k.a. Either) maps over BOTH sides with bimap; the bifunctor laws (identity and
+-- composition) hold by case analysis (refl leaves). A distinct named structure beyond
+-- Option/List. Proof-only.
+--
+--   bimapId   : bimap id id e             = e
+--   bimapComp : bimap (g2 . f2) (h2 . f) e = bimap g2 h2 (bimap f2 f e)
+
+data Sum : U -> U -> U is
+  inl : (A : U) -> (B : U) -> A -> Sum A B
+| inr : (A : U) -> (B : U) -> B -> Sum A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+compose : (A : U) -> (B : U) -> (C : U) -> (B -> C) -> (A -> B) -> A -> C is
+  fn (A : U) (B : U) (C : U) (g : B -> C) (f : A -> B) (x : A) is g (f x) end
+end
+
+bimap : (A : U) -> (B : U) -> (C : U) -> (D : U) ->
+        (A -> C) -> (B -> D) -> Sum A B -> Sum C D is
+  fn (A : U) (B : U) (C : U) (D : U) (f : A -> C) (g : B -> D) (e : Sum A B) is
+    SumElim A B (fn (x : Sum A B) is Sum C D end)
+      (fn (a : A) is inl C D (f a) end)
+      (fn (b : B) is inr C D (g b) end)
+      e
+  end
+end
+
+-- IDENTITY: mapping id on both sides is the identity, by case on e.
+bimapId : (A : U) -> (B : U) -> (e : Sum A B) ->
+          Eq (Sum A B) (bimap A B A B (fn (x : A) is x end) (fn (y : B) is y end) e) e is
+  fn (A : U) (B : U) (e : Sum A B) is
+    SumElim A B
+      (fn (x : Sum A B) is
+         Eq (Sum A B) (bimap A B A B (fn (u : A) is u end) (fn (v : B) is v end) x) x end)
+      (fn (a : A) is refl end)
+      (fn (b : B) is refl end)
+      e
+  end
+end
+
+-- COMPOSITION: bimap of composites = composite of bimaps, by case on e.
+bimapComp : (A : U) -> (B : U) -> (C : U) -> (D : U) -> (E : U) -> (F : U) ->
+            (f1 : A -> C) -> (g1 : C -> E) -> (f2 : B -> D) -> (g2 : D -> F) ->
+            (e : Sum A B) ->
+            Eq (Sum E F)
+               (bimap A B E F (compose A C E g1 f1) (compose B D F g2 f2) e)
+               (bimap C D E F g1 g2 (bimap A B C D f1 f2 e)) is
+  fn (A : U) (B : U) (C : U) (D : U) (E : U) (F : U)
+     (f1 : A -> C) (g1 : C -> E) (f2 : B -> D) (g2 : D -> F) (e : Sum A B) is
+    SumElim A B
+      (fn (x : Sum A B) is
+         Eq (Sum E F)
+            (bimap A B E F (compose A C E g1 f1) (compose B D F g2 f2) x)
+            (bimap C D E F g1 g2 (bimap A B C D f1 f2 x)) end)
+      (fn (a : A) is refl end)
+      (fn (b : B) is refl end)
+      e
+  end
+end
