@@ -1,0 +1,60 @@
+-- Chapter 363 — map is a fold: map f xs = foldr (\h a. (f h)::a) nil xs (proven tier).
+--
+-- The functor map is recovered as a catamorphism. By induction on xs. Proof-only.
+--
+--   mapAsFold : (f : Nat -> Nat) -> (xs : NatList)
+--             -> Eq NatList (mapList f xs) (foldr NatList (mapCons f) nnil xs)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+foldr : (B : U) -> (Nat -> B -> B) -> B -> NatList -> B is
+  fn (B : U) (f : Nat -> B -> B) (z : B) (xs : NatList) is
+    NatListElim (fn (x : NatList) is B end)
+      z
+      (fn (h : Nat) (rest : NatList) (ih : B) is f h ih end)
+      xs
+  end
+end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+mapCons : (Nat -> Nat) -> Nat -> NatList -> NatList is
+  fn (f : Nat -> Nat) (h : Nat) (acc : NatList) is ncons (f h) acc end
+end
+
+mapAsFold : (f : Nat -> Nat) -> (xs : NatList) ->
+            Eq NatList (mapList f xs) (foldr NatList (mapCons f) nnil xs) is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq NatList (mapList f z) (foldr NatList (mapCons f) nnil z) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (mapList f rest) (foldr NatList (mapCons f) nnil rest)) is
+         cong NatList NatList (consWith (f h)) (mapList f rest) (foldr NatList (mapCons f) nnil rest) ih end)
+      xs
+  end
+end
