@@ -141,19 +141,25 @@ func runSimulate(src string, n int, out io.Writer) error {
 		return err
 	}
 	fmt.Fprint(out, sim.Render(run, n))
-	// Diagnose the merge laws observationally, so a non-convergent protocol is told
-	// WHICH join law it violates (the better-than-Winglang linter).
+	// Diagnose the merge laws observationally. The LINTER is authoritative: it proves
+	// (by counterexample) that a non-join cannot converge under every schedule, even
+	// when a particular run happened to look fine. The better-than-Winglang catch.
 	ops := make([]string, n)
 	for i := range ops {
 		ops[i] = "op" + strconv.Itoa(i)
 	}
-	if rep, derr := sim.Diagnose(s, "init", "merge", ops); derr == nil {
+	rep, derr := sim.Diagnose(s, "init", "merge", ops)
+	if derr == nil {
 		fmt.Fprint(out, "\n"+sim.RenderReport(rep))
 	}
-	if run.Converged() {
-		fmt.Fprintf(out, "\nverdict: CONVERGED to %s on all %d replicas\n", run.Final[0], n)
-	} else {
-		fmt.Fprintf(out, "\nverdict: did NOT converge (final %v) - no join? this is not a CvRDT\n", run.Final)
+	switch {
+	case derr == nil && !rep.IsCvRDT():
+		fmt.Fprintf(out, "\nverdict: NOT GUARANTEED to converge - merge is not a join (see the failed law above). "+
+			"This run ended %v, but that is schedule luck, not a property.\n", run.Final)
+	case run.Converged():
+		fmt.Fprintf(out, "\nverdict: CONVERGED to %s on all %d replicas (and the join laws hold, so under any schedule).\n", run.Final[0], n)
+	default:
+		fmt.Fprintf(out, "\nverdict: did NOT converge (final %v).\n", run.Final)
 	}
 	return nil
 }

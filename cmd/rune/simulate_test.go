@@ -81,8 +81,29 @@ func TestRunSimulateLWW(t *testing.T) {
 	if err := runSimulate(string(src), 2, &out); err != nil {
 		t.Fatalf("runSimulate: %v", err)
 	}
-	if got := out.String(); !strings.Contains(got, "did NOT converge") {
+	if got := out.String(); !strings.Contains(got, "NOT GUARANTEED to converge") {
 		t.Errorf("LWW should be reported non-convergent:\n%s", got)
+	}
+}
+
+// TestRunSimulateBadCounter is the better-than-Winglang catch: a counter whose merge
+// naively adds (not max) passes a happy-path run by luck, but the linter proves it is
+// not idempotent and the verdict flags it as not guaranteed to converge.
+func TestRunSimulateBadCounter(t *testing.T) {
+	src, err := os.ReadFile("../../examples/badcounter.rune")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	var out strings.Builder
+	if err := runSimulate(string(src), 2, &out); err != nil {
+		t.Fatalf("runSimulate: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "idempotent:  FAIL") {
+		t.Errorf("bad counter should fail idempotence:\n%s", got)
+	}
+	if !strings.Contains(got, "NOT GUARANTEED to converge") {
+		t.Errorf("bad counter verdict should warn it is not a join:\n%s", got)
 	}
 }
 

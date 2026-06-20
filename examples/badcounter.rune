@@ -1,0 +1,27 @@
+-- examples/badcounter.rune: a counter that looks reasonable but is NOT a CvRDT - the
+-- classic mistake. Each replica holds a count and merge naively ADDS the two counts
+-- instead of taking the max. That double-counts shared history: re-delivering the
+-- same gossip keeps growing the value, so it never converges. The law linter catches
+-- exactly why - merge is not idempotent (merge a a = 2a, not a). Run it:
+--   rune simulate examples/badcounter.rune 2
+-- and watch it FAIL the idempotence law and diverge.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+data C   : U is c : Nat -> C end
+
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+getC : C -> Nat is fn (s : C) is CElim (fn (w : C) is Nat end) (fn (a : Nat) is a end) s end end
+
+init : C is c zero end
+
+op0 : C -> C is fn (s : C) is c (succ (getC s)) end end
+op1 : C -> C is fn (s : C) is c (succ (getC s)) end end
+
+-- THE BUG: merge adds instead of taking the max. Not idempotent.
+merge : C -> C -> C is fn (x : C) (y : C) is c (add (getC x) (getC y)) end end
+value : C -> Nat is fn (s : C) is getC s end end
