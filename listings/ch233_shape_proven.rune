@@ -1,0 +1,94 @@
+-- Chapter 233 — shapes PROVEN, not checked: a typed equal-length contract (D4 design).
+--
+-- The R-INTEROP design's headline is Futhark/safe-tensor on a dependent substrate: a
+-- vector op's shape conformance is settled by the TYPE CHECKER, not a runtime assertion.
+-- This realizes that on the current substrate without an indexed Vec: `safeDot` requires
+-- a PROOF that its two inputs have equal length —
+--
+--   safeDot : (xs ys : NatList) -> Eq Nat (len xs) (len ys) -> Nat
+--
+-- so a mismatched-length call CANNOT be written: the caller must supply `refl`, which
+-- only type-checks when the two lengths are definitionally equal. `safeDot xs ys
+-- (refl Nat (len xs))` compiles for equal-length xs, ys (the lengths both reduce to the
+-- same Nat); a ragged call `safeDot [1,2] [4,5,6] (refl ...)` is a COMPILE ERROR, never a
+-- runtime crash. The dot itself is computed in EXACT proven Nat arithmetic (ch232's tie).
+--
+-- [1,2,3]·[4,5,6] = 4+10+18 = 32. Observable: "32\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are the ambient propositional equality, as in ch03/ch07.)
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+foreign printNat : Nat -> IO Nat end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- the dot, walking both lists in lockstep (recurse on xs, peel ys), in exact Nat.
+natDot : NatList -> NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList -> Nat end)
+      (fn (ys : NatList) is zero end)
+      (fn (h : Nat) (rest : NatList) (ih : NatList -> Nat) is
+         fn (ys : NatList) is
+           NatListElim (fn (y : NatList) is Nat end)
+             zero
+             (fn (yh : Nat) (yrest : NatList) (ih2 : Nat) is
+                natAdd (natMul h yh) (ih yrest) end)
+             ys
+         end
+       end)
+      xs
+  end
+end
+
+-- THE TYPED CONTRACT: equal length is a precondition the caller must PROVE. The proof is
+-- erased; the obligation is discharged at compile time (no runtime shape check emitted).
+safeDot : (xs : NatList) -> (ys : NatList) -> Eq Nat (len xs) (len ys) -> Nat is
+  fn (xs : NatList) (ys : NatList) (pf : Eq Nat (len xs) (len ys)) is
+    natDot xs ys
+  end
+end
+
+xs : NatList is ncons 1 (ncons 2 (ncons 3 nnil)) end
+ys : NatList is ncons 4 (ncons 5 (ncons 6 nnil)) end
+
+-- `refl Nat (len xs)` has type `Eq Nat (len xs) (len xs)`; it is accepted as the contract
+-- `Eq Nat (len xs) (len ys)` because `len xs` and `len ys` both reduce to 3 — the shape
+-- conformance is DISCHARGED by the checker, exactly the design's headline.
+main : IO Unit is
+  bindIO Nat Unit (printNat (safeDot xs ys refl)) (fn (u1 : Nat) is
+    pureIO Unit unit
+  end)
+end

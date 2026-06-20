@@ -1407,3 +1407,72 @@ func TestFurnaceTierBridge(t *testing.T) {
 		}
 	})
 }
+
+// TestD4ShapeProven realizes the R-INTEROP headline (shapes proven, not checked) on the
+// current substrate: safeDot requires a proof Eq Nat (len xs) (len ys), so a mismatched
+// call is a compile error (verified manually: "refl does not prove ..."), and the dot is
+// computed in exact Nat arithmetic. [1,2,3]·[4,5,6] = 32: "32\nunit" on all seven
+// backends — pure Rune, no foreign libs (plain compile, no -lm/-lopenblas).
+func TestD4ShapeProven(t *testing.T) {
+	const want = "32\nunit"
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch233_shape_proven.rune", "main", ""); got != want {
+				t.Errorf("[%s] safeDot gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	s := loadListing(t, "ch233_shape_proven.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("c", func(t *testing.T) {
+		if _, err := exec.LookPath("cc"); err != nil {
+			t.Skip("cc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.C{}.Emit(p)
+		f := filepath.Join(dir, "main.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+			t.Fatalf("[c] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[c] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[c] safeDot gave %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if _, err := exec.LookPath("clang"); err != nil {
+			t.Skip("clang not in PATH")
+		}
+		dir := t.TempDir()
+		ll, _ := codegen.LL{}.Emit(p)
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		f := filepath.Join(dir, "main.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(ll), 0o644)
+		os.WriteFile(rtf, []byte(rt), 0o644)
+		if out, err := exec.Command("clang", f, rtf, "-o", bin).CombinedOutput(); err != nil {
+			t.Fatalf("[ll] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[ll] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[ll] safeDot gave %q, want %q", got, want)
+		}
+	})
+}
