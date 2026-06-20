@@ -127,3 +127,23 @@ func TestRunSimulateGSet(t *testing.T) {
 		t.Errorf("G-Set (OR join) should be reported a CvRDT:\n%s", got)
 	}
 }
+
+// TestRunSimulatePNCounter confirms a compound-state CRDT (the canonical PN-Counter,
+// with both increment and decrement) converges and is reported a CvRDT.
+func TestRunSimulatePNCounter(t *testing.T) {
+	src, err := os.ReadFile("../../examples/pncounter.rune")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	var out strings.Builder
+	if err := runSimulate(string(src), 2, &out); err != nil {
+		t.Fatalf("runSimulate: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "verdict: CONVERGED") {
+		t.Errorf("PN-Counter should converge:\n%s", got)
+	}
+	if !strings.Contains(got, "a CvRDT") {
+		t.Errorf("PN-Counter should be a CvRDT:\n%s", got)
+	}
+}
