@@ -146,6 +146,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch338_leaves_mirror` — mirror preserves leaf count: `countLeaves (mirror t) = countLeaves t`.
 - `ch326_flatten_mirror` — mirroring reverses the inorder traversal: `flatten (mirror t) = reverse (flatten t)`.
 - `ch365_flatten_tmap` — flatten natural in the tree functor: `flatten (tmap f t) = map f (flatten t)`.
+- `ch366_sum_flatten` — inorder sum equals tree sum: `sum (flatten t) = tsum t`.
 
 ## Proven tier — arithmetic & order
 
