@@ -30,8 +30,8 @@ r1 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool
 
 init : OR is orset false false false false end
 
--- replica 0: add via tag0, then observe-remove (tombstone the observed tags).
-op0 : OR -> OR is fn (s : OR) is orset true (a1 s) true (a1 s) end end
+-- replica 0: add via tag0, then observe-remove (grow-only tombstone of the observed tags).
+op0 : OR -> OR is fn (s : OR) is orset true (a1 s) true (orB (r1 s) (a1 s)) end end
 -- replica 1: add via tag1 (a tag op0's remove never saw).
 op1 : OR -> OR is fn (s : OR) is orset (a0 s) true (r0 s) (r1 s) end end
 

@@ -217,6 +217,31 @@ func TestRunSimulateORSet(t *testing.T) {
 	}
 }
 
+// TestRunSimulateResetCounter is the inflation-side better-than-Winglang catch: a counter
+// whose merge is a flawless join (pointwise max) but whose reset op is NOT inflationary.
+// The run converges by schedule luck and all three merge laws pass, yet the linter flags
+// the non-monotone update and the verdict reports it is not guaranteed to converge.
+func TestRunSimulateResetCounter(t *testing.T) {
+	src, err := os.ReadFile("../../examples/resetcounter.rune")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	var out strings.Builder
+	if err := runSimulate(string(src), 2, &out); err != nil {
+		t.Fatalf("runSimulate: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "commutative: ok") {
+		t.Errorf("reset counter's merge IS a join (max) - laws should pass:\n%s", got)
+	}
+	if !strings.Contains(got, "inflationary:FAIL") {
+		t.Errorf("reset counter's op is not inflationary - the linter should catch it:\n%s", got)
+	}
+	if !strings.Contains(got, "NOT GUARANTEED to converge") {
+		t.Errorf("non-inflationary update should make convergence not guaranteed:\n%s", got)
+	}
+}
+
 // TestRunSimulatePNCounter confirms a compound-state CRDT (the canonical PN-Counter,
 // with both increment and decrement) converges and is reported a CvRDT.
 func TestRunSimulatePNCounter(t *testing.T) {

@@ -153,8 +153,9 @@ end
 empty : OR is orset false false false false end
 addTag0 : OR -> OR is fn (s : OR) is orset true (a1 s) (r0 s) (r1 s) end end
 addTag1 : OR -> OR is fn (s : OR) is orset (a0 s) true (r0 s) (r1 s) end end
--- remove tombstones the tags it observes (sets each ri to the observed ai).
-removeObs : OR -> OR is fn (s : OR) is orset (a0 s) (a1 s) (a0 s) (a1 s) end end
+-- remove tombstones the tags it observes - GROW-ONLY (ri := ri OR ai), so the tombstone
+-- set only grows and every operation is inflationary (a proper CvRDT update).
+removeObs : OR -> OR is fn (s : OR) is orset (a0 s) (a1 s) (orB (r0 s) (a0 s)) (orB (r1 s) (a1 s)) end end
 
 -- RE-ADD: add tag0, observe-remove it (now absent), then add a fresh tag1 -> present.
 -- A 2P-Set could not do this (its remove is permanent); the OR-Set can.

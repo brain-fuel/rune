@@ -68,10 +68,14 @@ dropped/duplicated gossip (idempotence) and to a crashed-then-recovered replica
 (durability); a last-writer-wins register stays divergent. The built-in **law
 linter** is authoritative, `examples/badcounter.rune` (merge naively adds, so it
 double-counts) passes a happy-path run by luck but the linter proves it is not
-idempotent and the verdict flags it. `examples/gcounter.rune` is all three at
-once: it loads (so its convergence proof checks), `rune simulate` converges on
-it, and `rune run examples/gcounter.rune converged` executes the scenario on a
-backend. The simulator lives in `internal/sim` (shadow tooling, never the
+idempotent and the verdict flags it. The linter also checks that every update is
+**inflationary** (only grows the state in the merge order), the op-side condition a
+join merge alone cannot guarantee, `examples/resetcounter.rune` has a flawless
+pointwise-max merge but an op that resets a tally, and the linter flags it not
+convergent even when a run converges by schedule luck. `examples/gcounter.rune` is
+all three at once: it loads (so its convergence proof checks), `rune simulate`
+converges on it, and `rune run examples/gcounter.rune converged` executes the
+scenario on a backend. The simulator lives in `internal/sim` (shadow tooling, never the
 kernel); see `ref_docs/wootz/R-PROTO.md`.
 
 Behind the simulator is a **verified distributed algebra** (the `listings/`

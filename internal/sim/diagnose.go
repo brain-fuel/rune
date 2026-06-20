@@ -17,12 +17,25 @@ type LawReport struct {
 	Commutative bool
 	Idempotent  bool
 	Associative bool
-	Notes       []string
+	// Inflationary records whether every local op only GROWS the state in the
+	// merge-induced order (merge s (op s) = op s). A join merge alone does not
+	// guarantee convergence: if an update can move a replica DOWN the lattice, two
+	// replicas can diverge permanently. This is the op-side companion to the three
+	// merge laws, and a violation the merge-law linter alone would miss.
+	Inflationary bool
+	Notes        []string
 }
 
 // IsCvRDT reports whether all three join laws held on the sampled states.
 func (r *LawReport) IsCvRDT() bool {
 	return r.Commutative && r.Idempotent && r.Associative
+}
+
+// IsConvergent reports whether the protocol has BOTH a join merge and inflationary
+// ops - the full state-based convergence criterion (Shapiro et al.): a monotone
+// semilattice of states with monotone updates.
+func (r *LawReport) IsConvergent() bool {
+	return r.IsCvRDT() && r.Inflationary
 }
 
 // Diagnose samples states (the initial state and the result of each local op, plus
@@ -44,11 +57,13 @@ func Diagnose(sess *session.Session, init, mergeFn string, ops []string) (*LawRe
 
 	// Sample set: init, each op applied to init, and a merge of the first two ops.
 	samples := []core.Tm{base}
+	opRefs := make([]core.Tm, 0, len(ops))
 	for _, op := range ops {
 		ref, err := d.ref(op)
 		if err != nil {
 			return nil, err
 		}
+		opRefs = append(opRefs, ref)
 		samples = append(samples, d.apply1(ref, base))
 	}
 	if len(samples) >= 3 {
@@ -56,7 +71,23 @@ func Diagnose(sess *session.Session, init, mergeFn string, ops []string) (*LawRe
 	}
 
 	show := func(t core.Tm) string { return sess.Pretty(t) }
-	rep := &LawReport{Commutative: true, Idempotent: true, Associative: true}
+	rep := &LawReport{Commutative: true, Idempotent: true, Associative: true, Inflationary: true}
+
+	// Inflation: every op must only GROW the state in the merge order - merge s (op s)
+	// must equal op s. A violation means an update can move a replica down the lattice,
+	// breaking convergence even when merge is a perfect join.
+	for oi, op := range opRefs {
+		for si := range samples {
+			os := d.apply1(op, samples[si])
+			grown := d.apply2(mergeRef, samples[si], os)
+			if show(grown) != show(os) {
+				rep.Inflationary = false
+				rep.Notes = append(rep.Notes, "not inflationary: op"+strconv.Itoa(oi)+" on s"+strconv.Itoa(si)+
+					" gives "+show(os)+", but merge s"+strconv.Itoa(si)+" (op"+strconv.Itoa(oi)+" s"+strconv.Itoa(si)+
+					") = "+show(grown)+" (an update moved the state down the lattice)")
+			}
+		}
+	}
 
 	for i := range samples {
 		// Idempotence: merge a a = a.
@@ -107,11 +138,14 @@ func RenderReport(r *LawReport) string {
 	b.WriteString("  commutative: " + mark(r.Commutative) + "\n")
 	b.WriteString("  idempotent:  " + mark(r.Idempotent) + "\n")
 	b.WriteString("  associative: " + mark(r.Associative) + "\n")
+	b.WriteString("  inflationary:" + mark(r.Inflationary) + " (updates only grow the state)\n")
 	for _, n := range r.Notes {
 		b.WriteString("  - " + n + "\n")
 	}
-	if r.IsCvRDT() {
-		b.WriteString("verdict: a CvRDT (the join laws hold on the samples) - will converge\n")
+	if r.IsConvergent() {
+		b.WriteString("verdict: a CvRDT (join merge + inflationary updates) - will converge\n")
+	} else if r.IsCvRDT() {
+		b.WriteString("verdict: NOT convergent - merge is a join, but an update is not inflationary\n")
 	} else {
 		b.WriteString("verdict: NOT a CvRDT on the samples - convergence is not guaranteed\n")
 	}

@@ -1,0 +1,49 @@
+-- examples/resetcounter.rune: a counter whose MERGE is a perfect join (pointwise max,
+-- exactly the G-Counter's) but whose UPDATE is broken - one op RESETS a tally to zero.
+-- A join merge alone does not guarantee convergence: an update must also be inflationary
+-- (only ever grow the state). This reset moves a replica DOWN the lattice, so two replicas
+-- can disagree forever even though every merge law holds. The simulator's law linter
+-- reports the merge as a join yet flags the protocol NOT convergent, because the new
+-- inflation check catches the non-monotone op. Run it:
+--   rune simulate examples/resetcounter.rune 2
+-- This is the inflation-side companion to examples/badcounter.rune (which breaks a merge
+-- law); here the merge is impeccable and the OP is the bug.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+data C   : U is c : Nat -> Nat -> C end
+
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Nat end)
+      (fn (b : Nat) is b end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Nat end) (succ k) (fn (j : Nat) (ihj : Nat) is succ (ih j) end) b
+         end
+       end)
+      a
+  end
+end
+
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+p0 : C -> Nat is fn (s : C) is CElim (fn (w : C) is Nat end) (fn (a : Nat) (b : Nat) is a end) s end end
+p1 : C -> Nat is fn (s : C) is CElim (fn (w : C) is Nat end) (fn (a : Nat) (b : Nat) is b end) s end end
+
+init : C is c zero zero end
+
+-- op0 increments slot 1 (so a reachable state has a positive tally to reset).
+op0 : C -> C is fn (s : C) is c (p0 s) (succ (p1 s)) end end
+-- op1 RESETS slot 1 to zero - the non-inflationary update (moves the state down).
+op1 : C -> C is fn (s : C) is c (p0 s) zero end end
+
+-- the merge is a flawless join: pointwise max (the G-Counter's own merge).
+merge : C -> C -> C is
+  fn (x : C) (y : C) is c (max (p0 x) (p0 y)) (max (p1 x) (p1 y)) end
+end
+
+value : C -> Nat is fn (s : C) is add (p0 s) (p1 s) end end
