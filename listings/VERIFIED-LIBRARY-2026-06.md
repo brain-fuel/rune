@@ -99,6 +99,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch255_de_morgan` — De Morgan's laws.
 - `ch256_bool_lattice` — distributivity + absorption.
 - `ch257_bool_monoid` — and/or commutativity + associativity (→ full boolean algebra).
+- `ch287_xor` — exclusive-or laws (`xor a a = false`, `xor a false = a`, commutativity).
 
 ## Proven tier — verified metatheory (a tiny optimizer)
 

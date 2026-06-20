@@ -1,0 +1,45 @@
+-- Chapter 287 — exclusive-or laws for Bool (proven tier).
+--
+-- xor with its characteristic laws: self-cancellation, commutativity, and the false unit.
+-- Each by case analysis (refl leaves; commutativity cases both arguments). Proof-only.
+--
+--   xorSelf    : xor a a     = false
+--   xorFalseR  : xor a false = a
+--   xorComm    : xor a b     = xor b a
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Bool end) false true a end
+end
+
+-- xor true b = not b ; xor false b = b.
+xor : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) (notB b) b a end
+end
+
+xorSelf : (a : Bool) -> Eq Bool (xor a a) false is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (xor x x) false end) refl refl a
+  end
+end
+
+xorFalseR : (a : Bool) -> Eq Bool (xor a false) a is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (xor x false) x end) refl refl a
+  end
+end
+
+xorComm : (a : Bool) -> (b : Bool) -> Eq Bool (xor a b) (xor b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (xor x b) (xor b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (xor true y) (xor y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (xor false y) (xor y false) end) refl refl b)
+      a
+  end
+end
