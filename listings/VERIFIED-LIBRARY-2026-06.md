@@ -129,6 +129,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch282_monus` — truncated subtraction: `monus n 0 = n`, `monus n n = 0`.
 - `ch315_monus_add` — add-then-subtract cancels: `monus (a + b) b = a`.
 - `ch316_monus_over` — over-subtraction is zero: `monus a (a + b) = 0`.
+- `ch317_monus_pred` — subtracting one is predecessor: `monus n 1 = pred n`.
 - `ch298_max_idem` — maximum: `natMax a a = a`, `natMax a 0 = a` (idempotence + identity).
 - `ch303_monus_leb` — leb weakening (`a<=b -> a<=succ b`) + the monus bound (`monus a b <= a`).
 - `ch304_leb_add_mono` — <= monotone in the bound: `a <= b -> a <= b + c` (subst transport).

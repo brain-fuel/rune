@@ -1,0 +1,50 @@
+-- Chapter 317 — subtracting one is predecessor: monus n 1 = pred n (proven tier).
+--
+-- The two notions of "minus one" agree. By induction on n: at zero both are zero; at
+-- succ k, monus (succ k) 1 reduces to monus k 0 = k (monusZeroR), and pred (succ k) = k.
+-- Proof-only.
+--
+--   monusPred : (n : Nat) -> Eq Nat (monus n (succ zero)) (pred n)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (monK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is monK j end) m
+         end
+       end)
+      a b
+  end
+end
+
+monusZeroR : (n : Nat) -> Eq Nat (monus n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (monus x zero) x end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (monus k zero) k) is refl end)
+      n
+  end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is k end) n end
+end
+
+monusPred : (n : Nat) -> Eq Nat (monus n (succ zero)) (pred n) is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (monus x (succ zero)) (pred x) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (monus k (succ zero)) (pred k)) is monusZeroR k end)
+      n
+  end
+end
