@@ -182,6 +182,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch372_minmax_absorb` — lattice absorption: `min a (max a b) = a`, `max a (min a b) = a` (min/max form a lattice).
 - `ch373_min_dist_max` — min distributes over max: `min a (max b c) = max (min a b)(min a c)` (DISTRIBUTIVE lattice).
 - `ch374_leb_min` — order determines the meet: `a <= b -> min a b = a` (+ exFalsoNat: false=true explodes into any Nat eq).
+- `ch375_leb_antisym` — leb ANTISYMMETRIC: `a<=b -> b<=a -> a=b` (ch253 had abandoned this; exFalsoNat unblocks it) + `a<=b -> max a b = b`. <= is a partial order (refl ch251 + trans ch252 + antisym).
 - `ch283_binary_inc` — verified binary numerals: `toNat (bsucc b) = succ (toNat b)`
   (binary increment agrees with unary successor).
 - `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
