@@ -15,8 +15,12 @@
 -- DEPLOY (the same source runs on a backend): `convergedCorrect` below proves the
 -- merged value is 3, and
 --   rune run examples/gcounter.rune converged
--- executes that scenario on a real backend, printing 3. So this one file is proved,
+--   rune run examples/gcounter.rune converged --target erl   (the BEAM, the real
+--                                                              distributed target)
+-- execute that scenario, printing 3 on every backend. So this one file is proved,
 -- simulated, and deployed - the better-than-Winglang triad from one verified source.
+-- (This deploys the merge/value LOGIC; the live-actor projection of a protocol onto
+-- spawn/send/receive is D5's OTP runtime, ch205/ch214.)
 
 data Nat : U is
   zero : Nat
