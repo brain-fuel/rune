@@ -107,7 +107,7 @@ func TestIllTypedRejected(t *testing.T) {
 		// Binder annotation conflicts with the expected domain.
 		{prelude + `bad : U -> U is fn (x : U -> U) is U end end`, "expected domain"},
 		// Unbound name.
-		{`bad : U is nope end`, "unbound identifier"},
+		{`bad : U is nope end`, "I can't find `nope` in scope"},
 	}
 	for _, c := range cases {
 		loadErr(t, c.src, c.want)

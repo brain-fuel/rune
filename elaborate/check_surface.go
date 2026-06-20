@@ -29,7 +29,7 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 			}
 			return core.Ref{Hash: h}, ty, nil
 		}
-		return nil, nil, fmt.Errorf("unbound identifier %q", s.Name)
+		return nil, nil, e.unboundError(c, s.Name)
 	case surface.EUniv:
 		return core.Univ{Lvl: s.Lvl}, core.VU{Lvl: s.Lvl + 1}, nil // U_i : U_{i+1}
 	case surface.EProp:

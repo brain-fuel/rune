@@ -39,7 +39,7 @@ func TestREPLSession(t *testing.T) {
 		"defined id",                   // multi-line definition accumulated
 		"U : U1",                       // bare U checks; U_0 : U_1
 		"fn (x : U) is x end : U -> U", // the level-polymorphic identity at U β-reduces
-		`unbound identifier "nope"`,    // elaboration error, loop continues
+		"I can't find `nope` in scope", // elaboration error, loop continues
 		`unknown command ":bogus"`,     // unknown command, loop continues
 		"(λ. (λ. #0))",                 // :core de Bruijn view
 		"(A : U) -> A -> A",            // :type id prints the stored type
