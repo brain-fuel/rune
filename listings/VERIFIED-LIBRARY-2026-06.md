@@ -180,6 +180,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch370_min_assoc` — min is associative: `min (min a b) c = min a (min b c)` (with comm+idem, a meet-semilattice).
 - `ch371_max_assoc` — max is associative: `max (max a b) c = max a (max b c)` (join-semilattice). min/max are dual semilattices.
 - `ch372_minmax_absorb` — lattice absorption: `min a (max a b) = a`, `max a (min a b) = a` (min/max form a lattice).
+- `ch373_min_dist_max` — min distributes over max: `min a (max b c) = max (min a b)(min a c)` (DISTRIBUTIVE lattice).
 - `ch283_binary_inc` — verified binary numerals: `toNat (bsucc b) = succ (toNat b)`
   (binary increment agrees with unary successor).
 - `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
