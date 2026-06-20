@@ -174,6 +174,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch304_leb_add_mono` — <= monotone in the bound: `a <= b -> a <= b + c` (subst transport).
 - `ch305_leb_add_left_mono` — addition monotone on the left: `a <= b -> c+a <= c+b`.
 - `ch339_leb_add_self` — addition only grows: `a <= a + b`.
+- `ch379_leb_add_cancel` — additive cancellation: `leb (c+a)(c+b) = leb a b`.
 - `ch299_min_idem` — minimum: `natMin a a = a`, `natMin a 0 = 0` (idempotence + zero-absorption).
 - `ch300_leb_max` — max is an upper bound: `a <= max a b` (structural max unblocks the bound proof).
 - `ch301_leb_min` — min is a lower bound: `min a b <= a` (the dual; min/max lattice bounds).
