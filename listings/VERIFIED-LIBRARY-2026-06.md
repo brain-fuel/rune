@@ -347,6 +347,12 @@ equation).
   receiver's clock advances and absorbs the message history, via ch426's join lemmas),
   `causalReady0/1` (deps already present - causal safety), `fifoNext0/1` (exactly-once in
   order). Spends the clock machinery on the delivery protocol.
+- `ch429_mvregister`: Multi-Value Register - VC-based conflict resolution (the payoff of
+  ch424-428). A read keeps a write unless strictly dominated (`vcLt`) by another:
+  `dominatedDropped` (a preceded write is dropped), `concurrentKeepA/B` (two concurrent
+  writes both survive - what a LWW register wrongly discards), `dominatedDropA`/
+  `dominatedKeepTop` (a superseded write drops, its successor survives). The real-world
+  use of vector clocks inside a CRDT.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl

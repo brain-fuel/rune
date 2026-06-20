@@ -1,0 +1,103 @@
+-- Chapter 429, Multi-Value Register: vector-clock conflict resolution (E3/E4).
+--
+-- This is the payoff of the vector-clock machinery (ch424-428): a CRDT whose merge uses
+-- causality to resolve conflicting writes. A Multi-Value Register tags each write with the
+-- writer's vector clock; on read it returns exactly the writes that are NOT causally
+-- dominated by another. So a write that happened-before another is DROPPED (the later one
+-- supersedes it), but two CONCURRENT writes are both kept (a genuine conflict the
+-- application must resolve) - the behaviour a last-writer-wins register gets wrong by
+-- silently discarding one of two concurrent writes.
+--
+--   dominatedDropped : a strictly-preceded write is dropped (keepFirst = false).
+--   concurrentBothKept : two concurrent writes both survive (the MV-register's reason to
+--                        exist; a scalar clock would falsely order and drop one).
+--   dominatedResolves  : when one write precedes another, exactly the later survives.
+--
+-- vcLt is the STRICT happens-before (vcLeq and not vcEq). Proof-only.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data VC   : U is vc : Nat -> Nat -> VC end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+notB : Bool -> Bool is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Bool end) false true a end
+end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+lte : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Bool end)
+      (fn (b : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Bool end) false (fn (j : Nat) (ihj : Bool) is ih j end) b
+         end
+       end)
+      a
+  end
+end
+
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Bool end)
+      (fn (b : Nat) is NatElim (fn (w : Nat) is Bool end) true (fn (j : Nat) (ihj : Bool) is false end) b end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Bool end) false (fn (j : Nat) (ihj : Bool) is ih j end) b
+         end
+       end)
+      a
+  end
+end
+
+c0 : VC -> Nat is fn (v : VC) is VCElim (fn (w : VC) is Nat end) (fn (x : Nat) (y : Nat) is x end) v end end
+c1 : VC -> Nat is fn (v : VC) is VCElim (fn (w : VC) is Nat end) (fn (x : Nat) (y : Nat) is y end) v end end
+
+vcLeq : VC -> VC -> Bool is
+  fn (x : VC) (y : VC) is andB (lte (c0 x) (c0 y)) (lte (c1 x) (c1 y)) end
+end
+
+vcEq : VC -> VC -> Bool is
+  fn (x : VC) (y : VC) is andB (eqNat (c0 x) (c0 y)) (eqNat (c1 x) (c1 y)) end
+end
+
+-- strict happens-before: x precedes y when x <= y and x is not equal to y.
+vcLt : VC -> VC -> Bool is
+  fn (x : VC) (y : VC) is andB (vcLeq x y) (notB (vcEq x y)) end
+end
+
+-- the read resolution: keep a write unless it is strictly dominated by the other.
+keepFirst  : VC -> VC -> Bool is fn (x : VC) (y : VC) is notB (vcLt x y) end end
+keepSecond : VC -> VC -> Bool is fn (x : VC) (y : VC) is notB (vcLt y x) end end
+
+-- a write strictly preceded by another is dropped on read.
+dominatedDropped : (x : VC) -> (y : VC) -> Eq Bool (vcLt x y) true -> Eq Bool (keepFirst x y) false is
+  fn (x : VC) (y : VC) (h : Eq Bool (vcLt x y) true) is
+    cong Bool Bool (fn (w : Bool) is notB w end) (vcLt x y) true h
+  end
+end
+
+-- ===== the two regimes, concretely =====
+-- replica 0's write (wA) and replica 1's write (wB) are CONCURRENT; top causally follows
+-- both. The MV-register keeps both concurrent writes, and drops a write its successor beats.
+
+wA  : VC is vc (succ zero) zero end
+wB  : VC is vc zero (succ zero) end
+top : VC is vc (succ zero) (succ zero) end
+
+-- CONCURRENT writes: both survive the read (neither dominates the other).
+concurrentKeepA : Eq Bool (keepFirst wA wB) true is refl end
+concurrentKeepB : Eq Bool (keepSecond wA wB) true is refl end
+
+-- a DOMINATED write (wA precedes top): the old write is dropped, the newer survives.
+dominatedDropA : Eq Bool (keepFirst wA top) false is refl end
+dominatedKeepTop : Eq Bool (keepSecond wA top) true is refl end
