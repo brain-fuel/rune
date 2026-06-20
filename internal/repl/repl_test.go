@@ -572,7 +572,7 @@ func TestREPLRunTypeError(t *testing.T) {
 	if err := Run(in, &out); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-	if !strings.Contains(out.String(), "applying a non-function") {
+	if !strings.Contains(out.String(), "it is not a function") {
 		t.Errorf("expected a type error from :run on an ill-typed expression, got:\n%s", out.String())
 	}
 }

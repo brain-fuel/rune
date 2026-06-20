@@ -142,7 +142,7 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 			var err2 error
 			pi, err2 = e.expectPi(c, fnTy, s.Icit)
 			if err2 != nil {
-				return nil, nil, fmt.Errorf("applying a non-function of type %s (%v)", e.pretty(c, fnTy), err2)
+				return nil, nil, e.applyNonFunctionError(c, fn, fnTy, err2)
 			}
 		}
 		if pi.Icit != s.Icit {
@@ -601,7 +601,7 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 			var err error
 			pi, err = e.expectPi(c, want, s.Icit)
 			if err != nil {
-				return nil, fmt.Errorf("lambda has non-function type %s", e.pretty(c, want))
+				return nil, e.lambdaNonFunctionError(c, want)
 			}
 		}
 		if pi.Icit != s.Icit {

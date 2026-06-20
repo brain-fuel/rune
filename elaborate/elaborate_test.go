@@ -96,14 +96,14 @@ end
 func TestIllTypedRejected(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// Applying a non-function.
-		{`bad : U is U U end`, "non-function"},
+		{`bad : U is U U end`, "it is not a function"},
 		// Wrong argument type: id expects a type first... U is fine; (id U) wants
 		// a U, give it a function type's inhabitant mismatch instead.
 		{prelude + `bad : U is id U id end`, "types don't match"},
 		// Body doesn't match the declared type.
 		{`bad : U -> U is U end`, "types don't match"},
 		// Lambda against a non-function type.
-		{`bad : U is fn (x : U) is x end end`, "non-function type"},
+		{`bad : U is fn (x : U) is x end end`, "expected type is not a function type"},
 		// Binder annotation conflicts with the expected domain.
 		{prelude + `bad : U -> U is fn (x : U -> U) is U end end`, "expected domain"},
 		// Unbound name.

@@ -1,6 +1,7 @@
 package elaborate
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -224,6 +225,51 @@ func (e *Elaborator) reflMismatchError(c *Ctx, eq core.VEq) error {
 			"hold. Which of the two is it?",
 	}
 	return d
+}
+
+// applyNonFunctionError builds the diagnostic for applying an argument to something
+// whose type is not a function type — usually one argument too many. It names the
+// thing being applied and its (non-arrow) type, and explains that a finished value
+// takes no arguments.
+func (e *Elaborator) applyNonFunctionError(c *Ctx, fn core.Tm, fnTy core.Val, cause error) error {
+	// A type that is still an unsolved metavariable did not fail because it is "not a
+	// function" — it failed to be SOLVED as one (a scope escape, an ambiguous hole).
+	// That precise unifier message is the useful one; keep it.
+	if e.isFlexibleMeta(fnTy) {
+		return fmt.Errorf("I can't tell what this is being applied to — its type is still unknown: %w", cause)
+	}
+	head := e.prettyTm(fn)
+	ty := e.pretty(c, fnTy)
+	return &Diagnostic{
+		Summary: "This is being applied to an argument, but it is not a function.",
+		Body: []string{
+			"`" + head + "` has type `" + ty + "`. That is not a function type (an `A -> B`), " +
+				"so it is already a finished value and cannot be applied to anything.",
+		},
+		Hints: []string{
+			"The usual cause is one argument too many: count the arguments `" + head + "` " +
+				"actually takes. Otherwise, did you mean to apply a different function, or to " +
+				"build `" + head + "` so that it returns a function?",
+		},
+	}
+}
+
+// lambdaNonFunctionError builds the diagnostic for a `fn` checked against a type that
+// is not a function type — the mirror of applyNonFunctionError, from the other side.
+func (e *Elaborator) lambdaNonFunctionError(c *Ctx, want core.Val) error {
+	ty := e.pretty(c, want)
+	return &Diagnostic{
+		Summary: "This is written as a function, but its expected type is not a function type.",
+		Body: []string{
+			"A `fn` always has a function type (an `A -> B`), but here the context expects " +
+				"a `" + ty + "`, which is not one.",
+		},
+		Hints: []string{
+			"Either this should not be a function — give a plain value of type `" + ty + "` " +
+				"instead — or the type it is checked against is wrong and should be an arrow " +
+				"`… -> …`.",
+		},
+	}
 }
 
 // reflNonEqError builds the diagnostic for a `refl` checked against a type that is
