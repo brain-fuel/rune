@@ -213,6 +213,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch263_sum_bifunctor` — Sum (Either) bifunctor laws (id, composition).
 - `ch319_sum_monad` — Sum as the error monad: the three monad laws.
 - `ch331_option_sum_iso` — Option ≅ Sum Unit: round-trip `sumToOption (optionToSum m) = m`.
+- `ch383_option_some_none` — some-or-none, not both: `isSome m || isNone m = true`, `isSome m && isNone m = false`.
 - `ch332_sum_option_iso` — the other direction: `optionToSum (sumToOption s) = s` (full iso, unit eta).
 - `ch333_sum_swap` — Sum symmetry is involutive: `swap (swap s) = s` (Sum A B ≅ Sum B A).
 - `ch284_swap_involutions` — swap is an involution on products and sums

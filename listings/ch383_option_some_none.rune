@@ -1,0 +1,58 @@
+-- Chapter 383 — every Option is some-or-none and not both (proven tier).
+--
+-- isSome and isNone partition Option: their disjunction is always true and their conjunction
+-- always false (the decidable LEM/non-contradiction for definedness). By case analysis.
+-- Proof-only.
+--
+--   optSomeOrNone : (A : U) -> (m : Option A) -> Eq Bool (orB  (isSome A m) (isNone A m)) true
+--   optNotBoth    : (A : U) -> (m : Option A) -> Eq Bool (andB (isSome A m) (isNone A m)) false
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+isSome : (A : U) -> Option A -> Bool is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Bool end) false (fn (a : A) is true end) m
+  end
+end
+
+isNone : (A : U) -> Option A -> Bool is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Bool end) true (fn (a : A) is false end) m
+  end
+end
+
+optSomeOrNone : (A : U) -> (m : Option A) -> Eq Bool (orB (isSome A m) (isNone A m)) true is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Eq Bool (orB (isSome A x) (isNone A x)) true end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
+
+optNotBoth : (A : U) -> (m : Option A) -> Eq Bool (andB (isSome A m) (isNone A m)) false is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Eq Bool (andB (isSome A x) (isNone A x)) false end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
