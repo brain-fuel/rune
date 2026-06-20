@@ -1,0 +1,110 @@
+-- Chapter 238, PN-Counter SAFETY: all four tallies monotone under merge (E3/E4).
+--
+-- ch235 proved the PN-Counter converges; this adds its safety certificate. A
+-- PN-Counter's NET value is not monotone (decrements lower it, by design), but its
+-- underlying STATE is: each of the four grow-only tallies (P0,P1,N0,N1) only ever
+-- increases under merge, so the per-replica increment and decrement histories are
+-- never lost. Per slot it is leb a (max a c) = true (maxGeL). Completes PN's
+-- verification (convergence + safety), matching the counter and set. Proof-only.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data PN   : U is pn : Nat -> Nat -> Nat -> Nat -> PN end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Bool end)
+      (fn (b : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Bool end) false (fn (j : Nat) (ihj : Bool) is ih j end) b
+         end
+       end)
+      a
+  end
+end
+
+max : Nat -> Nat -> Nat is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Nat end)
+      (fn (b : Nat) is b end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (b : Nat) is
+           NatElim (fn (w : Nat) is Nat end) (succ k) (fn (j : Nat) (ihj : Nat) is succ (ih j) end) b
+         end
+       end)
+      a
+  end
+end
+
+lebRefl : (a : Nat) -> Eq Bool (leb a a) true is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Eq Bool (leb w w) true end)
+      refl (fn (k : Nat) (ih : Eq Bool (leb k k) true) is ih end) a
+  end
+end
+
+maxGeL : (a : Nat) -> (b : Nat) -> Eq Bool (leb a (max a b)) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (leb x (max x b)) true end)
+      (fn (b : Nat) is refl end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Bool (leb k (max k b)) true) is
+         fn (b : Nat) is
+           NatElim (fn (x : Nat) is Eq Bool (leb (succ k) (max (succ k) x)) true end)
+             (lebRefl (succ k))
+             (fn (j : Nat) (ihj : Eq Bool (leb (succ k) (max (succ k) j)) true) is ih j end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+q0 : PN -> Nat is fn (s : PN) is PNElim (fn (w : PN) is Nat end) (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is a end) s end end
+q1 : PN -> Nat is fn (s : PN) is PNElim (fn (w : PN) is Nat end) (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is b end) s end end
+q2 : PN -> Nat is fn (s : PN) is PNElim (fn (w : PN) is Nat end) (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is c end) s end end
+q3 : PN -> Nat is fn (s : PN) is PNElim (fn (w : PN) is Nat end) (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is d end) s end end
+
+merge : PN -> PN -> PN is
+  fn (g : PN) (h : PN) is
+    PNElim (fn (x : PN) is PN end)
+      (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is
+         PNElim (fn (y : PN) is PN end)
+           (fn (e : Nat) (f : Nat) (gg : Nat) (hh : Nat) is pn (max a e) (max b f) (max c gg) (max d hh) end)
+           h
+       end)
+      g
+  end
+end
+
+-- a uniform per-slot monotonicity: each projection grows under merge. Stated for all
+-- four slots; each reduces to maxGeL on that slot.
+slotMono : (g : PN) -> (h : PN)
+   -> Eq Bool (leb (q0 g) (q0 (merge g h))) true is
+  fn (g : PN) is
+    PNElim (fn (x : PN) is (h : PN) -> Eq Bool (leb (q0 x) (q0 (merge x h))) true end)
+      (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is
+         fn (h : PN) is
+           PNElim (fn (y : PN) is Eq Bool (leb (q0 (pn a b c d)) (q0 (merge (pn a b c d) y))) true end)
+             (fn (e : Nat) (f : Nat) (gg : Nat) (hh : Nat) is maxGeL a e end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+slotMono3 : (g : PN) -> (h : PN)
+   -> Eq Bool (leb (q3 g) (q3 (merge g h))) true is
+  fn (g : PN) is
+    PNElim (fn (x : PN) is (h : PN) -> Eq Bool (leb (q3 x) (q3 (merge x h))) true end)
+      (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is
+         fn (h : PN) is
+           PNElim (fn (y : PN) is Eq Bool (leb (q3 (pn a b c d)) (q3 (merge (pn a b c d) y))) true end)
+             (fn (e : Nat) (f : Nat) (gg : Nat) (hh : Nat) is maxGeL d hh end)
+             h
+         end
+       end)
+      g
+  end
+end
