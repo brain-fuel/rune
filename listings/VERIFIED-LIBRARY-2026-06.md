@@ -116,6 +116,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch276_pow_add` — exponentiation + the exponent law `a^(m+n) = a^m * a^n`.
 - `ch282_monus` — truncated subtraction: `monus n 0 = n`, `monus n n = 0`.
 - `ch298_max_idem` — maximum: `natMax a a = a`, `natMax a 0 = a` (idempotence + identity).
+- `ch303_monus_leb` — leb weakening (`a<=b -> a<=succ b`) + the monus bound (`monus a b <= a`).
 - `ch299_min_idem` — minimum: `natMin a a = a`, `natMin a 0 = 0` (idempotence + zero-absorption).
 - `ch300_leb_max` — max is an upper bound: `a <= max a b` (structural max unblocks the bound proof).
 - `ch301_leb_min` — min is a lower bound: `min a b <= a` (the dual; min/max lattice bounds).
