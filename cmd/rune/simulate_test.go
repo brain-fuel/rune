@@ -193,6 +193,30 @@ func TestRunSimulateTwoPSet(t *testing.T) {
 	}
 }
 
+// TestRunSimulateORSet drives the add-wins OR-Set: replica 0 adds then observe-removes
+// its own tag while replica 1 concurrently adds a different tag; they diverge under the
+// partition and converge to present=1 because the concurrent add wins over the remove.
+func TestRunSimulateORSet(t *testing.T) {
+	src, err := os.ReadFile("../../examples/orset.rune")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	var out strings.Builder
+	if err := runSimulate(string(src), 2, &out); err != nil {
+		t.Fatalf("runSimulate: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "verdict: CONVERGED") {
+		t.Errorf("OR-Set should converge:\n%s", got)
+	}
+	if !strings.Contains(got, "a CvRDT") {
+		t.Errorf("OR-Set (OR join) should be reported a CvRDT:\n%s", got)
+	}
+	if !strings.Contains(got, "[diverged]") {
+		t.Errorf("OR-Set should visibly diverge under the partition:\n%s", got)
+	}
+}
+
 // TestRunSimulatePNCounter confirms a compound-state CRDT (the canonical PN-Counter,
 // with both increment and decrement) converges and is reported a CvRDT.
 func TestRunSimulatePNCounter(t *testing.T) {

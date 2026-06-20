@@ -1,0 +1,50 @@
+-- examples/orset.rune: an Observed-Remove Set (OR-Set CvRDT), the add-wins CRDT, driven
+-- through the simulator. One element with one add-tag per replica: (a0,a1) add-tags
+-- present, (r0,r1) tombstoned; present iff some add-tag survives. The join is pointwise
+-- OR. Run it:
+--   rune simulate examples/orset.rune 2
+-- replica 0 adds the element and immediately observe-removes its own tag (element absent
+-- locally); replica 1 CONCURRENTLY adds via a different tag. They diverge under the
+-- partition (replica 0 sees absent = 0, replica 1 sees present = 1), then heal: they
+-- converge to PRESENT = 1, because the concurrent add wins over the remove (the remove
+-- never observed replica 1's tag). The law linter confirms OR is a join, so it is a CvRDT.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data OR   : U is orset : Bool -> Bool -> Bool -> Bool -> OR end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+notB : Bool -> Bool is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Bool end) false true a end
+end
+
+a0 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is a end) s end end
+a1 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is b end) s end end
+r0 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is c end) s end end
+r1 : OR -> Bool is fn (s : OR) is ORElim (fn (w : OR) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is d end) s end end
+
+init : OR is orset false false false false end
+
+-- replica 0: add via tag0, then observe-remove (tombstone the observed tags).
+op0 : OR -> OR is fn (s : OR) is orset true (a1 s) true (a1 s) end end
+-- replica 1: add via tag1 (a tag op0's remove never saw).
+op1 : OR -> OR is fn (s : OR) is orset (a0 s) true (r0 s) (r1 s) end end
+
+merge : OR -> OR -> OR is
+  fn (x : OR) (y : OR) is
+    orset (orB (a0 x) (a0 y)) (orB (a1 x) (a1 y)) (orB (r0 x) (r0 y)) (orB (r1 x) (r1 y))
+  end
+end
+
+present : OR -> Bool is
+  fn (s : OR) is orB (andB (a0 s) (notB (r0 s))) (andB (a1 s) (notB (r1 s))) end
+end
+inc1 : Bool -> Nat -> Nat is
+  fn (b : Bool) (acc : Nat) is BoolElim (fn (w : Bool) is Nat end) (succ acc) acc b end
+end
+value : OR -> Nat is fn (s : OR) is inc1 (present s) zero end end
