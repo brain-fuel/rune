@@ -97,6 +97,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch280_reverse_acc` — accumulator reverse equals naive reverse (`revAcc xs nnil = reverse xs`),
   via the generalized spec `revAcc xs acc = reverse xs ++ acc` — an optimization-correctness result.
 - `ch281_map_take` — naturality: `take n (map f xs) = map f (take n xs)`.
+- `ch385_head_map` — head is natural: `headOpt (map f xs) = omap f (headOpt xs)`.
 - `ch293_map_reverse` — naturality: `map f (reverse xs) = reverse (map f xs)`.
 - `ch294_sum_reverse` — `sum (reverse xs) = sum xs` (reverse preserves the sum).
 - `ch355_prod_reverse` — reverse preserves the product: `prod (reverse xs) = prod xs`.

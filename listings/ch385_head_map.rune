@@ -1,0 +1,62 @@
+-- Chapter 385 — head is natural: headOpt (map f xs) = omap f (headOpt xs) (proven tier).
+--
+-- Taking the optional head commutes with mapping. Naturality of the safe-head transformation
+-- between the list and Option functors. By case analysis on xs. Proof-only.
+--
+--   headMap : (f : Nat -> Nat) -> (xs : NatList)
+--           -> Eq (Option Nat) (headOpt (mapList f xs)) (omap Nat Nat f (headOpt xs))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+omap : (A : U) -> (B : U) -> (A -> B) -> Option A -> Option B is
+  fn (A : U) (B : U) (f : A -> B) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Option B end)
+      (none B)
+      (fn (a : A) is some B (f a) end)
+      m
+  end
+end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+headOpt : NatList -> Option Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Option Nat end)
+      (none Nat)
+      (fn (h : Nat) (rest : NatList) (ih : Option Nat) is some Nat h end)
+      xs
+  end
+end
+
+headMap : (f : Nat -> Nat) -> (xs : NatList) ->
+          Eq (Option Nat) (headOpt (mapList f xs)) (omap Nat Nat f (headOpt xs)) is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq (Option Nat) (headOpt (mapList f z)) (omap Nat Nat f (headOpt z)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq (Option Nat) (headOpt (mapList f rest)) (omap Nat Nat f (headOpt rest))) is refl end)
+      xs
+  end
+end
