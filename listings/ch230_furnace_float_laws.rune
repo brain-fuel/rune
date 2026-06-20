@@ -1,0 +1,70 @@
+-- Chapter 230 — the FURNACE: property-testing the float kit into submission (Savage).
+--
+-- The furnace is the pedagogical spine — the polyglot property-test subset where foreign
+-- code is TESTED into submission before it is proven. The float kit (fadd/fmul/fsqrt/fpow)
+-- is foreign: its bodies live in each backend's runtime, not in Rune's logic, so we can't
+-- prove its laws — but we CAN property-test them against in-language references, on every
+-- backend, and watch them all pass. This is the on-ramp from "I tested it" to "I proved
+-- it": the SAME shape as a proof (a law, checked), but discharged by observation.
+--
+-- Three laws, each checked within tolerance and reported as 1 (holds) / 0 (fails):
+--   L1.  pow b 2      ≈ b * b        (b = 3:  9 ≈ 9)
+--   L2.  sqrt (b * b) ≈ b            (b = 5:  5 ≈ 5)
+--   L3.  sqrt (pow b 2) ≈ b          (b = 4:  4 ≈ 4)   -- the two ops compose back to id
+--
+-- Observable: all hold: "1\n1\n1\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Float : U end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign fsqrt      : Float -> Float end
+foreign fpow       : Float -> Float -> Float end
+foreign fleqN      : Float -> Float -> Nat end
+
+-- the furnace's verdict: |x - y| <= eps ? 1 : 0 (a passing property prints 1).
+holds : Float -> Float -> Float -> Nat is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleqN (fabsP (fsub x y)) eps
+  end
+end
+
+eps : Float is fdiv (fromNat 1) (fromNat 1000000) end
+
+two : Float is fromNat 2 end
+
+-- L1: pow b 2 ≈ b * b
+law1 : Float -> Nat is fn (b : Float) is holds eps (fpow b two) (fmul b b) end end
+-- L2: sqrt (b * b) ≈ b
+law2 : Float -> Nat is fn (b : Float) is holds eps (fsqrt (fmul b b)) b end end
+-- L3: sqrt (pow b 2) ≈ b
+law3 : Float -> Nat is fn (b : Float) is holds eps (fsqrt (fpow b two)) b end end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (law1 (fromNat 3))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (law2 (fromNat 5))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (law3 (fromNat 4))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
