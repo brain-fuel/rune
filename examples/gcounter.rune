@@ -10,8 +10,13 @@
 -- INFLIGHT (what the simulator folds forward): init / merge / value / op0 / op1.
 --   rune simulate examples/gcounter.rune 2
 -- drives it under a partition fault policy: the replicas diverge while the network
--- is cut, then re-converge to the correct total once it heals. Same source, proved
--- and run.
+-- is cut, then re-converge to the correct total once it heals.
+--
+-- DEPLOY (the same source runs on a backend): `convergedCorrect` below proves the
+-- merged value is 3, and
+--   rune run examples/gcounter.rune converged
+-- executes that scenario on a real backend, printing 3. So this one file is proved,
+-- simulated, and deployed - the better-than-Winglang triad from one verified source.
 
 data Nat : U is
   zero : Nat

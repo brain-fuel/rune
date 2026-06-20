@@ -4,7 +4,35 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"goforge.dev/rune/v3/internal/session"
 )
+
+// TestGCounterExampleTriad confirms one verified source PROVES, SIMULATES, and
+// DEPLOYS: the example loads (so convergedCorrect, the convergence proof, checks),
+// rune simulate converges on it, and `converged` (the deploy scenario value) reduces
+// to 3 - the value codegen emits and `rune run` executes on a backend.
+func TestGCounterExampleTriad(t *testing.T) {
+	src, err := os.ReadFile("../../examples/gcounter.rune")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	s := session.New()
+	if _, err := s.LoadSource(string(src)); err != nil {
+		t.Fatalf("PROVE: example failed to load/check (proofs included): %v", err)
+	}
+	e, err := s.ParseSrcExpr("converged")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	tm, _, err := s.ElabExpr(e)
+	if err != nil {
+		t.Fatalf("elab: %v", err)
+	}
+	if got := s.Pretty(s.NormalizeExpr(tm)); got != "succ (succ (succ zero))" {
+		t.Errorf("DEPLOY: converged should reduce to 3, got %q", got)
+	}
+}
 
 // TestRunSimulateGCounter drives the `simulate` verb over the shipped G-Counter
 // example: it must diverge under the partition and converge after the heal.
