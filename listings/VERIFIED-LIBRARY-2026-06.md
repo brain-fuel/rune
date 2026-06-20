@@ -48,6 +48,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
 - `ch280_reverse_acc` — accumulator reverse equals naive reverse (`revAcc xs nnil = reverse xs`),
   via the generalized spec `revAcc xs acc = reverse xs ++ acc` — an optimization-correctness result.
+- `ch281_map_take` — naturality: `take n (map f xs) = map f (take n xs)`.
 
 ## Proven tier — a verified map (association list)
 

@@ -1,0 +1,83 @@
+-- Chapter 281 — map and take commute (naturality), machine-checked (proven tier).
+--
+-- Taking a prefix then mapping equals mapping then taking the prefix — map is natural with
+-- respect to take. By induction on n (IH generalized over the list), then case on the list;
+-- the cons step closes with congruence. Proof-only.
+--
+--   mapTake : (f : Nat -> Nat) -> (n : Nat) -> (xs : NatList)
+--           -> Eq NatList (take n (mapList f xs)) (mapList f (take n xs))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+take : Nat -> NatList -> NatList is
+  fn (n : Nat) (xs : NatList) is
+    NatElim (fn (k : Nat) is NatList -> NatList end)
+      (fn (ys : NatList) is nnil end)
+      (fn (k : Nat) (takeK : NatList -> NatList) is
+         fn (ys : NatList) is
+           NatListElim (fn (z : NatList) is NatList end)
+             nnil
+             (fn (h : Nat) (t : NatList) (ih : NatList) is ncons h (takeK t) end)
+             ys
+         end
+       end)
+      n xs
+  end
+end
+
+-- THE THEOREM, by induction on n (IH generalized over xs), then case on xs:
+--   0:      both sides nnil                                                          -> refl
+--   succ k, nnil:  both sides nnil                                                   -> refl
+--   succ k, ncons h t: take (succ k) (mapList f (h::t)) = (f h) :: take k (mapList f t)
+--                      mapList f (take (succ k) (h::t))  = (f h) :: mapList f (take k t)
+--                      cong (cons (f h)) on the IH at t.
+mapTake : (f : Nat -> Nat) -> (n : Nat) -> (xs : NatList) ->
+          Eq NatList (take n (mapList f xs)) (mapList f (take n xs)) is
+  fn (f : Nat -> Nat) (n : Nat) (xs : NatList) is
+    NatElim (fn (k : Nat) is (ys : NatList) ->
+               Eq NatList (take k (mapList f ys)) (mapList f (take k ys)) end)
+      (fn (ys : NatList) is refl end)
+      (fn (k : Nat) (ih : (ys : NatList) ->
+             Eq NatList (take k (mapList f ys)) (mapList f (take k ys))) is
+         fn (ys : NatList) is
+           NatListElim (fn (z : NatList) is
+                          Eq NatList (take (succ k) (mapList f z)) (mapList f (take (succ k) z)) end)
+             refl
+             (fn (h : Nat) (t : NatList)
+                 (ih2 : Eq NatList (take (succ k) (mapList f t)) (mapList f (take (succ k) t))) is
+                cong NatList NatList (consWith (f h))
+                  (take k (mapList f t)) (mapList f (take k t)) (ih t) end)
+             ys
+         end
+       end)
+      n xs
+  end
+end
