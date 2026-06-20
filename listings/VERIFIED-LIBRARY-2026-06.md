@@ -91,6 +91,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch258_mul_identities` — `mulZeroR`, `mulOneL`, `mulOneR`.
 - `ch276_pow_add` — exponentiation + the exponent law `a^(m+n) = a^m * a^n`.
 - `ch282_monus` — truncated subtraction: `monus n 0 = n`, `monus n n = 0`.
+- `ch298_max_idem` — maximum: `natMax a a = a`, `natMax a 0 = a` (idempotence + identity).
 - `ch283_binary_inc` — verified binary numerals: `toNat (bsucc b) = succ (toNat b)`
   (binary increment agrees with unary successor).
 - `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
