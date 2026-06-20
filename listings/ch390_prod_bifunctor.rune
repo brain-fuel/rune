@@ -1,0 +1,48 @@
+-- Chapter 390 — Prod is a bifunctor (proven tier).
+--
+-- bimap preserves identities and composition (the multiplicative dual of the Sum bifunctor
+-- ch263). By case analysis on the pair. Proof-only.
+--
+--   bimapId   : bimap id id p = p
+--   bimapComp : bimap (f2 . f1) (g2 . g1) p = bimap f2 g2 (bimap f1 g1 p)
+
+data Prod : U -> U -> U is
+  mkProd : (A : U) -> (B : U) -> A -> B -> Prod A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+idf : (A : U) -> A -> A is fn (A : U) (a : A) is a end end
+
+bimap : (A : U) -> (B : U) -> (C : U) -> (D : U) -> (A -> C) -> (B -> D) -> Prod A B -> Prod C D is
+  fn (A : U) (B : U) (C : U) (D : U) (f : A -> C) (g : B -> D) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is Prod C D end)
+      (fn (a : A) (b : B) is mkProd C D (f a) (g b) end)
+      p
+  end
+end
+
+bimapId : (A : U) -> (B : U) -> (p : Prod A B) -> Eq (Prod A B) (bimap A B A B (idf A) (idf B) p) p is
+  fn (A : U) (B : U) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is Eq (Prod A B) (bimap A B A B (idf A) (idf B) x) x end)
+      (fn (a : A) (b : B) is refl end)
+      p
+  end
+end
+
+bimapComp : (A : U) -> (B : U) -> (C : U) -> (D : U) -> (E : U) -> (G : U) ->
+            (f1 : A -> C) -> (f2 : C -> E) -> (g1 : B -> D) -> (g2 : D -> G) -> (p : Prod A B) ->
+            Eq (Prod E G)
+              (bimap A B E G (fn (a : A) is f2 (f1 a) end) (fn (b : B) is g2 (g1 b) end) p)
+              (bimap C D E G f2 g2 (bimap A B C D f1 g1 p)) is
+  fn (A : U) (B : U) (C : U) (D : U) (E : U) (G : U)
+     (f1 : A -> C) (f2 : C -> E) (g1 : B -> D) (g2 : D -> G) (p : Prod A B) is
+    ProdElim A B
+      (fn (x : Prod A B) is
+         Eq (Prod E G)
+           (bimap A B E G (fn (a : A) is f2 (f1 a) end) (fn (b : B) is g2 (g1 b) end) x)
+           (bimap C D E G f2 g2 (bimap A B C D f1 g1 x)) end)
+      (fn (a : A) (b : B) is refl end)
+      p
+  end
+end

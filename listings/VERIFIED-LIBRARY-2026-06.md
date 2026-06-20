@@ -220,6 +220,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch333_sum_swap` — Sum symmetry is involutive: `swap (swap s) = s` (Sum A B ≅ Sum B A).
 - `ch388_prod_swap` — product swap involutive: `swap (swap p) = p` (Prod A B ≅ Prod B A).
 - `ch389_curry` — curry/uncurry mutually inverse: `(Prod A B -> C) ≅ (A -> B -> C)`.
+- `ch390_prod_bifunctor` — Prod is a bifunctor: `bimap id id = id`, composition law.
 - `ch284_swap_involutions` — swap is an involution on products and sums
   (`swapP (swapP p) = p`, `sswap (sswap e) = e`).
 - `ch255_de_morgan` — De Morgan's laws.
