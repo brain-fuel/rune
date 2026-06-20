@@ -1,0 +1,136 @@
+-- Chapter 224 — NumPy statistics: numpy.var behind a contract (D4 / R-INTEROP).
+--
+-- A statistic whose reference takes TWO passes (the mean, then the mean of squared
+-- deviations) — still bound by the same interop discipline. `npVar` is `numpy.var` on
+-- the python backend; everywhere else a hand 2-pass fold (no BLAS). The contract checks
+-- the library's population variance against `refVar = sqDevSum(mean) / len`, and blames
+-- a drift. This rounds the stats corner of "Python's numeric reach via interop".
+--
+-- Observable: var[2,4,6,8] = 5 (mean 5; deviations -3,-1,1,3; squares 9,1,1,9; sum 20;
+-- /4 = 5), a within-default ok (5), and a negative-tolerance blame (0): "5\n5\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the interop kernel: numpy.var on py; a hand 2-pass mean/sq-dev floor elsewhere.
+foreign npVar      : FList -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+refSum : FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Float end)
+      (fromNat 0)
+      (fn (x : Float) (rest : FList) (ih : Float) is fadd x ih end)
+      xs
+  end
+end
+
+refLen : FList -> Nat is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Nat end)
+      zero
+      (fn (x : Float) (rest : FList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- sum of squared deviations from a given mean (the second pass).
+sqDevSum : Float -> FList -> Float is
+  fn (m : Float) (xs : FList) is
+    FListElim (fn (x : FList) is Float end)
+      (fromNat 0)
+      (fn (x : Float) (rest : FList) (ih : Float) is
+         fadd (fmul (fsub x m) (fsub x m)) ih end)
+      xs
+  end
+end
+
+refVar : FList -> Float is
+  fn (xs : FList) is
+    fdiv (sqDevSum (fdiv (refSum xs) (fromNat (refLen xs))) xs) (fromNat (refLen xs))
+  end
+end
+
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+-- THE INTEROP CONTRACT: accept numpy.var only within `eps` of the reference variance.
+npVarChecked : Float -> FList -> Result Float Blame is
+  fn (eps : Float) (xs : FList) is
+    case withinTol eps (npVar xs) (refVar xs) of
+    | true  -> ok  Float Blame (npVar xs)
+    | false -> err Float Blame (driftBlame (npVar xs))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+xs : FList is fcons (fromNat 2) (fcons (fromNat 4) (fcons (fromNat 6) (fcons (fromNat 8) fnil))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npVar xs))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (npVarChecked defaultEps xs))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (npVarChecked (fsub (fromNat 0) (fromNat 1)) xs))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

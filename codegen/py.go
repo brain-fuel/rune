@@ -124,6 +124,10 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npMean") {
 		b.WriteString("def npMean():\n    import numpy as np\n    def _m(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.mean(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _m(xs)\n")
 	}
+	// D4 interop: npVar binds REAL numpy.var on the py backend (population variance).
+	if usesForeign(p, "npVar") {
+		b.WriteString("def npVar():\n    import numpy as np\n    def _v(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.var(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _v(xs)\n")
+	}
 	// D4 interop: npMatSum binds REAL numpy matmul on py — reshape the flat row-major
 	// FLists into 2-D np.arrays, multiply with @, sum. This proves the 2-D marshalling
 	// boundary works THROUGH numpy (the signature linalg op).
