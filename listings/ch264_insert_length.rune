@@ -1,0 +1,91 @@
+-- Chapter 264 — ordered insertion adds exactly one element (proven tier, sorting).
+--
+-- `insert` places x into a list at the first position where x <= head. Whatever branch it
+-- takes, it adds exactly one element. The proof mirrors insert's own structure: an
+-- induction on the list whose cons step does a BoolElim on the SAME comparison (leb x h)
+-- that insert branches on, so each branch's length is computed and closed. Proof-only.
+--
+--   insertLen : (x : Nat) -> (xs : NatList) -> Eq Nat (len (insert x xs)) (succ (len xs))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- insert x into xs at the first place where x <= head (else keep descending).
+insert : Nat -> NatList -> NatList is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is NatList end)
+      (ncons x nnil)
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end)
+           (ncons x (ncons h rest))
+           (ncons h ih)
+           (leb x h) end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  insert x nnil = ncons x nnil, len = 1 = succ 0                       -> refl
+--   ncons: insert branches on (leb x h); BoolElim on the SAME comparison:
+--     true  -> ncons x (ncons h rest), len = succ (succ (len rest))            -> refl
+--     false -> ncons h (insert x rest), len = succ (len (insert x rest));
+--              cong succ on the IH gives succ (succ (len rest)).
+insertLen : (x : Nat) -> (xs : NatList) -> Eq Nat (len (insert x xs)) (succ (len xs)) is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is Eq Nat (len (insert x w)) (succ (len w)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (len (insert x rest)) (succ (len rest))) is
+         BoolElim (fn (c : Bool) is
+                     Eq Nat
+                       (len (BoolElim (fn (d : Bool) is NatList end)
+                               (ncons x (ncons h rest)) (ncons h (insert x rest)) c))
+                       (succ (succ (len rest))) end)
+           refl
+           (cong Nat Nat succ (len (insert x rest)) (succ (len rest)) ih)
+           (leb x h) end)
+      xs
+  end
+end
