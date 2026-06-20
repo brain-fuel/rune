@@ -1,0 +1,53 @@
+-- Chapter 243 — the CvRDT order: merge is the JOIN (least upper bound) (E3).
+--
+-- ch241 proved merge is a semilattice (idempotent/commutative/associative). A semilattice
+-- induces a partial order  a <= b  :=  merge a b = b , and merge is the JOIN for it: a and
+-- b each sit below merge a b, so state only ever climbs the lattice (CvRDT updates are
+-- inflationary — the monotonicity that, with convergence, makes a CvRDT correct). These
+-- order facts are machine-checked here. Proof-only.
+--
+--   leRefl  : le a a                 (reflexive: merge a a = a)
+--   leJoinL : le a (merge a b)       (a <= a |_| b)
+--   leJoinR : le b (merge a b)       (b <= a |_| b)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+merge : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+-- the induced order: a <= b iff joining a into b changes nothing.
+le : Bool -> Bool -> U is
+  fn (a : Bool) (b : Bool) is Eq Bool (merge a b) b end
+end
+
+-- REFLEXIVE: a <= a is merge a a = a (idempotence), by case analysis.
+leRefl : (a : Bool) -> le a a is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is le x x end) refl refl a
+  end
+end
+
+-- a <= a |_| b : merge a (merge a b) = merge a b. Case on a; both leaves reduce by refl
+-- (merge true _ = true, and merge false x = x makes merge false (merge false b) = merge false b).
+leJoinL : (a : Bool) -> (b : Bool) -> le a (merge a b) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is le x (merge x b) end) refl refl a
+  end
+end
+
+-- b <= a |_| b : merge b (merge a b) = merge a b. For b = false this is definitional; for
+-- b = true the right side merge a true needs a case on a (true either way).
+leJoinR : (a : Bool) -> (b : Bool) -> le b (merge a b) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (y : Bool) is le y (merge a y) end)
+      (BoolElim (fn (x : Bool) is Eq Bool (merge true (merge x true)) (merge x true) end) refl refl a)
+      refl
+      b
+  end
+end
