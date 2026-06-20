@@ -1,0 +1,58 @@
+-- Chapter 257 — boolean and/or are commutative monoids (proven tier).
+--
+-- The remaining boolean-algebra laws: commutativity and associativity of andB and orB.
+-- With the lattice laws (ch256) and De Morgan (ch255), (Bool, andB, orB, notB, true, false)
+-- is now a fully hermetic boolean algebra. Commutativity needs a case on both arguments;
+-- associativity collapses to a single case (the and/or reductions). Proof-only.
+--
+--   andComm/orComm : a op b = b op a
+--   andAssoc/orAssoc : (a op b) op c = a op (b op c)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+andComm : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) (andB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB x b) (andB b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (andB true y) (andB y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (andB false y) (andB y false) end) refl refl b)
+      a
+  end
+end
+
+orComm : (a : Bool) -> (b : Bool) -> Eq Bool (orB a b) (orB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB x b) (orB b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (orB true y) (orB y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (orB false y) (orB y false) end) refl refl b)
+      a
+  end
+end
+
+andAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+           Eq Bool (andB (andB a b) c) (andB a (andB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB (andB x b) c) (andB x (andB b c)) end)
+      refl refl a
+  end
+end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+          Eq Bool (orB (orB a b) c) (orB a (orB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB (orB x b) c) (orB x (orB b c)) end)
+      refl refl a
+  end
+end
