@@ -1,0 +1,116 @@
+-- Chapter 288 — appending an element makes it a member (proven tier).
+--
+-- `elem` tests membership with a Nat equality test; `snoc` appends one element at the end.
+-- Adding x to the end of any list makes x a member. The base case finds x at the tail (by
+-- reflexivity of the test); the cons case keeps membership alive past the head (or absorbs
+-- a true on the right). Proof-only.
+--
+--   elemSnoc : (x : Nat) -> (xs : NatList) -> Eq Bool (elem x (snoc xs x)) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+orFalseR : (b : Bool) -> Eq Bool (orB b false) b is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (orB x false) x end) refl refl b end
+end
+
+orTrueR : (b : Bool) -> Eq Bool (orB b true) true is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (orB x true) true end) refl refl b end
+end
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+beqNatRefl : (n : Nat) -> Eq Bool (beqNat n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (beqNat x x) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (beqNat k k) true) is ih end)
+      n
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+snoc : NatList -> Nat -> NatList is
+  fn (xs : NatList) (x : Nat) is append xs (ncons x nnil) end
+end
+
+elem : Nat -> NatList -> Bool is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Bool end)
+      false
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is orB (beqNat x h) ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  elem x (snoc nnil x) = orB (beqNat x x) false = beqNat x x = true
+--          (orFalseR then beqNatRefl, by transitivity)
+--   ncons h t: elem x (snoc (h::t) x) = orB (beqNat x h) (elem x (snoc t x))
+--          cong (orB (beqNat x h)) IH : = orB (beqNat x h) true
+--          orTrueR (beqNat x h)        : = true
+elemSnoc : (x : Nat) -> (xs : NatList) -> Eq Bool (elem x (snoc xs x)) true is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Bool (elem x (snoc z x)) true end)
+      (transEq Bool (orB (beqNat x x) false) (beqNat x x) true
+         (orFalseR (beqNat x x)) (beqNatRefl x))
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (elem x (snoc rest x)) true) is
+         transEq Bool
+           (orB (beqNat x h) (elem x (snoc rest x)))
+           (orB (beqNat x h) true)
+           true
+           (cong Bool Bool (orB (beqNat x h)) (elem x (snoc rest x)) true ih)
+           (orTrueR (beqNat x h)) end)
+      xs
+  end
+end
