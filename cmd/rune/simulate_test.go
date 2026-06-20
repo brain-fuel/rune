@@ -85,3 +85,24 @@ func TestRunSimulateLWW(t *testing.T) {
 		t.Errorf("LWW should be reported non-convergent:\n%s", got)
 	}
 }
+
+// TestRunSimulateGSet confirms the simulator generalizes past counters: a grow-only
+// Set (join = pointwise boolean OR) converges to the union and the linter reports a
+// CvRDT.
+func TestRunSimulateGSet(t *testing.T) {
+	src, err := os.ReadFile("../../examples/gset.rune")
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	var out strings.Builder
+	if err := runSimulate(string(src), 2, &out); err != nil {
+		t.Fatalf("runSimulate: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "verdict: CONVERGED") {
+		t.Errorf("G-Set should converge:\n%s", got)
+	}
+	if !strings.Contains(got, "a CvRDT") {
+		t.Errorf("G-Set (OR join) should be reported a CvRDT:\n%s", got)
+	}
+}

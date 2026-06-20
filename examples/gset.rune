@@ -1,0 +1,34 @@
+-- examples/gset.rune: a grow-only SET (G-Set CvRDT) over a 3-element domain, to show
+-- the simulator framework is not counter-specific. State is membership of elements
+-- 0,1,2; the join is pointwise boolean OR (a different lattice from the G-Counter's
+-- max), value is the cardinality. Run it:
+--   rune simulate examples/gset.rune 2
+-- two replicas add different elements, the network partitions, then heals, and they
+-- converge to the union. The law linter confirms OR is a join (commutative,
+-- idempotent, associative), so it IS a CvRDT.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data S    : U is set : Bool -> Bool -> Bool -> S end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+
+b0 : S -> Bool is fn (s : S) is SElim (fn (w : S) is Bool end) (fn (x : Bool) (y : Bool) (z : Bool) is x end) s end end
+b1 : S -> Bool is fn (s : S) is SElim (fn (w : S) is Bool end) (fn (x : Bool) (y : Bool) (z : Bool) is y end) s end end
+b2 : S -> Bool is fn (s : S) is SElim (fn (w : S) is Bool end) (fn (x : Bool) (y : Bool) (z : Bool) is z end) s end end
+
+init : S is set false false false end
+
+op0 : S -> S is fn (s : S) is set true (b1 s) (b2 s) end end
+op1 : S -> S is fn (s : S) is set (b0 s) true (b2 s) end end
+
+merge : S -> S -> S is
+  fn (x : S) (y : S) is set (orB (b0 x) (b0 y)) (orB (b1 x) (b1 y)) (orB (b2 x) (b2 y)) end
+end
+
+inc1 : Bool -> Nat -> Nat is
+  fn (b : Bool) (acc : Nat) is BoolElim (fn (w : Bool) is Nat end) (succ acc) acc b end
+end
+value : S -> Nat is fn (s : S) is inc1 (b0 s) (inc1 (b1 s) (inc1 (b2 s) zero)) end end
