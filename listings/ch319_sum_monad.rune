@@ -1,0 +1,55 @@
+-- Chapter 319 — Sum as the error monad: the monad laws (proven tier).
+--
+-- Sum E A is the error/exception monad: bind threads a success (inr) into the continuation
+-- and short-circuits on an error (inl). The three monad laws hold by case analysis (left
+-- identity definitional; right identity and associativity by SumElim). Proof-only.
+--
+--   sLeftId : sbind (inr E A a) f = f a
+--   sRightId: sbind m (inr E A) = m
+--   sAssoc  : sbind (sbind m f) g = sbind m (\x -> sbind (f x) g)
+
+data Sum : U -> U -> U is
+  inl : (A : U) -> (B : U) -> A -> Sum A B
+| inr : (A : U) -> (B : U) -> B -> Sum A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+-- Sum E A: inl = error of type E, inr = success of type A.
+sbind : (E : U) -> (A : U) -> (B : U) -> Sum E A -> (A -> Sum E B) -> Sum E B is
+  fn (E : U) (A : U) (B : U) (m : Sum E A) (k : A -> Sum E B) is
+    SumElim E A (fn (x : Sum E A) is Sum E B end)
+      (fn (e : E) is inl E B e end)
+      (fn (a : A) is k a end)
+      m
+  end
+end
+
+sLeftId : (E : U) -> (A : U) -> (B : U) -> (a : A) -> (f : A -> Sum E B) ->
+          Eq (Sum E B) (sbind E A B (inr E A a) f) (f a) is
+  fn (E : U) (A : U) (B : U) (a : A) (f : A -> Sum E B) is refl end
+end
+
+sRightId : (E : U) -> (A : U) -> (m : Sum E A) -> Eq (Sum E A) (sbind E A A m (inr E A)) m is
+  fn (E : U) (A : U) (m : Sum E A) is
+    SumElim E A (fn (x : Sum E A) is Eq (Sum E A) (sbind E A A x (inr E A)) x end)
+      (fn (e : E) is refl end)
+      (fn (a : A) is refl end)
+      m
+  end
+end
+
+sAssoc : (E : U) -> (A : U) -> (B : U) -> (C : U) ->
+         (m : Sum E A) -> (f : A -> Sum E B) -> (g : B -> Sum E C) ->
+         Eq (Sum E C) (sbind E B C (sbind E A B m f) g)
+                      (sbind E A C m (fn (x : A) is sbind E B C (f x) g end)) is
+  fn (E : U) (A : U) (B : U) (C : U) (m : Sum E A) (f : A -> Sum E B) (g : B -> Sum E C) is
+    SumElim E A
+      (fn (x : Sum E A) is
+         Eq (Sum E C) (sbind E B C (sbind E A B x f) g)
+                      (sbind E A C x (fn (y : A) is sbind E B C (f y) g end)) end)
+      (fn (e : E) is refl end)
+      (fn (a : A) is refl end)
+      m
+  end
+end
