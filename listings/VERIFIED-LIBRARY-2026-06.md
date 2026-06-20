@@ -76,6 +76,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
   `reverse (reverse xs) = xs` (reverse distribution + involution).
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
+- `ch320_len_drop` — drop shrinks length by n: `len (drop n xs) = monus (len xs) n`.
 - `ch280_reverse_acc` — accumulator reverse equals naive reverse (`revAcc xs nnil = reverse xs`),
   via the generalized spec `revAcc xs acc = reverse xs ++ acc` — an optimization-correctness result.
 - `ch281_map_take` — naturality: `take n (map f xs) = map f (take n xs)`.
