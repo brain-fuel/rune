@@ -341,6 +341,12 @@ equation).
   partial order (`leqJRefl`/`leqJTrans`/`leqJAntisym`) and merge is its join
   (`leqJUpperL`/`R` + `leqJLeast`). Purely equational, no induction. So the algebraic and
   order-theoretic views coincide for EVERY CvRDT; ch426's vector clock is one instance.
+- `ch428_causal_delivery`: the APPLICATION motivating vector clocks - causal message
+  delivery. A message is deliverable iff it is the sender's next (FIFO, `eqNat`) with all
+  cross-replica deps present (causal, `lte`). `deliverMonotone`/`deliverDominatesMsg` (the
+  receiver's clock advances and absorbs the message history, via ch426's join lemmas),
+  `causalReady0/1` (deps already present - causal safety), `fifoNext0/1` (exactly-once in
+  order). Spends the clock machinery on the delivery protocol.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
