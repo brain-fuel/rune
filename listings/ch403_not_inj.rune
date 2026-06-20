@@ -1,0 +1,49 @@
+-- Chapter 403 — negation is injective: notB a = notB b implies a = b (proven tier).
+--
+-- Apply notB to both sides and cancel the double negations (notNot). Proof-only.
+--
+--   notInj : (a b : Bool) -> Eq Bool (notB a) (notB b) -> Eq Bool a b
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+notNot : (b : Bool) -> Eq Bool (notB (notB b)) b is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (notB (notB x)) x end) refl refl b end
+end
+
+-- a = notB (notB a) = notB (notB b) = b.
+notInj : (a : Bool) -> (b : Bool) -> Eq Bool (notB a) (notB b) -> Eq Bool a b is
+  fn (a : Bool) (b : Bool) (h : Eq Bool (notB a) (notB b)) is
+    transEq Bool a (notB (notB a)) b
+      (symEq Bool (notB (notB a)) a (notNot a))
+      (transEq Bool (notB (notB a)) (notB (notB b)) b
+         (cong Bool Bool notB (notB a) (notB b) h)
+         (notNot b))
+  end
+end
