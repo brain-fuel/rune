@@ -68,6 +68,8 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch253_leb_total` — `leb` total (so a total preorder).
 - `ch258_mul_identities` — `mulZeroR`, `mulOneL`, `mulOneR`.
 - `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
+- `ch270_mul_distrib` — four-term interchange + **left distributivity** (`a*(b+c) = a*b + a*c`)
+  — completes the hermetic Nat commutative semiring.
 
 ## Proven tier — booleans & Option
 
