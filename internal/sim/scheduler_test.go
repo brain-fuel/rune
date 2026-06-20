@@ -309,3 +309,29 @@ func TestDiagnoseDistinguishesByLaws(t *testing.T) {
 	}
 	t.Logf("LWW report:\n%s", RenderReport(rep2))
 }
+
+// TestStabilizeLiveness checks eventual consistency under fair ring gossip: the
+// 3-replica G-Counter reaches a global fixpoint within n-1 rounds, while the LWW
+// register never stabilizes (ring delivery rotates its values forever).
+func TestStabilizeLiveness(t *testing.T) {
+	gc := loadSession(t, gcounter3Src)
+	rounds, ok, err := Stabilize(gc, "gc zero zero zero", "mergeGC", 3, []string{"op0", "op1", "op2"}, 10)
+	if err != nil {
+		t.Fatalf("stabilize gc: %v", err)
+	}
+	if !ok {
+		t.Errorf("G-Counter must stabilize under fair gossip")
+	}
+	if rounds > 2 {
+		t.Errorf("3-node ring should stabilize within n-1=2 rounds, took %d", rounds)
+	}
+
+	lww := loadSession(t, lwwSrc)
+	_, ok2, err := Stabilize(lww, "lw zero", "mergeLW", 2, []string{"w2", "w1"}, 10)
+	if err != nil {
+		t.Fatalf("stabilize lww: %v", err)
+	}
+	if ok2 {
+		t.Errorf("LWW must NOT stabilize (no join)")
+	}
+}
