@@ -69,6 +69,16 @@ func Diagnose(sess *session.Session, init, mergeFn string, ops []string) (*LawRe
 	if len(samples) >= 3 {
 		samples = append(samples, d.apply2(mergeRef, samples[1], samples[2]))
 	}
+	// Deepen coverage with TWO-STEP states (op applied to an op-result), so a violation
+	// that only shows up after several updates - e.g. a non-inflationary op on a grown
+	// state - is still sampled. Bounded to keep the sweep fast (skip if many ops).
+	if len(opRefs) <= 4 {
+		for _, oi := range opRefs {
+			for _, oj := range opRefs {
+				samples = append(samples, d.apply1(oi, d.apply1(oj, base)))
+			}
+		}
+	}
 
 	show := func(t core.Tm) string { return sess.Pretty(t) }
 	rep := &LawReport{Commutative: true, Idempotent: true, Associative: true, Inflationary: true}
