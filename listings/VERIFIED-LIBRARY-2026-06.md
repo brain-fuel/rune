@@ -331,6 +331,11 @@ equation).
   ex-falso-into-Eq-Nat by `cong`, then `vcLeqAntisym`) and proves CONCURRENCY DETECTION:
   two clocks that each ticked a different replica are concurrent (`vcLeq` false both ways,
   by refl) - the capability a scalar Lamport clock lacks (it would falsely order them).
+- `ch426_vc_merge_join`: the vector-clock merge IS the join of the causal order - order
+  theory and CRDT algebra coincide. `maxUpperBoundL`/`R` + `maxLeast` (max is the LUB of
+  Nat's order), lifted to `mergeUpperBoundL`/`R` (merge follows both inputs) + `mergeLUB`
+  (any clock above both is above the merge). So `merge` is exactly the join induced by
+  happens-before, not merely some commutative-idempotent-associative operation.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
