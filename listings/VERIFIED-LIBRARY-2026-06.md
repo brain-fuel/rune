@@ -85,6 +85,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
 - `ch288_elem_snoc` — appending x makes it a member: `elem x (snoc xs x) = true`.
 - `ch309_count_snoc` — appending x increments its count: `countOccur x (snoc xs x) = succ (countOccur x xs)`.
+- `ch310_count_append` — count is additive over append: `countOccur x (xs++ys) = countOccur x xs + countOccur x ys` (multiset homomorphism).
 
 ## Proven tier — a verified queue
 
