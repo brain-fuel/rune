@@ -6,7 +6,48 @@ import (
 	"testing"
 
 	"goforge.dev/rune/v3/internal/session"
+	"goforge.dev/rune/v3/internal/sim"
 )
+
+// stabilizeExample loads a protocol file and runs the fair-gossip liveness check.
+func stabilizeExample(t *testing.T, file string, n int, ops []string) (int, bool) {
+	t.Helper()
+	src, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatalf("read %s: %v", file, err)
+	}
+	s := session.New()
+	if _, err := s.LoadSource(string(src)); err != nil {
+		t.Fatalf("load %s: %v", file, err)
+	}
+	rounds, ok, err := sim.Stabilize(s, "init", "merge", n, ops, 12)
+	if err != nil {
+		t.Fatalf("stabilize %s: %v", file, err)
+	}
+	return rounds, ok
+}
+
+// TestStabilizeAcrossCvRDTs is consolidated LIVENESS coverage: every shipped CvRDT
+// example reaches a fixpoint under fair ring gossip, and the non-CvRDT does not.
+func TestStabilizeAcrossCvRDTs(t *testing.T) {
+	cvrdts := []struct {
+		file string
+		n    int
+		ops  []string
+	}{
+		{"../../examples/gcounter3.rune", 3, []string{"op0", "op1", "op2"}},
+		{"../../examples/gset.rune", 2, []string{"op0", "op1"}},
+		{"../../examples/pncounter.rune", 2, []string{"op0", "op1"}},
+	}
+	for _, c := range cvrdts {
+		if _, ok := stabilizeExample(t, c.file, c.n, c.ops); !ok {
+			t.Errorf("%s (a CvRDT) failed to stabilize under fair gossip", c.file)
+		}
+	}
+	if _, ok := stabilizeExample(t, "../../examples/lww.rune", 2, []string{"op0", "op1"}); ok {
+		t.Errorf("lww.rune (no join) must NOT stabilize")
+	}
+}
 
 // TestGCounterExampleTriad confirms one verified source PROVES, SIMULATES, and
 // DEPLOYS: the example loads (so convergedCorrect, the convergence proof, checks),
