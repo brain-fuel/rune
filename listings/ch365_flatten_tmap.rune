@@ -1,0 +1,137 @@
+-- Chapter 365 — flatten is natural in the tree functor (proven tier).
+--
+-- flatten (tmap f t) = mapList f (flatten t): mapping a tree then flattening equals
+-- flattening then mapping the list. Naturality of inorder flatten between the tree and list
+-- functors. The node step rewrites both subtrees (cong2) and distributes map over the
+-- append (mapAppend). Proof-only.
+--
+--   flattenTmap : (f : Nat -> Nat) -> (t : Tree)
+--               -> Eq NatList (flatten (tmap f t)) (mapList f (flatten t))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+data Tree : U is
+  leaf : Tree
+| node : Tree -> Nat -> Tree -> Tree
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+mapAppend : (f : Nat -> Nat) -> (xs : NatList) -> (ys : NatList) ->
+            Eq NatList (mapList f (append xs ys)) (append (mapList f xs) (mapList f ys)) is
+  fn (f : Nat -> Nat) (xs : NatList) (ys : NatList) is
+    NatListElim (fn (z : NatList) is Eq NatList (mapList f (append z ys)) (append (mapList f z) (mapList f ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (mapList f (append rest ys)) (append (mapList f rest) (mapList f ys))) is
+         cong NatList NatList (consWith (f h)) (mapList f (append rest ys)) (append (mapList f rest) (mapList f ys)) ih end)
+      xs
+  end
+end
+
+tmap : (Nat -> Nat) -> Tree -> Tree is
+  fn (f : Nat -> Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Tree end)
+      leaf
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Tree) (ihr : Tree) is node ihl (f x) ihr end)
+      t
+  end
+end
+
+flatten : Tree -> NatList is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is NatList end)
+      nnil
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : NatList) (ihr : NatList) is append ihl (ncons x ihr) end)
+      t
+  end
+end
+
+-- consAt c p q = append p (ncons c q) — the two-subtree congruence shape.
+consAt : Nat -> NatList -> NatList -> NatList is
+  fn (c : Nat) (p : NatList) (q : NatList) is append p (ncons c q) end
+end
+
+-- THE THEOREM, by induction on t. Node step:
+--   flatten (tmap f (node l x r)) = append (flatten (tmap f l)) (ncons (f x) (flatten (tmap f r)))
+--   cong2 (consAt (f x)) IHl IHr : = append (map f (flatten l)) (ncons (f x) (map f (flatten r)))
+--   sym (mapAppend ...)          : = map f (append (flatten l) (ncons x (flatten r))) = map f (flatten (node l x r))
+flattenTmap : (f : Nat -> Nat) -> (t : Tree) ->
+              Eq NatList (flatten (tmap f t)) (mapList f (flatten t)) is
+  fn (f : Nat -> Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq NatList (flatten (tmap f x)) (mapList f (flatten x)) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq NatList (flatten (tmap f l)) (mapList f (flatten l)))
+          (ihr : Eq NatList (flatten (tmap f r)) (mapList f (flatten r))) is
+         transEq NatList
+           (append (flatten (tmap f l)) (ncons (f x) (flatten (tmap f r))))
+           (append (mapList f (flatten l)) (ncons (f x) (mapList f (flatten r))))
+           (mapList f (append (flatten l) (ncons x (flatten r))))
+           (cong2 NatList NatList NatList (consAt (f x))
+              (flatten (tmap f l)) (mapList f (flatten l))
+              (flatten (tmap f r)) (mapList f (flatten r)) ihl ihr)
+           (symEq NatList
+              (mapList f (append (flatten l) (ncons x (flatten r))))
+              (append (mapList f (flatten l)) (ncons (f x) (mapList f (flatten r))))
+              (mapAppend f (flatten l) (ncons x (flatten r)))) end)
+      t
+  end
+end

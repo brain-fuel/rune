@@ -145,6 +145,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch337_leaves_nodes` — leaves = internal nodes + 1: `countLeaves t = succ (countNodes t)`.
 - `ch338_leaves_mirror` — mirror preserves leaf count: `countLeaves (mirror t) = countLeaves t`.
 - `ch326_flatten_mirror` — mirroring reverses the inorder traversal: `flatten (mirror t) = reverse (flatten t)`.
+- `ch365_flatten_tmap` — flatten natural in the tree functor: `flatten (tmap f t) = map f (flatten t)`.
 
 ## Proven tier — arithmetic & order
 
