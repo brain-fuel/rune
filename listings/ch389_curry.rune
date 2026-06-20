@@ -1,0 +1,38 @@
+-- Chapter 389 — currying and uncurrying are mutually inverse (proven tier).
+--
+-- uncurry (curry f) p = f p and curry (uncurry g) a b = g a b: the curry/uncurry
+-- isomorphism (Prod A B -> C) ≅ (A -> B -> C). By case analysis on the pair (first) and by
+-- reflexivity (second). Proof-only.
+--
+--   uncurryCurry : (f : Prod A B -> C) -> (p : Prod A B) -> Eq C (uncurry A B C (curry A B C f) p) (f p)
+--   curryUncurry : (g : A -> B -> C) -> (a : A) -> (b : B) -> Eq C (curry A B C (uncurry A B C g) a b) (g a b)
+
+data Prod : U -> U -> U is
+  mkProd : (A : U) -> (B : U) -> A -> B -> Prod A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+curry : (A : U) -> (B : U) -> (C : U) -> (Prod A B -> C) -> A -> B -> C is
+  fn (A : U) (B : U) (C : U) (f : Prod A B -> C) (a : A) (b : B) is f (mkProd A B a b) end
+end
+
+uncurry : (A : U) -> (B : U) -> (C : U) -> (A -> B -> C) -> Prod A B -> C is
+  fn (A : U) (B : U) (C : U) (g : A -> B -> C) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is C end) (fn (a : A) (b : B) is g a b end) p
+  end
+end
+
+uncurryCurry : (A : U) -> (B : U) -> (C : U) -> (f : Prod A B -> C) -> (p : Prod A B) ->
+               Eq C (uncurry A B C (curry A B C f) p) (f p) is
+  fn (A : U) (B : U) (C : U) (f : Prod A B -> C) (p : Prod A B) is
+    ProdElim A B (fn (x : Prod A B) is Eq C (uncurry A B C (curry A B C f) x) (f x) end)
+      (fn (a : A) (b : B) is refl end)
+      p
+  end
+end
+
+curryUncurry : (A : U) -> (B : U) -> (C : U) -> (g : A -> B -> C) -> (a : A) -> (b : B) ->
+               Eq C (curry A B C (uncurry A B C g) a b) (g a b) is
+  fn (A : U) (B : U) (C : U) (g : A -> B -> C) (a : A) (b : B) is refl end
+end
