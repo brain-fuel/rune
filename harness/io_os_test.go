@@ -267,10 +267,13 @@ func TestIOArgvExitConformance(t *testing.T) {
 // (7/2*4-1) = 13, a contract-guarded dot within budget (11, ok), and one over budget
 // (blame → 0). The guard is the R-FFI contract-GUARD tier: the foreign dot2 kernel is
 // assumed, its postcondition (≤ 100) checked at the boundary, the kernel blamed on
-// violation. (Rust excluded — its value domain has no float variant yet, parked.)
+// violation. Rust is now INCLUDED — its value domain gained a V::Float(f64) variant
+// and the float kernels are baked (fromNat/fadd/.../floatToNat/fleqN/dot2), so the
+// f64 element type is byte-identical across all five source backends.
 func TestIOFloatBlasConformance(t *testing.T) {
 	const want = "11\n13\n11\n0\nunit"
-	for _, bk := range ioCLIBackends {
+	floatBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range floatBackends {
 		bk := bk
 		t.Run(bk.name, func(t *testing.T) {
 			if _, err := exec.LookPath(bk.bin); err != nil {

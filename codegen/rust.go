@@ -53,6 +53,39 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "timeNanos") {
 		b.WriteString("fn timeNanos() -> Rc<V> { vfun(move |_u: Rc<V>| -> Rc<V> { let ns = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64; Rc::new(V::Nat(_big_from_u64(ns))) }) }\n")
 	}
+	// D3 machine floats (f64) — pure host bodies (native f64 arithmetic). A Float is
+	// a V::Float(f64). `Float` is a foreign TYPE but survives erasure as ok/err's type
+	// argument, so it needs a trivial runtime-irrelevant body (like ch205's Pid).
+	if usesForeign(p, "Float") {
+		b.WriteString("fn Float() -> Rc<V> { unit() }\n")
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("fn fromNat() -> Rc<V> { vfun(|n: Rc<V>| Rc::new(V::Float(_big_to_string(_nat(&n)).parse::<f64>().unwrap()))) }\n")
+	}
+	if usesForeign(p, "fadd") {
+		b.WriteString("fn fadd() -> Rc<V> { vfun(|a: Rc<V>| vfun(move |b: Rc<V>| Rc::new(V::Float(_float(&a) + _float(&b))))) }\n")
+	}
+	if usesForeign(p, "fsub") {
+		b.WriteString("fn fsub() -> Rc<V> { vfun(|a: Rc<V>| vfun(move |b: Rc<V>| Rc::new(V::Float(_float(&a) - _float(&b))))) }\n")
+	}
+	if usesForeign(p, "fmul") {
+		b.WriteString("fn fmul() -> Rc<V> { vfun(|a: Rc<V>| vfun(move |b: Rc<V>| Rc::new(V::Float(_float(&a) * _float(&b))))) }\n")
+	}
+	if usesForeign(p, "fdiv") {
+		b.WriteString("fn fdiv() -> Rc<V> { vfun(|a: Rc<V>| vfun(move |b: Rc<V>| Rc::new(V::Float(_float(&a) / _float(&b))))) }\n")
+	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("fn fabsP() -> Rc<V> { vfun(|x: Rc<V>| Rc::new(V::Float(_float(&x).abs()))) }\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("fn floatToNat() -> Rc<V> { vfun(|x: Rc<V>| Rc::new(V::Nat(_big_from_dec(&format!(\"{:.0}\", _float(&x).trunc()))))) }\n")
+	}
+	if usesForeign(p, "fleqN") {
+		b.WriteString("fn fleqN() -> Rc<V> { vfun(|a: Rc<V>| vfun(move |b: Rc<V>| if _float(&a) <= _float(&b) { Rc::new(V::Nat(_big_from_u64(1))) } else { Rc::new(V::Nat(Vec::new())) })) }\n")
+	}
+	if usesForeign(p, "dot2") {
+		b.WriteString("fn dot2() -> Rc<V> { vfun(|a0: Rc<V>| vfun(move |a1: Rc<V>| { let a0 = a0.clone(); vfun(move |b0: Rc<V>| { let a0 = a0.clone(); let a1 = a1.clone(); vfun(move |b1: Rc<V>| Rc::new(V::Float(_float(&a0) * _float(&b0) + _float(&a1) * _float(&b1)))) }) })) }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatRust(&b, *p.Nat)
@@ -325,6 +358,7 @@ enum V {
     Unit,
     Int(i64),                 // host machine int (FFI LitInt)
     Nat(Vec<u32>),            // builtin-nat: arbitrary-precision base-1e9 limbs (little-endian)
+    Float(f64),               // D3 machine float (f64): host native double
     Str(String),
     Ptr(i64),
     Fun(Rc<dyn Fn(Rc<V>) -> Rc<V>>),
@@ -357,6 +391,9 @@ fn _impossible() -> Rc<V> { panic!("impossible: unmatched constructor tag") }
 const BIG_BASE: u64 = 1_000_000_000;
 fn _nat<'a>(v: &'a Rc<V>) -> &'a Vec<u32> {
     match &**v { V::Nat(l) => l, _ => panic!("rune: expected a nat") }
+}
+fn _float(v: &Rc<V>) -> f64 {
+    match &**v { V::Float(x) => *x, _ => panic!("rune: expected a float") }
 }
 fn _big_norm(mut l: Vec<u32>) -> Vec<u32> { while let Some(&0) = l.last() { l.pop(); } l }
 fn _big_from_u64(mut n: u64) -> Vec<u32> {
@@ -451,6 +488,7 @@ fn _show(v: &Rc<V>) -> String {
         V::Unit => "()".to_string(),
         V::Int(n) => n.to_string(),
         V::Nat(l) => _big_to_string(l),
+        V::Float(x) => format!("{}", x),
         V::Str(s) => s.clone(),
         V::Ptr(_) => "<ptr>".to_string(),
         V::Fun(_) => "<function>".to_string(),
