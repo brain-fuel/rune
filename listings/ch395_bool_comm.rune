@@ -1,0 +1,41 @@
+-- Chapter 395 — and/or are commutative (proven tier).
+--
+-- andB a b = andB b a and orB a b = orB b a. With associativity and the units these make
+-- (Bool, and, true) and (Bool, or, false) commutative monoids. By double case analysis.
+-- Proof-only.
+--
+--   andComm : (a b : Bool) -> Eq Bool (andB a b) (andB b a)
+--   orComm  : (a b : Bool) -> Eq Bool (orB  a b) (orB  b a)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+andComm : (a : Bool) -> (b : Bool) -> Eq Bool (andB a b) (andB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB x b) (andB b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (andB true y) (andB y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (andB false y) (andB y false) end) refl refl b)
+      a
+  end
+end
+
+orComm : (a : Bool) -> (b : Bool) -> Eq Bool (orB a b) (orB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB x b) (orB b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (orB true y) (orB y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (orB false y) (orB y false) end) refl refl b)
+      a
+  end
+end
