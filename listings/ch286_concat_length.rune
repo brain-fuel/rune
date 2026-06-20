@@ -1,0 +1,108 @@
+-- Chapter 286 — concat length is the sum of the lengths (proven tier).
+--
+-- Flattening a list of lists yields a list whose length is the sum of the inner lengths.
+-- The cons step uses the append-length law. A nested-list result. Proof-only.
+--
+--   lenConcat : (xss : LL) -> Eq Nat (len (concat xss)) (sumLens xss)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+data LL : U is
+  lnil  : LL
+| lcons : NatList -> LL -> LL
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+lenAppend : (xs : NatList) -> (ys : NatList) -> Eq Nat (len (append xs ys)) (natAdd (len xs) (len ys)) is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is Eq Nat (len (append x ys)) (natAdd (len x) (len ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (len (append rest ys)) (natAdd (len rest) (len ys))) is
+         cong Nat Nat succ (len (append rest ys)) (natAdd (len rest) (len ys)) ih end)
+      xs
+  end
+end
+
+concat : LL -> NatList is
+  fn (xss : LL) is
+    LLElim (fn (x : LL) is NatList end)
+      nnil
+      (fn (xs : NatList) (rest : LL) (ih : NatList) is append xs ih end)
+      xss
+  end
+end
+
+sumLens : LL -> Nat is
+  fn (xss : LL) is
+    LLElim (fn (x : LL) is Nat end)
+      zero
+      (fn (xs : NatList) (rest : LL) (ih : Nat) is natAdd (len xs) ih end)
+      xss
+  end
+end
+
+-- THE THEOREM, by induction on xss:
+--   lnil:  len (concat lnil) = 0 = sumLens lnil                                   -> refl
+--   lcons xs rest: len (concat (lcons xs rest)) = len (append xs (concat rest))
+--                  lenAppend xs (concat rest) : = natAdd (len xs) (len (concat rest))
+--                  cong (natAdd (len xs)) IH   : = natAdd (len xs) (sumLens rest) = sumLens (lcons ..)
+lenConcat : (xss : LL) -> Eq Nat (len (concat xss)) (sumLens xss) is
+  fn (xss : LL) is
+    LLElim (fn (x : LL) is Eq Nat (len (concat x)) (sumLens x) end)
+      refl
+      (fn (xs : NatList) (rest : LL) (ih : Eq Nat (len (concat rest)) (sumLens rest)) is
+         transEq Nat
+           (len (append xs (concat rest)))
+           (natAdd (len xs) (len (concat rest)))
+           (natAdd (len xs) (sumLens rest))
+           (lenAppend xs (concat rest))
+           (cong Nat Nat (natAdd (len xs)) (len (concat rest)) (sumLens rest) ih) end)
+      xss
+  end
+end

@@ -51,6 +51,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch281_map_take` — naturality: `take n (map f xs) = map f (take n xs)`.
 - `ch285_foldl_sum` — left fold equals right fold for addition (`sumL 0 xs = sum xs`),
   via `sumL acc xs = acc + sum xs` — fold-direction independence for the additive monoid.
+- `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
 
 ## Proven tier — a verified map (association list)
 
