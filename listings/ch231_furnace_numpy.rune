@@ -1,0 +1,96 @@
+-- Chapter 231 — the FURNACE catches the lie: discriminating numpy property tests (Savage).
+--
+-- A property test is only worth running if it can FAIL. ch230 watched true float laws
+-- pass; this chapter proves the furnace is not vacuous by running a FALSE law beside true
+-- ones and watching it report 0. We property-test the bound NumPy ops against in-language
+-- references — and against a deliberately WRONG reference — so the furnace's verdict is
+-- meaningful: 1 only when the library genuinely matches the law.
+--
+--   P1 (true) : npMean xs ≈ refMean xs   (mean = sum/len)        -> 1
+--   P2 (FALSE): npMean xs ≈ refSum  xs   (mean is NOT the sum)   -> 0   <- the lie, caught
+--   P3 (true) : npNorm xs ≈ refNorm xs   (L2 norm = sqrt sum-sq) -> 1
+--
+-- For xs=[2,4,6,8]: mean 5, sum 20 (so P2's 5 ≈ 20 is false). Observable: "1\n0\n1\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign fsqrt      : Float -> Float end
+foreign fleqN      : Float -> Float -> Nat end
+foreign npMean     : FList -> Float end
+foreign npNorm     : FList -> Float end
+
+-- the furnace verdict: |x - y| <= eps ? 1 : 0.
+holds : Float -> Float -> Float -> Nat is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleqN (fabsP (fsub x y)) eps
+  end
+end
+
+eps : Float is fdiv (fromNat 1) (fromNat 1000000) end
+
+refSum : FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Float end)
+      (fromNat 0)
+      (fn (x : Float) (rest : FList) (ih : Float) is fadd x ih end)
+      xs
+  end
+end
+
+refLen : FList -> Nat is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Nat end)
+      zero
+      (fn (x : Float) (rest : FList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+refMean : FList -> Float is
+  fn (xs : FList) is fdiv (refSum xs) (fromNat (refLen xs)) end
+end
+
+sumSq : FList -> Float is
+  fn (xs : FList) is
+    FListElim (fn (x : FList) is Float end)
+      (fromNat 0)
+      (fn (x : Float) (rest : FList) (ih : Float) is fadd (fmul x x) ih end)
+      xs
+  end
+end
+
+refNorm : FList -> Float is fn (xs : FList) is fsqrt (sumSq xs) end end
+
+xs : FList is fcons (fromNat 2) (fcons (fromNat 4) (fcons (fromNat 6) (fcons (fromNat 8) fnil))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (holds eps (npMean xs) (refMean xs))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (holds eps (npMean xs) (refSum xs))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (holds eps (npNorm xs) (refNorm xs))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
