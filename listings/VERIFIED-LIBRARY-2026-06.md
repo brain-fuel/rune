@@ -96,6 +96,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch285_foldl_sum` — left fold equals right fold for addition (`sumL 0 xs = sum xs`),
   via `sumL acc xs = acc + sum xs` — fold-direction independence for the additive monoid.
 - `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
+- `ch346_isempty_append` — empty iff both empty: `isEmpty (xs++ys) = isEmpty xs && isEmpty ys`.
 - `ch288_elem_snoc` — appending x makes it a member: `elem x (snoc xs x) = true`.
 - `ch312_elem_append` — membership distributes over append: `elem x (xs++ys) = elem x xs || elem x ys`.
 - `ch309_count_snoc` — appending x increments its count: `countOccur x (snoc xs x) = succ (countOccur x xs)`.

@@ -1,0 +1,56 @@
+-- Chapter 346 — a concatenation is empty iff both parts are (proven tier).
+--
+-- isEmpty (append xs ys) = andB (isEmpty xs) (isEmpty ys). By induction on xs (each case
+-- reduces both sides definitionally). Proof-only.
+--
+--   isEmptyAppend : (xs ys : NatList) -> Eq Bool (isEmpty (append xs ys)) (andB (isEmpty xs) (isEmpty ys))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+isEmpty : NatList -> Bool is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Bool end)
+      true
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is false end)
+      xs
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+isEmptyAppend : (xs : NatList) -> (ys : NatList) ->
+                Eq Bool (isEmpty (append xs ys)) (andB (isEmpty xs) (isEmpty ys)) is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (z : NatList) is Eq Bool (isEmpty (append z ys)) (andB (isEmpty z) (isEmpty ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (isEmpty (append rest ys)) (andB (isEmpty rest) (isEmpty ys))) is refl end)
+      xs
+  end
+end
