@@ -305,6 +305,12 @@ equation).
 - `ch418_pncounter_monotone`: PN-Counter SAFETY: tallies monotone (net value is not, by design).
 - `ch416_lww_not_crdt`: REFUTATION: LWW merge not commutative (counterexample -> false=true).
 - `ch417_badcounter_not_crdt`: REFUTATION: add-merge counter not idempotent.
+- `ch420_runtime_only_fail`: E3 completeness (runtime) over the SIMPLIFIED two-label LTS.
+- `ch421_okstep_no_comm`: E3 completeness over the REAL four-label calculus of ch409:
+  `okStepLabelOK` (the ok step never emits lsend/lrecv, by structural induction with
+  `interleaveTOK`/`commTOK`/`parOkOK` threading an `optLabelOK` invariant) + the runtime
+  corollary `visibleRunOnlyFail` (every observation over any fuel is a failure). Supersedes
+  ch420's two-label sketch on the genuine okStep.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
@@ -318,11 +324,11 @@ equation).
   Boolean explosion (`everythingTrue`, into `Eq Bool` only) is the available idiom.
 - JVM float bodies remain (the jvm emitter targets java-25; the local jvm is 17).
 - matplotlib / scipy / pandas absent locally, so plotting + those interops are untested here.
-- E3 adequacy COMPLETENESS on the runtime side: DONE over the fault alphabet (ch240
-  `visibleRunOnlyFail`, the companion to ch229's `projectOnlyFail`). Over the FULL 4-label
-  calculus (with lsend/lrecv) it would additionally need `okStep` to provably emit only
-  `ltau`/`lfail`, threading an `optLabelOK` invariant through `parOk`/`commT`/`interleaveT`
-  (nested dependent OptionElim, ~3 helper lemmas); only that full-alphabet strengthening
-  remains. The soundness invariants (both traces stay observable) ARE proven (ch229).
+- E3 adequacy COMPLETENESS on the runtime side: DONE, and now over the FULL four-label
+  calculus (ch421 `visibleRunOnlyFail`, built on `okStepLabelOK`: the genuine okStep emits
+  only `ltau`/`lfail`, the `optLabelOK` invariant threaded through `parOk`/`commT`/
+  `interleaveT` by `parOkOK`/`commTOK`/`interleaveTOK`). The earlier two-label sketch is
+  ch420; the spec-side companion is ch409 `projectOnlyFail`; soundness (both traces stay
+  observable) is ch409. The E3 frontier item is CLOSED.
 - E4 surface/runtime tail: live-actor projection onto spawn/send/receive (D5/B3 OTP runtime)
   and `protocol ... end` surface sugar are design-gated, deferred (see R-PROTO.md).

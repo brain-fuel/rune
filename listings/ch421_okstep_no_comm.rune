@@ -1,0 +1,398 @@
+-- Chapter 421, E3 completeness on the FULL four-label calculus: the runtime step
+-- emits no communication label (E3).
+--
+-- ch420 proved the runtime trace stays in {lfail} over a SIMPLIFIED two-label LTS
+-- (where "every label is tau-or-fail" holds by the label type). This chapter discharges
+-- the genuine remaining E3 item over the REAL four-label fault calculus of ch409
+-- (labels {ltau, lsend, lrecv, lfail}, the full okStep built from parOk / commT /
+-- interleaveT): the `ok` step function NEVER emits a communication label (lsend / lrecv).
+--
+--   okStepLabelOK : (p : Proc) -> optLabelOK (okStep p) = true
+--
+-- where `optLabelOK` holds of an optional transition iff its label is tau-or-fail. The
+-- proof is structural induction over Proc; the only label-emitting case is `par`, and it
+-- delegates to parOk -> commT -> interleaveT. Three preservation lemmas thread the
+-- invariant through them: interleaveT only ever re-emits a SUB-transition's label (so the
+-- induction hypotheses carry it), commT emits at most a fresh `ltau` (rendezvous), and
+-- parOk emits at most a fresh `lfail` (DETECT). lsend / lrecv are therefore unreachable.
+--
+-- The runtime corollary closes adequacy completeness on the real calculus:
+--
+--   visibleRunOnlyFail : (k : Nat) (p : Proc) -> allFail (visibleRun k p) = true
+--
+-- every OBSERVATION the runtime emits over any fuel is a failure - because okStep emits
+-- only {ltau, lfail}, `visible` drops the ltau, and what survives is exactly lfail. This
+-- is the four-label companion to ch409's projectOnlyFail (the spec side) and supersedes
+-- ch420's two-label sketch by proving it of the genuine okStep. Proof-only.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+
+-- the real four-label fault alphabet of ch206 / ch409.
+data Label : U is
+  ltau  : Label
+| lsend : Label
+| lrecv : Label
+| lfail : Label
+end
+
+data Proc : U is
+  halt  : Proc
+| out   : Proc -> Proc
+| inp   : Proc -> Proc
+| mon   : Proc -> Proc
+| par   : Proc -> Proc -> Proc
+| crash : Proc
+end
+
+data Trans : U is tr : Label -> Proc -> Trans end
+
+labelOf : Trans -> Label is
+  fn (t : Trans) is TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t end
+end
+
+procOf : Trans -> Proc is
+  fn (t : Trans) is TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t end
+end
+
+-- ===== the ok-fault step, verbatim from ch409 =====
+
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+
+commT : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (interleaveT iha ihb a b)
+      (fn (pa : Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+           (interleaveT iha ihb a b)
+           (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+           (inpCont b)
+       end)
+      (outCont a)
+  end
+end
+
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (commT a b iha ihb)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (commT a b iha ihb)
+      (isCrash a)
+  end
+end
+
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+-- ===== the tau-or-fail invariant =====
+
+-- a label is admissible iff it is silent (ltau) or an observable failure (lfail); the
+-- two communication labels are exactly what the ok step must never emit.
+labelTauOrFail : Label -> Bool is
+  fn (l : Label) is
+    LabelElim (fn (w : Label) is Bool end) true false false true l
+  end
+end
+
+-- an optional transition is OK iff (vacuously when absent, else) its label is admissible.
+optLabelOK : Option Trans -> Bool is
+  fn (o : Option Trans) is
+    OptionElim Trans (fn (w : Option Trans) is Bool end)
+      true
+      (fn (t : Trans) is labelTauOrFail (labelOf t) end)
+      o
+  end
+end
+
+-- (lemma 1) interleaving only re-emits a sub-transition's label, so it preserves OK.
+-- Case on ra (it re-emits ra's label), then within none-ra on rb. Each leaf either is
+-- `none` (OK by definition) or re-emits a scrutinee's label, supplied by its hypothesis.
+interleaveTOK : (ra : Option Trans) -> (rb : Option Trans) -> (a : Proc) -> (b : Proc) ->
+    Eq Bool (optLabelOK ra) true -> Eq Bool (optLabelOK rb) true ->
+    Eq Bool (optLabelOK (interleaveT ra rb a b)) true is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc)
+     (hra : Eq Bool (optLabelOK ra) true) (hrb : Eq Bool (optLabelOK rb) true) is
+    OptionElim Trans
+      (fn (r : Option Trans) is
+         Eq Bool (optLabelOK r) true -> Eq Bool (optLabelOK (interleaveT r rb a b)) true end)
+      (fn (h0 : Eq Bool (optLabelOK (none Trans)) true) is
+         OptionElim Trans
+           (fn (r : Option Trans) is
+              Eq Bool (optLabelOK r) true ->
+              Eq Bool (optLabelOK
+                (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+                   (none Trans)
+                   (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+                   r)) true end)
+           (fn (h : Eq Bool (optLabelOK (none Trans)) true) is refl end)
+           (fn (tb : Trans) (htb : Eq Bool (optLabelOK (some Trans tb)) true) is htb end)
+           rb hrb
+       end)
+      (fn (ta : Trans) (hta : Eq Bool (optLabelOK (some Trans ta)) true) is hta end)
+      ra hra
+  end
+end
+
+-- (lemma 2) the communication step preserves OK: it emits at most a fresh `ltau`
+-- (a rendezvous), otherwise it interleaves (lemma 1). Case on outCont a, then inpCont b.
+commTOK : (a : Proc) -> (b : Proc) -> (iha : Option Trans) -> (ihb : Option Trans) ->
+    Eq Bool (optLabelOK iha) true -> Eq Bool (optLabelOK ihb) true ->
+    Eq Bool (optLabelOK (commT a b iha ihb)) true is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans)
+     (hiha : Eq Bool (optLabelOK iha) true) (hihb : Eq Bool (optLabelOK ihb) true) is
+    OptionElim Proc
+      (fn (oc : Option Proc) is
+         Eq Bool (optLabelOK
+           (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+              (interleaveT iha ihb a b)
+              (fn (pa : Proc) is
+                 OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+                   (interleaveT iha ihb a b)
+                   (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+                   (inpCont b)
+               end)
+              oc)) true end)
+      (interleaveTOK iha ihb a b hiha hihb)
+      (fn (pa : Proc) is
+         OptionElim Proc
+           (fn (ic : Option Proc) is
+              Eq Bool (optLabelOK
+                (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+                   (interleaveT iha ihb a b)
+                   (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+                   ic)) true end)
+           (interleaveTOK iha ihb a b hiha hihb)
+           (fn (qb : Proc) is refl end)
+           (inpCont b)
+       end)
+      (outCont a)
+  end
+end
+
+-- (lemma 3) the parallel-composition step preserves OK: a crashed peer beside a monitor
+-- emits a fresh `lfail` (DETECT), otherwise it is a communication step (lemma 2).
+parOkOK : (a : Proc) -> (b : Proc) -> (iha : Option Trans) -> (ihb : Option Trans) ->
+    Eq Bool (optLabelOK iha) true -> Eq Bool (optLabelOK ihb) true ->
+    Eq Bool (optLabelOK (parOk a b iha ihb)) true is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans)
+     (hiha : Eq Bool (optLabelOK iha) true) (hihb : Eq Bool (optLabelOK ihb) true) is
+    BoolElim
+      (fn (bc : Bool) is
+         Eq Bool (optLabelOK
+           (BoolElim (fn (w : Bool) is Option Trans end)
+              (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+                 (commT a b iha ihb)
+                 (fn (h : Proc) is some Trans (tr lfail h) end)
+                 (monCont b))
+              (commT a b iha ihb)
+              bc)) true end)
+      (OptionElim Proc
+         (fn (mc : Option Proc) is
+            Eq Bool (optLabelOK
+              (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+                 (commT a b iha ihb)
+                 (fn (h : Proc) is some Trans (tr lfail h) end)
+                 mc)) true end)
+         (commTOK a b iha ihb hiha hihb)
+         (fn (h : Proc) is refl end)
+         (monCont b))
+      (commTOK a b iha ihb hiha hihb)
+      (isCrash a)
+  end
+end
+
+-- THE COMPLETENESS THEOREM: the ok step never emits a communication label. Structural
+-- induction over Proc; only `par` emits, discharged by parOkOK with the two IHs.
+okStepLabelOK : (p : Proc) -> Eq Bool (optLabelOK (okStep p)) true is
+  fn (p : Proc) is
+    ProcElim (fn (w : Proc) is Eq Bool (optLabelOK (okStep w)) true end)
+      refl
+      (fn (q : Proc) (ih : Eq Bool (optLabelOK (okStep q)) true) is refl end)
+      (fn (q : Proc) (ih : Eq Bool (optLabelOK (okStep q)) true) is refl end)
+      (fn (q : Proc) (ih : Eq Bool (optLabelOK (okStep q)) true) is refl end)
+      (fn (a : Proc) (b : Proc)
+          (iha : Eq Bool (optLabelOK (okStep a)) true)
+          (ihb : Eq Bool (optLabelOK (okStep b)) true) is
+         parOkOK a b (okStep a) (okStep b) iha ihb end)
+      refl
+      p
+  end
+end
+
+-- ===== runtime corollary: the observable trace is exactly failures =====
+
+visible : Label -> Bool is
+  fn (l : Label) is
+    LabelElim (fn (w : Label) is Bool end) false true true true l
+  end
+end
+
+isFail : Label -> Bool is
+  fn (l : Label) is
+    LabelElim (fn (w : Label) is Bool end) false false false true l
+  end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is
+    BoolElim (fn (w : Bool) is List Label end) (cons Label l rest) rest (visible l)
+  end
+end
+
+allFail : List Label -> Bool is
+  fn (xs : List Label) is
+    ListElim Label (fn (w : List Label) is Bool end)
+      true
+      (fn (l : Label) (t : List Label) (ih : Bool) is andB (isFail l) ih end)
+      xs
+  end
+end
+
+-- the runtime trace of the ok step: collect each emitted observable label over k steps.
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (okStep p)
+         end
+       end)
+      n
+  end
+end
+
+-- consing an ADMISSIBLE label keeps the trace all-failures: ltau is dropped by consVis
+-- (the tail carries), lfail is kept and is a failure (the tail carries), and the two
+-- communication cases are vacuous - their admissibility hypothesis is `false = true`,
+-- which is exactly the goal `allFail (cons l rest) = false = true`.
+consVisFail : (l : Label) -> (rest : List Label) ->
+    Eq Bool (labelTauOrFail l) true -> Eq Bool (allFail rest) true ->
+    Eq Bool (allFail (consVis l rest)) true is
+  fn (l : Label) (rest : List Label) is
+    LabelElim
+      (fn (w : Label) is
+         Eq Bool (labelTauOrFail w) true -> Eq Bool (allFail rest) true ->
+         Eq Bool (allFail (consVis w rest)) true end)
+      (fn (hok : Eq Bool (labelTauOrFail ltau) true) (h : Eq Bool (allFail rest) true) is h end)
+      (fn (hok : Eq Bool (labelTauOrFail lsend) true) (h : Eq Bool (allFail rest) true) is hok end)
+      (fn (hok : Eq Bool (labelTauOrFail lrecv) true) (h : Eq Bool (allFail rest) true) is hok end)
+      (fn (hok : Eq Bool (labelTauOrFail lfail) true) (h : Eq Bool (allFail rest) true) is h end)
+      l
+  end
+end
+
+-- ADEQUACY COMPLETENESS (runtime side, real four-label calculus): every observation the
+-- runtime emits over any fuel is a failure. Induction on the fuel; the step uses the
+-- completeness theorem to learn the emitted label is admissible, then consVisFail.
+visibleRunOnlyFail : (k : Nat) -> (p : Proc) -> Eq Bool (allFail (visibleRun k p)) true is
+  fn (k : Nat) is
+    NatElim (fn (n : Nat) is (p : Proc) -> Eq Bool (allFail (visibleRun n p)) true end)
+      (fn (p : Proc) is refl end)
+      (fn (k0 : Nat) (ih : (p : Proc) -> Eq Bool (allFail (visibleRun k0 p)) true) is
+         fn (p : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq Bool (optLabelOK o) true ->
+                Eq Bool
+                  (allFail (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun k0 (procOf t)) end)
+                     o))
+                  true
+              end)
+             (fn (h : Eq Bool (optLabelOK (none Trans)) true) is refl end)
+             (fn (t : Trans) (h : Eq Bool (optLabelOK (some Trans t)) true) is
+                consVisFail (labelOf t) (visibleRun k0 (procOf t)) h (ih (procOf t)) end)
+             (okStep p)
+             (okStepLabelOK p)
+         end
+       end)
+      k
+  end
+end
