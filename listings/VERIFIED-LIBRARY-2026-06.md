@@ -318,3 +318,10 @@ equation).
   Boolean explosion (`everythingTrue`, into `Eq Bool` only) is the available idiom.
 - JVM float bodies remain (the jvm emitter targets java-25; the local jvm is 17).
 - matplotlib / scipy / pandas absent locally, so plotting + those interops are untested here.
+- E3 adequacy COMPLETENESS on the runtime side (`allFail (visibleRun k p) = true`, the
+  companion to ch229's `projectOnlyFail`) is open: it needs `okStep` to provably emit only
+  `ltau`/`lfail` labels, which threads an `optLabelOK` invariant through `parOk`/`commT`/
+  `interleaveT` (nested dependent OptionElim/BoolElim, ~3 helper lemmas). Scoped, not yet
+  proven. The soundness invariants (both traces stay in the observable alphabet) ARE proven.
+- E4 surface/runtime tail: live-actor projection onto spawn/send/receive (D5/B3 OTP runtime)
+  and `protocol ... end` surface sugar are design-gated, deferred (see R-PROTO.md).
