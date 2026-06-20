@@ -1,0 +1,56 @@
+-- Chapter 398 — Nat constructors are disjoint: zero is not a successor (proven tier).
+--
+-- From zero = succ n derive a contradiction (true = false) by applying isZero, hence any Nat
+-- equality. Constructor disjointness — the companion to exFalsoNat, foundational for
+-- refuting impossible equations between distinct constructors. Proof-only.
+--
+--   zeroNotSucc : (n : Nat) -> Eq Nat zero (succ n) -> Eq Bool true false
+--   natDisjoint : (n : Nat) -> Eq Nat zero (succ n) -> (x y : Nat) -> Eq Nat x y
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+isZero : Nat -> Bool is
+  fn (n : Nat) is NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n end
+end
+
+exFalsoNat : Eq Bool false true -> (x : Nat) -> (y : Nat) -> Eq Nat x y is
+  fn (h : Eq Bool false true) (x : Nat) (y : Nat) is
+    cong Bool Nat (fn (z : Bool) is BoolElim (fn (w : Bool) is Nat end) y x z end) false true h
+  end
+end
+
+-- isZero zero = true, isZero (succ n) = false, so zero = succ n forces true = false.
+zeroNotSucc : (n : Nat) -> Eq Nat zero (succ n) -> Eq Bool true false is
+  fn (n : Nat) (h : Eq Nat zero (succ n)) is
+    cong Nat Bool isZero zero (succ n) h
+  end
+end
+
+natDisjoint : (n : Nat) -> Eq Nat zero (succ n) -> (x : Nat) -> (y : Nat) -> Eq Nat x y is
+  fn (n : Nat) (h : Eq Nat zero (succ n)) (x : Nat) (y : Nat) is
+    exFalsoNat (symEq Bool true false (zeroNotSucc n h)) x y
+  end
+end
