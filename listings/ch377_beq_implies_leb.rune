@@ -1,0 +1,101 @@
+-- Chapter 377 — equal implies less-or-equal: beqNat a b = true -> leb a b = true.
+--
+-- Decidable equality refines decidable order. The proof reflects beqNat into a propositional
+-- equality (beqNatSound, ch376) and transports reflexivity of leb (ch251) along it. Proof-only.
+--
+--   beqImpliesLeb : (a b : Nat) -> Eq Bool (beqNat a b) true -> Eq Bool (leb a b) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+exFalsoNat : Eq Bool false true -> (x : Nat) -> (y : Nat) -> Eq Nat x y is
+  fn (h : Eq Bool false true) (x : Nat) (y : Nat) is
+    cong Bool Nat (fn (z : Bool) is BoolElim (fn (w : Bool) is Nat end) y x z end) false true h
+  end
+end
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+beqNatSound : (a : Nat) -> (b : Nat) -> Eq Bool (beqNat a b) true -> Eq Nat a b is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (beqNat x b) true -> Eq Nat x b end)
+      (fn (b : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (beqNat zero y) true -> Eq Nat zero y end)
+           (fn (h : Eq Bool (beqNat zero zero) true) is refl end)
+           (fn (j : Nat) (ihj : Eq Bool (beqNat zero j) true -> Eq Nat zero j) is
+              fn (h : Eq Bool (beqNat zero (succ j)) true) is exFalsoNat h zero (succ j) end
+            end)
+           b
+       end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Bool (beqNat k b) true -> Eq Nat k b) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (beqNat (succ k) y) true -> Eq Nat (succ k) y end)
+             (fn (h : Eq Bool (beqNat (succ k) zero) true) is exFalsoNat h (succ k) zero end)
+             (fn (j : Nat) (ihj : Eq Bool (beqNat (succ k) j) true -> Eq Nat (succ k) j) is
+                fn (h : Eq Bool (beqNat (succ k) (succ j)) true) is
+                  cong Nat Nat succ k j (ih j h) end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+lebRefl : (n : Nat) -> Eq Bool (leb n n) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (leb x x) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (leb k k) true) is ih end)
+      n
+  end
+end
+
+-- transport lebRefl a along the equality a = b extracted from beqNat.
+beqImpliesLeb : (a : Nat) -> (b : Nat) -> Eq Bool (beqNat a b) true -> Eq Bool (leb a b) true is
+  fn (a : Nat) (b : Nat) (h : Eq Bool (beqNat a b) true) is
+    subst Nat a b (beqNatSound a b h)
+      (fn (z : Nat) is Eq Bool (leb a z) true end)
+      (lebRefl a)
+  end
+end
