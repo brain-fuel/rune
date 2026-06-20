@@ -1,4 +1,4 @@
-# Verified library — 2026-06-20 session (ch220–ch302)
+# Verified library — 2026-06-20 session (ch220–ch318)
 
 A navigable index of the listings added in the 2026-06-20 autonomous session
 (tags v3.25.0–v3.111.0+). Two strands: **D3/D4 machine-numeric + interop**
@@ -152,6 +152,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch248_option_monad` — Option monad laws (left/right id, assoc).
 - `ch254_option_functor` — Option functor laws (id, composition).
 - `ch313_option_orelse` — Option `orElse` is a monoid (none identity + associativity; the alternative structure).
+- `ch318_option_bind_map` — monad/functor coherence: `bind m (some . f) = map f m`.
 - `ch263_sum_bifunctor` — Sum (Either) bifunctor laws (id, composition).
 - `ch284_swap_involutions` — swap is an involution on products and sums
   (`swapP (swapP p) = p`, `sswap (sswap e) = e`).

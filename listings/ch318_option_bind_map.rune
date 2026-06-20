@@ -1,0 +1,45 @@
+-- Chapter 318 — Option monad/functor coherence: bind with pure.f equals map (proven tier).
+--
+-- map is recoverable from bind: obind m (\x -> some (f x)) = omap f m. This is the
+-- coherence law tying Option's monad and functor structures (ch248/ch254). By case
+-- analysis (refl leaves). Proof-only.
+--
+--   bindMap : (A B : U) -> (f : A -> B) -> (m : Option A)
+--           -> Eq (Option B) (obind A B m (fn x is some B (f x) end)) (omap A B f m)
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+obind : (A : U) -> (B : U) -> Option A -> (A -> Option B) -> Option B is
+  fn (A : U) (B : U) (m : Option A) (k : A -> Option B) is
+    OptionElim A (fn (x : Option A) is Option B end)
+      (none B)
+      (fn (a : A) is k a end)
+      m
+  end
+end
+
+omap : (A : U) -> (B : U) -> (A -> B) -> Option A -> Option B is
+  fn (A : U) (B : U) (f : A -> B) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Option B end)
+      (none B)
+      (fn (a : A) is some B (f a) end)
+      m
+  end
+end
+
+bindMap : (A : U) -> (B : U) -> (f : A -> B) -> (m : Option A) ->
+          Eq (Option B) (obind A B m (fn (x : A) is some B (f x) end)) (omap A B f m) is
+  fn (A : U) (B : U) (f : A -> B) (m : Option A) is
+    OptionElim A
+      (fn (x : Option A) is
+         Eq (Option B) (obind A B x (fn (y : A) is some B (f y) end)) (omap A B f x) end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
