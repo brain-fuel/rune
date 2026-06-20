@@ -23,6 +23,34 @@
 > live-actor projection onto spawn/send/receive (the D5/B3 OTP runtime tie),
 > `protocol ... end` surface sugar + a `deploy` verb.
 
+> **AS BUILT (E4 expansion, v3.268 to v3.279).** The verified distributed algebra
+> grew into a comprehensive library and the simulator gained a new check.
+> - **E3 adequacy CLOSED on the full four-label calculus** (ch421): `okStepLabelOK`
+>   proves the genuine `okStep` emits no communication label (lsend/lrecv), the
+>   `optLabelOK` invariant threaded through `parOk`/`commT`/`interleaveT`; with the
+>   runtime corollary `visibleRunOnlyFail` and ch409's `projectOnlyFail` the
+>   observable alphabet is pinned to {lfail} on both spec and runtime sides.
+> - **CRDT corpus, full set + register family**: G-Counter / G-Set / PN-Counter
+>   (prior) plus the 2P-Set (ch422, remove-permanent), the Observed-Remove Set
+>   (ch430, add-wins, re-addable), and a Multi-Value Register (ch429, vector-clock
+>   conflict resolution keeping concurrent writes). 2P-Set + OR-Set also simulate
+>   (examples/{twopset,orset}.rune).
+> - **The generic theorems**: strong eventual consistency derived ONCE for any
+>   join-semilattice (ch423: order-independence / gossip-robustness / duplicate-
+>   safety), and the induced partial order with merge = least upper bound (ch427) -
+>   so every concrete CRDT inherits SEC by supplying its three laws.
+> - **Causality**: vector clocks (ch424 causal order refl/trans + tick-advances;
+>   ch425 antisymmetry + concurrency detection, the Lamport-clock gap), the
+>   merge-is-the-join tie (ch426), and causal message delivery (ch428: FIFO + causal
+>   deliverability, delivery monotone + dominates message + causal-safety).
+> - **Inflation check (simulator, v3.278)**: `Diagnose` now verifies every update is
+>   INFLATIONARY (`merge s (op s) = op s`), the op-side condition a join merge alone
+>   cannot give; `examples/resetcounter.rune` has a flawless max merge but a reset op
+>   and is correctly flagged not convergent. ch431 is the matching PROOF (the
+>   G-Counter's increments are inflationary), the same prove/lint symmetry as ch72.
+> REMAINING (unchanged, design-gated): live-actor projection onto spawn/send/receive
+> (D5/B3 OTP runtime tie) and the `protocol ... end` surface sugar + `deploy` verb.
+
 > Roadmap node **E3** (`E3 [I] verified protocols (consensus/repl/CRDT) +
 > projection to actors ⇐ E2, D5`), the **M7/M0 demonstrator**. Telos 4:
 > "verified algebra over distributed systems… used to specify and *prove*
