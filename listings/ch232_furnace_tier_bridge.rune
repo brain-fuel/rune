@@ -1,0 +1,78 @@
+-- Chapter 232 — the FURNACE bridges the tiers: fast foreign vs exact proven (Savage).
+--
+-- Wootz has two numeric worlds: the FAST foreign floats (numpy/BLAS, this track) and the
+-- EXACT proven arithmetic (the Nat semiring, machine-checked, ch11/etc). The furnace's
+-- deepest use is to tie them: compute the SAME quantity both ways and confirm the fast
+-- path agrees with the proven path. Here the dot product of [1,2,3]·[4,5,6] is computed
+--   (a) by FOREIGN numpy (`npDot`, real np.dot on py), and
+--   (b) by EXACT Nat arithmetic (`natAdd`/`natMul`, ordinary recursion on the proven
+--       Nat — no foreign anything),
+-- and the furnace checks they agree (within tolerance, after lifting the exact Nat into a
+-- Float). A 1 means the fast world and the proven world concur. This is the tiered-
+-- assurance bar made concrete: trust the fast path because it MATCHES the exact one.
+--
+-- 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32. Observable: "32\n1\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Float : U end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+foreign npDot      : FList -> FList -> Float end
+
+-- EXACT proven arithmetic: addition and multiplication on Nat by ordinary recursion
+-- (NatElim). No foreign bodies — this is the machine-checkable semiring.
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a
+  end
+end
+
+-- the exact dot of [1,2,3]·[4,5,6] in proven Nat arithmetic.
+exactDot : Nat is
+  natAdd (natMul 1 4) (natAdd (natMul 2 5) (natMul 3 6))
+end
+
+-- the fast foreign dot (numpy on py / OpenBLAS native / reference floor).
+xs : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) fnil)) end
+ys : FList is fcons (fromNat 4) (fcons (fromNat 5) (fcons (fromNat 6) fnil)) end
+
+eps : Float is fdiv (fromNat 1) (fromNat 1000000) end
+
+-- the bridge verdict: does the fast foreign dot match the exact proven dot (lifted)?
+agree : Nat is
+  fleqN (fabsP (fsub (npDot xs ys) (fromNat exactDot))) eps
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npDot xs ys))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat agree) (fn (u2 : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end

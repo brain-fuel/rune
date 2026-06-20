@@ -1327,3 +1327,83 @@ func TestFurnaceNumpy(t *testing.T) {
 		}
 	})
 }
+
+// TestFurnaceTierBridge ties the two numeric tiers: the dot product computed by FOREIGN
+// numpy (npDot) is checked against the SAME quantity computed in EXACT proven Nat
+// arithmetic (natAdd/natMul, lifted to Float). A 1 means the fast path agrees with the
+// proven path. [1,2,3]·[4,5,6] = 32: "32\n1\nunit". Native uses cblas (-lopenblas).
+func TestFurnaceTierBridge(t *testing.T) {
+	const want = "32\n1\nunit"
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if bk.name == "py" {
+				if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+					t.Skip("numpy not installed")
+				}
+			}
+			if got := runIOListing(t, bk, "ch232_furnace_tier_bridge.rune", "main", ""); got != want {
+				t.Errorf("[%s] tier-bridge gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	s := loadListing(t, "ch232_furnace_tier_bridge.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipNoBLAS := func(t *testing.T, out []byte, err error) {
+		if err != nil && strings.Contains(string(out)+err.Error(), "cblas") {
+			t.Skip("OpenBLAS/cblas.h not available")
+		}
+	}
+	t.Run("c", func(t *testing.T) {
+		if _, err := exec.LookPath("cc"); err != nil {
+			t.Skip("cc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.C{}.Emit(p)
+		f := filepath.Join(dir, "main.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		if out, err := exec.Command("cc", "-o", bin, f, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[c] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[c] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[c] tier-bridge gave %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if _, err := exec.LookPath("clang"); err != nil {
+			t.Skip("clang not in PATH")
+		}
+		dir := t.TempDir()
+		ll, _ := codegen.LL{}.Emit(p)
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		f := filepath.Join(dir, "main.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(ll), 0o644)
+		os.WriteFile(rtf, []byte(rt), 0o644)
+		if out, err := exec.Command("clang", f, rtf, "-o", bin, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[ll] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[ll] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[ll] tier-bridge gave %q, want %q", got, want)
+		}
+	})
+}
