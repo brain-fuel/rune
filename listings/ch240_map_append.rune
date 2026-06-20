@@ -1,0 +1,68 @@
+-- Chapter 240 — map distributes over append (naturality), machine-checked (proven tier).
+--
+-- mapList f (xs ++ ys) = (mapList f xs) ++ (mapList f ys): mapping commutes with
+-- concatenation. The naturality law that lets a pipeline push a map across a split/join
+-- (the basis of map/reduce fusion over partitioned data). By induction on xs. Proof-only.
+--
+--   mapAppend : (f : Nat -> Nat) -> (xs ys : NatList)
+--             -> Eq NatList (mapList f (append xs ys)) (append (mapList f xs) (mapList f ys))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03/ch07.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+consWith : Nat -> NatList -> NatList is
+  fn (n : Nat) (t : NatList) is ncons n t end
+end
+
+-- THE THEOREM, by induction on xs (f, ys fixed):
+--   nnil:  mapList f (append nnil ys) = mapList f ys
+--          append (mapList f nnil) (mapList f ys) = append nnil (mapList f ys) = mapList f ys  -> refl
+--   ncons: both sides = ncons (f h) (...); cong (ncons (f h)) on the IH.
+mapAppend : (f : Nat -> Nat) -> (xs : NatList) -> (ys : NatList) ->
+            Eq NatList (mapList f (append xs ys)) (append (mapList f xs) (mapList f ys)) is
+  fn (f : Nat -> Nat) (xs : NatList) (ys : NatList) is
+    NatListElim
+      (fn (x : NatList) is
+         Eq NatList (mapList f (append x ys)) (append (mapList f x) (mapList f ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq NatList (mapList f (append rest ys)) (append (mapList f rest) (mapList f ys))) is
+         cong NatList NatList (consWith (f h))
+           (mapList f (append rest ys)) (append (mapList f rest) (mapList f ys)) ih end)
+      xs
+  end
+end
