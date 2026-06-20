@@ -68,6 +68,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch239_sum_homomorphism` — `sum (xs ++ ys) = sum xs + sum ys`.
 - `ch297_prod_append` — `prod (xs ++ ys) = prod xs * prod ys` (product homomorphism).
 - `ch240_map_append` — `mapList f (xs ++ ys) = mapList f xs ++ mapList f ys`.
+- `ch344_map_snoc` — map commutes with snoc: `map f (snoc xs x) = snoc (map f xs)(f x)`.
 - `ch314_sum_map_succ` — mapping succ adds the length to the sum: `sum (map succ xs) = len xs + sum xs`.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch330_nonempty` — non-empty list with a STRUCTURALLY total head (no precondition); conversion is never empty.

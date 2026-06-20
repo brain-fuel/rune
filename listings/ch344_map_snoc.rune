@@ -1,0 +1,63 @@
+-- Chapter 344 — map commutes with snoc: map f (snoc xs x) = snoc (map f xs) (f x).
+--
+-- Mapping after appending one element at the end equals appending the mapped element after
+-- mapping. Naturality of map at the tail position. By induction on xs. Proof-only.
+--
+--   mapSnoc : (f : Nat -> Nat) -> (xs : NatList) -> (x : Nat)
+--           -> Eq NatList (mapList f (snoc xs x)) (snoc (mapList f xs) (f x))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+snoc : NatList -> Nat -> NatList is fn (xs : NatList) (x : Nat) is append xs (ncons x nnil) end end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  map f [x] = [f x] = snoc nnil (f x)                                      -> refl
+--   ncons h t: ncons (f h) (map f (snoc t x)) vs ncons (f h) (snoc (map f t)(f x)); cong (cons (f h)) IH
+mapSnoc : (f : Nat -> Nat) -> (xs : NatList) -> (x : Nat) ->
+          Eq NatList (mapList f (snoc xs x)) (snoc (mapList f xs) (f x)) is
+  fn (f : Nat -> Nat) (xs : NatList) (x : Nat) is
+    NatListElim (fn (z : NatList) is Eq NatList (mapList f (snoc z x)) (snoc (mapList f z) (f x)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (mapList f (snoc rest x)) (snoc (mapList f rest) (f x))) is
+         cong NatList NatList (consWith (f h))
+           (mapList f (snoc rest x)) (snoc (mapList f rest) (f x)) ih end)
+      xs
+  end
+end
