@@ -1,0 +1,107 @@
+-- Chapter 293 — map and reverse commute (naturality), machine-checked (proven tier).
+--
+-- Mapping then reversing equals reversing then mapping. The cons step uses the
+-- map-over-append law (ch240). The map/append machinery is reused from ch240. Proof-only.
+--
+--   mapReverse : (f : Nat -> Nat) -> (xs : NatList)
+--              -> Eq NatList (mapList f (reverse xs)) (reverse (mapList f xs))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03/ch07.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+consWith : Nat -> NatList -> NatList is
+  fn (n : Nat) (t : NatList) is ncons n t end
+end
+
+-- THE THEOREM, by induction on xs (f, ys fixed):
+--   nnil:  mapList f (append nnil ys) = mapList f ys
+--          append (mapList f nnil) (mapList f ys) = append nnil (mapList f ys) = mapList f ys  -> refl
+--   ncons: both sides = ncons (f h) (...); cong (ncons (f h)) on the IH.
+mapAppend : (f : Nat -> Nat) -> (xs : NatList) -> (ys : NatList) ->
+            Eq NatList (mapList f (append xs ys)) (append (mapList f xs) (mapList f ys)) is
+  fn (f : Nat -> Nat) (xs : NatList) (ys : NatList) is
+    NatListElim
+      (fn (x : NatList) is
+         Eq NatList (mapList f (append x ys)) (append (mapList f x) (mapList f ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq NatList (mapList f (append rest ys)) (append (mapList f rest) (mapList f ys))) is
+         cong NatList NatList (consWith (f h))
+           (mapList f (append rest ys)) (append (mapList f rest) (mapList f ys)) ih end)
+      xs
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+appendTo : NatList -> NatList -> NatList is fn (w : NatList) (z : NatList) is append z w end end
+
+reverse : NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is append ih (ncons h nnil) end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  both sides nnil                                                        -> refl
+--   ncons: mapList f (reverse (h::t)) = mapList f (append (reverse t) [h])
+--          mapAppend f (reverse t) [h] : = append (mapList f (reverse t)) [f h]
+--          cong (++ [f h]) IH           : = append (reverse (mapList f t)) [f h]
+--                                        = reverse (mapList f (h::t))
+mapReverse : (f : Nat -> Nat) -> (xs : NatList) ->
+             Eq NatList (mapList f (reverse xs)) (reverse (mapList f xs)) is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is Eq NatList (mapList f (reverse x)) (reverse (mapList f x)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (mapList f (reverse rest)) (reverse (mapList f rest))) is
+         transEq NatList
+           (mapList f (reverse (ncons h rest)))
+           (append (mapList f (reverse rest)) (mapList f (ncons h nnil)))
+           (reverse (mapList f (ncons h rest)))
+           (mapAppend f (reverse rest) (ncons h nnil))
+           (cong NatList NatList (appendTo (ncons (f h) nnil))
+              (mapList f (reverse rest)) (reverse (mapList f rest)) ih) end)
+      xs
+  end
+end
