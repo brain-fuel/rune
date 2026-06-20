@@ -141,6 +141,15 @@ func runSimulate(src string, n int, out io.Writer) error {
 		return err
 	}
 	fmt.Fprint(out, sim.Render(run, n))
+	// Diagnose the merge laws observationally, so a non-convergent protocol is told
+	// WHICH join law it violates (the better-than-Winglang linter).
+	ops := make([]string, n)
+	for i := range ops {
+		ops[i] = "op" + strconv.Itoa(i)
+	}
+	if rep, derr := sim.Diagnose(s, "init", "merge", ops); derr == nil {
+		fmt.Fprint(out, "\n"+sim.RenderReport(rep))
+	}
 	if run.Converged() {
 		fmt.Fprintf(out, "\nverdict: CONVERGED to %s on all %d replicas\n", run.Final[0], n)
 	} else {

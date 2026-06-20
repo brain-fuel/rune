@@ -282,3 +282,30 @@ func TestLWWStaysDivergent(t *testing.T) {
 		t.Errorf("LWW must NOT converge (no join), but did: final = %v", run.Final)
 	}
 }
+
+// TestDiagnoseDistinguishesByLaws checks the observational CvRDT linter: the
+// G-Counter passes all three join laws; the LWW register fails commutativity, and
+// Diagnose names that failure.
+func TestDiagnoseDistinguishesByLaws(t *testing.T) {
+	gc := loadSession(t, gcounterSrc)
+	rep, err := Diagnose(gc, "gc zero zero", "mergeGC", []string{"inc0", "inc1"})
+	if err != nil {
+		t.Fatalf("diagnose gc: %v", err)
+	}
+	if !rep.IsCvRDT() {
+		t.Errorf("G-Counter should pass all join laws, got %s", RenderReport(rep))
+	}
+
+	lww := loadSession(t, lwwSrc)
+	rep2, err := Diagnose(lww, "lw zero", "mergeLW", []string{"w2", "w1"})
+	if err != nil {
+		t.Fatalf("diagnose lww: %v", err)
+	}
+	if rep2.Commutative {
+		t.Errorf("LWW merge (take-peer) is not commutative, but linter said it was:\n%s", RenderReport(rep2))
+	}
+	if rep2.IsCvRDT() {
+		t.Errorf("LWW must not be reported a CvRDT:\n%s", RenderReport(rep2))
+	}
+	t.Logf("LWW report:\n%s", RenderReport(rep2))
+}
