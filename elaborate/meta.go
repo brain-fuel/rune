@@ -3,6 +3,7 @@ package elaborate
 import (
 	"fmt"
 	"sort"
+	"strconv"
 
 	"goforge.dev/rune/v3/core"
 )
@@ -69,17 +70,34 @@ func (e *Elaborator) ErrUnsolved(what string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	hints := ""
+	holes := ""
 	for i, id := range ids {
 		if i > 0 {
-			hints += ", "
+			holes += ", "
 		}
-		hints += fmt.Sprintf("?%d", id)
+		holes += fmt.Sprintf("?%d", id)
 		if n := e.metas.entries[id].name; n != "" {
-			hints += " (" + n + ")"
+			holes += " (" + n + ")"
 		}
 	}
-	return fmt.Errorf("%s has unsolved metavariables: %s", what, hints)
+	n := len(ids)
+	thing := "one value"
+	if n > 1 {
+		thing = strconv.Itoa(n) + " values"
+	}
+	return &Diagnostic{
+		Summary: "I couldn't work out every type in " + what + ".",
+		Body: []string{
+			"Type inference left " + thing + " undetermined: " + holes + ". These come " +
+				"from a hole (`_`) or an implicit argument (`{…}`) that the surrounding code " +
+				"does not pin down — there was not enough information to fill them in.",
+		},
+		Hints: []string{
+			"Add an annotation where the type is ambiguous: give the hole an explicit type, " +
+				"or pass the implicit argument directly with `{the type}`, so inference has " +
+				"a value to work from.",
+		},
+	}
 }
 
 // Zonk replaces every solved metavariable in t by its solution, β-reducing only

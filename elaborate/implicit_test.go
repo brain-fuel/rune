@@ -51,7 +51,7 @@ twice : U -> U is comp idU idU end
 func TestImplicitErrors(t *testing.T) {
 	cases := []struct{ src, want string }{
 		// Underconstrained: nothing determines the implicit.
-		{implicitPrelude + `bad : U is (fn (x : U) is x end) (id _) end`, "unsolved"},
+		{implicitPrelude + `bad : U is (fn (x : U) is x end) (id _) end`, "couldn't work out every type"},
 		// Implicit lambda against an explicit Pi.
 		{`bad : U -> U is fn {x : U} is x end end`, "implicit lambda"},
 		// Too many implicit arguments: id {U} {U}.
