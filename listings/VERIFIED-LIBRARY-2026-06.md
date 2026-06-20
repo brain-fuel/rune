@@ -83,6 +83,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch340_replicate_append` — replicate additive: `replicate m x ++ replicate n x = replicate (m+n) x`.
 - `ch324_map_replicate` — `map f (replicate n x) = replicate n (f x)`.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
+- `ch341_takewhile_dropwhile` — predicate split-join: `takeWhile p xs ++ dropWhile p xs = xs`.
 - `ch320_len_drop` — drop shrinks length by n: `len (drop n xs) = monus (len xs) n`.
 - `ch321_len_take` — take caps the length: `len (take n xs) = min n (len xs)`.
 - `ch336_zipwith_length` — zip stops at the shorter: `len (zipWith f xs ys) = min (len xs)(len ys)`.

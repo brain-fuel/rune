@@ -1,0 +1,90 @@
+-- Chapter 341 — takeWhile/dropWhile recombine to the original (proven tier).
+--
+-- Splitting a list at the first failure of a predicate and rejoining recovers it:
+--   append (takeWhile p xs) (dropWhile p xs) = xs.
+-- The predicate-driven analogue of the index split-join (ch279). A branch-aware induction.
+-- Proof-only.
+--
+--   takeDropWhile : (p : Nat -> Bool) -> (xs : NatList)
+--                 -> Eq NatList (append (takeWhile p xs) (dropWhile p xs)) xs
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+takeWhile : (Nat -> Bool) -> NatList -> NatList is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end) (ncons h ih) nnil (p h) end)
+      xs
+  end
+end
+
+dropWhile : (Nat -> Bool) -> NatList -> NatList is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end) ih (ncons h rest) (p h) end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs with a BoolElim on (p h):
+--   nnil: append nnil nnil = nnil                                                   -> refl
+--   keep (p h = true):  ncons h (append (takeWhile p t)(dropWhile p t)) = ncons h t; cong (cons h) IH
+--   stop (p h = false): append nnil (ncons h t) = ncons h t                         -> refl
+takeDropWhile : (p : Nat -> Bool) -> (xs : NatList) ->
+                Eq NatList (append (takeWhile p xs) (dropWhile p xs)) xs is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim
+      (fn (z : NatList) is Eq NatList (append (takeWhile p z) (dropWhile p z)) z end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq NatList (append (takeWhile p rest) (dropWhile p rest)) rest) is
+         BoolElim
+           (fn (c : Bool) is
+              Eq NatList
+                (append (BoolElim (fn (d : Bool) is NatList end) (ncons h (takeWhile p rest)) nnil c)
+                        (BoolElim (fn (d : Bool) is NatList end) (dropWhile p rest) (ncons h rest) c))
+                (ncons h rest) end)
+           (cong NatList NatList (consWith h)
+              (append (takeWhile p rest) (dropWhile p rest)) rest ih)
+           refl
+           (p h) end)
+      xs
+  end
+end
