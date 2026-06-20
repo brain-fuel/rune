@@ -105,6 +105,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch361_foldr_id` — catamorphism identity: `foldr ncons nnil xs = xs`.
 - `ch362_foldr_append` — foldr-append fusion: `foldr f z (xs++ys) = foldr f (foldr f z ys) xs`.
 - `ch363_map_as_fold` — map as a fold: `map f xs = foldr (\h a. (f h)::a) nil xs`.
+- `ch364_sum_as_fold` — sum as a fold: `sum xs = foldr natAdd 0 xs`.
 - `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
 - `ch357_sum_concat` — sum of flatten = sum of sums: `sum (concat xss) = sumAll xss`.
 - `ch346_isempty_append` — empty iff both empty: `isEmpty (xs++ys) = isEmpty xs && isEmpty ys`.
