@@ -138,7 +138,7 @@ func runForm(s *session.Session, st *replState, src string, out io.Writer) error
 	if looksLikeDecl(src) {
 		items, err := surface.ParseProgram(src)
 		if err != nil {
-			return err
+			return locateParse(src, err)
 		}
 		for _, it := range items {
 			if err := addItem(s, it, out); err != nil {
@@ -149,9 +149,19 @@ func runForm(s *session.Session, st *replState, src string, out io.Writer) error
 	}
 	e, err := s.ParseSrcExpr(src)
 	if err != nil {
-		return err
+		return locateParse(src, err)
 	}
 	return runExpr(s, st, e, out)
+}
+
+// locateParse renders a terminal parse error with a source caret. An ErrIncomplete
+// is passed through UNCHANGED so the read loop still recognises it and asks for more
+// input (the multi-line continuation); only a real, terminal parse error is located.
+func locateParse(src string, err error) error {
+	if err == nil || errors.Is(err, surface.ErrIncomplete) {
+		return err
+	}
+	return errors.New(surface.RenderParseError(src, err))
 }
 
 // addItem adds one parsed top-level form to the session, using the SAME session

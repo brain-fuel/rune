@@ -8,6 +8,7 @@
 package session
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -394,7 +395,9 @@ func (s *Session) addPartialDef(d surface.Def) (Def, error) {
 func (s *Session) LoadSource(src string) ([]string, error) {
 	items, err := surface.ParseProgram(src)
 	if err != nil {
-		return nil, err
+		// A file is never "incomplete" — a parse failure here is terminal, so render
+		// it with a source caret (REPL handles ErrIncomplete itself, before this).
+		return nil, errors.New(surface.RenderParseError(src, err))
 	}
 	var added []string
 	for _, it := range items {
