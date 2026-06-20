@@ -89,6 +89,8 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
   eval (add (a*b) (a*c))` via distribL) — verified compiler-optimization rules.
 - `ch273_const_fold` — a constant-folding optimizer proven correct (`eval (fold e) = eval e`
   for all e) via value-preserving smart constructors — the canonical verified-compiler-pass.
+- `ch274_rewrite_catalog` — verified algebraic rewrite rules (add/mul comm + assoc, distribute),
+  each a semantics-preserving rewrite from the corresponding semiring law.
 
 ## Telos 4 — distributed (CRDTs + bisimulation)
 
