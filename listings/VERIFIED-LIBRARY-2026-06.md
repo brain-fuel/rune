@@ -72,6 +72,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch246_tree_size_mirror` — `size (mirror t) = size t` (uses addComm).
 - `ch260_flatten_size` — `len (flatten t) = size t` (inorder length = size).
 - `ch267_tree_functor` — tree functor: `tmap id = id` + `size (tmap f t) = size t`.
+- `ch290_tree_map_fusion` — tree functor composition: `tmap g (tmap f t) = tmap (g . f) t`.
 
 ## Proven tier — arithmetic & order
 

@@ -1,0 +1,126 @@
+-- Chapter 290 — tree map fusion: tmap g (tmap f t) = tmap (g . f) t (proven tier).
+--
+-- The composition law for the tree functor (the identity law + size preservation are
+-- ch267): relabelling twice fuses into one pass. By structural induction, the node step
+-- closing with congruence in both subtrees (cong2). The tree-functor machinery is reused
+-- from ch267. Proof-only.
+--
+--   tmapComp : (f g : Nat -> Nat) -> (t : Tree)
+--            -> Eq Tree (tmap g (tmap f t)) (tmap (compose g f) t)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Tree : U is
+  leaf : Tree
+| node : Tree -> Nat -> Tree -> Tree
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+-- relabel every key with f; the shape (leaf/node structure) is untouched.
+tmap : (Nat -> Nat) -> Tree -> Tree is
+  fn (f : Nat -> Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Tree end)
+      leaf
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Tree) (ihr : Tree) is node ihl (f x) ihr end)
+      t
+  end
+end
+
+size : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end)
+      zero
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Nat) (ihr : Nat) is succ (natAdd ihl ihr) end)
+      t
+  end
+end
+
+nodeAt : Nat -> Tree -> Tree -> Tree is
+  fn (x : Nat) (l : Tree) (r : Tree) is node l x r end
+end
+
+-- IDENTITY: tmap id = id, by structural induction (node: cong2 on the two subtree IHs;
+-- the key is unchanged since id x = x).
+tmapId : (t : Tree) -> Eq Tree (tmap (fn (u : Nat) is u end) t) t is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Tree (tmap (fn (u : Nat) is u end) x) x end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Tree (tmap (fn (u : Nat) is u end) l) l)
+          (ihr : Eq Tree (tmap (fn (u : Nat) is u end) r) r) is
+         cong2 Tree Tree Tree (nodeAt x)
+           (tmap (fn (u : Nat) is u end) l) l (tmap (fn (u : Nat) is u end) r) r ihl ihr end)
+      t
+  end
+end
+
+-- SIZE PRESERVATION: relabelling keeps the size, by structural induction.
+sizeMap : (f : Nat -> Nat) -> (t : Tree) -> Eq Nat (size (tmap f t)) (size t) is
+  fn (f : Nat -> Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Nat (size (tmap f x)) (size x) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Nat (size (tmap f l)) (size l))
+          (ihr : Eq Nat (size (tmap f r)) (size r)) is
+         cong Nat Nat succ
+           (natAdd (size (tmap f l)) (size (tmap f r))) (natAdd (size l) (size r))
+           (cong2 Nat Nat Nat natAdd
+              (size (tmap f l)) (size l) (size (tmap f r)) (size r) ihl ihr) end)
+      t
+  end
+end
+
+compose : (Nat -> Nat) -> (Nat -> Nat) -> Nat -> Nat is
+  fn (g : Nat -> Nat) (f : Nat -> Nat) (x : Nat) is g (f x) end
+end
+
+-- THE FUSION LAW, by structural induction on t (node: cong2 on the two subtree IHs; the
+-- key agrees definitionally since compose g f x = g (f x)).
+tmapComp : (f : Nat -> Nat) -> (g : Nat -> Nat) -> (t : Tree) ->
+           Eq Tree (tmap g (tmap f t)) (tmap (compose g f) t) is
+  fn (f : Nat -> Nat) (g : Nat -> Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Tree (tmap g (tmap f x)) (tmap (compose g f) x) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Tree (tmap g (tmap f l)) (tmap (compose g f) l))
+          (ihr : Eq Tree (tmap g (tmap f r)) (tmap (compose g f) r)) is
+         cong2 Tree Tree Tree (nodeAt (g (f x)))
+           (tmap g (tmap f l)) (tmap (compose g f) l)
+           (tmap g (tmap f r)) (tmap (compose g f) r) ihl ihr end)
+      t
+  end
+end
