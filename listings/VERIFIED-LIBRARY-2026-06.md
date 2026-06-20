@@ -53,6 +53,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
   via the generalized spec `revAcc xs acc = reverse xs ++ acc` — an optimization-correctness result.
 - `ch281_map_take` — naturality: `take n (map f xs) = map f (take n xs)`.
 - `ch293_map_reverse` — naturality: `map f (reverse xs) = reverse (map f xs)`.
+- `ch294_sum_reverse` — `sum (reverse xs) = sum xs` (reverse preserves the sum).
 - `ch285_foldl_sum` — left fold equals right fold for addition (`sumL 0 xs = sum xs`),
   via `sumL acc xs = acc + sum xs` — fold-direction independence for the additive monoid.
 - `ch286_concat_length` — `len (concat xss) = sumLens xss` (flatten length = sum of lengths).
