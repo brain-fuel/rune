@@ -3,6 +3,8 @@ package elaborate
 import (
 	"sort"
 	"strings"
+
+	"goforge.dev/rune/v3/core"
 )
 
 // A Diagnostic is a human-facing error: a one-line Summary that says plainly what
@@ -140,6 +142,62 @@ func (e *Elaborator) unboundError(c *Ctx, name string) error {
 				"before the line that uses it. Check the spelling and the order.")
 	}
 	return d
+}
+
+// typeMismatchError builds the diagnostic for a checked expression whose inferred
+// type does not match what the context expects. It names both types plainly, and
+// when the clash is a universe-level one — the mismatch that reads as nonsense
+// ("expected U, got U1") to anyone who has not met the hierarchy — it explains what
+// a universe level IS and which way to move. The raw unifier message is kept as a
+// final precise note for the case the prose does not cover.
+func (e *Elaborator) typeMismatchError(c *Ctx, want, got core.Val, cause error) error {
+	wantS := e.pretty(c, want)
+	gotS := e.pretty(c, got)
+	d := &Diagnostic{Summary: "The types don't match here."}
+
+	if wantS == gotS {
+		// Same printed form, different cores (levels, metas, or quantities) — say so,
+		// so the reader is not left comparing two identical-looking types.
+		d.Body = []string{
+			"This expression should have type `" + wantS + "`, and at a glance it does " +
+				"— but the two differ in a detail the printer hides (a universe level, a " +
+				"usage quantity, or an unsolved hole).",
+		}
+	} else {
+		d.Body = []string{
+			"I expected this expression to have type `" + wantS + "`, but it actually " +
+				"has type `" + gotS + "`.",
+		}
+	}
+
+	if isUniverseMismatch(cause) {
+		d.Body = append(d.Body,
+			"These are both universes (the types whose members are themselves types), "+
+				"but at different LEVELS. `U` is `U0`, the universe of ordinary types; "+
+				"`U1` is the next one up, large enough to contain `U0` itself. The levels "+
+				"stop a type from containing itself, so they are not interchangeable.")
+		d.Hints = append(d.Hints,
+			"A value one level too big needs a bigger annotation (write `U1` where you "+
+				"wrote `U`); a value one level too small means the surrounding type is "+
+				"asking for more than it should. Move the annotation to match the level "+
+				"the expression actually lives at.")
+	} else {
+		d.Hints = append(d.Hints,
+			"One of the two is wrong: either this expression should be built differently "+
+				"to produce a `"+wantS+"`, or the type it is checked against should be "+
+				"`"+gotS+"`. Decide which you meant and change that one.")
+	}
+
+	if cause != nil {
+		d.Hints = append(d.Hints, "(precise reason: "+cause.Error()+")")
+	}
+	return d
+}
+
+// isUniverseMismatch reports whether a unifier error is a universe-level clash, so
+// the diagnostic can switch to the level-aware explanation.
+func isUniverseMismatch(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "universe level")
 }
 
 // inScopeNames lists every name a reference could legally resolve to right here:

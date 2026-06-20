@@ -47,7 +47,7 @@ func TestQuantityRejected(t *testing.T) {
 		{`bad : (1 x : U) -> U is fn (0 x : U) is U end end`, "expects"},
 		// Quantities are part of the Pi's identity: (1 x : U) -> U ≠ U -> U.
 		{`f : (1 x : U) -> U is fn (1 x : U) is x end end
-bad : U -> U is f end`, "type mismatch"},
+bad : U -> U is f end`, "types don't match"},
 	}
 	for i, c := range cases {
 		s := session.New()

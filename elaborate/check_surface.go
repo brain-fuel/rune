@@ -666,8 +666,7 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 			if e.M.Sub(c.Lvl(), got, want) {
 				return tm, nil // cumulativity: Prop <: U
 			}
-			return nil, fmt.Errorf("type mismatch: expected %s, got %s (%v)",
-				e.pretty(c, want), e.pretty(c, got), err)
+			return nil, e.typeMismatchError(c, want, got, err)
 		}
 		return tm, nil
 	}

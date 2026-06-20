@@ -27,7 +27,7 @@ func TestLoadTypeChecksAndCertifies(t *testing.T) {
 func TestIllTypedDefinitionRejected(t *testing.T) {
 	s := New()
 	_, err := s.LoadSource(`bad : U -> U is U end`)
-	if err == nil || !strings.Contains(err.Error(), "type mismatch") {
+	if err == nil || !strings.Contains(err.Error(), "types don't match") {
 		t.Fatalf("ill-typed definition accepted (err=%v)", err)
 	}
 	if _, ok := s.refs["bad"]; ok {
