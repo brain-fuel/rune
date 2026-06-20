@@ -1,0 +1,39 @@
+-- Chapter 345 — boolean implication: reflexive, and equal to (not a) or b (proven tier).
+--
+-- implb is material implication on Bool. It is reflexive (a implies a) and agrees with the
+-- classical definition (not a) or b — completing the boolean connectives alongside and/or/
+-- not/xor (ch287)/eqBool (ch343). By case analysis. Proof-only.
+--
+--   implbRefl : (a : Bool) -> Eq Bool (implb a a) true
+--   implbOr   : (a b : Bool) -> Eq Bool (implb a b) (orB (notB a) b)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+implb : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b true a end
+end
+
+implbRefl : (a : Bool) -> Eq Bool (implb a a) true is
+  fn (a : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (implb x x) true end) refl refl a
+  end
+end
+
+implbOr : (a : Bool) -> (b : Bool) -> Eq Bool (implb a b) (orB (notB a) b) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (implb x b) (orB (notB x) b) end) refl refl a
+  end
+end

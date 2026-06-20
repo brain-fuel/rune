@@ -186,6 +186,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch257_bool_monoid` — and/or commutativity + associativity (→ full boolean algebra).
 - `ch287_xor` — exclusive-or laws (`xor a a = false`, `xor a false = a`, commutativity).
 - `ch343_eqbool` — boolean equality (XNOR) reflexive + symmetric: `eqBool a a = true`, `eqBool a b = eqBool b a`.
+- `ch345_implb` — boolean implication: `implb a a = true`, `implb a b = ¬a ∨ b`.
 - `ch306_bool_to_nat` — the 0/1 embedding: `b2n (a∧b) = min`, `b2n (a∨b) = max` (Bool→Nat lattice).
 - `ch307_bool_nat_roundtrip` — `n2b (b2n b) = b` (left inverse) + `b2n (¬b) = 1 - b2n b`.
 
