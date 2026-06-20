@@ -1,0 +1,71 @@
+-- Chapter 358 — any/map fusion: any p (map f xs) = any (p . f) xs (proven tier).
+--
+-- Testing a predicate after mapping equals testing the composed predicate — one traversal
+-- instead of two (deforestation). By induction on xs. Proof-only.
+--
+--   anyMap : (p : Nat -> Bool) -> (f : Nat -> Nat) -> (xs : NatList)
+--          -> Eq Bool (any p (mapList f xs)) (any (pcomp p f) xs)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+pcomp : (Nat -> Bool) -> (Nat -> Nat) -> Nat -> Bool is
+  fn (p : Nat -> Bool) (f : Nat -> Nat) (x : Nat) is p (f x) end
+end
+
+any : (Nat -> Bool) -> NatList -> Bool is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Bool end)
+      false
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is orB (p h) ih end)
+      xs
+  end
+end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs:
+--   nnil:  false = false                                                            -> refl
+--   ncons: orB (p (f h)) (any p (map f t)) vs orB (p (f h)) (any (p.f) t); cong (orB (p (f h))) IH
+anyMap : (p : Nat -> Bool) -> (f : Nat -> Nat) -> (xs : NatList) ->
+         Eq Bool (any p (mapList f xs)) (any (pcomp p f) xs) is
+  fn (p : Nat -> Bool) (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Bool (any p (mapList f z)) (any (pcomp p f) z) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (any p (mapList f rest)) (any (pcomp p f) rest)) is
+         cong Bool Bool (orB (p (f h))) (any p (mapList f rest)) (any (pcomp p f) rest) ih end)
+      xs
+  end
+end

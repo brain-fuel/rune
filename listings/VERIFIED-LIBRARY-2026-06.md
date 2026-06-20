@@ -77,6 +77,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch322_filter_length` — filter never increases length: `len (filter p xs) <= len xs`.
 - `ch323_filter_append` — filter distributes over append: `filter p (xs++ys) = filter p xs ++ filter p ys`.
 - `ch291_any_all_demorgan` — quantifier De Morgan: `any p xs = not (all (not . p) xs)`.
+- `ch358_any_map` — any/map fusion: `any p (map f xs) = any (p . f) xs`.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
 - `ch325_reverse_replicate` — `reverse (replicate n x) = replicate n x` (n copies are self-reverse).
 - `ch292_reverse_involution` — `reverse (append xs ys) = reverse ys ++ reverse xs` and
