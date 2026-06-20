@@ -100,6 +100,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 ## Proven tier — booleans & Option
 
 - `ch247_dec_eq_bool` — Boolean equality reflects propositional equality (sound + complete).
+- `ch296_beq_sym` — symmetry of the Nat equality test: `beqNat a b = beqNat b a`.
 - `ch248_option_monad` — Option monad laws (left/right id, assoc).
 - `ch254_option_functor` — Option functor laws (id, composition).
 - `ch263_sum_bifunctor` — Sum (Either) bifunctor laws (id, composition).

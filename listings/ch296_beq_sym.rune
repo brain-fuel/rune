@@ -1,0 +1,54 @@
+-- Chapter 296 — symmetry of the Nat equality test (proven tier).
+--
+-- beqNat is symmetric: testing a == b gives the same bit as b == a. By double induction;
+-- the diagonal recurses (succ/succ reduces to the predecessors), the off-diagonal and
+-- base agree by refl. Proof-only.
+--
+--   beqNatSym : (a b : Nat) -> Eq Bool (beqNat a b) (beqNat b a)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+beqNatSym : (a : Nat) -> (b : Nat) -> Eq Bool (beqNat a b) (beqNat b a) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (beqNat x b) (beqNat b x) end)
+      (fn (b : Nat) is
+         NatElim (fn (y : Nat) is Eq Bool (beqNat zero y) (beqNat y zero) end)
+           refl
+           (fn (j : Nat) (ih2 : Eq Bool (beqNat zero j) (beqNat j zero)) is refl end)
+           b
+       end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Bool (beqNat k b) (beqNat b k)) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (beqNat (succ k) y) (beqNat y (succ k)) end)
+             refl
+             (fn (j : Nat) (ih2 : Eq Bool (beqNat (succ k) j) (beqNat j (succ k))) is ih j end)
+             b
+         end
+       end)
+      a
+  end
+end
