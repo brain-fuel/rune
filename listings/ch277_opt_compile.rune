@@ -1,0 +1,353 @@
+-- Chapter 277 — the verified pipeline: optimize then compile is correct (proven tier).
+--
+-- End-to-end software-verification capstone: the constant-folding optimizer (ch273) and
+-- the stack-machine compiler (ch275) COMPOSE — running the compiled code of the OPTIMIZED
+-- expression still pushes exactly the source value.
+--
+--   optCompileCorrect : (e : Expr) -> (s : NatList)
+--                     -> Eq NatList (exec (compile (fold e)) s) (ncons (eval e) s)
+--
+-- It follows from compileCorrect (fold e) and foldCorrect e by transitivity — the two
+-- verified passes plugged together. The compiler + optimizer machinery is reused
+-- (compiler verbatim from ch275; optimizer adapted from ch273 to the eadd/emul ctors).
+-- Proof-only.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a
+  end
+end
+
+-- the stack-machine instructions and programs.
+data Instr : U is
+  push : Nat -> Instr
+| iadd : Instr
+| imul : Instr
+end
+
+data Code : U is
+  cnil  : Code
+| ccons : Instr -> Code -> Code
+end
+
+iapp : Code -> Code -> Code is
+  fn (c1 : Code) (c2 : Code) is
+    CodeElim (fn (x : Code) is Code end)
+      c2
+      (fn (i : Instr) (rest : Code) (ih : Code) is ccons i ih end)
+      c1
+  end
+end
+
+-- pop two operands and push their combination (top is the second operand).
+popAdd : NatList -> NatList is
+  fn (s : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (b : Nat) (s1 : NatList) (ih : NatList) is
+         NatListElim (fn (y : NatList) is NatList end)
+           (ncons b nnil)
+           (fn (a : Nat) (s2 : NatList) (ih2 : NatList) is ncons (natAdd a b) s2 end)
+           s1 end)
+      s
+  end
+end
+
+popMul : NatList -> NatList is
+  fn (s : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (b : Nat) (s1 : NatList) (ih : NatList) is
+         NatListElim (fn (y : NatList) is NatList end)
+           (ncons b nnil)
+           (fn (a : Nat) (s2 : NatList) (ih2 : NatList) is ncons (natMul a b) s2 end)
+           s1 end)
+      s
+  end
+end
+
+step : Instr -> NatList -> NatList is
+  fn (i : Instr) (s : NatList) is
+    InstrElim (fn (x : Instr) is NatList end)
+      (fn (n : Nat) is ncons n s end)
+      (popAdd s)
+      (popMul s)
+      i
+  end
+end
+
+exec : Code -> NatList -> NatList is
+  fn (c : Code) (s : NatList) is
+    CodeElim (fn (x : Code) is NatList -> NatList end)
+      (fn (t : NatList) is t end)
+      (fn (i : Instr) (rest : Code) (ih : NatList -> NatList) is
+         fn (t : NatList) is ih (step i t) end
+       end)
+      c s
+  end
+end
+
+-- exec distributes over code concatenation (the IH generalized over the stack).
+execAppend : (c1 : Code) -> (c2 : Code) -> (s : NatList) ->
+             Eq NatList (exec (iapp c1 c2) s) (exec c2 (exec c1 s)) is
+  fn (c1 : Code) is
+    CodeElim (fn (x : Code) is (c2 : Code) -> (s : NatList) ->
+                 Eq NatList (exec (iapp x c2) s) (exec c2 (exec x s)) end)
+      (fn (c2 : Code) (s : NatList) is refl end)
+      (fn (i : Instr) (rest : Code)
+          (ih : (c2 : Code) -> (s : NatList) ->
+                Eq NatList (exec (iapp rest c2) s) (exec c2 (exec rest s))) is
+         fn (c2 : Code) (s : NatList) is ih c2 (step i s) end
+       end)
+      c1
+  end
+end
+
+data Expr : U is
+  lit : Nat -> Expr
+| eadd : Expr -> Expr -> Expr
+| emul : Expr -> Expr -> Expr
+end
+
+eval : Expr -> Nat is
+  fn (e : Expr) is
+    ExprElim (fn (x : Expr) is Nat end)
+      (fn (n : Nat) is n end)
+      (fn (l : Expr) (r : Expr) (ihl : Nat) (ihr : Nat) is natAdd ihl ihr end)
+      (fn (l : Expr) (r : Expr) (ihl : Nat) (ihr : Nat) is natMul ihl ihr end)
+      e
+  end
+end
+
+-- compile: left subtree, right subtree, then the binary op.
+compile : Expr -> Code is
+  fn (e : Expr) is
+    ExprElim (fn (x : Expr) is Code end)
+      (fn (n : Nat) is ccons (push n) cnil end)
+      (fn (l : Expr) (r : Expr) (cl : Code) (cr : Code) is iapp cl (iapp cr (ccons iadd cnil)) end)
+      (fn (l : Expr) (r : Expr) (cl : Code) (cr : Code) is iapp cl (iapp cr (ccons imul cnil)) end)
+      e
+  end
+end
+
+-- THE CORRECTNESS THEOREM, by structural induction on e.
+--   lit n: exec (ccons (push n) cnil) s = ncons n s                         -> refl
+--   eadd l r: peel both subprograms with execAppend, rewrite the stacks by the IHs, and
+--             the trailing `iadd` pops the two values and pushes their sum.
+compileCorrect : (e : Expr) -> (s : NatList) ->
+                 Eq NatList (exec (compile e) s) (ncons (eval e) s) is
+  fn (e : Expr) is
+    ExprElim (fn (x : Expr) is (s : NatList) ->
+                 Eq NatList (exec (compile x) s) (ncons (eval x) s) end)
+      (fn (n : Nat) is fn (s : NatList) is refl end end)
+      (fn (l : Expr) (r : Expr)
+          (ihl : (s : NatList) -> Eq NatList (exec (compile l) s) (ncons (eval l) s))
+          (ihr : (s : NatList) -> Eq NatList (exec (compile r) s) (ncons (eval r) s)) is
+         fn (s : NatList) is
+           transEq NatList
+             (exec (iapp (compile l) (iapp (compile r) (ccons iadd cnil))) s)
+             (exec (iapp (compile r) (ccons iadd cnil)) (exec (compile l) s))
+             (ncons (natAdd (eval l) (eval r)) s)
+             (execAppend (compile l) (iapp (compile r) (ccons iadd cnil)) s)
+             (transEq NatList
+                (exec (iapp (compile r) (ccons iadd cnil)) (exec (compile l) s))
+                (exec (iapp (compile r) (ccons iadd cnil)) (ncons (eval l) s))
+                (ncons (natAdd (eval l) (eval r)) s)
+                (cong NatList NatList
+                   (fn (t : NatList) is exec (iapp (compile r) (ccons iadd cnil)) t end)
+                   (exec (compile l) s) (ncons (eval l) s) (ihl s))
+                (transEq NatList
+                   (exec (iapp (compile r) (ccons iadd cnil)) (ncons (eval l) s))
+                   (exec (ccons iadd cnil) (exec (compile r) (ncons (eval l) s)))
+                   (ncons (natAdd (eval l) (eval r)) s)
+                   (execAppend (compile r) (ccons iadd cnil) (ncons (eval l) s))
+                   (cong NatList NatList
+                      (fn (t : NatList) is exec (ccons iadd cnil) t end)
+                      (exec (compile r) (ncons (eval l) s)) (ncons (eval r) (ncons (eval l) s))
+                      (ihr (ncons (eval l) s))))) end
+         end)
+      (fn (l : Expr) (r : Expr)
+          (ihl : (s : NatList) -> Eq NatList (exec (compile l) s) (ncons (eval l) s))
+          (ihr : (s : NatList) -> Eq NatList (exec (compile r) s) (ncons (eval r) s)) is
+         fn (s : NatList) is
+           transEq NatList
+             (exec (iapp (compile l) (iapp (compile r) (ccons imul cnil))) s)
+             (exec (iapp (compile r) (ccons imul cnil)) (exec (compile l) s))
+             (ncons (natMul (eval l) (eval r)) s)
+             (execAppend (compile l) (iapp (compile r) (ccons imul cnil)) s)
+             (transEq NatList
+                (exec (iapp (compile r) (ccons imul cnil)) (exec (compile l) s))
+                (exec (iapp (compile r) (ccons imul cnil)) (ncons (eval l) s))
+                (ncons (natMul (eval l) (eval r)) s)
+                (cong NatList NatList
+                   (fn (t : NatList) is exec (iapp (compile r) (ccons imul cnil)) t end)
+                   (exec (compile l) s) (ncons (eval l) s) (ihl s))
+                (transEq NatList
+                   (exec (iapp (compile r) (ccons imul cnil)) (ncons (eval l) s))
+                   (exec (ccons imul cnil) (exec (compile r) (ncons (eval l) s)))
+                   (ncons (natMul (eval l) (eval r)) s)
+                   (execAppend (compile r) (ccons imul cnil) (ncons (eval l) s))
+                   (cong NatList NatList
+                      (fn (t : NatList) is exec (ccons imul cnil) t end)
+                      (exec (compile r) (ncons (eval l) s)) (ncons (eval r) (ncons (eval l) s))
+                      (ihr (ncons (eval l) s))))) end
+         end)
+      e
+  end
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+-- smart eadd: if both operands are literals, fold to one literal; else rebuild an eadd node.
+addSmart : Expr -> Expr -> Expr is
+  fn (a : Expr) (b : Expr) is
+    ExprElim (fn (x : Expr) is Expr end)
+      (fn (m : Nat) is
+         ExprElim (fn (y : Expr) is Expr end)
+           (fn (n : Nat) is lit (natAdd m n) end)
+           (fn (bl : Expr) (br : Expr) (il : Expr) (ir : Expr) is eadd (lit m) (eadd bl br) end)
+           (fn (bl : Expr) (br : Expr) (il : Expr) (ir : Expr) is eadd (lit m) (emul bl br) end)
+           b end)
+      (fn (al : Expr) (ar : Expr) (il : Expr) (ir : Expr) is eadd (eadd al ar) b end)
+      (fn (al : Expr) (ar : Expr) (il : Expr) (ir : Expr) is eadd (emul al ar) b end)
+      a
+  end
+end
+
+mulSmart : Expr -> Expr -> Expr is
+  fn (a : Expr) (b : Expr) is
+    ExprElim (fn (x : Expr) is Expr end)
+      (fn (m : Nat) is
+         ExprElim (fn (y : Expr) is Expr end)
+           (fn (n : Nat) is lit (natMul m n) end)
+           (fn (bl : Expr) (br : Expr) (il : Expr) (ir : Expr) is emul (lit m) (eadd bl br) end)
+           (fn (bl : Expr) (br : Expr) (il : Expr) (ir : Expr) is emul (lit m) (emul bl br) end)
+           b end)
+      (fn (al : Expr) (ar : Expr) (il : Expr) (ir : Expr) is emul (eadd al ar) b end)
+      (fn (al : Expr) (ar : Expr) (il : Expr) (ir : Expr) is emul (emul al ar) b end)
+      a
+  end
+end
+
+-- each smart constructor preserves the value: by case on a (and on b in the lit case),
+-- every branch's eval is exactly natAdd/natMul of the operand values (refl).
+addSmartCorrect : (a : Expr) -> (b : Expr) -> Eq Nat (eval (addSmart a b)) (natAdd (eval a) (eval b)) is
+  fn (a : Expr) (b : Expr) is
+    ExprElim (fn (x : Expr) is Eq Nat (eval (addSmart x b)) (natAdd (eval x) (eval b)) end)
+      (fn (m : Nat) is
+         ExprElim (fn (y : Expr) is Eq Nat (eval (addSmart (lit m) y)) (natAdd m (eval y)) end)
+           (fn (n : Nat) is refl end)
+           (fn (bl : Expr) (br : Expr) (il : Eq Nat (eval (addSmart (lit m) bl)) (natAdd m (eval bl))) (ir : Eq Nat (eval (addSmart (lit m) br)) (natAdd m (eval br))) is refl end)
+           (fn (bl : Expr) (br : Expr) (il : Eq Nat (eval (addSmart (lit m) bl)) (natAdd m (eval bl))) (ir : Eq Nat (eval (addSmart (lit m) br)) (natAdd m (eval br))) is refl end)
+           b end)
+      (fn (al : Expr) (ar : Expr) (il : Eq Nat (eval (addSmart al b)) (natAdd (eval al) (eval b))) (ir : Eq Nat (eval (addSmart ar b)) (natAdd (eval ar) (eval b))) is refl end)
+      (fn (al : Expr) (ar : Expr) (il : Eq Nat (eval (addSmart al b)) (natAdd (eval al) (eval b))) (ir : Eq Nat (eval (addSmart ar b)) (natAdd (eval ar) (eval b))) is refl end)
+      a
+  end
+end
+
+mulSmartCorrect : (a : Expr) -> (b : Expr) -> Eq Nat (eval (mulSmart a b)) (natMul (eval a) (eval b)) is
+  fn (a : Expr) (b : Expr) is
+    ExprElim (fn (x : Expr) is Eq Nat (eval (mulSmart x b)) (natMul (eval x) (eval b)) end)
+      (fn (m : Nat) is
+         ExprElim (fn (y : Expr) is Eq Nat (eval (mulSmart (lit m) y)) (natMul m (eval y)) end)
+           (fn (n : Nat) is refl end)
+           (fn (bl : Expr) (br : Expr) (il : Eq Nat (eval (mulSmart (lit m) bl)) (natMul m (eval bl))) (ir : Eq Nat (eval (mulSmart (lit m) br)) (natMul m (eval br))) is refl end)
+           (fn (bl : Expr) (br : Expr) (il : Eq Nat (eval (mulSmart (lit m) bl)) (natMul m (eval bl))) (ir : Eq Nat (eval (mulSmart (lit m) br)) (natMul m (eval br))) is refl end)
+           b end)
+      (fn (al : Expr) (ar : Expr) (il : Eq Nat (eval (mulSmart al b)) (natMul (eval al) (eval b))) (ir : Eq Nat (eval (mulSmart ar b)) (natMul (eval ar) (eval b))) is refl end)
+      (fn (al : Expr) (ar : Expr) (il : Eq Nat (eval (mulSmart al b)) (natMul (eval al) (eval b))) (ir : Eq Nat (eval (mulSmart ar b)) (natMul (eval ar) (eval b))) is refl end)
+      a
+  end
+end
+
+-- the optimizer: recurse, combining with the smart constructors.
+fold : Expr -> Expr is
+  fn (e : Expr) is
+    ExprElim (fn (x : Expr) is Expr end)
+      (fn (n : Nat) is lit n end)
+      (fn (l : Expr) (r : Expr) (ihl : Expr) (ihr : Expr) is addSmart ihl ihr end)
+      (fn (l : Expr) (r : Expr) (ihl : Expr) (ihr : Expr) is mulSmart ihl ihr end)
+      e
+  end
+end
+
+-- THE CORRECTNESS THEOREM, by structural induction:
+--   lit:  eval (fold (lit n)) = n = eval (lit n)                                 -> refl
+--   eadd:  eval (fold (eadd l r)) = eval (addSmart (fold l) (fold r))
+--         addSmartCorrect : = natAdd (eval (fold l)) (eval (fold r))
+--         cong2 natAdd ihl ihr : = natAdd (eval l) (eval r) = eval (eadd l r)
+--   emul:  symmetric with mulSmartCorrect.
+foldCorrect : (e : Expr) -> Eq Nat (eval (fold e)) (eval e) is
+  fn (e : Expr) is
+    ExprElim (fn (x : Expr) is Eq Nat (eval (fold x)) (eval x) end)
+      (fn (n : Nat) is refl end)
+      (fn (l : Expr) (r : Expr) (ihl : Eq Nat (eval (fold l)) (eval l)) (ihr : Eq Nat (eval (fold r)) (eval r)) is
+         transEq Nat
+           (eval (addSmart (fold l) (fold r)))
+           (natAdd (eval (fold l)) (eval (fold r)))
+           (natAdd (eval l) (eval r))
+           (addSmartCorrect (fold l) (fold r))
+           (cong2 Nat Nat Nat natAdd (eval (fold l)) (eval l) (eval (fold r)) (eval r) ihl ihr) end)
+      (fn (l : Expr) (r : Expr) (ihl : Eq Nat (eval (fold l)) (eval l)) (ihr : Eq Nat (eval (fold r)) (eval r)) is
+         transEq Nat
+           (eval (mulSmart (fold l) (fold r)))
+           (natMul (eval (fold l)) (eval (fold r)))
+           (natMul (eval l) (eval r))
+           (mulSmartCorrect (fold l) (fold r))
+           (cong2 Nat Nat Nat natMul (eval (fold l)) (eval l) (eval (fold r)) (eval r) ihl ihr) end)
+      e
+  end
+end
+
+-- THE PIPELINE THEOREM: compile-after-optimize preserves the source value.
+optCompileCorrect : (e : Expr) -> (s : NatList) ->
+                    Eq NatList (exec (compile (fold e)) s) (ncons (eval e) s) is
+  fn (e : Expr) (s : NatList) is
+    transEq NatList
+      (exec (compile (fold e)) s)
+      (ncons (eval (fold e)) s)
+      (ncons (eval e) s)
+      (compileCorrect (fold e) s)
+      (cong Nat NatList (fn (v : Nat) is ncons v s end) (eval (fold e)) (eval e) (foldCorrect e))
+  end
+end

@@ -95,6 +95,8 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch275_stack_compiler` — a verified compiler from expressions to a stack machine
   (`exec (compile e) s = eval e :: s`) — the canonical compiler-correctness theorem,
   via `execAppend` (exec distributes over code concatenation).
+- `ch277_opt_compile` — the verified PIPELINE: `exec (compile (fold e)) s = eval e :: s`
+  — optimizer (ch273) and compiler (ch275) compose; optimize-then-compile is correct.
 
 ## Telos 4 — distributed (CRDTs + bisimulation)
 
