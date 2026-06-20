@@ -282,3 +282,82 @@ func TestIOFloatBlasConformance(t *testing.T) {
 		})
 	}
 }
+
+// TestD3OpenBLASTolerance is the D3 OpenBLAS-swap gate: on the SOURCE backends
+// (js/py/go/erl) `dot2` is the portable reference loop; on the NATIVE backends
+// (C/LLVM) it is SWAPPED for cblas_ddot (real OpenBLAS, linked -lopenblas). ch218's
+// tolerance contract binds them — the OpenBLAS result must be within `eps` of the
+// reference, configurable with `defaultEps` (1e-9). The observable is byte-identical
+// everywhere ("11\n11\n0\nunit": the dot, a within-default-tolerance ok, and a
+// negative-tolerance blame), so the swap holds parity at the CONTRACT, not the bits.
+func TestD3OpenBLASTolerance(t *testing.T) {
+	const want = "11\n11\n0\nunit"
+	// Source backends: the portable reference path (dot2 = naive loop).
+	for _, bk := range ioCLIBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch218_blas_tolerance.rune", "main", ""); got != want {
+				t.Errorf("[%s] gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	// Native backends: the OpenBLAS swap (dot2 = cblas_ddot), linked -lopenblas.
+	s := loadListing(t, "ch218_blas_tolerance.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipNoBLAS := func(t *testing.T, out []byte, err error) {
+		if err != nil && strings.Contains(string(out)+err.Error(), "cblas") {
+			t.Skip("OpenBLAS/cblas.h not available")
+		}
+	}
+	t.Run("c", func(t *testing.T) {
+		if _, err := exec.LookPath("cc"); err != nil {
+			t.Skip("cc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.C{}.Emit(p)
+		f := filepath.Join(dir, "main.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		if out, err := exec.Command("cc", "-o", bin, f, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[c] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[c] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[c] OpenBLAS gave %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if _, err := exec.LookPath("clang"); err != nil {
+			t.Skip("clang not in PATH")
+		}
+		dir := t.TempDir()
+		ll, _ := codegen.LL{}.Emit(p)
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		f := filepath.Join(dir, "main.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(ll), 0o644)
+		os.WriteFile(rtf, []byte(rt), 0o644)
+		if out, err := exec.Command("clang", f, rtf, "-o", bin, "-lopenblas").CombinedOutput(); err != nil {
+			skipNoBLAS(t, out, err)
+			t.Fatalf("[ll] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[ll] run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[ll] OpenBLAS gave %q, want %q", got, want)
+		}
+	})
+}

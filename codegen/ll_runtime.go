@@ -76,7 +76,7 @@ const llRuntimeC = `/* rune llvm-backend runtime — the external-linkage twin o
 
 typedef intptr_t Value;
 
-enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6 };
+enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7 };
 
 typedef struct Obj {
   int kind;
@@ -89,6 +89,7 @@ typedef struct Obj {
   int nfield;
   const char* str;
   long handle;
+  double dval; /* D3 machine float (f64): a boxed double, kind K_FLOAT. */
   Value slots[1];
 } Obj;
 
@@ -247,6 +248,14 @@ Value rt_mkptr(long h) {
   o->kind = K_PTR; o->handle = h;
   return (Value)o;
 }
+/* D3 machine float (f64): box/unbox a double (kind K_FLOAT), shared by the baked
+   float/BLAS host bodies appended by EmitRuntimeFor. */
+static Value mkfloat(double d) {
+  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  o->kind = K_FLOAT; o->dval = d;
+  return (Value)o;
+}
+static double float_val(Value v) { return obj(v)->dval; }
 static Value mkunit(void) {
   Obj* o = (Obj*)gc_alloc(sizeof(Obj));
   o->kind = K_UNIT;
@@ -337,6 +346,13 @@ static void big_print(Value v) {
   for (int i = n - 2; i >= 0; i--) printf("%09ld", big_limb(v, i));
 }
 
+/* D3: a builtin-nat magnitude as a double (for fromNat: Nat -> Float). */
+static double big_to_double(Value v) {
+  double d = 0.0;
+  for (int i = big_nlimbs(v) - 1; i >= 0; i--) d = d * (double)BIG_BASE + (double)big_limb(v, i);
+  return d;
+}
+
 /* rt_* entry points the emitted IR calls. */
 Value rt_big_from_long(long n) {
   if (n <= 0) return mkbig(0);
@@ -385,6 +401,7 @@ static void show(Value v) {
   Obj* o = obj(v);
   switch (o->kind) {
     case K_BIG: big_print(v); return;
+    case K_FLOAT: printf("%g", o->dval); return;
     case K_CLO: printf("<function>"); return;
     case K_PTR: printf("<ptr>"); return;
     case K_STR: printf("%s", o->str); return;

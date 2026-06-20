@@ -103,6 +103,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fdiv") {
 		b.WriteString("func fdiv() any { return func(a any) any { return func(b any) any { return a.(float64) / b.(float64) } } }\n")
 	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("func fabsP() any { return func(x any) any { v := x.(float64); if v < 0 { return -v }; return v } }\n")
+	}
 	if usesForeign(p, "floatToNat") {
 		b.WriteString("func floatToNat() any { return func(x any) any { return big.NewInt(int64(x.(float64))) } }\n")
 	}

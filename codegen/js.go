@@ -98,6 +98,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fdiv") {
 		b.WriteString("const fdiv = () => a => b => a / b;\n")
 	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("const fabsP = () => x => Math.abs(x);\n")
+	}
 	if usesForeign(p, "floatToNat") {
 		b.WriteString("const floatToNat = () => x => BigInt(Math.trunc(x));\n")
 	}

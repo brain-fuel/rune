@@ -111,6 +111,9 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fdiv") {
 		b.WriteString("ff_fdiv() -> fun(A) -> fun(B) -> A / B end end.\n")
 	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("ff_fabsP() -> fun(X) -> abs(X) end.\n")
+	}
 	if usesForeign(p, "floatToNat") {
 		b.WriteString("ff_floatToNat() -> fun(X) -> trunc(X) end.\n")
 	}

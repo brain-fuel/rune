@@ -97,6 +97,9 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fdiv") {
 		b.WriteString("def fdiv():\n    return lambda a: lambda b: a / b\n")
 	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("def fabsP():\n    return lambda x: abs(x)\n")
+	}
 	if usesForeign(p, "floatToNat") {
 		b.WriteString("def floatToNat():\n    return lambda x: int(x)\n")
 	}

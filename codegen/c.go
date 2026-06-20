@@ -76,6 +76,9 @@ func (C) Emit(p Program) (TargetSource, error) {
 	if usesIO(p) {
 		b.WriteString(cIORuntime)
 	}
+	// D3 / R-FFI: bake the machine-float (f64) host bodies + the OpenBLAS dot kernel
+	// when referenced (defined before the program code blocks that call them).
+	emitFloatPrimsC(&b, p)
 
 	// Forward declarations: every code block and every thunk, so the bodies may
 	// reference one another (and themselves) regardless of definition order.
@@ -525,6 +528,62 @@ func cstr(s string) string {
 	return b.String()
 }
 
+// emitFloatPrimsC bakes the D3 machine-float (f64) host bodies + the OpenBLAS dot
+// kernel into the C translation unit (R-FFI assume-tier accessors, gated by use).
+// Each is a curried closure over K_FLOAT boxes; a comparison returns a builtin-nat
+// (1/0) the Rune side cases into Bool; `dot2` calls cblas_ddot (link -lopenblas).
+// `Float` is a foreign TYPE surviving erasure as ok/err's type arg — a unit body.
+func emitFloatPrimsC(b *strings.Builder, p Program) {
+	// printNat (Nat -> IO Nat): the C backend's baked console-out (the source
+	// backends bake it in their Emit; the native backends did not until D3's float
+	// demos needed an observable). Prints the nat decimal, returns it.
+	if usesForeign(p, "printNat") {
+		b.WriteString("static Value printNat_c2(Value w, Value* env) { (void)w; Value n = env[0]; if (IS_INT(n)) printf(\"%ld\\n\", INT_VAL(n)); else { big_print(n); putchar('\\n'); } return n; }\n")
+		b.WriteString("static Value printNat_c1(Value n, Value* env) { (void)env; Value c = mkclo(&printNat_c2, 1); clo_set(c, 0, n); return c; }\n")
+		b.WriteString("static Value printNat(void) { return mkclo(&printNat_c1, 0); }\n")
+	}
+	if usesForeign(p, "Float") {
+		b.WriteString("static Value Float(void) { return UNIT; }\n")
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("static Value fromNat_c(Value a, Value* env) { (void)env; return mkfloat(big_to_double(a)); }\n")
+		b.WriteString("static Value fromNat(void) { return mkclo(&fromNat_c, 0); }\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("static Value floatToNat_c(Value x, Value* env) { (void)env; return big_from_long((long)float_val(x)); }\n")
+		b.WriteString("static Value floatToNat(void) { return mkclo(&floatToNat_c, 0); }\n")
+	}
+	bin := func(name, op string) {
+		if usesForeign(p, name) {
+			fmt.Fprintf(b, "static Value %s_c2(Value y, Value* env) { return mkfloat(float_val(env[0]) %s float_val(y)); }\n", name, op)
+			fmt.Fprintf(b, "static Value %s_c1(Value x, Value* env) { (void)env; Value c = mkclo(&%s_c2, 1); clo_set(c, 0, x); return c; }\n", name, name)
+			fmt.Fprintf(b, "static Value %s(void) { return mkclo(&%s_c1, 0); }\n", name, name)
+		}
+	}
+	bin("fadd", "+")
+	bin("fsub", "-")
+	bin("fmul", "*")
+	bin("fdiv", "/")
+	if usesForeign(p, "fleqN") {
+		b.WriteString("static Value fleqN_c2(Value y, Value* env) { return float_val(env[0]) <= float_val(y) ? big_from_long(1) : big_from_long(0); }\n")
+		b.WriteString("static Value fleqN_c1(Value x, Value* env) { (void)env; Value c = mkclo(&fleqN_c2, 1); clo_set(c, 0, x); return c; }\n")
+		b.WriteString("static Value fleqN(void) { return mkclo(&fleqN_c1, 0); }\n")
+	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); return mkfloat(d < 0 ? -d : d); }\n")
+		b.WriteString("static Value fabsP(void) { return mkclo(&fabsP_c, 0); }\n")
+	}
+	if usesForeign(p, "dot2") {
+		// the OpenBLAS swap: the dot product runs through cblas_ddot, not a hand loop.
+		b.WriteString("#include <cblas.h>\n")
+		b.WriteString("static Value dot2_c4(Value b1, Value* env) { double X[2] = { float_val(env[0]), float_val(env[1]) }; double Y[2] = { float_val(env[2]), float_val(b1) }; return mkfloat(cblas_ddot(2, X, 1, Y, 1)); }\n")
+		b.WriteString("static Value dot2_c3(Value b0, Value* env) { Value c = mkclo(&dot2_c4, 3); clo_set(c, 0, env[0]); clo_set(c, 1, env[1]); clo_set(c, 2, b0); return c; }\n")
+		b.WriteString("static Value dot2_c2(Value a1, Value* env) { Value c = mkclo(&dot2_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, a1); return c; }\n")
+		b.WriteString("static Value dot2_c1(Value a0, Value* env) { (void)env; Value c = mkclo(&dot2_c2, 1); clo_set(c, 0, a0); return c; }\n")
+		b.WriteString("static Value dot2(void) { return mkclo(&dot2_c1, 0); }\n")
+	}
+}
+
 // cRuntime is the embedded native closure runtime (R-NATIVE ABI piece 1+2+3 at
 // the simplest correct point). A `Value` is a tagged word: an immediate int (low
 // bit 1) or a pointer to a boxed Obj (low bit 0). Allocation is garbage-collected
@@ -541,7 +600,7 @@ typedef intptr_t Value;
 
 /* Object kinds. K_BIG is a naive arbitrary-precision integer (builtin-nat): see
    the bignum section. */
-enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6 };
+enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7 };
 
 typedef struct Obj {
   int kind;
@@ -560,6 +619,9 @@ typedef struct Obj {
   /* string / opaque ptr */
   const char* str;
   long handle;
+  /* D3 machine float (f64): a boxed IEEE-754 double, kind K_FLOAT. Traces no slots
+     (the double is not a heap pointer), so the GC mark/size defaults cover it. */
+  double dval;
   /* trailing slots: env (closure) or fields (constructor) */
   Value slots[1];
 } Obj;
@@ -808,6 +870,13 @@ static Value mkptr(long h) {
   o->kind = K_PTR; o->handle = h;
   return (Value)o;
 }
+/* D3 machine float: box/unbox an IEEE-754 double (kind K_FLOAT). */
+static Value mkfloat(double d) {
+  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  o->kind = K_FLOAT; o->dval = d;
+  return (Value)o;
+}
+static double float_val(Value v) { return obj(v)->dval; }
 static Value mkunit(void) {
   Obj* o = (Obj*)gc_alloc(sizeof(Obj));
   o->kind = K_UNIT;
@@ -946,6 +1015,13 @@ static void big_print(Value v) {
   for (int i = n - 2; i >= 0; i--) printf("%09ld", big_limb(v, i));
 }
 
+/* D3: a builtin-nat magnitude as a double (for fromNat: Nat -> Float). */
+static double big_to_double(Value v) {
+  double d = 0.0;
+  for (int i = big_nlimbs(v) - 1; i >= 0; i--) d = d * (double)BIG_BASE + (double)big_limb(v, i);
+  return d;
+}
+
 /* nat accel ops, now on the bignum rep (saturating Peano monus). */
 static Value nat_add(Value a, Value b) { return big_add(a, b); }
 static Value nat_mul(Value a, Value b) { return big_mul(a, b); }
@@ -973,6 +1049,7 @@ static void show(Value v) {
   Obj* o = obj(v);
   switch (o->kind) {
     case K_BIG: big_print(v); return;
+    case K_FLOAT: printf("%g", o->dval); return;
     case K_CLO: printf("<function>"); return;
     case K_PTR: printf("<ptr>"); return;
     case K_STR: printf("%s", o->str); return;

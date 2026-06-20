@@ -195,6 +195,72 @@ func (LL) EmitRuntime() string {
 	return b.String()
 }
 
+// EmitRuntimeFor is EmitRuntime plus the D3 machine-float (f64) + OpenBLAS dot host
+// bodies the program references (R-FFI). The base EmitRuntime() omits them so the
+// generic corpus links without -lopenblas; a float/BLAS program uses THIS runtime and
+// links -lopenblas. The accessors are EXTERNAL (the .ll calls @fromNat/@dot2/… which
+// foreignNames auto-declares); the closure code blocks are static internals.
+func (LL) EmitRuntimeFor(p Program) string {
+	var b strings.Builder
+	b.WriteString(llRuntimeC)
+	b.WriteString(llRuntimeQuot)
+	b.WriteString(llRuntimeIO)
+	emitFloatPrimsLL(&b, p)
+	b.WriteString(llRuntimeMain)
+	return b.String()
+}
+
+// emitFloatPrimsLL bakes the float/BLAS host bodies into the LINKED LLVM runtime,
+// with EXTERNAL linkage on the accessors (called from the .ll) and the runtime's
+// rt_* closure/bignum helpers. The bodies mirror emitFloatPrimsC; dot2 swaps in
+// cblas_ddot (link -lopenblas).
+func emitFloatPrimsLL(b *strings.Builder, p Program) {
+	if usesForeign(p, "printNat") {
+		b.WriteString("static Value printNat_c2(Value w, Value* env) { (void)w; Value n = env[0]; if (IS_INT(n)) printf(\"%ld\\n\", INT_VAL(n)); else { big_print(n); putchar('\\n'); } return n; }\n")
+		b.WriteString("static Value printNat_c1(Value n, Value* env) { (void)env; Value c = rt_mkclo(&printNat_c2, 1); rt_clo_set(c, 0, n); return c; }\n")
+		b.WriteString("Value printNat(void) { return rt_mkclo(&printNat_c1, 0); }\n")
+	}
+	if usesForeign(p, "Float") {
+		b.WriteString("Value Float(void) { return UNIT; }\n")
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("static Value fromNat_c(Value a, Value* env) { (void)env; return mkfloat(big_to_double(a)); }\n")
+		b.WriteString("Value fromNat(void) { return rt_mkclo(&fromNat_c, 0); }\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("static Value floatToNat_c(Value x, Value* env) { (void)env; return rt_big_from_long((long)float_val(x)); }\n")
+		b.WriteString("Value floatToNat(void) { return rt_mkclo(&floatToNat_c, 0); }\n")
+	}
+	bin := func(name, op string) {
+		if usesForeign(p, name) {
+			fmt.Fprintf(b, "static Value %s_c2(Value y, Value* env) { return mkfloat(float_val(env[0]) %s float_val(y)); }\n", name, op)
+			fmt.Fprintf(b, "static Value %s_c1(Value x, Value* env) { (void)env; Value c = rt_mkclo(&%s_c2, 1); rt_clo_set(c, 0, x); return c; }\n", name, name)
+			fmt.Fprintf(b, "Value %s(void) { return rt_mkclo(&%s_c1, 0); }\n", name, name)
+		}
+	}
+	bin("fadd", "+")
+	bin("fsub", "-")
+	bin("fmul", "*")
+	bin("fdiv", "/")
+	if usesForeign(p, "fleqN") {
+		b.WriteString("static Value fleqN_c2(Value y, Value* env) { return float_val(env[0]) <= float_val(y) ? rt_big_from_long(1) : rt_big_from_long(0); }\n")
+		b.WriteString("static Value fleqN_c1(Value x, Value* env) { (void)env; Value c = rt_mkclo(&fleqN_c2, 1); rt_clo_set(c, 0, x); return c; }\n")
+		b.WriteString("Value fleqN(void) { return rt_mkclo(&fleqN_c1, 0); }\n")
+	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); return mkfloat(d < 0 ? -d : d); }\n")
+		b.WriteString("Value fabsP(void) { return rt_mkclo(&fabsP_c, 0); }\n")
+	}
+	if usesForeign(p, "dot2") {
+		b.WriteString("#include <cblas.h>\n")
+		b.WriteString("static Value dot2_c4(Value b1, Value* env) { double X[2] = { float_val(env[0]), float_val(env[1]) }; double Y[2] = { float_val(env[2]), float_val(b1) }; return mkfloat(cblas_ddot(2, X, 1, Y, 1)); }\n")
+		b.WriteString("static Value dot2_c3(Value b0, Value* env) { Value c = rt_mkclo(&dot2_c4, 3); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, env[1]); rt_clo_set(c, 2, b0); return c; }\n")
+		b.WriteString("static Value dot2_c2(Value a1, Value* env) { Value c = rt_mkclo(&dot2_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, a1); return c; }\n")
+		b.WriteString("static Value dot2_c1(Value a0, Value* env) { (void)env; Value c = rt_mkclo(&dot2_c2, 1); rt_clo_set(c, 0, a0); return c; }\n")
+		b.WriteString("Value dot2(void) { return rt_mkclo(&dot2_c1, 0); }\n")
+	}
+}
+
 // llEmitter renders CIr terms to LLVM IR. Like cEmitter it knows the nat
 // eliminator's name + the accel table for native arithmetic. It also accumulates
 // the string-constant globals (constructor names + string literals) so they can be

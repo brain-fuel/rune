@@ -1,0 +1,113 @@
+-- Chapter 218 — the OpenBLAS SWAP behind a TOLERANCE contract (D3 / R-FFI / R-NATIVE).
+--
+-- ch217 gave machine floats + a native dot kernel `dot2`. On the SOURCE backends
+-- (js/py/go/erl) `dot2` is a hand loop; on the NATIVE backends (C/LLVM) it is SWAPPED
+-- for `cblas_ddot` — real OpenBLAS. That swap is only sound if the fast path AGREES
+-- with the portable reference, so this chapter binds the two by a TOLERANCE contract:
+-- the OpenBLAS result must be within `eps` of the in-language reference dot, else the
+-- kernel is BLAMED. The tolerance is CONFIGURABLE (any `eps : Float`) with a SENSIBLE
+-- DEFAULT (`defaultEps` = 1e-9). This is how platform parity holds when a capability
+-- has different implementations per backend: parity of the CONTRACT, not of the bits.
+--
+-- The observable is byte-identical on every backend (the verdict, not the raw float),
+-- even though C/LLVM compute the dot through OpenBLAS and the others through the loop:
+--   line 1 — the dot 3·1 + 4·2 = 11 (OpenBLAS on C/LLVM, loop elsewhere; same value)
+--   line 2 — guarded with the default tolerance: agrees → ok → 11
+--   line 3 — guarded with a NEGATIVE tolerance (nothing is within −1): blame → 0
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+foreign Float : U end
+
+-- the blame carries the offending (out-of-tolerance) value; carrying a Float also
+-- keeps Blame structurally distinct from Unit (a bare nullary ctor would collide).
+data Blame : U is
+  driftBlame : Float -> Blame
+end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fadd       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+-- the BLAS kernel: cblas_ddot on C/LLVM, a hand loop on the source backends.
+foreign dot2       : Float -> Float -> Float -> Float -> Float end
+
+fleq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is
+    case fleqN a b of
+    | zero    -> false
+    | succ k  -> true
+    end
+  end
+end
+
+-- |x - y| <= eps : is x within tolerance eps of y?
+withinTol : Float -> Float -> Float -> Bool is
+  fn (eps : Float) (x : Float) (y : Float) is
+    fleq (fabsP (fsub x y)) eps
+  end
+end
+
+-- the trusted in-language reference dot (the portable implementation).
+refDot : Float -> Float -> Float -> Float -> Float is
+  fn (a0 : Float) (a1 : Float) (b0 : Float) (b1 : Float) is
+    fadd (fmul a0 b0) (fmul a1 b1)
+  end
+end
+
+-- a sensible default tolerance: 1e-9.
+defaultEps : Float is fdiv (fromNat 1) (fromNat 1000000000) end
+
+-- THE CONTRACT: the (OpenBLAS) `dot2` must be within `eps` of the reference, or the
+-- kernel is blamed. `eps` is the configurable tolerance; pass `defaultEps` for the
+-- sensible default. This is R-FFI's contract-GUARD tier on a real native swap.
+dotChecked : Float -> Float -> Float -> Float -> Float -> Result Float Blame is
+  fn (eps : Float) (a0 : Float) (a1 : Float) (b0 : Float) (b1 : Float) is
+    case withinTol eps (dot2 a0 a1 b0 b1) (refDot a0 a1 b0 b1) of
+    | true  -> ok  Float Blame (dot2 a0 a1 b0 b1)
+    | false -> err Float Blame (driftBlame (dot2 a0 a1 b0 b1))
+    end
+  end
+end
+
+resultToNat : Result Float Blame -> Nat is
+  fn (r : Result Float Blame) is
+    ResultElim Float Blame (fn (x : Result Float Blame) is Nat end)
+      (fn (f : Float) is floatToNat f end)
+      (fn (b : Blame) is zero end)
+      r
+  end
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (dot2 (fromNat 3) (fromNat 4) (fromNat 1) (fromNat 2)))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (resultToNat (dotChecked defaultEps (fromNat 3) (fromNat 4) (fromNat 1) (fromNat 2)))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (resultToNat (dotChecked (fsub (fromNat 0) (fromNat 1)) (fromNat 3) (fromNat 4) (fromNat 1) (fromNat 2)))) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

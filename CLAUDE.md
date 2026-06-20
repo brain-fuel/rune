@@ -764,6 +764,22 @@ first and forces only on mismatch, so the fast path logs nothing.
     length ddot/gemm (array marshalling) + a real OpenBLAS bind (native backends) + the
     `with post guard` surface sugar. (rust excluded — value domain has no float variant
     yet, parked.)
+  - **D3 / R-FFI / R-NATIVE — the OpenBLAS SWAP on the NATIVE backends LANDED (v3.23.0,
+    ch218).** On the source backends `dot2` is a hand loop; on the NATIVE backends (C +
+    LLVM) it is SWAPPED for `cblas_ddot` — real OpenBLAS, linked `-lopenblas`. Both native
+    runtimes gained a `K_FLOAT` boxed-double kind (`mkfloat`/`float_val`/`big_to_double`,
+    in cRuntime AND ll_runtime); the float/BLAS host bodies are baked per native backend
+    (emitFloatPrimsC inline + `static`; emitFloatPrimsLL in `LL.EmitRuntimeFor(p)` with
+    EXTERNAL linkage + the rt_* helpers, since the .ll calls `@dot2`/`@fromNat` that
+    `foreignNames` auto-declares). The base `EmitRuntime()` omits them so the generic
+    corpus links without -lopenblas; only a float program uses `EmitRuntimeFor` + the
+    flag. The swap is bound to the portable reference by a CONFIGURABLE TOLERANCE contract
+    (`dotChecked eps`, default `defaultEps` = 1e-9): the OpenBLAS result must be within ε
+    of the in-language reference dot, else blame — parity defined at the CONTRACT, not the
+    bits. ch218 → `11\n11\n0\nunit` byte-identical across js/py/go/erl AND C/LLVM-via-
+    OpenBLAS (`TestD3OpenBLASTolerance`). The C backend also gained a baked `printNat`
+    (the native backends lacked the ioPrims). REMAINING D3: arbitrary-length ddot/gemm
+    (array marshalling) + the `with post guard` surface sugar + rust/jvm float bodies.
 
 ## Standing rules
 
