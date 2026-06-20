@@ -1,0 +1,117 @@
+-- Chapter 342 — an element occurs at most as often as the list is long (proven tier).
+--
+-- countOccur x xs <= len xs: no element can appear more times than there are positions. A
+-- branch-aware induction: when the head matches, both sides grow (IH transfers); otherwise
+-- the count stays and the length grows, closed by leb weakening (ch303). Proof-only.
+--
+--   countLen : (x : Nat) -> (xs : NatList) -> Eq Bool (leb (countOccur x xs) (len xs)) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+everythingTrue : Eq Bool false true -> (x : Bool) -> Eq Bool x true is
+  fn (h : Eq Bool false true) (x : Bool) is
+    BoolElim (fn (z : Bool) is Eq Bool z true end) refl h x
+  end
+end
+
+lebSuccR : (a : Nat) -> (b : Nat) -> Eq Bool (leb a b) true -> Eq Bool (leb a (succ b)) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (leb x b) true -> Eq Bool (leb x (succ b)) true end)
+      (fn (b : Nat) (h : Eq Bool (leb zero b) true) is refl end)
+      (fn (k : Nat)
+          (ih : (b : Nat) -> Eq Bool (leb k b) true -> Eq Bool (leb k (succ b)) true) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is
+                      Eq Bool (leb (succ k) y) true -> Eq Bool (leb (succ k) (succ y)) true end)
+             (fn (h : Eq Bool (leb (succ k) zero) true) is everythingTrue h (leb (succ k) (succ zero)) end)
+             (fn (j : Nat)
+                 (ihj : Eq Bool (leb (succ k) j) true -> Eq Bool (leb (succ k) (succ j)) true) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) true) is ih j h end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+countOccur : Nat -> NatList -> Nat is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is
+         BoolElim (fn (c : Bool) is Nat end) (succ ih) ih (beqNat x h) end)
+      xs
+  end
+end
+
+-- THE BOUND, by induction on xs with a BoolElim on (beqNat x h):
+--   nnil: leb 0 0 = true                                                            -> refl
+--   match:    leb (succ (countOccur x t)) (succ (len t)) = leb _ _ = IH
+--   mismatch: leb (countOccur x t) (succ (len t)) by leb weakening on the IH
+countLen : (x : Nat) -> (xs : NatList) -> Eq Bool (leb (countOccur x xs) (len xs)) true is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Bool (leb (countOccur x z) (len z)) true end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (leb (countOccur x rest) (len rest)) true) is
+         BoolElim
+           (fn (c : Bool) is
+              Eq Bool (leb (BoolElim (fn (d : Bool) is Nat end) (succ (countOccur x rest)) (countOccur x rest) c)
+                           (succ (len rest))) true end)
+           ih
+           (lebSuccR (countOccur x rest) (len rest) ih)
+           (beqNat x h) end)
+      xs
+  end
+end
