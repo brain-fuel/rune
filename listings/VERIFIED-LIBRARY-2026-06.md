@@ -95,6 +95,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch299_min_idem` — minimum: `natMin a a = a`, `natMin a 0 = 0` (idempotence + zero-absorption).
 - `ch300_leb_max` — max is an upper bound: `a <= max a b` (structural max unblocks the bound proof).
 - `ch301_leb_min` — min is a lower bound: `min a b <= a` (the dual; min/max lattice bounds).
+- `ch302_leb_minmax_r` — the other bounds: `b <= max a b` and `min a b <= b` (4 bounds complete).
 - `ch283_binary_inc` — verified binary numerals: `toNat (bsucc b) = succ (toNat b)`
   (binary increment agrees with unary successor).
 - `ch269_mul_comm` — `mulSuccR` and **commutativity of multiplication** (`a*b = b*a`).
