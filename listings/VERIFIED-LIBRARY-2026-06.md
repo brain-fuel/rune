@@ -127,6 +127,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 
 - `ch278_assoc_lookup` — `lookup k (insert k v m) = some v` (lookup-after-insert),
   via `beqNat` reflexivity transported into the lookup's key comparison.
+- `ch376_beqnat_sound` — decidable equality is sound: `beqNat a b = true -> a = b` (with ch278 converse, fully characterizes =).
 
 ## Proven tier — sorting correctness (insertion sort)
 
