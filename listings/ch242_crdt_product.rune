@@ -1,0 +1,142 @@
+-- Chapter 242 — the PRODUCT of CvRDTs is a CvRDT (E3, CRDT composition).
+--
+-- CvRDTs compose: a record/tuple of CvRDTs, merged componentwise, is again a CvRDT. Here
+-- a two-field flag (a tiny grow-only set over a 2-element domain) merges pointwise, and the
+-- three semilattice laws LIFT from the component flag's laws (ch241) via cong2. This is the
+-- structural reason real CRDTs (OR-set = product of per-element flags) converge. Proof-only.
+--
+--   merge2Idem  : merge2 p p = p
+--   merge2Comm  : merge2 p q = merge2 q p
+--   merge2Assoc : merge2 (merge2 p q) r = merge2 p (merge2 q r)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- congruence in two arguments, from two single-argument transports.
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C)
+     (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa)
+      (cong B C (fn (y : B) is f a2 y end) b b2 pb)
+  end
+end
+
+-- the component flag merge (logical OR) and its semilattice laws (ch241).
+merge : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+mergeIdem : (a : Bool) -> Eq Bool (merge a a) a is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Eq Bool (merge x x) x end) refl refl a end
+end
+
+mergeComm : (a : Bool) -> (b : Bool) -> Eq Bool (merge a b) (merge b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (merge x b) (merge b x) end)
+      (BoolElim (fn (y : Bool) is Eq Bool (merge true y) (merge y true) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Bool (merge false y) (merge y false) end) refl refl b)
+      a
+  end
+end
+
+mergeAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+             Eq Bool (merge (merge a b) c) (merge a (merge b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (merge (merge x b) c) (merge x (merge b c)) end)
+      refl refl a
+  end
+end
+
+-- the product CvRDT: two flags, merged pointwise.
+data Flag2 : U is
+  mk : Bool -> Bool -> Flag2
+end
+
+merge2 : Flag2 -> Flag2 -> Flag2 is
+  fn (p : Flag2) (q : Flag2) is
+    Flag2Elim (fn (x : Flag2) is Flag2 end)
+      (fn (a1 : Bool) (a2 : Bool) is
+         Flag2Elim (fn (y : Flag2) is Flag2 end)
+           (fn (b1 : Bool) (b2 : Bool) is mk (merge a1 b1) (merge a2 b2) end)
+           q
+       end)
+      p
+  end
+end
+
+-- each product law LIFTS from the component law via cong2.
+merge2Idem : (p : Flag2) -> Eq Flag2 (merge2 p p) p is
+  fn (p : Flag2) is
+    Flag2Elim (fn (x : Flag2) is Eq Flag2 (merge2 x x) x end)
+      (fn (a1 : Bool) (a2 : Bool) is
+         cong2 Bool Bool Flag2 mk (merge a1 a1) a1 (merge a2 a2) a2
+           (mergeIdem a1) (mergeIdem a2) end)
+      p
+  end
+end
+
+merge2Comm : (p : Flag2) -> (q : Flag2) -> Eq Flag2 (merge2 p q) (merge2 q p) is
+  fn (p : Flag2) (q : Flag2) is
+    Flag2Elim (fn (x : Flag2) is (w : Flag2) -> Eq Flag2 (merge2 x w) (merge2 w x) end)
+      (fn (a1 : Bool) (a2 : Bool) is
+         fn (w : Flag2) is
+           Flag2Elim (fn (y : Flag2) is Eq Flag2 (merge2 (mk a1 a2) y) (merge2 y (mk a1 a2)) end)
+             (fn (b1 : Bool) (b2 : Bool) is
+                cong2 Bool Bool Flag2 mk (merge a1 b1) (merge b1 a1) (merge a2 b2) (merge b2 a2)
+                  (mergeComm a1 b1) (mergeComm a2 b2) end)
+             w
+           end
+         end)
+      p q
+  end
+end
+
+merge2Assoc : (p : Flag2) -> (q : Flag2) -> (r : Flag2) ->
+              Eq Flag2 (merge2 (merge2 p q) r) (merge2 p (merge2 q r)) is
+  fn (p : Flag2) (q : Flag2) (r : Flag2) is
+    Flag2Elim (fn (x : Flag2) is
+                 (w : Flag2) -> (v : Flag2) ->
+                 Eq Flag2 (merge2 (merge2 x w) v) (merge2 x (merge2 w v)) end)
+      (fn (a1 : Bool) (a2 : Bool) is
+         fn (w : Flag2) is
+           Flag2Elim (fn (y : Flag2) is
+                        (v : Flag2) ->
+                        Eq Flag2 (merge2 (merge2 (mk a1 a2) y) v) (merge2 (mk a1 a2) (merge2 y v)) end)
+             (fn (b1 : Bool) (b2 : Bool) is
+                fn (v : Flag2) is
+                  Flag2Elim (fn (z : Flag2) is
+                               Eq Flag2 (merge2 (merge2 (mk a1 a2) (mk b1 b2)) z)
+                                        (merge2 (mk a1 a2) (merge2 (mk b1 b2) z)) end)
+                    (fn (c1 : Bool) (c2 : Bool) is
+                       cong2 Bool Bool Flag2 mk
+                         (merge (merge a1 b1) c1) (merge a1 (merge b1 c1))
+                         (merge (merge a2 b2) c2) (merge a2 (merge b2 c2))
+                         (mergeAssoc a1 b1 c1) (mergeAssoc a2 b2 c2) end)
+                    v
+                  end
+                end)
+             w
+           end
+         end)
+      p q r
+  end
+end
