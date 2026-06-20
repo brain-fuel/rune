@@ -1,0 +1,37 @@
+-- Chapter 386 — the boolean distributive laws (proven tier).
+--
+-- and distributes over or and (dually) or over and. With De Morgan (ch291-era) and the
+-- lattice laws these complete the boolean ALGEBRA's distributivity. By case analysis on the
+-- first operand. Proof-only.
+--
+--   andOrDistrib : (a b c : Bool) -> Eq Bool (andB a (orB b c))  (orB  (andB a b) (andB a c))
+--   orAndDistrib : (a b c : Bool) -> Eq Bool (orB  a (andB b c)) (andB (orB  a b) (orB  a c))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+andOrDistrib : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+               Eq Bool (andB a (orB b c)) (orB (andB a b) (andB a c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (andB x (orB b c)) (orB (andB x b) (andB x c)) end) refl refl a
+  end
+end
+
+orAndDistrib : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+               Eq Bool (orB a (andB b c)) (andB (orB a b) (orB a c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (orB x (andB b c)) (andB (orB x b) (orB x c)) end) refl refl a
+  end
+end
