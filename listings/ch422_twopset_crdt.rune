@@ -1,0 +1,217 @@
+-- Chapter 422, Two-Phase Set (2P-Set) CvRDT: a remove-capable set (E3/E4).
+--
+-- ch413 proved a grow-only G-Set converges; a G-Set can never remove. The 2P-Set is the
+-- canonical CvRDT that CAN remove: state is TWO grow-only sets, an "added" set A and a
+-- tombstone "removed" set R, and an element is present iff it was added and not (yet)
+-- removed. Both components join by pointwise boolean OR, so the compound merge is again a
+-- join-semilattice and the set CONVERGES - but unlike the G-Set it has a genuine
+-- semantics: a remove is permanent (the tombstone, once set, is never cleared by merge),
+-- so REMOVE WINS over a concurrent add. This is the first remove-capable CRDT in the
+-- corpus. Proof-only over the ambient Eq/refl/subst.
+--
+--   mergeComm/mergeIdem/mergeAssoc : the join-semilattice laws (convergence).
+--   tomb0Monotone               : a tombstone only grows under merge (safety).
+--   removeWins0                 : a removed element is not present after any merge.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+
+-- a 2P-Set over a 2-element domain: added flags (a,b) for elements 0,1 and removed
+-- (tombstone) flags (c,d) for 0,1.
+data TP : U is tp : Bool -> Bool -> Bool -> Bool -> TP end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+notB : Bool -> Bool is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Bool end) false true a end
+end
+
+-- boolean implication, the per-slot grow-only order.
+impl : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b true a end
+end
+
+-- the OR-join laws (a commutative, idempotent, associative join), as ch413.
+orComm : (a : Bool) -> (b : Bool) -> Eq Bool (orB a b) (orB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB w b) (orB b w) end)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB true w) (orB w true) end) refl refl b)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB false w) (orB w false) end) refl refl b)
+      a
+  end
+end
+
+orIdem : (a : Bool) -> Eq Bool (orB a a) a is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Eq Bool (orB w w) w end) refl refl a end
+end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool)
+   -> Eq Bool (orB (orB a b) c) (orB a (orB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB (orB w b) c) (orB w (orB b c)) end)
+      refl
+      (BoolElim (fn (w : Bool) is Eq Bool (orB (orB false w) c) (orB false (orB w c)) end) refl refl b)
+      a
+  end
+end
+
+-- a => (a OR c): a set flag survives OR-ing in a peer (the grow-only order).
+orGeL : (a : Bool) -> (c : Bool) -> Eq Bool (impl a (orB a c)) true is
+  fn (a : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (impl w (orB w c)) true end) refl refl a
+  end
+end
+
+-- the four projections.
+a0 : TP -> Bool is fn (s : TP) is TPElim (fn (w : TP) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is a end) s end end
+a1 : TP -> Bool is fn (s : TP) is TPElim (fn (w : TP) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is b end) s end end
+r0 : TP -> Bool is fn (s : TP) is TPElim (fn (w : TP) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is c end) s end end
+r1 : TP -> Bool is fn (s : TP) is TPElim (fn (w : TP) is Bool end) (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is d end) s end end
+
+-- presence: added AND not removed. The tombstone is the BoolElim scrutinee (so a set
+-- tombstone definitionally forces presence to false - that is "remove wins").
+present0 : TP -> Bool is fn (s : TP) is andB (notB (r0 s)) (a0 s) end end
+present1 : TP -> Bool is fn (s : TP) is andB (notB (r1 s)) (a1 s) end end
+
+-- cardinality of the present elements (the observable value).
+inc1 : Bool -> Nat -> Nat is
+  fn (b : Bool) (acc : Nat) is BoolElim (fn (w : Bool) is Nat end) (succ acc) acc b end
+end
+value : TP -> Nat is fn (s : TP) is inc1 (present0 s) (inc1 (present1 s) zero) end end
+
+-- merge: pointwise OR of all four flags (both grow-only components joined).
+merge : TP -> TP -> TP is
+  fn (g : TP) (h : TP) is
+    TPElim (fn (x : TP) is TP end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         TPElim (fn (y : TP) is TP end)
+           (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is
+              tp (orB a e) (orB b f) (orB c i) (orB d j) end)
+           h
+       end)
+      g
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (w : A) is Eq A w x end) refl
+  end
+end
+
+-- congruence for the four-field constructor (nested subst on each field).
+cong4 : (a : Bool) -> (b : Bool) -> (c : Bool) -> (d : Bool) ->
+        (e : Bool) -> (f : Bool) -> (g : Bool) -> (h : Bool) ->
+        Eq Bool a e -> Eq Bool b f -> Eq Bool c g -> Eq Bool d h ->
+        Eq TP (tp a b c d) (tp e f g h) is
+  fn (a : Bool) (b : Bool) (c : Bool) (d : Bool)
+     (e : Bool) (f : Bool) (g : Bool) (h : Bool)
+     (p1 : Eq Bool a e) (p2 : Eq Bool b f) (p3 : Eq Bool c g) (p4 : Eq Bool d h) is
+    subst Bool a e p1 (fn (w : Bool) is Eq TP (tp a b c d) (tp w f g h) end)
+      (subst Bool b f p2 (fn (w : Bool) is Eq TP (tp a b c d) (tp a w g h) end)
+        (subst Bool c g p3 (fn (w : Bool) is Eq TP (tp a b c d) (tp a b w h) end)
+          (subst Bool d h p4 (fn (w : Bool) is Eq TP (tp a b c d) (tp a b c w) end) refl)))
+  end
+end
+
+-- ===== convergence: merge is a join-semilattice =====
+
+mergeComm : (g : TP) -> (h : TP) -> Eq TP (merge g h) (merge h g) is
+  fn (g : TP) is
+    TPElim (fn (x : TP) is (h : TP) -> Eq TP (merge x h) (merge h x) end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         fn (h : TP) is
+           TPElim (fn (y : TP) is Eq TP (merge (tp a b c d) y) (merge y (tp a b c d)) end)
+             (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is
+                cong4 (orB a e) (orB b f) (orB c i) (orB d j)
+                      (orB e a) (orB f b) (orB i c) (orB j d)
+                      (orComm a e) (orComm b f) (orComm c i) (orComm d j) end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+mergeIdem : (g : TP) -> Eq TP (merge g g) g is
+  fn (g : TP) is
+    TPElim (fn (x : TP) is Eq TP (merge x x) x end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         cong4 (orB a a) (orB b b) (orB c c) (orB d d) a b c d
+               (orIdem a) (orIdem b) (orIdem c) (orIdem d) end)
+      g
+  end
+end
+
+mergeAssoc : (g : TP) -> (h : TP) -> (k : TP)
+   -> Eq TP (merge (merge g h) k) (merge g (merge h k)) is
+  fn (g : TP) is
+    TPElim (fn (x : TP) is (h : TP) -> (k : TP)
+        -> Eq TP (merge (merge x h) k) (merge x (merge h k)) end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         fn (h : TP) is
+           TPElim (fn (y : TP) is (k : TP)
+               -> Eq TP (merge (merge (tp a b c d) y) k) (merge (tp a b c d) (merge y k)) end)
+             (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is
+                fn (k : TP) is
+                  TPElim (fn (z : TP) is
+                      Eq TP (merge (merge (tp a b c d) (tp e f i j)) z)
+                            (merge (tp a b c d) (merge (tp e f i j) z)) end)
+                    (fn (p : Bool) (q : Bool) (s : Bool) (t : Bool) is
+                       cong4 (orB (orB a e) p) (orB (orB b f) q) (orB (orB c i) s) (orB (orB d j) t)
+                             (orB a (orB e p)) (orB b (orB f q)) (orB c (orB i s)) (orB d (orB j t))
+                             (orAssoc a e p) (orAssoc b f q) (orAssoc c i s) (orAssoc d j t) end)
+                    k
+                end
+              end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+-- ===== safety: tombstones grow, and a removed element stays gone =====
+
+-- the removed-set component only grows under merge (a tombstone is never cleared).
+tomb0Monotone : (g : TP) -> (h : TP) -> Eq Bool (impl (r0 g) (r0 (merge g h))) true is
+  fn (g : TP) is
+    TPElim (fn (x : TP) is (h : TP) -> Eq Bool (impl (r0 x) (r0 (merge x h))) true end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         fn (h : TP) is
+           TPElim (fn (y : TP) is Eq Bool (impl (r0 (tp a b c d)) (r0 (merge (tp a b c d) y))) true end)
+             (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is orGeL c i end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+-- REMOVE WINS: if an element is removed in one replica, it is not present in any merge
+-- with a peer - even one that concurrently added it. The defining 2P-Set guarantee.
+removeWins0 : (g : TP) -> (h : TP) -> Eq Bool (r0 g) true -> Eq Bool (present0 (merge g h)) false is
+  fn (g : TP) is
+    TPElim (fn (x : TP) is (h : TP) -> Eq Bool (r0 x) true -> Eq Bool (present0 (merge x h)) false end)
+      (fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) is
+         fn (h : TP) is
+           TPElim (fn (y : TP) is
+               Eq Bool (r0 (tp a b c d)) true -> Eq Bool (present0 (merge (tp a b c d) y)) false end)
+             (fn (e : Bool) (f : Bool) (i : Bool) (j : Bool) is
+                fn (hc : Eq Bool c true) is
+                  subst Bool true c (symEq Bool c true hc)
+                    (fn (w : Bool) is Eq Bool (andB (notB (orB w i)) (orB a e)) false end)
+                    refl
+                end end)
+             h
+         end
+       end)
+      g
+  end
+end

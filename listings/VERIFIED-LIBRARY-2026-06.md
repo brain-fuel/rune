@@ -311,6 +311,12 @@ equation).
   `interleaveTOK`/`commTOK`/`parOkOK` threading an `optLabelOK` invariant) + the runtime
   corollary `visibleRunOnlyFail` (every observation over any fuel is a failure). Supersedes
   ch420's two-label sketch on the genuine okStep.
+- `ch422_twopset_crdt`: 2P-Set, the first REMOVE-capable CRDT (compound add-set + tombstone
+  removed-set, both OR-joined). CONVERGENCE (`mergeComm`/`mergeIdem`/`mergeAssoc` via a
+  four-field `cong4`) + SAFETY: `tomb0Monotone` (a tombstone only grows) and `removeWins0`
+  (a removed element is not present in ANY merge, even one that concurrently added it - the
+  defining 2P-Set guarantee). Simulator: `examples/twopset.rune` diverges {0,1}=2 vs {}=0
+  under the partition, converges to {0}=1 (remove wins), linter confirms a CvRDT.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
