@@ -1,0 +1,77 @@
+-- Chapter 306 — the Bool->Nat embedding maps and/or to min/max (proven tier).
+--
+-- Sending true to 1 and false to 0 turns conjunction into minimum and disjunction into
+-- maximum — the 0/1 lattice embedding. Both by case analysis on the two Bools (refl leaves).
+-- Proof-only.
+--
+--   b2nAnd : b2n (andB a b) = natMin (b2n a) (b2n b)
+--   b2nOr  : b2n (orB  a b) = natMax (b2n a) (b2n b)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+natMin : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (minK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) zero (fn (j : Nat) (ih2 : Nat) is succ (minK j) end) m
+         end
+       end)
+      a b
+  end
+end
+
+natMax : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is m end)
+      (fn (k : Nat) (maxK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is succ (maxK j) end) m
+         end
+       end)
+      a b
+  end
+end
+
+b2n : Bool -> Nat is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Nat end) (succ zero) zero b end
+end
+
+b2nAnd : (a : Bool) -> (b : Bool) -> Eq Nat (b2n (andB a b)) (natMin (b2n a) (b2n b)) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Nat (b2n (andB x b)) (natMin (b2n x) (b2n b)) end)
+      (BoolElim (fn (y : Bool) is Eq Nat (b2n (andB true y)) (natMin (b2n true) (b2n y)) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Nat (b2n (andB false y)) (natMin (b2n false) (b2n y)) end) refl refl b)
+      a
+  end
+end
+
+b2nOr : (a : Bool) -> (b : Bool) -> Eq Nat (b2n (orB a b)) (natMax (b2n a) (b2n b)) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Nat (b2n (orB x b)) (natMax (b2n x) (b2n b)) end)
+      (BoolElim (fn (y : Bool) is Eq Nat (b2n (orB true y)) (natMax (b2n true) (b2n y)) end) refl refl b)
+      (BoolElim (fn (y : Bool) is Eq Nat (b2n (orB false y)) (natMax (b2n false) (b2n y)) end) refl refl b)
+      a
+  end
+end

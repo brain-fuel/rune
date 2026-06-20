@@ -143,6 +143,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch256_bool_lattice` — distributivity + absorption.
 - `ch257_bool_monoid` — and/or commutativity + associativity (→ full boolean algebra).
 - `ch287_xor` — exclusive-or laws (`xor a a = false`, `xor a false = a`, commutativity).
+- `ch306_bool_to_nat` — the 0/1 embedding: `b2n (a∧b) = min`, `b2n (a∨b) = max` (Bool→Nat lattice).
 
 ## Proven tier — verified metatheory (a tiny optimizer)
 
