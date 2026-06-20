@@ -1,4 +1,4 @@
-# Verified library — 2026-06-20 session (ch220–ch261)
+# Verified library — 2026-06-20 session (ch220–ch266)
 
 A navigable index of the listings added in the 2026-06-20 autonomous session
 (tags v3.25.0–v3.69.0). Two strands: **D3/D4 machine-numeric + interop**
@@ -43,6 +43,13 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch240_map_append` — `mapList f (xs ++ ys) = mapList f xs ++ mapList f ys`.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
+- `ch262_reverse_length` — `len (reverse xs) = len xs`.
+
+## Proven tier — sorting correctness (insertion sort)
+
+- `ch264_insert_length` — `len (insert x xs) = succ (len xs)` (insert adds one).
+- `ch265_insert_sum` — `sum (insert x xs) = x + sum xs` (insert preserves the multiset).
+- `ch266_sort_sum` — `sum (insertSort xs) = sum xs` (insertion sort is a permutation).
 
 ## Proven tier — trees
 
@@ -64,6 +71,7 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch247_dec_eq_bool` — Boolean equality reflects propositional equality (sound + complete).
 - `ch248_option_monad` — Option monad laws (left/right id, assoc).
 - `ch254_option_functor` — Option functor laws (id, composition).
+- `ch263_sum_bifunctor` — Sum (Either) bifunctor laws (id, composition).
 - `ch255_de_morgan` — De Morgan's laws.
 - `ch256_bool_lattice` — distributivity + absorption.
 - `ch257_bool_monoid` — and/or commutativity + associativity (→ full boolean algebra).
