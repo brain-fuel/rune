@@ -32,7 +32,6 @@ transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq
 end
 
 consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
-appendTo : NatList -> NatList -> NatList is fn (w : NatList) (z : NatList) is append z w end end
 
 append : NatList -> NatList -> NatList is
   fn (xs : NatList) (ys : NatList) is
@@ -42,6 +41,8 @@ append : NatList -> NatList -> NatList is
       xs
   end
 end
+
+appendTo : NatList -> NatList -> NatList is fn (w : NatList) (z : NatList) is append z w end end
 
 replicate : Nat -> Nat -> NatList is
   fn (n : Nat) (x : Nat) is
