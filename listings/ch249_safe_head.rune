@@ -1,0 +1,65 @@
+-- Chapter 249 — total safe head: no partial functions (proven tier + runnable).
+--
+-- `head` is the textbook partial function — undefined on the empty list. Here it is made
+-- TOTAL by a typed precondition: safeHead demands a proof that the list is non-empty, so
+-- it cannot be called on nnil at all (the same discharge-by-refl idiom as ch233's shapes).
+--
+--   safeHead : (xs : NatList) -> Eq Bool (isEmpty xs) false -> Nat
+--
+-- safeHead (ncons 7 ...) refl type-checks (isEmpty reduces to false); safeHead nnil refl
+-- is a COMPILE error (refl cannot prove Eq Bool true false). No runtime crash is possible.
+--
+-- Observable: safeHead [7,8] = 7: "7\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+foreign printNat : Nat -> IO Nat end
+
+isEmpty : NatList -> Bool is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Bool end)
+      true
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is false end)
+      xs
+  end
+end
+
+-- THE TOTAL HEAD: the proof of non-emptiness is the precondition; the nnil branch of the
+-- eliminator is unreachable for any well-typed call, so its default (zero) is never hit.
+safeHead : (xs : NatList) -> Eq Bool (isEmpty xs) false -> Nat is
+  fn (xs : NatList) (pf : Eq Bool (isEmpty xs) false) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is h end)
+      xs
+  end
+end
+
+xs : NatList is ncons 7 (ncons 8 nnil) end
+
+-- isEmpty xs reduces to false, so `refl : Eq Bool false false` discharges the precondition.
+main : IO Unit is
+  bindIO Nat Unit (printNat (safeHead xs refl)) (fn (u1 : Nat) is
+    pureIO Unit unit
+  end)
+end
