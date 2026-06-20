@@ -1,0 +1,60 @@
+-- Chapter 335 — three-way comparison is antisymmetric: compare a b = flip (compare b a).
+--
+-- Swapping the operands flips the verdict (lt <-> gt, eq fixed). The duality of the
+-- trichotomy, by induction on both arguments. Proof-only.
+--
+--   compareSym : (a b : Nat) -> Eq Ordering (compareNat a b) (flipOrd (compareNat b a))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Ordering : U is
+  lt : Ordering
+| eq : Ordering
+| gt : Ordering
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+flipOrd : Ordering -> Ordering is
+  fn (o : Ordering) is
+    OrderingElim (fn (x : Ordering) is Ordering end) gt eq lt o
+  end
+end
+
+compareNat : Nat -> Nat -> Ordering is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Ordering end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Ordering end) eq (fn (j : Nat) (ih2 : Ordering) is lt end) m end)
+      (fn (k : Nat) (cmpK : Nat -> Ordering) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Ordering end) gt (fn (j : Nat) (ih2 : Ordering) is cmpK j end) m
+         end
+       end)
+      a b
+  end
+end
+
+compareSym : (a : Nat) -> (b : Nat) -> Eq Ordering (compareNat a b) (flipOrd (compareNat b a)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Ordering (compareNat x b) (flipOrd (compareNat b x)) end)
+      (fn (b : Nat) is
+         NatElim (fn (y : Nat) is Eq Ordering (compareNat zero y) (flipOrd (compareNat y zero)) end)
+           refl
+           (fn (j : Nat) (ih2 : Eq Ordering (compareNat zero j) (flipOrd (compareNat j zero))) is refl end)
+           b
+       end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Ordering (compareNat k b) (flipOrd (compareNat b k))) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Eq Ordering (compareNat (succ k) y) (flipOrd (compareNat y (succ k))) end)
+             refl
+             (fn (j : Nat) (ih2 : Eq Ordering (compareNat (succ k) j) (flipOrd (compareNat j (succ k)))) is ih j end)
+             b
+         end
+       end)
+      a
+  end
+end
