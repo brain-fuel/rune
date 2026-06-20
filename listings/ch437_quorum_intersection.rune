@@ -1,0 +1,66 @@
+-- Chapter 437, quorum intersection: the safety foundation of consensus (E3/E4).
+--
+-- The CRDT corpus is the COORDINATION-FREE side of distributed systems (replicas converge
+-- with no agreement). This is the other side: CONSENSUS, whose safety rests on a single
+-- combinatorial fact - any two quorums INTERSECT, so two decisions cannot be taken without
+-- a common participant to veto the conflict. For a three-node system the quorums are the
+-- majorities (the three 2-of-3 subsets); we prove every pair of them shares a node.
+--
+--   quorumIntersect : (q r : Quorum) -> inter q r = true
+--
+-- This is exactly the property Paxos and Raft need: a value chosen by one quorum is
+-- visible to every other quorum, so no two quorums can independently choose conflicting
+-- values. Proof by case analysis over the (finite) quorum pairs. Proof-only.
+
+data Bool : U is true : Bool | false : Bool end
+data Node : U is n0 : Node | n1 : Node | n2 : Node end
+-- the three majorities of a three-node system (each a 2-of-3 subset).
+data Quorum : U is q01 : Quorum | q02 : Quorum | q12 : Quorum end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+-- membership: which nodes each majority contains.
+contains : Quorum -> Node -> Bool is
+  fn (q : Quorum) (n : Node) is
+    QuorumElim (fn (w : Quorum) is Bool end)
+      (NodeElim (fn (w : Node) is Bool end) true true false n)
+      (NodeElim (fn (w : Node) is Bool end) true false true n)
+      (NodeElim (fn (w : Node) is Bool end) false true true n)
+      q
+  end
+end
+
+-- two quorums intersect iff some node is in both.
+inter : Quorum -> Quorum -> Bool is
+  fn (q : Quorum) (r : Quorum) is
+    orB (andB (contains q n0) (contains r n0))
+      (orB (andB (contains q n1) (contains r n1))
+           (andB (contains q n2) (contains r n2)))
+  end
+end
+
+-- QUORUM INTERSECTION: every pair of majorities shares a node. The safety core of
+-- consensus - two quorums always overlap, so conflicting decisions cannot both stand.
+quorumIntersect : (q : Quorum) -> (r : Quorum) -> Eq Bool (inter q r) true is
+  fn (q : Quorum) is
+    QuorumElim (fn (w : Quorum) is (r : Quorum) -> Eq Bool (inter w r) true end)
+      (fn (r : Quorum) is
+         QuorumElim (fn (z : Quorum) is Eq Bool (inter q01 z) true end) refl refl refl r end)
+      (fn (r : Quorum) is
+         QuorumElim (fn (z : Quorum) is Eq Bool (inter q02 z) true end) refl refl refl r end)
+      (fn (r : Quorum) is
+         QuorumElim (fn (z : Quorum) is Eq Bool (inter q12 z) true end) refl refl refl r end)
+      q
+  end
+end
+
+-- the intersection is moreover REFLEXIVE-friendly: a quorum trivially intersects itself
+-- (a value it chose, it sees), and intersection is symmetric.
+quorumSelf : (q : Quorum) -> Eq Bool (inter q q) true is
+  fn (q : Quorum) is quorumIntersect q q end
+end

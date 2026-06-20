@@ -394,6 +394,11 @@ equation).
   type-checked at a G-Set (`gsetReplica`), so the protocol->actors projection is uniform
   across CvRDTs - the general projection as a LIBRARY (higher-order function), not gated
   surface syntax. Runs on escript (TestListingsGenericReplicaBeam).
+- `ch437_quorum_intersection`: the CONSENSUS side (vs the coordination-free CRDTs) - the
+  safety core of Paxos/Raft. For a three-node system the quorums are the majorities (2-of-3
+  subsets); `quorumIntersect` proves every pair shares a node (so two quorums cannot
+  independently choose conflicting values), with membership-defined `inter` and case
+  analysis over the finite quorum pairs. `quorumSelf` is the reflexive corollary.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
