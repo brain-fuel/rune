@@ -1,0 +1,110 @@
+-- Chapter 233, G-Set CvRDT convergence: a SECOND join lattice (boolean OR) (E3/E4).
+--
+-- ch72 proved a G-Counter converges over the (Nat, max) join. This proves a grow-only
+-- SET converges over a different lattice: membership flags joined pointwise by boolean
+-- OR. The convergence criterion is the same - merge is a commutative, idempotent,
+-- associative join - but the carrier and operation differ, showing the verified-CRDT
+-- pattern is lattice-generic. Proof-only over the ambient Eq/refl/subst.
+--
+--   mergeComm/mergeIdem/mergeAssoc : the join-semilattice laws for the OR-set.
+
+data Bool : U is true : Bool | false : Bool end
+-- a set over a 2-element domain: membership flags for elements 0 and 1.
+data GS : U is gs : Bool -> Bool -> GS end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+
+-- the OR join is commutative, idempotent, associative (all by case analysis).
+orComm : (a : Bool) -> (b : Bool) -> Eq Bool (orB a b) (orB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB w b) (orB b w) end)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB true w) (orB w true) end) refl refl b)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB false w) (orB w false) end) refl refl b)
+      a
+  end
+end
+
+orIdem : (a : Bool) -> Eq Bool (orB a a) a is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Eq Bool (orB w w) w end) refl refl a end
+end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool)
+   -> Eq Bool (orB (orB a b) c) (orB a (orB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB (orB w b) c) (orB w (orB b c)) end)
+      refl
+      (BoolElim (fn (w : Bool) is Eq Bool (orB (orB false w) c) (orB false (orB w c)) end) refl refl b)
+      a
+  end
+end
+
+congGS : (a : Bool) -> (b : Bool) -> (c : Bool) -> (d : Bool)
+   -> Eq Bool a c -> Eq Bool b d -> Eq GS (gs a b) (gs c d) is
+  fn (a : Bool) (b : Bool) (c : Bool) (d : Bool) (e1 : Eq Bool a c) (e2 : Eq Bool b d) is
+    subst Bool a c e1 (fn (x : Bool) is Eq GS (gs a b) (gs x d) end)
+      (subst Bool b d e2 (fn (y : Bool) is Eq GS (gs a b) (gs a y) end) refl)
+  end
+end
+
+merge : GS -> GS -> GS is
+  fn (g : GS) (h : GS) is
+    GSElim (fn (x : GS) is GS end)
+      (fn (a : Bool) (b : Bool) is
+         GSElim (fn (y : GS) is GS end)
+           (fn (c : Bool) (d : Bool) is gs (orB a c) (orB b d) end)
+           h
+       end)
+      g
+  end
+end
+
+mergeComm : (g : GS) -> (h : GS) -> Eq GS (merge g h) (merge h g) is
+  fn (g : GS) is
+    GSElim (fn (x : GS) is (h : GS) -> Eq GS (merge x h) (merge h x) end)
+      (fn (a : Bool) (b : Bool) is
+         fn (h : GS) is
+           GSElim (fn (y : GS) is Eq GS (merge (gs a b) y) (merge y (gs a b)) end)
+             (fn (c : Bool) (d : Bool) is
+                congGS (orB a c) (orB b d) (orB c a) (orB d b) (orComm a c) (orComm b d) end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+mergeIdem : (g : GS) -> Eq GS (merge g g) g is
+  fn (g : GS) is
+    GSElim (fn (x : GS) is Eq GS (merge x x) x end)
+      (fn (a : Bool) (b : Bool) is congGS (orB a a) (orB b b) a b (orIdem a) (orIdem b) end)
+      g
+  end
+end
+
+mergeAssoc : (g : GS) -> (h : GS) -> (k : GS)
+   -> Eq GS (merge (merge g h) k) (merge g (merge h k)) is
+  fn (g : GS) is
+    GSElim (fn (x : GS) is (h : GS) -> (k : GS)
+        -> Eq GS (merge (merge x h) k) (merge x (merge h k)) end)
+      (fn (a : Bool) (b : Bool) is
+         fn (h : GS) is
+           GSElim (fn (y : GS) is (k : GS)
+               -> Eq GS (merge (merge (gs a b) y) k) (merge (gs a b) (merge y k)) end)
+             (fn (c : Bool) (d : Bool) is
+                fn (k : GS) is
+                  GSElim (fn (z : GS) is
+                      Eq GS (merge (merge (gs a b) (gs c d)) z) (merge (gs a b) (merge (gs c d) z)) end)
+                    (fn (e : Bool) (f : Bool) is
+                       congGS (orB (orB a c) e) (orB (orB b d) f) (orB a (orB c e)) (orB b (orB d f))
+                         (orAssoc a c e) (orAssoc b d f) end)
+                    k
+                end
+              end)
+             h
+         end
+       end)
+      g
+  end
+end
