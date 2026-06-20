@@ -1,0 +1,68 @@
+-- Chapter 250 — parity: doubling is even (proven tier, number theory).
+--
+-- even/odd by recursion (even toggles with each successor). The classic parity fact: for
+-- every n, double n is even. The induction step turns two successors into a double
+-- negation of the parity bit, closed by the involution not (not b) = b. Proof-only.
+--
+--   notNot      : (b : Bool) -> Eq Bool (notB (notB b)) b
+--   evenDouble  : (n : Nat)  -> Eq Bool (even (double n)) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+notB : Bool -> Bool is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end
+end
+
+-- not is an involution, by case analysis.
+notNot : (b : Bool) -> Eq Bool (notB (notB b)) b is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (notB (notB x)) x end) refl refl b
+  end
+end
+
+-- even toggles with each successor: even 0 = true, even (succ k) = not (even k).
+even : Nat -> Bool is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is notB ih end) n
+  end
+end
+
+-- double 0 = 0, double (succ k) = succ (succ (double k)).
+double : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is succ (succ ih) end) n
+  end
+end
+
+-- THE THEOREM, by induction on n:
+--   zero:  even (double 0) = even 0 = true                                   -> refl
+--   succ:  even (double (succ k)) = even (succ (succ (double k)))
+--                                 = notB (notB (even (double k)))
+--          notNot collapses the double negation to even (double k); IH says that is true.
+evenDouble : (n : Nat) -> Eq Bool (even (double n)) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (even (double x)) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (even (double k)) true) is
+         transEq Bool (notB (notB (even (double k)))) (even (double k)) true
+           (notNot (even (double k))) ih end)
+      n
+  end
+end
