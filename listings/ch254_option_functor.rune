@@ -1,0 +1,51 @@
+-- Chapter 254 — the Option functor laws, machine-checked (proven tier).
+--
+-- ch248 made Option a lawful monad; these are the FUNCTOR laws for its map, completing the
+-- picture (every lawful monad is a functor). Both by case analysis, the leaves reduce by
+-- refl. Proof-only.
+--
+--   omapId   : omap id m            = m
+--   omapComp : omap (g . f) m       = omap g (omap f m)
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+compose : (A : U) -> (B : U) -> (C : U) -> (B -> C) -> (A -> B) -> A -> C is
+  fn (A : U) (B : U) (C : U) (g : B -> C) (f : A -> B) (x : A) is g (f x) end
+end
+
+omap : (A : U) -> (B : U) -> (A -> B) -> Option A -> Option B is
+  fn (A : U) (B : U) (f : A -> B) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Option B end)
+      (none B)
+      (fn (a : A) is some B (f a) end)
+      m
+  end
+end
+
+-- IDENTITY: omap id = id, by case on m (both leaves refl).
+omapId : (A : U) -> (m : Option A) -> Eq (Option A) (omap A A (fn (x : A) is x end) m) m is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Eq (Option A) (omap A A (fn (y : A) is y end) x) x end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
+
+-- COMPOSITION: omap (g . f) = omap g . omap f, by case on m (both leaves refl).
+omapComp : (A : U) -> (B : U) -> (C : U) -> (f : A -> B) -> (g : B -> C) -> (m : Option A) ->
+           Eq (Option C) (omap A C (compose A B C g f) m) (omap B C g (omap A B f m)) is
+  fn (A : U) (B : U) (C : U) (f : A -> B) (g : B -> C) (m : Option A) is
+    OptionElim A
+      (fn (x : Option A) is
+         Eq (Option C) (omap A C (compose A B C g f) x) (omap B C g (omap A B f x)) end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
