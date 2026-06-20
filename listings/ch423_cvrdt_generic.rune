@@ -1,0 +1,141 @@
+-- Chapter 423, the generic CvRDT theorem: a join-semilattice converges (E3/E4).
+--
+-- ch72/ch413/ch415/ch422 each prove a CONCRETE replicated type's merge is commutative,
+-- idempotent, and associative - the state-based CRDT (CvRDT) criterion. This chapter
+-- proves, ONCE and abstractly, what that criterion BUYS: the strong-eventual-consistency
+-- guarantees, for ANY carrier `S` with ANY `mrg` satisfying the three laws (taken as
+-- hypotheses). Every concrete CRDT in the corpus instantiates this by supplying its three
+-- laws, so they all inherit:
+--
+--   orderIndependent : merging the same three states in different gossip orders agrees
+--                      (replicas converge regardless of delivery order).
+--   gossipRobust     : re-merging an already-absorbed peer is a no-op (anti-entropy is
+--                      stable - repeated gossip rounds change nothing).
+--   duplicateSafe    : a re-delivered (duplicated) state is absorbed without effect.
+--
+-- These are exactly Shapiro et al.'s SEC properties; here they are derived purely from
+-- commutativity + idempotence + associativity, with no appeal to any concrete lattice.
+-- Proof-only over the ambient Eq/refl/subst.
+
+-- the equational toolkit (derived from the ambient subst).
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (w : A) is Eq A w x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ORDER INDEPENDENCE: the same three states merged in two different orders converge.
+-- mrg (mrg a b) c = mrg (mrg c b) a, by assoc then comm (twice). This is the heart of
+-- convergence: two replicas that absorbed {a, b, c} in any order reach the same state.
+orderIndependent : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (a : S) -> (b : S) -> (c : S) -> Eq S (mrg (mrg a b) c) (mrg (mrg c b) a) is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (a : S) (b : S) (c : S) is
+    transEq S (mrg (mrg a b) c) (mrg a (mrg b c)) (mrg (mrg c b) a)
+      (assoc a b c)
+      (transEq S (mrg a (mrg b c)) (mrg a (mrg c b)) (mrg (mrg c b) a)
+         (cong S S (fn (z : S) is mrg a z end) (mrg b c) (mrg c b) (comm b c))
+         (comm a (mrg c b)))
+  end
+end
+
+-- GOSSIP ROBUSTNESS: re-merging a peer already folded in is a no-op. mrg (mrg a b) b =
+-- mrg a b, by assoc then idempotence. So repeated anti-entropy rounds are stable - once
+-- converged, more gossip never changes a replica.
+gossipRobust : (S : U) -> (mrg : S -> S -> S) ->
+    (idem : (x : S) -> Eq S (mrg x x) x) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (a : S) -> (b : S) -> Eq S (mrg (mrg a b) b) (mrg a b) is
+  fn (S : U) (mrg : S -> S -> S)
+     (idem : (x : S) -> Eq S (mrg x x) x)
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (a : S) (b : S) is
+    transEq S (mrg (mrg a b) b) (mrg a (mrg b b)) (mrg a b)
+      (assoc a b b)
+      (cong S S (fn (z : S) is mrg a z end) (mrg b b) b (idem b))
+  end
+end
+
+-- DUPLICATE SAFETY: a re-delivered state is absorbed. mrg (mrg a b) a = mrg a b, by
+-- comm, then (sym) assoc, then idempotence. So at-least-once delivery is harmless - a
+-- duplicated message cannot corrupt the converged value.
+duplicateSafe : (S : U) -> (mrg : S -> S -> S) ->
+    (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x)) ->
+    (idem : (x : S) -> Eq S (mrg x x) x) ->
+    (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z))) ->
+    (a : S) -> (b : S) -> Eq S (mrg (mrg a b) a) (mrg a b) is
+  fn (S : U) (mrg : S -> S -> S)
+     (comm : (x : S) -> (y : S) -> Eq S (mrg x y) (mrg y x))
+     (idem : (x : S) -> Eq S (mrg x x) x)
+     (assoc : (x : S) -> (y : S) -> (z : S) -> Eq S (mrg (mrg x y) z) (mrg x (mrg y z)))
+     (a : S) (b : S) is
+    transEq S (mrg (mrg a b) a) (mrg a (mrg a b)) (mrg a b)
+      (comm (mrg a b) a)
+      (transEq S (mrg a (mrg a b)) (mrg (mrg a a) b) (mrg a b)
+         (symEq S (mrg (mrg a a) b) (mrg a (mrg a b)) (assoc a a b))
+         (cong S S (fn (z : S) is mrg z b end) (mrg a a) a (idem a)))
+  end
+end
+
+-- ===== a concrete instantiation: the generic theorem is not vacuous =====
+-- Any concrete CRDT inherits all three SEC guarantees by passing its own three laws.
+-- Here the boolean-OR join (the G-Set lattice, ch413) does so, witnessing applicability.
+
+data Bool : U is true : Bool | false : Bool end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end
+end
+
+orComm : (a : Bool) -> (b : Bool) -> Eq Bool (orB a b) (orB b a) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB w b) (orB b w) end)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB true w) (orB w true) end) refl refl b)
+      (BoolElim (fn (w : Bool) is Eq Bool (orB false w) (orB w false) end) refl refl b)
+      a
+  end
+end
+
+orIdem : (a : Bool) -> Eq Bool (orB a a) a is
+  fn (a : Bool) is BoolElim (fn (w : Bool) is Eq Bool (orB w w) w end) refl refl a end
+end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool)
+   -> Eq Bool (orB (orB a b) c) (orB a (orB b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (orB (orB w b) c) (orB w (orB b c)) end)
+      refl
+      (BoolElim (fn (w : Bool) is Eq Bool (orB (orB false w) c) (orB false (orB w c)) end) refl refl b)
+      a
+  end
+end
+
+-- the three SEC guarantees, inherited for the OR-join with one application each.
+orSetOrderIndependent : (a : Bool) -> (b : Bool) -> (c : Bool) ->
+    Eq Bool (orB (orB a b) c) (orB (orB c b) a) is
+  fn (a : Bool) (b : Bool) (c : Bool) is orderIndependent Bool orB orComm orAssoc a b c end
+end
+
+orSetGossipRobust : (a : Bool) -> (b : Bool) -> Eq Bool (orB (orB a b) b) (orB a b) is
+  fn (a : Bool) (b : Bool) is gossipRobust Bool orB orIdem orAssoc a b end
+end
+
+orSetDuplicateSafe : (a : Bool) -> (b : Bool) -> Eq Bool (orB (orB a b) a) (orB a b) is
+  fn (a : Bool) (b : Bool) is duplicateSafe Bool orB orComm orIdem orAssoc a b end
+end

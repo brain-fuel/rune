@@ -317,6 +317,11 @@ equation).
   (a removed element is not present in ANY merge, even one that concurrently added it - the
   defining 2P-Set guarantee). Simulator: `examples/twopset.rune` diverges {0,1}=2 vs {}=0
   under the partition, converges to {0}=1 (remove wins), linter confirms a CvRDT.
+- `ch423_cvrdt_generic`: the GENERIC CvRDT theorem - strong eventual consistency derived
+  ONCE, abstractly, for any carrier + merge satisfying comm/idem/assoc (taken as Pi-typed
+  hypotheses): `orderIndependent` (different gossip orders converge), `gossipRobust`
+  (re-merge is a no-op), `duplicateSafe` (re-delivery is absorbed). Concrete CRDTs inherit
+  all three by passing their own laws; the OR-join instantiation (`orSet*`) witnesses it.
 - SIMULATOR (`internal/sim` + `rune simulate`): drives these protocols' verified ops under
   fault policies (partition/dup/crash) + CvRDT law linter + liveness; examples/{gcounter,
   gcounter3,gset,pncounter,lww,badcounter}.rune. gcounter is proved+simulated+deployed (incl
