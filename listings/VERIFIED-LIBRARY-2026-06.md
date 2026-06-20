@@ -129,6 +129,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 
 - `ch245_add_comm` — `addZeroR`, `addSuccR`, `addComm`.
 - `ch250_parity_double` — `even (double n) = true` (+ not-involution).
+- `ch328_double_add` — doubling equals self-addition: `double n = n + n`.
 - `ch251_nat_order` — `leb` reflexive + add-monotone.
 - `ch252_leb_trans` — `leb` transitive (Boolean explosion `everythingTrue`).
 - `ch253_leb_total` — `leb` total (so a total preorder).
