@@ -1,0 +1,69 @@
+-- Chapter 340 — replicate is additive over append (proven tier).
+--
+-- Concatenating m copies and n copies of x gives m+n copies:
+--   append (replicate m x) (replicate n x) = replicate (natAdd m n) x.
+-- A monoid homomorphism from (Nat, +, 0) to (lists, append, nil). By induction on m, the
+-- step a single congruence. Proof-only.
+--
+--   replicateAppend : (m n x : Nat)
+--                   -> Eq NatList (append (replicate m x) (replicate n x)) (replicate (natAdd m n) x)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+replicate : Nat -> Nat -> NatList is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is NatList end)
+      nnil
+      (fn (k : Nat) (ih : NatList) is ncons x ih end)
+      n
+  end
+end
+
+-- THE THEOREM, by induction on m:
+--   0:      append nnil (replicate n x) = replicate n x = replicate (0+n) x         -> refl
+--   succ k: ncons x (append (replicate k x) (replicate n x)) vs ncons x (replicate (k+n) x); cong (cons x) IH
+replicateAppend : (m : Nat) -> (n : Nat) -> (x : Nat) ->
+                  Eq NatList (append (replicate m x) (replicate n x)) (replicate (natAdd m n) x) is
+  fn (m : Nat) (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is Eq NatList (append (replicate k x) (replicate n x)) (replicate (natAdd k n) x) end)
+      refl
+      (fn (k : Nat) (ih : Eq NatList (append (replicate k x) (replicate n x)) (replicate (natAdd k n) x)) is
+         cong NatList NatList (consWith x)
+           (append (replicate k x) (replicate n x)) (replicate (natAdd k n) x) ih end)
+      m
+  end
+end
