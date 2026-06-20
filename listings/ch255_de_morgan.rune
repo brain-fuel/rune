@@ -1,0 +1,44 @@
+-- Chapter 255 — De Morgan's laws for Bool, machine-checked (proven tier).
+--
+-- The two duality laws of boolean logic. Each needs only a single case analysis on the
+-- first argument: orB true _ = true, orB false x = x, andB false _ = false, andB true x = x
+-- all reduce definitionally, collapsing both branches to refl even with the second
+-- argument symbolic. Proof-only.
+--
+--   deMorgan1 : notB (andB a b) = orB  (notB a) (notB b)
+--   deMorgan2 : notB (orB  a b) = andB (notB a) (notB b)
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+notB : Bool -> Bool is
+  fn (a : Bool) is BoolElim (fn (x : Bool) is Bool end) false true a end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+deMorgan1 : (a : Bool) -> (b : Bool) ->
+            Eq Bool (notB (andB a b)) (orB (notB a) (notB b)) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (notB (andB x b)) (orB (notB x) (notB b)) end)
+      refl refl a
+  end
+end
+
+deMorgan2 : (a : Bool) -> (b : Bool) ->
+            Eq Bool (notB (orB a b)) (andB (notB a) (notB b)) is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (notB (orB x b)) (andB (notB x) (notB b)) end)
+      refl refl a
+  end
+end
