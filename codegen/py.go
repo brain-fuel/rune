@@ -114,6 +114,11 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("def dotList():\n    def _dl(xs, ys):\n        s = 0.0\n        while xs[\"tag\"] == 1 and ys[\"tag\"] == 1:\n            s += xs[\"args\"][0] * ys[\"args\"][0]\n            xs = xs[\"args\"][1]; ys = ys[\"args\"][1]\n        return s\n    return lambda xs: lambda ys: _dl(xs, ys)\n")
 	}
+	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
+	// portable triple-loop reference (native backends use cblas_dgemm).
+	if usesForeign(p, "gemmSum") {
+		b.WriteString("def gemmSum():\n    def _g(m, k, n, A, B):\n        a = []; t = A\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        b2 = []; t = B\n        while t[\"tag\"] == 1: b2.append(t[\"args\"][0]); t = t[\"args\"][1]\n        M, K, N = int(m), int(k), int(n); s = 0.0\n        for i in range(M):\n            for j in range(N):\n                for l in range(K):\n                    s += a[i * K + l] * b2[l * N + j]\n        return s\n    return lambda m: lambda k: lambda n: lambda A: lambda B: _g(m, k, n, A, B)\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatPy(&b, *p.Nat)

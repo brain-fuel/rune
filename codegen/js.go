@@ -116,6 +116,12 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("const dotList = () => xs => ys => { let s = 0; while (xs.tag === 1 && ys.tag === 1) { s += xs.args[0] * ys.args[0]; xs = xs.args[1]; ys = ys.args[1]; } return s; };\n")
 	}
+	// Matrix product sum: flat row-major A (m×k) and B (k×n) as Rune FLists; sum all
+	// entries of A·B. The native backends route this through cblas_dgemm; on the source
+	// backends it is the portable triple-loop reference.
+	if usesForeign(p, "gemmSum") {
+		b.WriteString("const gemmSum = () => m => k => n => A => B => { const a = [], b2 = []; for (let t = A; t.tag === 1; t = t.args[1]) a.push(t.args[0]); for (let t = B; t.tag === 1; t = t.args[1]) b2.push(t.args[0]); const M = Number(m), K = Number(k), N = Number(n); let s = 0; for (let i = 0; i < M; i++) for (let j = 0; j < N; j++) for (let l = 0; l < K; l++) s += a[i * K + l] * b2[l * N + j]; return s; };\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNat(&b, *p.Nat)

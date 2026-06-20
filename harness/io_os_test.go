@@ -454,6 +454,19 @@ func TestD3BLASVector(t *testing.T) {
 // kernel + 2-D marshaller live in the C/LLVM runtimes).
 func TestD3GemmMatrix(t *testing.T) {
 	const want = "134\n134\n0\nunit"
+	// Source backends: the portable triple-loop gemmSum reference (no OpenBLAS link).
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch220_gemm_matrix.rune", "main", ""); got != want {
+				t.Errorf("[%s] gemmSum reference gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
 	s := loadListing(t, "ch220_gemm_matrix.rune")
 	p, err := s.EmitProgram("main")
 	if err != nil {

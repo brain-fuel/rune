@@ -120,6 +120,11 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("func dotList() any { return func(xs any) any { return func(ys any) any { s := 0.0; for xs.(map[string]any)[\"tag\"] == 1 && ys.(map[string]any)[\"tag\"] == 1 { mx := xs.(map[string]any); my := ys.(map[string]any); s += mx[\"args\"].([]any)[0].(float64) * my[\"args\"].([]any)[0].(float64); xs = mx[\"args\"].([]any)[1]; ys = my[\"args\"].([]any)[1] }; return s } } }\n")
 	}
+	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
+	// portable triple-loop reference (native backends use cblas_dgemm).
+	if usesForeign(p, "gemmSum") {
+		b.WriteString("func gemmSum() any { return func(m any) any { return func(k any) any { return func(n any) any { return func(A any) any { return func(B any) any { var a, b2 []float64; for t := A; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); a = append(a, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; for t := B; t.(map[string]any)[\"tag\"] == 1; { mt := t.(map[string]any); b2 = append(b2, mt[\"args\"].([]any)[0].(float64)); t = mt[\"args\"].([]any)[1] }; M := int(m.(*big.Int).Int64()); K := int(k.(*big.Int).Int64()); N := int(n.(*big.Int).Int64()); s := 0.0; for i := 0; i < M; i++ { for j := 0; j < N; j++ { for l := 0; l < K; l++ { s += a[i*K+l] * b2[l*N+j] } } }; return s } } } } } }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatGo(&b, *p.Nat)

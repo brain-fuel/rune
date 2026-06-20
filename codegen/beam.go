@@ -129,6 +129,12 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("ff_dotList() -> fun(Xs) -> fun(Ys) -> (fun D(A, B, Acc) -> case {A, B} of {{c, 1, _, [X, Xr]}, {c, 1, _, [Y, Yr]}} -> D(Xr, Yr, Acc + X * Y); _ -> Acc end end)(Xs, Ys, 0.0) end end.\n")
 	}
+	// Matrix product sum: flat row-major A (m×k), B (k×n); sum all entries of A·B — the
+	// portable triple-loop reference (native backends use cblas_dgemm). Col flattens an
+	// FList to an Erlang (1-indexed) list; the comprehension sums A[i*K+P]·B[P*N+J].
+	if usesForeign(p, "gemmSum") {
+		b.WriteString("ff_gemmSum() -> fun(M) -> fun(K) -> fun(N) -> fun(A) -> fun(B) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, AL = Col(A), BL = Col(B), lists:sum([ lists:nth(I * K + P + 1, AL) * lists:nth(P * N + J + 1, BL) || I <- lists:seq(0, M - 1), J <- lists:seq(0, N - 1), P <- lists:seq(0, K - 1) ]) end end end end end.\n")
+	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}

@@ -89,6 +89,9 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("fn dotList() -> Rc<V> { vfun(|xs: Rc<V>| vfun(move |ys: Rc<V>| Rc::new(V::Float(_fldot(xs.clone(), ys.clone()))))) }\n")
 	}
+	if usesForeign(p, "gemmSum") {
+		b.WriteString("fn gemmSum() -> Rc<V> { vfun(|m: Rc<V>| vfun(move |k: Rc<V>| { let m = m.clone(); vfun(move |n: Rc<V>| { let m = m.clone(); let k = k.clone(); vfun(move |a: Rc<V>| { let m = m.clone(); let k = k.clone(); let n = n.clone(); vfun(move |bm: Rc<V>| { let mm: usize = _big_to_string(_nat(&m)).parse().unwrap(); let kk: usize = _big_to_string(_nat(&k)).parse().unwrap(); let nn: usize = _big_to_string(_nat(&n)).parse().unwrap(); let av = _flvec(a.clone()); let bv = _flvec(bm.clone()); let mut s = 0.0; for i in 0..mm { for j in 0..nn { for l in 0..kk { s += av[i * kk + l] * bv[l * nn + j]; } } } Rc::new(V::Float(s)) }) }) }) })) }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatRust(&b, *p.Nat)
@@ -412,6 +415,15 @@ fn _fldot(mut xs: Rc<V>, mut ys: Rc<V>) -> f64 {
         }
     }
     s
+}
+// _flvec: flatten a Rune FList into a Vec<f64> (for gemmSum's flat row-major matrices).
+fn _flvec(mut xs: Rc<V>) -> Vec<f64> {
+    let mut v = Vec::new();
+    loop {
+        let nx = match &*xs { V::Ctor(1, _, a) => Some((_float(&a[0]), a[1].clone())), _ => None };
+        match nx { Some((h, t)) => { v.push(h); xs = t; }, None => break }
+    }
+    v
 }
 fn _big_norm(mut l: Vec<u32>) -> Vec<u32> { while let Some(&0) = l.last() { l.pop(); } l }
 fn _big_from_u64(mut n: u64) -> Vec<u32> {
