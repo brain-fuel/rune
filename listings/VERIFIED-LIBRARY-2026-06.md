@@ -71,6 +71,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch344_map_snoc` — map commutes with snoc: `map f (snoc xs x) = snoc (map f xs)(f x)`.
 - `ch314_sum_map_succ` — mapping succ adds the length to the sum: `sum (map succ xs) = len xs + sum xs`.
 - `ch354_sum_linear` — sum is linear under scaling: `sum (map (c*) xs) = c * sum xs`.
+- `ch360_sum_double_list` — `sum (xs++xs) = double (sum xs)`.
 - `ch249_safe_head` — total `safeHead` via a non-emptiness proof (runnable, all backends).
 - `ch330_nonempty` — non-empty list with a STRUCTURALLY total head (no precondition); conversion is never empty.
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
