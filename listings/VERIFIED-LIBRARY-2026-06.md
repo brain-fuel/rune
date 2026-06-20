@@ -159,6 +159,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch328_double_add` — doubling equals self-addition: `double n = n + n`.
 - `ch329_even_self_add` — self-sum is even: `even (n + n) = true`.
 - `ch380_odd_succ_double` — succ of even is odd: `even (succ (double n)) = false`.
+- `ch381_even_add` — parity of a sum is XNOR of parities: `even (a+b) = eqBool (even a)(even b)`.
 - `ch251_nat_order` — `leb` reflexive + add-monotone.
 - `ch334_compare_refl` — three-way compare reflexive: `compare n n = eq` (lt|eq|gt trichotomy).
 - `ch335_compare_sym` — three-way compare antisymmetric: `compare a b = flip (compare b a)`.
