@@ -1,0 +1,59 @@
+-- Chapter 253 — totality of <= : the order is total (proven tier).
+--
+-- With reflexivity (ch251) and transitivity (ch252), leb is a preorder; totality makes it
+-- a TOTAL preorder (a linear order up to antisymmetry): for any a, b at least one of
+-- a <= b, b <= a holds. Unlike antisymmetry (which needs explosion into an arbitrary type,
+-- unavailable here), totality always holds, so every branch closes by refl or the IH — no
+-- impossible cases. Proof-only.
+--
+--   lebTotal : (a b : Nat) -> Eq Bool (orB (leb a b) (leb b a)) true
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl are ambient, as in ch03.)
+
+orB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) true b a end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+-- TOTALITY, by induction on a then case on b:
+--   a=0:           orB (leb 0 b) (leb b 0) = orB true _ = true                  -> refl
+--   a=succ, b=0:   orB false true = true                                        -> refl
+--   a=succ, b=succ m: orB (leb k m) (leb m k), exactly the outer IH at m.
+lebTotal : (a : Nat) -> (b : Nat) -> Eq Bool (orB (leb a b) (leb b a)) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (orB (leb x b) (leb b x)) true end)
+      (fn (b : Nat) is refl end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Bool (orB (leb k b) (leb b k)) true) is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is Eq Bool (orB (leb (succ k) bb) (leb bb (succ k))) true end)
+             refl
+             (fn (m : Nat) (ihb : Eq Bool (orB (leb (succ k) m) (leb m (succ k))) true) is ih m end)
+             b
+           end
+         end)
+      a
+  end
+end
