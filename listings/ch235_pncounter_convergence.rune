@@ -1,0 +1,207 @@
+-- Chapter 235, PN-Counter convergence: a COMPOUND-state CvRDT (E3/E4).
+--
+-- ch72 (G-Counter) and ch233 (G-Set) verify single-lattice CRDTs; this verifies a
+-- COMPOUND one. A PN-Counter keeps two grow-only counters per replica - P
+-- (increments) and N (decrements) - so its state is four Nat tallies and its join is
+-- pointwise max on all four. Convergence is again mergeComm/mergeIdem/mergeAssoc,
+-- now via a four-slot congruence over the (Nat,max) laws. Pairs with
+-- examples/pncounter.rune (the same protocol simulated). Proof-only.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+-- addition (the observed value combines the two replicas' counts).
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- MAX, the CRDT join on a single slot: max 0 n = n, max (succ m) 0 = succ m,
+-- max (succ m) (succ n) = succ (max m n). Recursion on the first argument (IH is max m), casing
+-- the second. All three equations hold DEFINITIONALLY (the eliminators compute).
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is n end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end)
+             (succ k)
+             (fn (j : Nat) (ihj : Nat) is succ (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- symmetry and a succ-congruence over the ambient Eq, by `subst` (Leibniz transport).
+symNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat b a is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat z a end) (refl a)
+  end
+end
+
+congSucc : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) (refl (succ a))
+  end
+end
+
+-- max m 0 = m, by `refl` on each constructor (both equations are definitional: max 0 0 ~> 0 and
+-- max (succ k) 0 ~> succ k), assembled by induction so it holds for every m.
+maxZeroR : (m : Nat) -> Eq Nat (max m zero) m is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k zero) k) is refl (succ k) end)
+      m
+  end
+end
+
+-- MAX IS COMMUTATIVE, the heart of CRDT convergence (the join is order-independent). Double
+-- induction: m = 0 uses `max n 0 = n` (maxZeroR, flipped by symNat); the succ/succ step is
+-- succ-congruence on the IH.
+maxComm : (m : Nat) -> (n : Nat) -> Eq Nat (max m n) (max n m) is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Nat (max x n) (max n x) end)
+      (fn (n : Nat) is symNat (max n zero) n (maxZeroR n) end)
+      (fn (k : Nat) (ih : (n : Nat) -> Eq Nat (max k n) (max n k)) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Eq Nat (max (succ k) x) (max x (succ k)) end)
+             (refl (succ k))
+             (fn (j : Nat) (ihj : Eq Nat (max (succ k) j) (max j (succ k))) is
+                congSucc (max k j) (max j k) (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- MAX IS IDEMPOTENT, `max a a = a`. By induction: base `max 0 0 ~> 0`; step `max (succ k)
+-- (succ k) ~> succ (max k k)`, succ-congruence on the IH. (Join idempotence: merging a replica
+-- with itself is a no-op.)
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x x) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k k) k) is congSucc (max k k) k ih end)
+      a
+  end
+end
+
+-- MAX IS ASSOCIATIVE, `max (max a b) c = max a (max b c)`. Triple induction; every boundary
+-- (any argument 0) is `refl` by the definitional max equations, and the succ/succ/succ case is
+-- succ-congruence on the outer IH at the predecessors. (Join associativity: gossip grouping is
+-- irrelevant.)
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (max (max a b) c) (max a (max b c)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (max (max x b) c) (max x (max b c)) end)
+      (fn (b : Nat) (c : Nat) is refl (max b c) end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (max (max k b) c) (max k (max b c))) is
+         fn (b : Nat) is
+           NatElim (fn (x : Nat) is (c : Nat) -> Eq Nat (max (max (succ k) x) c) (max (succ k) (max x c)) end)
+             (fn (c : Nat) is refl (max (succ k) c) end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (max (max (succ k) j) c) (max (succ k) (max j c))) is
+                fn (c : Nat) is
+                  NatElim (fn (x : Nat) is Eq Nat (max (max (succ k) (succ j)) x) (max (succ k) (max (succ j) x)) end)
+                    (refl (succ (max k j)))
+                    (fn (i : Nat) (ihc : Eq Nat (max (max (succ k) (succ j)) i) (max (succ k) (max (succ j) i))) is
+                       congSucc (max (max k j) i) (max k (max j i)) (ih j i) end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- a PN-Counter: P increments by replica (a,b), N decrements by replica (c,d).
+data PN : U is pn : Nat -> Nat -> Nat -> Nat -> PN end
+
+-- four-slot congruence, by four substs.
+congPN : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> (ap : Nat) -> (bp : Nat) -> (cp : Nat) -> (dp : Nat)
+   -> Eq Nat a ap -> Eq Nat b bp -> Eq Nat c cp -> Eq Nat d dp
+   -> Eq PN (pn a b c d) (pn ap bp cp dp) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (ap : Nat) (bp : Nat) (cp : Nat) (dp : Nat)
+     (e1 : Eq Nat a ap) (e2 : Eq Nat b bp) (e3 : Eq Nat c cp) (e4 : Eq Nat d dp) is
+    subst Nat a ap e1 (fn (x : Nat) is Eq PN (pn a b c d) (pn x bp cp dp) end)
+      (subst Nat b bp e2 (fn (y : Nat) is Eq PN (pn a b c d) (pn a y cp dp) end)
+        (subst Nat c cp e3 (fn (z : Nat) is Eq PN (pn a b c d) (pn a b z dp) end)
+          (subst Nat d dp e4 (fn (w : Nat) is Eq PN (pn a b c d) (pn a b c w) end) refl)))
+  end
+end
+
+merge : PN -> PN -> PN is
+  fn (g : PN) (h : PN) is
+    PNElim (fn (x : PN) is PN end)
+      (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is
+         PNElim (fn (y : PN) is PN end)
+           (fn (e : Nat) (f : Nat) (gg : Nat) (hh : Nat) is
+              pn (max a e) (max b f) (max c gg) (max d hh) end)
+           h
+       end)
+      g
+  end
+end
+
+mergeComm : (g : PN) -> (h : PN) -> Eq PN (merge g h) (merge h g) is
+  fn (g : PN) is
+    PNElim (fn (x : PN) is (h : PN) -> Eq PN (merge x h) (merge h x) end)
+      (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is
+         fn (h : PN) is
+           PNElim (fn (y : PN) is Eq PN (merge (pn a b c d) y) (merge y (pn a b c d)) end)
+             (fn (e : Nat) (f : Nat) (gg : Nat) (hh : Nat) is
+                congPN (max a e) (max b f) (max c gg) (max d hh) (max e a) (max f b) (max gg c) (max hh d)
+                  (maxComm a e) (maxComm b f) (maxComm c gg) (maxComm d hh) end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+mergeIdem : (g : PN) -> Eq PN (merge g g) g is
+  fn (g : PN) is
+    PNElim (fn (x : PN) is Eq PN (merge x x) x end)
+      (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is
+         congPN (max a a) (max b b) (max c c) (max d d) a b c d
+           (maxIdem a) (maxIdem b) (maxIdem c) (maxIdem d) end)
+      g
+  end
+end
+
+mergeAssoc : (g : PN) -> (h : PN) -> (k : PN)
+   -> Eq PN (merge (merge g h) k) (merge g (merge h k)) is
+  fn (g : PN) is
+    PNElim (fn (x : PN) is (h : PN) -> (k : PN) -> Eq PN (merge (merge x h) k) (merge x (merge h k)) end)
+      (fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) is
+         fn (h : PN) is
+           PNElim (fn (y : PN) is (k : PN)
+               -> Eq PN (merge (merge (pn a b c d) y) k) (merge (pn a b c d) (merge y k)) end)
+             (fn (e : Nat) (f : Nat) (gg : Nat) (hh : Nat) is
+                fn (k : PN) is
+                  PNElim (fn (z : PN) is
+                      Eq PN (merge (merge (pn a b c d) (pn e f gg hh)) z)
+                            (merge (pn a b c d) (merge (pn e f gg hh) z)) end)
+                    (fn (p : Nat) (q : Nat) (r : Nat) (s : Nat) is
+                       congPN (max (max a e) p) (max (max b f) q) (max (max c gg) r) (max (max d hh) s)
+                              (max a (max e p)) (max b (max f q)) (max c (max gg r)) (max d (max hh s))
+                         (maxAssoc a e p) (maxAssoc b f q) (maxAssoc c gg r) (maxAssoc d hh s) end)
+                    k
+                end
+              end)
+             h
+         end
+       end)
+      g
+  end
+end
