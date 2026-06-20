@@ -1,0 +1,42 @@
+-- Chapter 334 — three-way comparison is reflexive: compare n n = eq (proven tier).
+--
+-- A trichotomy comparison returning lt | eq | gt (richer than the two-valued leb). Comparing
+-- a number with itself yields eq, by induction peeling both successors in lockstep. Proof-only.
+--
+--   compareRefl : (n : Nat) -> Eq Ordering (compareNat n n) eq
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Ordering : U is
+  lt : Ordering
+| eq : Ordering
+| gt : Ordering
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+compareNat : Nat -> Nat -> Ordering is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Ordering end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Ordering end) eq (fn (j : Nat) (ih2 : Ordering) is lt end) m end)
+      (fn (k : Nat) (cmpK : Nat -> Ordering) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Ordering end) gt (fn (j : Nat) (ih2 : Ordering) is cmpK j end) m
+         end
+       end)
+      a b
+  end
+end
+
+compareRefl : (n : Nat) -> Eq Ordering (compareNat n n) eq is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Ordering (compareNat x x) eq end)
+      refl
+      (fn (k : Nat) (ih : Eq Ordering (compareNat k k) eq) is ih end)
+      n
+  end
+end

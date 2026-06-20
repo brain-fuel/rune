@@ -133,6 +133,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch328_double_add` — doubling equals self-addition: `double n = n + n`.
 - `ch329_even_self_add` — self-sum is even: `even (n + n) = true`.
 - `ch251_nat_order` — `leb` reflexive + add-monotone.
+- `ch334_compare_refl` — three-way compare reflexive: `compare n n = eq` (lt|eq|gt trichotomy).
 - `ch252_leb_trans` — `leb` transitive (Boolean explosion `everythingTrue`).
 - `ch253_leb_total` — `leb` total (so a total preorder).
 - `ch258_mul_identities` — `mulZeroR`, `mulOneL`, `mulOneR`.
