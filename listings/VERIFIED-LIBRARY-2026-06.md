@@ -1,13 +1,37 @@
-# Verified library — 2026-06-20 session (ch220–ch266)
+# Verified library — 2026-06-20 session (ch220–ch302)
 
 A navigable index of the listings added in the 2026-06-20 autonomous session
-(tags v3.25.0–v3.69.0). Two strands: **D3/D4 machine-numeric + interop**
+(tags v3.25.0–v3.111.0+). Two strands: **D3/D4 machine-numeric + interop**
 (runnable, cross-backend, contract-guarded) and the **proven-tier stdlib**
 (proof-only, machine-checked by `TestListingsElaborateAndCheck`).
 
 Conventions for the proof listings: `Eq`/`refl`/`subst` are ambient; the
 equality toolkit (`cong`, `symEq`, `transEq`, `cong2`) is derived from `subst`;
 proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
+
+## Summary
+
+~80 listings spanning two teloi. **Telos 3 (stdlib):** the full D3 float kit
+(+,-,*,/,abs,cmp,sqrt,pow) + BLAS (dot/matrix) + the D4 NumPy interop suite
+(dot/mean/matmul/var/max/norm) behind tolerance contracts, byte-identical across
+7 backends; the furnace property-test spine; and an exhaustive **proven tier** —
+the **Nat commutative semiring** (add/mul comm+assoc, distributivity, identities),
+a **complete boolean algebra** (and/or/not/xor, De Morgan, lattice laws), the
+**functor/monad zoo** (List, Option, Sum, Prod, Tree, all laws), monus, exponent,
+parity, the decidable **leb preorder + totality + min/max lattice bounds**, list
+combinator laws (append/reverse/take/drop/concat/elem/fold), a verified **Map**
+(lookup-after-insert), **insertion-sort correctness** (length + sum = permutation),
+and a verified **compiler toolchain** (rewrites, constant-folding, a stack-machine
+compiler, the composed optimize→compile pipeline). **Telos 4 (distributed):**
+CvRDT convergence (flag semilattice, product, lattice order) and a finite trace
+bisimulation.
+
+**Substrate limits found** (bound the proof space): no large elimination into `U`,
+no zero-constructor empty type, no scrutinee-exposing `case` (non-dependent
+`BoolElim`), no user-defined indexed families (GADTs), and only structural /
+eliminator recursion (no general/well-founded recursion — so e.g. merge-sort is
+inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
+`Dec`, `Pair`/`mkPair`, `inc`, `loop`.
 
 ## D3 — machine floats + BLAS (runnable, all backends unless noted)
 
