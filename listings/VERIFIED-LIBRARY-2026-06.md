@@ -166,6 +166,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch318_option_bind_map` — monad/functor coherence: `bind m (some . f) = map f m`.
 - `ch263_sum_bifunctor` — Sum (Either) bifunctor laws (id, composition).
 - `ch319_sum_monad` — Sum as the error monad: the three monad laws.
+- `ch331_option_sum_iso` — Option ≅ Sum Unit: round-trip `sumToOption (optionToSum m) = m`.
 - `ch284_swap_involutions` — swap is an involution on products and sums
   (`swapP (swapP p) = p`, `sswap (sswap e) = e`).
 - `ch255_de_morgan` — De Morgan's laws.

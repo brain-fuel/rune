@@ -1,0 +1,51 @@
+-- Chapter 331 — Option is (isomorphic to) Sum Unit: a round-trip (proven tier).
+--
+-- Option A and Sum Unit A carry the same information (none <-> inl unit, some a <-> inr a).
+-- One direction of the isomorphism: converting an Option to a Sum and back is the identity.
+-- By case analysis. Proof-only.
+--
+--   otsRoundtrip : (A : U) -> (m : Option A) -> Eq (Option A) (sumToOption A (optionToSum A m)) m
+
+data Unit : U is
+  unit : Unit
+end
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data Sum : U -> U -> U is
+  inl : (A : U) -> (B : U) -> A -> Sum A B
+| inr : (A : U) -> (B : U) -> B -> Sum A B
+end
+
+-- (Eq / refl are ambient, as in ch03.)
+
+optionToSum : (A : U) -> Option A -> Sum Unit A is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Sum Unit A end)
+      (inl Unit A unit)
+      (fn (a : A) is inr Unit A a end)
+      m
+  end
+end
+
+sumToOption : (A : U) -> Sum Unit A -> Option A is
+  fn (A : U) (s : Sum Unit A) is
+    SumElim Unit A (fn (x : Sum Unit A) is Option A end)
+      (fn (u : Unit) is none A end)
+      (fn (a : A) is some A a end)
+      s
+  end
+end
+
+-- round-trip: Option -> Sum -> Option is the identity (by case on the Option).
+otsRoundtrip : (A : U) -> (m : Option A) -> Eq (Option A) (sumToOption A (optionToSum A m)) m is
+  fn (A : U) (m : Option A) is
+    OptionElim A (fn (x : Option A) is Eq (Option A) (sumToOption A (optionToSum A x)) x end)
+      refl
+      (fn (a : A) is refl end)
+      m
+  end
+end
