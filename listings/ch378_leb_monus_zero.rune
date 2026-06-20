@@ -1,0 +1,80 @@
+-- Chapter 378 — below means nothing to subtract: a <= b implies monus a b = 0 (proven tier).
+--
+-- If a is at most b, truncated subtraction a - b clamps to zero. Ties the order (leb) to
+-- truncated subtraction. By induction on a then case on b; the impossible leb(succ k)0 = true
+-- leaf is discharged by exFalsoNat (ch374). Proof-only.
+--
+--   monusLebZero : (a b : Nat) -> Eq Bool (leb a b) true -> Eq Nat (monus a b) zero
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+exFalsoNat : Eq Bool false true -> (x : Nat) -> (y : Nat) -> Eq Nat x y is
+  fn (h : Eq Bool false true) (x : Nat) (y : Nat) is
+    cong Bool Nat (fn (z : Bool) is BoolElim (fn (w : Bool) is Nat end) y x z end) false true h
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (monK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is monK j end) m
+         end
+       end)
+      a b
+  end
+end
+
+-- THE THEOREM, by induction on a then case on b:
+--   a=0:           monus 0 b = 0                                                    -> refl
+--   a=succ k, b=0: leb (succ k) 0 = true is false = true; explode                    -> exFalsoNat
+--   a=succ k, b=succ j: monus (succ k) (succ j) = monus k j; the IH at j
+monusLebZero : (a : Nat) -> (b : Nat) -> Eq Bool (leb a b) true -> Eq Nat (monus a b) zero is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Bool (leb x b) true -> Eq Nat (monus x b) zero end)
+      (fn (b : Nat) (h : Eq Bool (leb zero b) true) is refl end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Bool (leb k b) true -> Eq Nat (monus k b) zero) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Eq Bool (leb (succ k) y) true -> Eq Nat (monus (succ k) y) zero end)
+             (fn (h : Eq Bool (leb (succ k) zero) true) is exFalsoNat h (succ k) zero end)
+             (fn (j : Nat) (ihj : Eq Bool (leb (succ k) j) true -> Eq Nat (monus (succ k) j) zero) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) true) is ih j h end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end

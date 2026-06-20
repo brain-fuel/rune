@@ -129,6 +129,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
   via `beqNat` reflexivity transported into the lookup's key comparison.
 - `ch376_beqnat_sound` — decidable equality is sound: `beqNat a b = true -> a = b` (with ch278 converse, fully characterizes =).
 - `ch377_beq_implies_leb` — equal implies <=: `beqNat a b = true -> leb a b = true` (decidable eq refines order).
+- `ch378_leb_monus_zero` — below means nothing to subtract: `a <= b -> monus a b = 0`.
 
 ## Proven tier — sorting correctness (insertion sort)
 
