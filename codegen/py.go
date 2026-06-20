@@ -109,6 +109,11 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dot2") {
 		b.WriteString("def dot2():\n    return lambda a0: lambda a1: lambda b0: lambda b1: a0 * b0 + a1 * b1\n")
 	}
+	// Arbitrary-length dot: walk two Rune FLists (fcons = tag 1, head args[0], tail
+	// args[1]) summing products — the portable reference (native backends use cblas).
+	if usesForeign(p, "dotList") {
+		b.WriteString("def dotList():\n    def _dl(xs, ys):\n        s = 0.0\n        while xs[\"tag\"] == 1 and ys[\"tag\"] == 1:\n            s += xs[\"args\"][0] * ys[\"args\"][0]\n            xs = xs[\"args\"][1]; ys = ys[\"args\"][1]\n        return s\n    return lambda xs: lambda ys: _dl(xs, ys)\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatPy(&b, *p.Nat)

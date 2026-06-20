@@ -123,6 +123,12 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dot2") {
 		b.WriteString("ff_dot2() -> fun(A0) -> fun(A1) -> fun(B0) -> fun(B1) -> A0 * B0 + A1 * B1 end end end end.\n")
 	}
+	// Arbitrary-length dot: walk two Rune FLists ({c, 1, _, [Head, Tail]}) in lockstep
+	// summing products via a named recursive fun — the portable reference (native
+	// backends route this through cblas_ddot).
+	if usesForeign(p, "dotList") {
+		b.WriteString("ff_dotList() -> fun(Xs) -> fun(Ys) -> (fun D(A, B, Acc) -> case {A, B} of {{c, 1, _, [X, Xr]}, {c, 1, _, [Y, Yr]}} -> D(Xr, Yr, Acc + X * Y); _ -> Acc end end)(Xs, Ys, 0.0) end end.\n")
+	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}

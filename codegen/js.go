@@ -110,6 +110,12 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dot2") {
 		b.WriteString("const dot2 = () => a0 => a1 => b0 => b1 => a0 * b0 + a1 * b1;\n")
 	}
+	// Arbitrary-length dot: walk two Rune FLists (fcons = tag 1, head in args[0], tail
+	// in args[1]) in lockstep summing products. The native backends route this through
+	// cblas_ddot; on the source backends it is the portable reference loop.
+	if usesForeign(p, "dotList") {
+		b.WriteString("const dotList = () => xs => ys => { let s = 0; while (xs.tag === 1 && ys.tag === 1) { s += xs.args[0] * ys.args[0]; xs = xs.args[1]; ys = ys.args[1]; } return s; };\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNat(&b, *p.Nat)

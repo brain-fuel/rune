@@ -369,10 +369,25 @@ func TestD3OpenBLASTolerance(t *testing.T) {
 // MARSHALLED across the FFI into a C double[] and run through cblas_ddot (real
 // OpenBLAS) on the native backends (C/LLVM), bound to an in-language reference fold
 // by the tolerance contract (ch219). [1,2,3,4]·[1,1,1,1] = 10; within-default ok;
-// negative-tolerance blame: "10\n10\n0\nunit". Native-only (the array marshaller is
-// in the C/LLVM runtimes; the source backends have no dotList host body).
+// negative-tolerance blame: "10\n10\n0\nunit". On the NATIVE backends (C/LLVM) the
+// marshaller routes through cblas_ddot (real OpenBLAS); on the SOURCE backends
+// (js/py/go/erl/rust) dotList is the portable reference loop over the same FList — the
+// observable is byte-identical, parity at the CONTRACT across all seven backends.
 func TestD3BLASVector(t *testing.T) {
 	const want = "10\n10\n0\nunit"
+	// Source backends: the portable dotList reference (no OpenBLAS link needed).
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch219_blas_vector.rune", "main", ""); got != want {
+				t.Errorf("[%s] dotList reference gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
 	s := loadListing(t, "ch219_blas_vector.rune")
 	p, err := s.EmitProgram("main")
 	if err != nil {

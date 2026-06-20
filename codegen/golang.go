@@ -115,6 +115,11 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dot2") {
 		b.WriteString("func dot2() any { return func(a0 any) any { return func(a1 any) any { return func(b0 any) any { return func(b1 any) any { return a0.(float64)*b0.(float64) + a1.(float64)*b1.(float64) } } } } }\n")
 	}
+	// Arbitrary-length dot: walk two Rune FLists (fcons = tag 1, head args[0], tail
+	// args[1]) summing products — the portable reference (native backends use cblas).
+	if usesForeign(p, "dotList") {
+		b.WriteString("func dotList() any { return func(xs any) any { return func(ys any) any { s := 0.0; for xs.(map[string]any)[\"tag\"] == 1 && ys.(map[string]any)[\"tag\"] == 1 { mx := xs.(map[string]any); my := ys.(map[string]any); s += mx[\"args\"].([]any)[0].(float64) * my[\"args\"].([]any)[0].(float64); xs = mx[\"args\"].([]any)[1]; ys = my[\"args\"].([]any)[1] }; return s } } }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatGo(&b, *p.Nat)

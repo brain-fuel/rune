@@ -86,6 +86,9 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dot2") {
 		b.WriteString("fn dot2() -> Rc<V> { vfun(|a0: Rc<V>| vfun(move |a1: Rc<V>| { let a0 = a0.clone(); vfun(move |b0: Rc<V>| { let a0 = a0.clone(); let a1 = a1.clone(); vfun(move |b1: Rc<V>| Rc::new(V::Float(_float(&a0) * _float(&b0) + _float(&a1) * _float(&b1)))) }) })) }\n")
 	}
+	if usesForeign(p, "dotList") {
+		b.WriteString("fn dotList() -> Rc<V> { vfun(|xs: Rc<V>| vfun(move |ys: Rc<V>| Rc::new(V::Float(_fldot(xs.clone(), ys.clone()))))) }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatRust(&b, *p.Nat)
@@ -394,6 +397,21 @@ fn _nat<'a>(v: &'a Rc<V>) -> &'a Vec<u32> {
 }
 fn _float(v: &Rc<V>) -> f64 {
     match &**v { V::Float(x) => *x, _ => panic!("rune: expected a float") }
+}
+// _fldot: the portable arbitrary-length dot — walk two Rune FLists (fcons = tag 1,
+// head in slot 0, tail in slot 1) in lockstep summing products. (Native backends
+// route dotList through cblas_ddot; the rust source backend uses this reference.)
+fn _fldot(mut xs: Rc<V>, mut ys: Rc<V>) -> f64 {
+    let mut s = 0.0;
+    loop {
+        let xn = match &*xs { V::Ctor(1, _, a) => Some((a[0].clone(), a[1].clone())), _ => None };
+        let yn = match &*ys { V::Ctor(1, _, a) => Some((a[0].clone(), a[1].clone())), _ => None };
+        match (xn, yn) {
+            (Some((xh, xt)), Some((yh, yt))) => { s += _float(&xh) * _float(&yh); xs = xt; ys = yt; }
+            _ => break,
+        }
+    }
+    s
 }
 fn _big_norm(mut l: Vec<u32>) -> Vec<u32> { while let Some(&0) = l.last() { l.pop(); } l }
 fn _big_from_u64(mut n: u64) -> Vec<u32> {
