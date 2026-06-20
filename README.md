@@ -74,6 +74,22 @@ it, and `rune run examples/gcounter.rune converged` executes the scenario on a
 backend. The simulator lives in `internal/sim` (shadow tooling, never the
 kernel); see `ref_docs/wootz/R-PROTO.md`.
 
+Behind the simulator is a **verified distributed algebra** (the `listings/`
+corpus). The CRDTs span grow-only and remove-capable shapes (G-Counter, G-Set,
+PN-Counter, and a 2P-Set whose tombstones make a concurrent remove win), each
+proved convergent; and the convergence criterion itself is proved **once,
+generically**: any join-semilattice (a `merge` that is commutative, idempotent,
+and associative) enjoys strong eventual consistency, so every CRDT inherits
+order-independence, gossip-robustness, and duplicate-safety from one theorem.
+Causality is verified too: **vector clocks** with a happens-before partial order
+(reflexive, transitive, antisymmetric) that **detects concurrency** (the thing a
+scalar Lamport clock cannot), the theorem that their merge is exactly the *join*
+of that order, and a **causal-delivery** protocol whose deliverability rule is
+proved to respect causal dependencies and exactly-once FIFO ordering. The
+adequacy story is closed end to end: over the fault calculus the runtime step
+provably emits no communication label, so every observation is a failure (the
+spec and runtime observable alphabets coincide).
+
 ## v2.0.0
 
 v2 extends the equality stratum with **quotients**, and proves the extension
