@@ -115,6 +115,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch310_count_append` — count is additive over append: `countOccur x (xs++ys) = countOccur x xs + countOccur x ys` (multiset homomorphism).
 - `ch311_count_replicate` — `countOccur x (replicate n x) = n` (n copies contain x n times).
 - `ch342_count_length` — count bounded by length: `countOccur x xs <= len xs`.
+- `ch382_count_filter` — count = equality-filter length: `countOccur x xs = len (filter (beqNat x) xs)`.
   (The full sort-by-count permutation theorem is NOT reachable: it needs a count-swap lemma
   commuting two conditionals on different scrutinees, which hits the no-scrutinee-equation limit;
   sort-by-sum (ch266) + sort-by-length (ch289) are the reachable permutation evidence.)

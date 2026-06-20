@@ -1,0 +1,94 @@
+-- Chapter 382 — count equals the length of the equality-filtered list (proven tier).
+--
+-- countOccur x xs = len (filter (beqNat x) xs): counting occurrences of x is the same as
+-- keeping only the elements equal to x and measuring. Ties the multiset count to filter. A
+-- branch-aware induction. Proof-only.
+--
+--   countFilter : (x : Nat) -> (xs : NatList) -> Eq Nat (countOccur x xs) (len (filter (beqNat x) xs))
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih2 : Bool) is false end) m end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end
+       end)
+      a b
+  end
+end
+
+len : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+filter : (Nat -> Bool) -> NatList -> NatList is
+  fn (p : Nat -> Bool) (xs : NatList) is
+    NatListElim (fn (z : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is
+         BoolElim (fn (c : Bool) is NatList end) (ncons h ih) ih (p h) end)
+      xs
+  end
+end
+
+countOccur : Nat -> NatList -> Nat is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Nat end)
+      zero
+      (fn (h : Nat) (rest : NatList) (ih : Nat) is
+         BoolElim (fn (c : Bool) is Nat end) (succ ih) ih (beqNat x h) end)
+      xs
+  end
+end
+
+-- THE THEOREM, by induction on xs with a BoolElim on (beqNat x h):
+--   nnil:  0 = len nnil = 0                                                         -> refl
+--   match:    succ (countOccur x t) vs len (ncons h (filter ..)) = succ (len ..); cong succ IH
+--   mismatch: countOccur x t vs len (filter ..); IH
+countFilter : (x : Nat) -> (xs : NatList) -> Eq Nat (countOccur x xs) (len (filter (beqNat x) xs)) is
+  fn (x : Nat) (xs : NatList) is
+    NatListElim (fn (z : NatList) is Eq Nat (countOccur x z) (len (filter (beqNat x) z)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (countOccur x rest) (len (filter (beqNat x) rest))) is
+         BoolElim
+           (fn (c : Bool) is
+              Eq Nat
+                (BoolElim (fn (d : Bool) is Nat end) (succ (countOccur x rest)) (countOccur x rest) c)
+                (len (BoolElim (fn (d : Bool) is NatList end) (ncons h (filter (beqNat x) rest)) (filter (beqNat x) rest) c)) end)
+           (cong Nat Nat succ (countOccur x rest) (len (filter (beqNat x) rest)) ih)
+           ih
+           (beqNat x h) end)
+      xs
+  end
+end
