@@ -1,0 +1,95 @@
+-- Chapter 279 — take/drop split-join: (take n xs) ++ (drop n xs) = xs (proven tier).
+--
+-- Splitting a list at position n and concatenating the halves recovers the original. By
+-- induction on n (the IH generalized over the list), the cons step closing with congruence.
+-- Proof-only.
+--
+--   takeDropAppend : (n : Nat) -> (xs : NatList) -> Eq NatList (append (take n xs) (drop n xs)) xs
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is
+  fn (h : Nat) (t : NatList) is ncons h t end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+-- take n xs: the first n elements.
+take : Nat -> NatList -> NatList is
+  fn (n : Nat) (xs : NatList) is
+    NatElim (fn (k : Nat) is NatList -> NatList end)
+      (fn (ys : NatList) is nnil end)
+      (fn (k : Nat) (takeK : NatList -> NatList) is
+         fn (ys : NatList) is
+           NatListElim (fn (z : NatList) is NatList end)
+             nnil
+             (fn (h : Nat) (t : NatList) (ih : NatList) is ncons h (takeK t) end)
+             ys
+         end
+       end)
+      n xs
+  end
+end
+
+-- drop n xs: all but the first n elements.
+drop : Nat -> NatList -> NatList is
+  fn (n : Nat) (xs : NatList) is
+    NatElim (fn (k : Nat) is NatList -> NatList end)
+      (fn (ys : NatList) is ys end)
+      (fn (k : Nat) (dropK : NatList -> NatList) is
+         fn (ys : NatList) is
+           NatListElim (fn (z : NatList) is NatList end)
+             nnil
+             (fn (h : Nat) (t : NatList) (ih : NatList) is dropK t end)
+             ys
+         end
+       end)
+      n xs
+  end
+end
+
+-- THE THEOREM, by induction on n (IH generalized over xs), then case on xs:
+--   0:      append (take 0 xs) (drop 0 xs) = append nnil xs = xs                    -> refl
+--   succ k, nnil:  append nnil nnil = nnil                                          -> refl
+--   succ k, ncons h t: append (ncons h (take k t)) (drop k t) = ncons h (append (take k t) (drop k t));
+--                      cong (ncons h) on the IH at t.
+takeDropAppend : (n : Nat) -> (xs : NatList) -> Eq NatList (append (take n xs) (drop n xs)) xs is
+  fn (n : Nat) (xs : NatList) is
+    NatElim (fn (k : Nat) is (ys : NatList) -> Eq NatList (append (take k ys) (drop k ys)) ys end)
+      (fn (ys : NatList) is refl end)
+      (fn (k : Nat) (ih : (ys : NatList) -> Eq NatList (append (take k ys) (drop k ys)) ys) is
+         fn (ys : NatList) is
+           NatListElim (fn (z : NatList) is Eq NatList (append (take (succ k) z) (drop (succ k) z)) z end)
+             refl
+             (fn (h : Nat) (t : NatList) (ih2 : Eq NatList (append (take (succ k) t) (drop (succ k) t)) t) is
+                cong NatList NatList (consWith h) (append (take k t) (drop k t)) t (ih t) end)
+             ys
+         end
+       end)
+      n xs
+  end
+end
