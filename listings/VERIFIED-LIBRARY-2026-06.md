@@ -91,6 +91,9 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
   for all e) via value-preserving smart constructors — the canonical verified-compiler-pass.
 - `ch274_rewrite_catalog` — verified algebraic rewrite rules (add/mul comm + assoc, distribute),
   each a semantics-preserving rewrite from the corresponding semiring law.
+- `ch275_stack_compiler` — a verified compiler from expressions to a stack machine
+  (`exec (compile e) s = eval e :: s`) — the canonical compiler-correctness theorem,
+  via `execAppend` (exec distributes over code concatenation).
 
 ## Telos 4 — distributed (CRDTs + bisimulation)
 
