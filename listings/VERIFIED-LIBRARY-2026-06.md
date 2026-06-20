@@ -77,6 +77,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch292_reverse_involution` — `reverse (append xs ys) = reverse ys ++ reverse xs` and
   `reverse (reverse xs) = xs` (reverse distribution + involution).
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
+- `ch324_map_replicate` — `map f (replicate n x) = replicate n (f x)`.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
 - `ch320_len_drop` — drop shrinks length by n: `len (drop n xs) = monus (len xs) n`.
 - `ch321_len_take` — take caps the length: `len (take n xs) = min n (len xs)`.

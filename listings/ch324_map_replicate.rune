@@ -1,0 +1,61 @@
+-- Chapter 324 — map over replicate: map f (replicate n x) = replicate n (f x) (proven tier).
+--
+-- Mapping f over n copies of x gives n copies of f x. By induction on n, the successor step
+-- a single congruence. Proof-only.
+--
+--   mapReplicate : (f : Nat -> Nat) -> (n x : Nat)
+--                -> Eq NatList (mapList f (replicate n x)) (replicate n (f x))
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+
+mapList : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end)
+      xs
+  end
+end
+
+replicate : Nat -> Nat -> NatList is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is NatList end)
+      nnil
+      (fn (k : Nat) (ih : NatList) is ncons x ih end)
+      n
+  end
+end
+
+-- THE THEOREM, by induction on n:
+--   0:      both sides nnil                                                        -> refl
+--   succ k: ncons (f x) (mapList f (replicate k x)) vs ncons (f x) (replicate k (f x));
+--           cong (cons (f x)) on the IH.
+mapReplicate : (f : Nat -> Nat) -> (n : Nat) -> (x : Nat) ->
+               Eq NatList (mapList f (replicate n x)) (replicate n (f x)) is
+  fn (f : Nat -> Nat) (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is Eq NatList (mapList f (replicate k x)) (replicate k (f x)) end)
+      refl
+      (fn (k : Nat) (ih : Eq NatList (mapList f (replicate k x)) (replicate k (f x))) is
+         cong NatList NatList (consWith (f x)) (mapList f (replicate k x)) (replicate k (f x)) ih end)
+      n
+  end
+end
