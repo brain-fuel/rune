@@ -1,0 +1,129 @@
+-- Chapter 292 — reverse distributes over append, and reverse is an involution (proven).
+--
+-- Two classic list theorems: reversing a concatenation reverses each part and swaps them,
+-- and reversing twice is the identity. The involution follows from the distribution law.
+-- Both by induction, using append associativity and right-identity. Proof-only.
+--
+--   reverseAppend : reverse (append xs ys) = append (reverse ys) (reverse xs)
+--   reverseInvol  : reverse (reverse xs)   = xs
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+appendTo : NatList -> NatList -> NatList is fn (w : NatList) (z : NatList) is append z w end end
+
+appendNnilR : (xs : NatList) -> Eq NatList (append xs nnil) xs is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Eq NatList (append x nnil) x end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (append rest nnil) rest) is
+         cong NatList NatList (consWith h) (append rest nnil) rest ih end)
+      xs
+  end
+end
+
+appendAssoc : (xs : NatList) -> (ys : NatList) -> (zs : NatList) ->
+              Eq NatList (append (append xs ys) zs) (append xs (append ys zs)) is
+  fn (xs : NatList) (ys : NatList) (zs : NatList) is
+    NatListElim
+      (fn (x : NatList) is Eq NatList (append (append x ys) zs) (append x (append ys zs)) end)
+      refl
+      (fn (h : Nat) (rest : NatList)
+          (ih : Eq NatList (append (append rest ys) zs) (append rest (append ys zs))) is
+         cong NatList NatList (consWith h)
+           (append (append rest ys) zs) (append rest (append ys zs)) ih end)
+      xs
+  end
+end
+
+reverse : NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is append ih (ncons h nnil) end)
+      xs
+  end
+end
+
+-- reverse (xs ++ ys) = reverse ys ++ reverse xs, by induction on xs.
+--   nnil:  reverse ys = append (reverse ys) nnil                       -> sym (appendNnilR ...)
+--   ncons: reverse (append (h::t) ys) = append (reverse (append t ys)) [h]
+--          cong (++ [h]) IH : = append (append (reverse ys) (reverse t)) [h]
+--          appendAssoc : = append (reverse ys) (append (reverse t) [h]) = append (reverse ys) (reverse (h::t))
+reverseAppend : (xs : NatList) -> (ys : NatList) ->
+                Eq NatList (reverse (append xs ys)) (append (reverse ys) (reverse xs)) is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is (ys : NatList) ->
+                   Eq NatList (reverse (append x ys)) (append (reverse ys) (reverse x)) end)
+      (fn (ys : NatList) is
+         symEq NatList (append (reverse ys) nnil) (reverse ys) (appendNnilR (reverse ys)) end)
+      (fn (h : Nat) (rest : NatList)
+          (ih : (ys : NatList) ->
+                Eq NatList (reverse (append rest ys)) (append (reverse ys) (reverse rest))) is
+         fn (ys : NatList) is
+           transEq NatList
+             (append (reverse (append rest ys)) (ncons h nnil))
+             (append (append (reverse ys) (reverse rest)) (ncons h nnil))
+             (append (reverse ys) (append (reverse rest) (ncons h nnil)))
+             (cong NatList NatList (appendTo (ncons h nnil))
+                (reverse (append rest ys)) (append (reverse ys) (reverse rest)) (ih ys))
+             (appendAssoc (reverse ys) (reverse rest) (ncons h nnil))
+         end
+       end)
+      xs
+  end
+end
+
+-- reverse (reverse xs) = xs, by induction, using the distribution law on the cons step.
+reverseInvol : (xs : NatList) -> Eq NatList (reverse (reverse xs)) xs is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Eq NatList (reverse (reverse x)) x end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (reverse (reverse rest)) rest) is
+         transEq NatList
+           (reverse (append (reverse rest) (ncons h nnil)))
+           (append (reverse (ncons h nnil)) (reverse (reverse rest)))
+           (ncons h rest)
+           (reverseAppend (reverse rest) (ncons h nnil))
+           (cong NatList NatList (consWith h) (reverse (reverse rest)) rest ih) end)
+      xs
+  end
+end

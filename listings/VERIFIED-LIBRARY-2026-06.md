@@ -45,6 +45,8 @@ proofs are by `…Elim` induction with `refl` bases and `cong`/`trans` steps.
 - `ch259_all_append` — `all p (xs ++ ys) = all p xs && all p ys` (homomorphism).
 - `ch291_any_all_demorgan` — quantifier De Morgan: `any p xs = not (all (not . p) xs)`.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
+- `ch292_reverse_involution` — `reverse (append xs ys) = reverse ys ++ reverse xs` and
+  `reverse (reverse xs) = xs` (reverse distribution + involution).
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.
 - `ch279_take_drop` — split-join: `(take n xs) ++ (drop n xs) = xs`.
 - `ch280_reverse_acc` — accumulator reverse equals naive reverse (`revAcc xs nnil = reverse xs`),
