@@ -1,0 +1,97 @@
+-- Chapter 315 — adding then subtracting cancels: monus (a + b) b = a (proven tier).
+--
+-- Truncated subtraction undoes addition (no clamping happens when subtracting exactly what
+-- was added). By induction on b: the base uses monus-zero and add-zero; the step rewrites
+-- a + succ k to succ (a + k) (addSuccR), after which monus (succ _) (succ k) peels to the
+-- predecessor and the IH closes it. Proof-only.
+--
+--   monusAddR : (a b : Nat) -> Eq Nat (monus (natAdd a b) b) a
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+addZeroR : (n : Nat) -> Eq Nat (natAdd n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k zero) k end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k zero) k) is cong Nat Nat succ (natAdd k zero) k ih end)
+      n
+  end
+end
+
+addSuccR : (m : Nat) -> (n : Nat) -> Eq Nat (natAdd m (succ n)) (succ (natAdd m n)) is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd k (succ n)) (succ (natAdd k n)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd k (succ n)) (succ (natAdd k n))) is
+         cong Nat Nat succ (natAdd k (succ n)) (succ (natAdd k n)) ih end)
+      m
+  end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is zero end)
+      (fn (k : Nat) (monK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is monK j end) m
+         end
+       end)
+      a b
+  end
+end
+
+monusZeroR : (n : Nat) -> Eq Nat (monus n zero) n is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (monus x zero) x end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (monus k zero) k) is refl end)
+      n
+  end
+end
+
+-- monusRight a k z = monus z (succ k) — the function for the step congruence.
+monusRight : Nat -> Nat -> Nat is fn (k : Nat) (z : Nat) is monus z (succ k) end end
+
+-- THE THEOREM, by induction on b (a fixed):
+--   b=0:      monus (a + 0) 0 = a + 0 = a            (monusZeroR then addZeroR)
+--   b=succ k: a + succ k = succ (a + k), so monus (a + succ k) (succ k) = monus (a + k) k = a (IH)
+monusAddR : (a : Nat) -> (b : Nat) -> Eq Nat (monus (natAdd a b) b) a is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (monus (natAdd a k) k) a end)
+      (transEq Nat (monus (natAdd a zero) zero) (natAdd a zero) a
+         (monusZeroR (natAdd a zero)) (addZeroR a))
+      (fn (k : Nat) (ih : Eq Nat (monus (natAdd a k) k) a) is
+         transEq Nat
+           (monus (natAdd a (succ k)) (succ k))
+           (monus (succ (natAdd a k)) (succ k))
+           a
+           (cong Nat Nat (monusRight k) (natAdd a (succ k)) (succ (natAdd a k)) (addSuccR a k))
+           ih end)
+      b
+  end
+end
