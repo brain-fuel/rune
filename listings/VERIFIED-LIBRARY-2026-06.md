@@ -168,6 +168,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch271_mul_assoc` — right distributivity + **associativity of multiplication** (`(a*b)*c = a*(b*c)`)
 - `ch347_pow_add` — exponents add: `pow b (m+n) = pow b m * pow b n`.
 - `ch352_pow_mul` — power of a power: `pow b (m*n) = pow (pow b m) n`.
+- `ch353_pow_mul_base` — power distributes over product: `pow (a*b) n = pow a n * pow b n` (+ 4-factor interchange).
 - `ch348_pow_one_base` — one to any power: `pow 1 n = 1`.
 - `ch351_mul_one_pow_one` — mult right identity `b*1 = b` + first power `pow b 1 = b`.
   — the Nat commutative semiring core (comm + assoc + distrib + identities) is now hermetic.
