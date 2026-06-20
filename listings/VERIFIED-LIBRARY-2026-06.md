@@ -74,6 +74,7 @@ inexpressible). Reserved/builtin names to avoid as user identifiers: `Eq`, `U`,
 - `ch323_filter_append` — filter distributes over append: `filter p (xs++ys) = filter p xs ++ filter p ys`.
 - `ch291_any_all_demorgan` — quantifier De Morgan: `any p xs = not (all (not . p) xs)`.
 - `ch262_reverse_length` — `len (reverse xs) = len xs`.
+- `ch325_reverse_replicate` — `reverse (replicate n x) = replicate n x` (n copies are self-reverse).
 - `ch292_reverse_involution` — `reverse (append xs ys) = reverse ys ++ reverse xs` and
   `reverse (reverse xs) = xs` (reverse distribution + involution).
 - `ch268_sum_replicate` — `sum (replicate n x) = n * x`.

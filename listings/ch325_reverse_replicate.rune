@@ -1,0 +1,95 @@
+-- Chapter 325 — reversing n copies is n copies: reverse (replicate n x) = replicate n x.
+--
+-- A list of identical elements is its own reverse. Needs a snoc-replicate lemma (appending
+-- x to the end of n copies equals consing it to the front, since all elements are x), then
+-- the reverse follows by induction. Proof-only.
+--
+--   reverseReplicate : (n x : Nat) -> Eq NatList (reverse (replicate n x)) (replicate n x)
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data NatList : U is
+  nnil  : NatList
+| ncons : Nat -> NatList -> NatList
+end
+
+-- (Eq / refl / subst are ambient, as in ch03.)
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+consWith : Nat -> NatList -> NatList is fn (h : Nat) (t : NatList) is ncons h t end end
+appendTo : NatList -> NatList -> NatList is fn (w : NatList) (z : NatList) is append z w end end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      ys
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end)
+      xs
+  end
+end
+
+replicate : Nat -> Nat -> NatList is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is NatList end)
+      nnil
+      (fn (k : Nat) (ih : NatList) is ncons x ih end)
+      n
+  end
+end
+
+reverse : NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end)
+      nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is append ih (ncons h nnil) end)
+      xs
+  end
+end
+
+-- appending x to the end of n copies of x = consing x to the front (all elements are x).
+snocReplicate : (n : Nat) -> (x : Nat) ->
+                Eq NatList (append (replicate n x) (ncons x nnil)) (ncons x (replicate n x)) is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is Eq NatList (append (replicate k x) (ncons x nnil)) (ncons x (replicate k x)) end)
+      refl
+      (fn (k : Nat) (ih : Eq NatList (append (replicate k x) (ncons x nnil)) (ncons x (replicate k x))) is
+         cong NatList NatList (consWith x)
+           (append (replicate k x) (ncons x nnil)) (ncons x (replicate k x)) ih end)
+      n
+  end
+end
+
+-- THE THEOREM, by induction on n:
+--   0:      reverse nnil = nnil                                                    -> refl
+--   succ k: reverse (ncons x (replicate k x)) = append (reverse (replicate k x)) [x]
+--           cong (++ [x]) IH : = append (replicate k x) [x]
+--           snocReplicate k x : = ncons x (replicate k x) = replicate (succ k) x
+reverseReplicate : (n : Nat) -> (x : Nat) -> Eq NatList (reverse (replicate n x)) (replicate n x) is
+  fn (n : Nat) (x : Nat) is
+    NatElim (fn (k : Nat) is Eq NatList (reverse (replicate k x)) (replicate k x) end)
+      refl
+      (fn (k : Nat) (ih : Eq NatList (reverse (replicate k x)) (replicate k x)) is
+         transEq NatList
+           (append (reverse (replicate k x)) (ncons x nnil))
+           (append (replicate k x) (ncons x nnil))
+           (ncons x (replicate k x))
+           (cong NatList NatList (appendTo (ncons x nnil)) (reverse (replicate k x)) (replicate k x) ih)
+           (snocReplicate k x) end)
+      n
+  end
+end
