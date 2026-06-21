@@ -43,6 +43,15 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | nosql   | DynamoDB | Cosmos DB | Firestore | DynamoDB-local | — |
 | dns     | Route 53 | Azure DNS | Cloud DNS | CoreDNS | — |
 | disk    | EBS | Managed Disk | Persistent Disk | — | — |
+| kms     | KMS | Key Vault key | Cloud KMS | — | — |
+| file    | EFS | Azure Files | Filestore | — | — |
+| stream  | Kinesis | Event Hubs | Pub/Sub | — | — |
+| iam     | IAM role | Managed Identity | Service Account | — | — |
+
+Shared Azure scaffolding is emitted once per graph: the resource group (always), the
+Service Bus namespace (queue), Event Hub namespace (stream), storage account
+(object+file, `needsStorageAccount`), Key Vault (secret+kms, `needsKeyVault`),
+vnet+subnet (compute). 13 rows total.
 
 Data-plane abstractions (queue/kv/object) carry a typed `.rune` interface the app
 CALLS (enqueue/dequeue, put/get/del — over the packed-String code); they type-check on
@@ -98,9 +107,10 @@ type-checks (data-plane), the protocol block accepts/rejects correctly, and `run
 - **Live broker binding:** point the in-process data-plane ops at real backends
   (managed Redis / SQS / S3 clients; RabbitMQ/NATS/Valkey/Garage over the wire) + a live
   Podman round-trip (deferred where Podman is absent). Rust data-plane body.
-- **Matrix breadth:** Networking (VPC/LB/CDN), Messaging & Streaming, Storage breadth
-  (file/archival), Database breadth (warehouse), Security (IAM/KMS/DDoS), Compute breadth
-  (serverless/managed-containers/PaaS), DevOps (CI/CD), AI/ML.
+- **Matrix breadth (remaining):** Networking (VPC/LB/CDN), Storage breadth (archival),
+  Database breadth (warehouse), Security (DDoS), Compute breadth (serverless/managed-
+  containers/PaaS), DevOps (CI/CD), AI/ML. (13 rows landed: queue/kv/object/compute/
+  database/secret/nosql/dns/disk/kms/file/stream/iam.)
 - **Cloud apply:** graduate from `fmt`/`validate` to real `apply` once accounts + creds
   exist (a credentialed milestone, not CI).
 
