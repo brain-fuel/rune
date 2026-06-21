@@ -268,6 +268,8 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 		return infra.Firewall{Name: name}, nil
 	case "logs":
 		return infra.Logs{Name: name}, nil
+	case "registry":
+		return infra.Registry{Name: name}, nil
 	default:
 		return nil, fmt.Errorf("rune deploy: unknown resource %q (run with no args for the kind list)", kind)
 	}

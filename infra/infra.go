@@ -237,6 +237,16 @@ func (Logs) isResource()           {}
 func (Logs) Kind() string          { return "logs" }
 func (l Logs) LogicalName() string { return l.Name }
 
+// Registry is a managed container image registry (AWS ECR / Azure ACR / GCP Artifact
+// Registry) — where Compute's OCI images live. Control-plane, cloud-only.
+type Registry struct {
+	Name string
+}
+
+func (Registry) isResource()           {}
+func (Registry) Kind() string          { return "registry" }
+func (r Registry) LogicalName() string { return r.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20

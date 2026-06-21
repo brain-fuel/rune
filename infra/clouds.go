@@ -219,6 +219,10 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("retention_in_days", "30")
 			h.close()
+		case Registry:
+			h.open("resource \"aws_ecr_repository\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -510,6 +514,13 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("sku", str("PerGB2018"))
 			h.attr("retention_in_days", "30")
 			h.close()
+		case Registry:
+			h.open("resource \"azurerm_container_registry\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("sku", str("Basic"))
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -693,6 +704,12 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("location", str("global"))
 			h.attr("bucket_id", str(v.Name))
 			h.attr("retention_days", "30")
+			h.close()
+		case Registry:
+			h.open("resource \"google_artifact_registry_repository\" %s", str(v.Name))
+			h.attr("repository_id", str(v.Name))
+			h.attr("location", "var.gcp_region")
+			h.attr("format", str("DOCKER"))
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)
