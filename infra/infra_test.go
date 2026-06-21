@@ -68,6 +68,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_iam_role", "azure": "azurerm_user_assigned_identity", "gcp": "google_service_account"}},
 		{"k8s", K8s{Name: "x"}, map[string]string{
 			"aws": "aws_eks_cluster", "azure": "azurerm_kubernetes_cluster", "gcp": "google_container_cluster"}},
+		{"network", Network{Name: "x"}, map[string]string{
+			"aws": "aws_vpc", "azure": "azurerm_virtual_network", "gcp": "google_compute_network"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -282,6 +284,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"stream":   {Stream{Name: "events"}},
 		"iam":      {Identity{Name: "worker"}},
 		"k8s":      {K8s{Name: "cluster"}},
+		"network":  {Network{Name: "vpc"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

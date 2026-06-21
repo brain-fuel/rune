@@ -207,6 +207,16 @@ func (K8s) isResource()           {}
 func (K8s) Kind() string          { return "k8s" }
 func (k K8s) LogicalName() string { return k.Name }
 
+// Network is a managed virtual network / VPC (AWS VPC / Azure VNet / GCP VPC).
+// Control-plane, cloud-only.
+type Network struct {
+	Name string
+}
+
+func (Network) isResource()           {}
+func (Network) Kind() string          { return "network" }
+func (n Network) LogicalName() string { return n.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20

@@ -197,6 +197,10 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("subnet_ids", "var.eks_subnet_ids")
 			h.close()
 			h.close()
+		case Network:
+			h.open("resource \"aws_vpc\" %s", str(v.Name))
+			h.attr("cidr_block", str("10.0.0.0/16"))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -467,6 +471,13 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("type", str("SystemAssigned"))
 			h.close()
 			h.close()
+		case Network:
+			h.open("resource \"azurerm_virtual_network\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("address_space", "[\"10.0.0.0/16\"]")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -624,6 +635,11 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("location", "var.gcp_zone")
 			h.attr("initial_node_count", "1")
+			h.close()
+		case Network:
+			h.open("resource \"google_compute_network\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("auto_create_subnetworks", "false")
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)
