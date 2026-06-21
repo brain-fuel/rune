@@ -1,0 +1,29 @@
+-- examples/queue_demo.rune — the wavelet QUEUE data plane, RUNNING (FIFO).
+--
+-- Enqueues 7 then 8 on a queue, dequeues twice — FIFO, so it prints 7 then 8 — on
+-- every source backend with the in-process binding:
+--
+--   rune run examples/queue_demo.rune main --target js|py|go|erl   -> 7 then 8
+--
+-- SQS / Service Bus / Pub-Sub / RabbitMQ / NATS are ports of the same enqueue/dequeue
+-- ops over a real client.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign enqueueCode : Nat -> Nat -> IO Nat end   -- queue -> message -> ack
+foreign dequeueCode : Nat -> IO Nat end          -- queue -> message (0 if empty)
+foreign printNat    : Nat -> IO Nat end
+
+main : IO Nat is
+  bindIO Nat Nat (enqueueCode 1 7) (fn (a : Nat) is
+    bindIO Nat Nat (enqueueCode 1 8) (fn (b : Nat) is
+      bindIO Nat Nat (dequeueCode 1) (fn (x : Nat) is
+        bindIO Nat Nat (printNat x) (fn (p : Nat) is
+          bindIO Nat Nat (dequeueCode 1) (fn (y : Nat) is printNat y end)
+        end)
+      end)
+    end)
+  end)
+end

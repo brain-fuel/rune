@@ -1,0 +1,23 @@
+-- examples/object_demo.rune — the wavelet OBJECT data plane, RUNNING.
+--
+-- Puts a blob under a key and reads it back, on every source backend with the
+-- in-process binding:
+--
+--   rune run examples/object_demo.rune main --target js|py|go|erl   -> 99
+--
+-- S3 / Blob / Cloud Storage / Garage are ports of the same put/get ops over an S3
+-- client.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign objPutCode : Nat -> Nat -> IO Nat end   -- key -> blob -> ack
+foreign objGetCode : Nat -> IO Nat end          -- key -> blob (0 if absent)
+foreign printNat   : Nat -> IO Nat end
+
+main : IO Nat is
+  bindIO Nat Nat (objPutCode 5 99) (fn (a : Nat) is
+    bindIO Nat Nat (objGetCode 5) (fn (v : Nat) is printNat v end)
+  end)
+end
