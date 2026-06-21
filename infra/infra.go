@@ -197,6 +197,16 @@ func (Identity) isResource()           {}
 func (Identity) Kind() string          { return "iam" }
 func (i Identity) LogicalName() string { return i.Name }
 
+// K8s is a managed Kubernetes cluster (AWS EKS / Azure AKS / GCP GKE) — the managed-
+// containers compute substrate. Control-plane, cloud-only.
+type K8s struct {
+	Name string
+}
+
+func (K8s) isResource()           {}
+func (K8s) Kind() string          { return "k8s" }
+func (k K8s) LogicalName() string { return k.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20

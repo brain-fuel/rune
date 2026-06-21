@@ -66,6 +66,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_kinesis_stream", "azure": "azurerm_eventhub", "gcp": "google_pubsub_topic"}},
 		{"iam", Identity{Name: "x"}, map[string]string{
 			"aws": "aws_iam_role", "azure": "azurerm_user_assigned_identity", "gcp": "google_service_account"}},
+		{"k8s", K8s{Name: "x"}, map[string]string{
+			"aws": "aws_eks_cluster", "azure": "azurerm_kubernetes_cluster", "gcp": "google_container_cluster"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -249,6 +251,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"file":     {File{Name: "shared"}},
 		"stream":   {Stream{Name: "events"}},
 		"iam":      {Identity{Name: "worker"}},
+		"k8s":      {K8s{Name: "cluster"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

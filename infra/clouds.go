@@ -86,6 +86,16 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 		h.attr("sensitive", "true")
 		h.close()
 	}
+	if hasKind(rs, "k8s") {
+		h.blank()
+		h.open("variable \"eks_role_arn\"")
+		h.attr("type", "string")
+		h.close()
+		h.blank()
+		h.open("variable \"eks_subnet_ids\"")
+		h.attr("type", "list(string)")
+		h.close()
+	}
 	h.blank()
 	h.open("provider \"aws\"")
 	h.attr("region", "var.aws_region")
@@ -178,6 +188,14 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"aws_iam_role\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
 			h.attr("assume_role_policy", str("{\"Version\":\"2012-10-17\",\"Statement\":[]}"))
+			h.close()
+		case K8s:
+			h.open("resource \"aws_eks_cluster\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("role_arn", "var.eks_role_arn")
+			h.open("vpc_config")
+			h.attr("subnet_ids", "var.eks_subnet_ids")
+			h.close()
 			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
@@ -434,6 +452,21 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
 			h.attr("location", "azurerm_resource_group.wavelet.location")
 			h.close()
+		case K8s:
+			h.open("resource \"azurerm_kubernetes_cluster\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("dns_prefix", str(v.Name))
+			h.open("default_node_pool")
+			h.attr("name", str("default"))
+			h.attr("node_count", "1")
+			h.attr("vm_size", str("Standard_D2_v2"))
+			h.close()
+			h.open("identity")
+			h.attr("type", str("SystemAssigned"))
+			h.close()
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -585,6 +618,12 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_service_account\" %s", str(v.Name))
 			h.attr("account_id", str(v.Name))
 			h.attr("display_name", str("wavelet "+v.Name))
+			h.close()
+		case K8s:
+			h.open("resource \"google_container_cluster\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("location", "var.gcp_zone")
+			h.attr("initial_node_count", "1")
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

@@ -260,8 +260,10 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 		return infra.Stream{Name: name}, nil
 	case "iam":
 		return infra.Identity{Name: name}, nil
+	case "k8s":
+		return infra.K8s{Name: name}, nil
 	default:
-		return nil, fmt.Errorf("rune deploy: unknown resource %q (queue|kv|object|compute|database|secret|nosql|dns|disk|kms|file|stream|iam)", kind)
+		return nil, fmt.Errorf("rune deploy: unknown resource %q (run with no args for the kind list)", kind)
 	}
 }
 
