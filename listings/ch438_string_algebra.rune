@@ -1,4 +1,4 @@
--- Chapter 100 — A verified STRING algebra (M6 / D-track stdlib; the string story's proof
+-- Chapter 438 — A verified STRING algebra (M6 / D-track stdlib; the string story's proof
 -- side). The REPL prelude represents a string as a PACKED bignum (`Bytes`, UTF-8 bytes
 -- low-byte-first + a sentinel) so concatenation is fast and deploys to every backend; this
 -- chapter gives the MATHEMATICAL MODEL that runtime refines — a string as a list of bytes —

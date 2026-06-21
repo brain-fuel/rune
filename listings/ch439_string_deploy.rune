@@ -1,11 +1,11 @@
--- Chapter 101 — A DEPLOYED string program (M6 / D-track stdlib; the string story's runtime
+-- Chapter 439 — A DEPLOYED string program (M6 / D-track stdlib; the string story's runtime
 -- side). A self-contained file that concatenates string literals with the `++` operator
 -- (defined here as packed-byte append, the same operator the REPL prelude overloads) and
 -- prints the result via the D6 `printStrCode` host primitive — so `rune run` EXECUTES it on
 -- a real backend (js / py / go / erl all print "Hello, wootz!"). The REPL prelude is
 -- REPL-only, so a deployed file carries its own definitions, as every listing does. This is
 -- the "++ in real code, not just the REPL" half of the string goal.
---   rune run listings/ch101_string_deploy.rune main [--target erl|py|go]
+--   rune run listings/ch439_string_deploy.rune main [--target erl|py|go]
 
 data Unit : U is unit : Unit end
 data Bool : U is true : Bool | false : Bool end

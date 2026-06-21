@@ -792,6 +792,45 @@ first and forces only on mismatch, so the fast path logs nothing.
     re-entered def is latest-wins. Multi-line works for all forms (the parser's
     `ErrIncomplete` drives the continuation loop). So the REPL can make/edit types,
     functions, foreign axioms, instances, and multi-line blocks — `TestREPLDeclParity`.
+  - **STATE SINCE v3.24 (v3.25.0 → v3.290.0, ~200 listings).** This phase-map detail
+    above stops at v3.24; the authoritative CURRENT build state + the live frontier is the
+    DAG plan (`~/.claude/plans/humble-humming-elephant.md`, with the `ref_docs/wootz/`
+    design records). Summary of what landed since, by track:
+    - **D3 reals/LA + R-FFI** — f64 `Float` + a contract-GUARDED BLAS kernel across all
+      backends (ch217), the OpenBLAS SWAP on the native C/LLVM backends behind a tolerance
+      contract (ch218), arbitrary-length array marshalling (ch219), `gemm` matrix BLAS
+      (ch220). Effectively done bar `with post guard` sugar + JVM float bodies.
+    - **D4 ML interop** — the NumPy suite (npDot/npMean/npMatSum/npVar/npMax/npNorm,
+      ch221–227), each REAL numpy on py / OpenBLAS on native / hand floor elsewhere, all
+      contract-guarded + 7-backend identical; a capstone mean→center→norm pipeline (ch228);
+      SHAPES-PROVEN safeDot (a ragged call is a compile error, ch233). Remaining: plotting
+      (matplotlib absent), the `Array dt sh` handle + CPython embed.
+    - **E3/E4 distributed** — the big one. General all-P adequacy CLOSED (soundness ch409 +
+      completeness ch421 over the full four-label calculus); a VERIFIED CRDT corpus over two
+      lattices carrying convergence+safety+stability (G-Counter/G-Set/PN-Counter
+      ch410–419), refutations matching the simulator's law linter (ch416/417); the
+      `internal/sim` + `rune simulate` better-than-Winglang SIMULATOR (v3.230–v3.248,
+      gates by observed behaviour — safety/robustness/durability — with a `Diagnose` CvRDT
+      law linter + `Stabilize` liveness check); expanded algebra (2P-Set ch422, the generic
+      CvRDT SEC theorem ch423, VECTOR CLOCKS ch424–427, causal delivery ch428, MV-Register
+      ch429, OR-Set ch430, inflation ch431, gossip-converges ch432, N-replica VCs ch437);
+      and the LIVE-ACTOR projection — the verified replicated counter RUNS as gossiping BEAM
+      processes, the fault-tolerance trilogy live (converge/durability/recovery ch433–435)
+      + the GENERIC protocol→actors library `serveG` over any CvRDT (ch436). Remaining E4:
+      only the `protocol … end` surface sugar + `deploy` verb (design-gated, needs user
+      input; the projection mechanism is done as a library).
+    - **REPL/tower DX (Savage, cross-cutting, branch `feat/tower-arithmetic-ops`)** —
+      ergonomic verified STRINGS (`++` Semigroup/Monoid, `runes` view, Show, slicing,
+      `{expr}` interpolation; algebra via a `toCodes/fromCodes` view, packed repr untouched,
+      deployed all backends, ch438_string_algebra/ch439_string_deploy); DECIMAL literal
+      input (`1.3`/`1.{3}` → exact Frac); overloaded tower `+ - *` via one `Num` Σ-record;
+      and prefix NEGATION promotion (v3.290.0) — `negate` is result-indexed `NegR R A`
+      (`Whole→Int`/`Int→Int`/`Frac→Frac`), so `-3 : Int` (was `: Frac`), `-1/3 : Frac`
+      preserved via a new `Div Int`. All surface/elaborator/prelude-only, outer kernel fixed.
+    - **Frontier (open nodes):** E4 surface sugar (design-gated — user decision), D4 tail
+      (plotting + CPython embed), D5 tail (non-BEAM scheduler shim + unbounded-stream
+      Eventually), D7 live hot-reload (`code_change` on BEAM). Everything else landed or
+      parked by demonstrated-need (PARKING-LOT.md). See the DAG for deps + implications.
 
 ## Standing rules
 
