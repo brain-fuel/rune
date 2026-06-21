@@ -322,7 +322,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{},
 	}
 }
 

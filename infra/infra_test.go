@@ -225,6 +225,7 @@ func TestFOSSBackendsEmit(t *testing.T) {
 		{"valkey", KV{Name: "k"}}, {"garage", Bucket{Name: "b"}},
 		{"podman", Compute{Name: "c", Replicas: 2}}, {"postgres", Database{Name: "d"}},
 		{"dynamodb", NoSQL{Name: "n"}}, {"coredns", DNS{Name: "z"}},
+		{"localregistry", Registry{Name: "r"}},
 	}
 	for _, c := range cases {
 		e, ok := ByTarget(c.backend)

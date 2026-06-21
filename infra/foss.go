@@ -371,3 +371,35 @@ func (Garage) Emit(rs []Resource) (Artifact, error) {
 		Logical: logicalSet(rs),
 	}, nil
 }
+
+// LocalRegistry is the self-hosted container-registry backend (the CNCF Distribution
+// `registry:2` image — the same OCI client serves ECR/ACR/Artifact Registry and this
+// local registry). It backs the "registry" abstraction with NO cloud account, so a
+// workload's images can be pushed/pulled entirely on the dev host.
+type LocalRegistry struct{}
+
+func (LocalRegistry) Target() string { return "localregistry" }
+func (LocalRegistry) Cloud() bool    { return false }
+
+func (LocalRegistry) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("localregistry", "registry", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Distribution (registry:2) backend for the wavelet \"registry\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (push to localhost:5000/<image>)\n" +
+		"services:\n" +
+		composeService("registry", "docker.io/library/registry:2",
+			[]string{"5000:5000"}, "")
+	env := map[string]string{
+		"WAVELET_REGISTRY_BACKEND": "localregistry",
+		"WAVELET_REGISTRY_URL":     "localhost:5000",
+	}
+	for _, n := range names {
+		env["WAVELET_REGISTRY_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}

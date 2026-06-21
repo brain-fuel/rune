@@ -51,7 +51,7 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | network | VPC | VNet | VPC | — | — |
 | firewall| WAF | DDoS Plan | Cloud Armor | — | — |
 | logs    | CloudWatch | Log Analytics | Cloud Logging | — | — |
-| registry| ECR | ACR | Artifact Registry | — | — |
+| registry| ECR | ACR | Artifact Registry | registry:2 (Distribution) | — |
 | paas    | Beanstalk | App Service plan | App Engine | — | — |
 | cdn     | CloudFront | CDN profile | Cloud CDN backend bucket | — | — |
 | lb      | ELBv2 | Load Balancer | Forwarding rule | — | — |
