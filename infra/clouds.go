@@ -67,6 +67,13 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 		h.attr("sensitive", "true")
 		h.close()
 	}
+	if hasKind(rs, "secret") {
+		h.blank()
+		h.open("variable \"secret_value\"")
+		h.attr("type", "string")
+		h.attr("sensitive", "true")
+		h.close()
+	}
 	h.blank()
 	h.open("provider \"aws\"")
 	h.attr("region", "var.aws_region")
@@ -109,6 +116,15 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("password", "var.db_password")
 			h.attr("skip_final_snapshot", "true")
 			h.close()
+		case Secret:
+			h.open("resource \"aws_secretsmanager_secret\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.close()
+			h.blank()
+			h.open("resource \"aws_secretsmanager_secret_version\" %s", str(v.Name))
+			h.attr("secret_id", "aws_secretsmanager_secret."+v.Name+".id")
+			h.attr("secret_string", "var.secret_value")
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -147,6 +163,17 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 	if hasKind(rs, "database") {
 		h.blank()
 		h.open("variable \"db_password\"")
+		h.attr("type", "string")
+		h.attr("sensitive", "true")
+		h.close()
+	}
+	if hasKind(rs, "secret") {
+		h.blank()
+		h.open("variable \"azure_tenant_id\"")
+		h.attr("type", "string")
+		h.close()
+		h.blank()
+		h.open("variable \"secret_value\"")
 		h.attr("type", "string")
 		h.attr("sensitive", "true")
 		h.close()
@@ -193,6 +220,16 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 		h.attr("location", "azurerm_resource_group.wavelet.location")
 		h.attr("account_tier", str("Standard"))
 		h.attr("account_replication_type", str("LRS"))
+		h.close()
+	}
+	if hasKind(rs, "secret") {
+		h.blank()
+		h.open("resource \"azurerm_key_vault\" \"wavelet\"")
+		h.attr("name", str("wavelet-kv"))
+		h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+		h.attr("location", "azurerm_resource_group.wavelet.location")
+		h.attr("tenant_id", "var.azure_tenant_id")
+		h.attr("sku_name", str("standard"))
 		h.close()
 	}
 	for _, r := range rs {
@@ -268,6 +305,12 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("administrator_password", "var.db_password")
 			h.attr("sku_name", str("B_Standard_B1ms"))
 			h.attr("storage_mb", "32768")
+			h.close()
+		case Secret:
+			h.open("resource \"azurerm_key_vault_secret\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("value", "var.secret_value")
+			h.attr("key_vault_id", "azurerm_key_vault.wavelet.id")
 			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
@@ -357,6 +400,18 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("settings")
 			h.attr("tier", str("db-f1-micro"))
 			h.close()
+			h.close()
+		case Secret:
+			h.open("resource \"google_secret_manager_secret\" %s", str(v.Name))
+			h.attr("secret_id", str(v.Name))
+			h.open("replication")
+			h.emptyBlock("auto")
+			h.close()
+			h.close()
+			h.blank()
+			h.open("resource \"google_secret_manager_secret_version\" %s", str(v.Name))
+			h.attr("secret", "google_secret_manager_secret."+v.Name+".id")
+			h.attr("secret_data", "var.secret_value")
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

@@ -105,6 +105,17 @@ func (Database) isResource()           {}
 func (Database) Kind() string          { return "database" }
 func (d Database) LogicalName() string { return d.Name }
 
+// Secret is a managed secret (a named credential the value of which is supplied out
+// of band, never in the config). Control-plane: AWS Secrets Manager / Azure Key Vault
+// / GCP Secret Manager native, a local dotenv file self-hosted.
+type Secret struct {
+	Name string
+}
+
+func (Secret) isResource()           {}
+func (Secret) Kind() string          { return "secret" }
+func (s Secret) LogicalName() string { return s.Name }
+
 // LogicalResource is the abstract shape an emitter claims to realize for a given
 // resource: the agnostic kind + name, INDEPENDENT of the concrete provider type.
 // Two targets are EQUIVALENT for a configuration when their LogicalResource sets are
@@ -141,7 +152,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{},
 	}
 }
 

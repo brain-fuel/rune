@@ -193,6 +193,32 @@ func (Postgres) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// Dotenv is the local self-hosted secret backend: a `secrets.env` template the
+// developer fills in, no service to run. The data stays out of the committed config
+// (the template carries only the keys), matching the cloud secret stores' contract.
+type Dotenv struct{}
+
+func (Dotenv) Target() string { return "dotenv" }
+func (Dotenv) Cloud() bool    { return false }
+
+func (Dotenv) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("dotenv", "secret", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	var secrets strings.Builder
+	secrets.WriteString("# wavelet secrets template - fill in values, do NOT commit the filled file.\n")
+	env := map[string]string{"WAVELET_SECRET_BACKEND": "dotenv"}
+	for _, n := range names {
+		fmt.Fprintf(&secrets, "%s=\n", strings.ToUpper(n))
+		env["WAVELET_SECRET_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"secrets.env": secrets.String(), "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Valkey is the self-hosted key/value backend (Redis wire protocol — the same
 // client serves managed Redis and self-hosted Valkey).
 type Valkey struct{}

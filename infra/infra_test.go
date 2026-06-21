@@ -50,6 +50,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_instance", "azure": "azurerm_linux_virtual_machine", "gcp": "google_compute_instance"}},
 		{"database", Database{Name: "x"}, map[string]string{
 			"aws": "aws_db_instance", "azure": "azurerm_postgresql_flexible_server", "gcp": "google_sql_database_instance"}},
+		{"secret", Secret{Name: "x"}, map[string]string{
+			"aws": "aws_secretsmanager_secret", "azure": "azurerm_key_vault_secret", "gcp": "google_secret_manager_secret"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -151,6 +153,22 @@ func TestDatabasePostgres(t *testing.T) {
 	}
 }
 
+// TestSecretDotenv checks the local secret backend emits a keys-only template.
+func TestSecretDotenv(t *testing.T) {
+	e, _ := ByTarget("dotenv")
+	art, err := e.Emit([]Resource{Secret{Name: "apikey"}})
+	if err != nil {
+		t.Fatalf("dotenv emit: %v", err)
+	}
+	tmpl := art.Files["secrets.env"]
+	if !strings.Contains(tmpl, "APIKEY=") {
+		t.Errorf("secrets.env missing the key template:\n%s", tmpl)
+	}
+	if strings.Contains(tmpl, "APIKEY=secret") || strings.Contains(tmpl, "APIKEY=value") {
+		t.Errorf("secrets.env must not carry a value")
+	}
+}
+
 // TestQueueFOSSBackends checks the self-hosted queue backends emit a runnable Compose
 // spec + a connection.env, with the same logical set as the clouds.
 func TestQueueFOSSBackends(t *testing.T) {
@@ -195,6 +213,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"object":  {Bucket{Name: "assets"}},
 		"compute":  {Compute{Name: "worker", Image: "docker.io/library/erlang:slim", Replicas: 3}},
 		"database": {Database{Name: "appdb"}},
+		"secret":   {Secret{Name: "apikey"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {
