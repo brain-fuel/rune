@@ -17,6 +17,12 @@ var dataPlaneBackends = []struct{ target, bin string }{
 
 // runProgramCapturing runs a source program's `main` on a target, capturing stdout.
 func runProgramCapturing(t *testing.T, src, target string) string {
+	return runNamedCapturing(t, src, "main", target)
+}
+
+// runNamedCapturing runs a named definition of a source program on a target,
+// capturing stdout.
+func runNamedCapturing(t *testing.T, src, name, target string) string {
 	t.Helper()
 	f, err := os.CreateTemp("", "wavelet-*.rune")
 	if err != nil {
@@ -38,7 +44,7 @@ func runProgramCapturing(t *testing.T, src, target string) string {
 		done <- buf.String()
 	}()
 	var banner bytes.Buffer
-	derr := runDeploy([]string{f.Name(), "main", "--target", target}, &banner)
+	derr := runDeploy([]string{f.Name(), name, "--target", target}, &banner)
 	w.Close()
 	os.Stdout = old
 	got := <-done
@@ -81,6 +87,28 @@ func TestDataPlaneRunsCrossBackend(t *testing.T) {
 			i7, i8 := strings.Index(got, "7"), strings.Index(got, "8")
 			if i7 < 0 || i8 < 0 || i7 > i8 {
 				t.Errorf("[%s] queue not FIFO (7 before 8):\n%s", bk.target, got)
+			}
+		})
+	}
+}
+
+// TestProtocolBlockRunsConverged gates examples/gcounter_protocol.rune: the SAME
+// protocol-block source that carries the convergence proofs and `rune simulate`s also
+// RUNS its converged value on a real backend (BEAM + JS) to the certified 3 — proved,
+// simulated, AND deployed from one source, through the protocol block.
+func TestProtocolBlockRunsConverged(t *testing.T) {
+	src, err := os.ReadFile("../../examples/gcounter_protocol.rune")
+	if err != nil {
+		t.Fatalf("read gcounter_protocol.rune: %v", err)
+	}
+	for _, bk := range []struct{ target, bin string }{{"erl", "escript"}, {"js", "node"}} {
+		t.Run(bk.target, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			got := runNamedCapturing(t, string(src), "converged", bk.target)
+			if !strings.Contains(got, "succ (succ (succ zero))") {
+				t.Errorf("[%s] protocol block's converged != 3:\n%s", bk.target, got)
 			}
 		})
 	}
