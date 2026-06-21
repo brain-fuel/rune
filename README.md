@@ -101,6 +101,28 @@ reach the same value), executed on `escript` from the same source that carries t
 convergence proof. That is the deploy half of the thesis on real distributed
 actors.
 
+## Wavelet: the cloud-abstraction layer
+
+`rune deploy` carries the thesis to real infrastructure. A `protocol … end` block is
+a checked CvRDT grouping: it is *rejected* unless it proves its merge is a
+join-semilattice (`mergeComm`/`mergeIdem`/`mergeAssoc`), so convergence is structural.
+`rune deploy FILE --target beam` then takes a verified protocol and **runs it** as live
+gossiping actors on a real backend — proven, deployed, running, from one source.
+
+The infra half is a provider-agnostic resource layer (`infra/`, the deploy-side dual of
+`codegen/`): one agnostic configuration → an **equivalent deployment on every cloud**.
+Eighteen resource kinds (queue, kv, object, compute, database, secret, nosql, dns, disk,
+kms, file, stream, iam, k8s, network, firewall, logs, registry) each lower to AWS /
+Azure / GCP as OpenTofu/Terraform HCL (canonical, `terraform fmt -check`-clean) and, for
+the data-plane kinds, to a self-hosted backend that runs locally under Podman
+(RabbitMQ/NATS, Valkey, Garage, Postgres). `rune deploy --manifest app.wav --backend
+aws` emits a whole app's graph as one `main.tf`, each provider's shared scaffolding
+de-duplicated; the same manifest lowers to the same *logical* resource set on every
+cloud (the equivalence gate). The three data-plane abstractions (queue/kv/object) also
+**run**: their foreign ops bind to in-process host bodies, so `rune run
+examples/kv_demo.rune --target js|py|go|erl` does a real get-after-put. Managed Redis /
+SQS / S3 are ports of the same ops over a live client. See `ref_docs/wootz/R-INFRA.md`.
+
 ## v2.0.0
 
 v2 extends the equality stratum with **quotients**, and proves the extension
