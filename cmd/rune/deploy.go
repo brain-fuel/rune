@@ -166,8 +166,10 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 		return infra.Bucket{Name: name}, nil
 	case "compute":
 		return infra.Compute{Name: name, Image: image, Replicas: replicas}, nil
+	case "database":
+		return infra.Database{Name: name}, nil
 	default:
-		return nil, fmt.Errorf("rune deploy: unknown resource %q (queue|kv|object|compute)", kind)
+		return nil, fmt.Errorf("rune deploy: unknown resource %q (queue|kv|object|compute|database)", kind)
 	}
 }
 

@@ -60,6 +60,13 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 		h.attr("default", str("ami-0c101f26f147fa7fd"))
 		h.close()
 	}
+	if hasKind(rs, "database") {
+		h.blank()
+		h.open("variable \"db_password\"")
+		h.attr("type", "string")
+		h.attr("sensitive", "true")
+		h.close()
+	}
 	h.blank()
 	h.open("provider \"aws\"")
 	h.attr("region", "var.aws_region")
@@ -91,6 +98,16 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 		case Bucket:
 			h.open("resource \"aws_s3_bucket\" %s", str(v.Name))
 			h.attr("bucket", str(v.Name))
+			h.close()
+		case Database:
+			h.open("resource \"aws_db_instance\" %s", str(v.Name))
+			h.attr("identifier", str(v.Name))
+			h.attr("engine", str("postgres"))
+			h.attr("instance_class", str("db.t3.micro"))
+			h.attr("allocated_storage", "20")
+			h.attr("username", str("wavelet"))
+			h.attr("password", "var.db_password")
+			h.attr("skip_final_snapshot", "true")
 			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
@@ -125,6 +142,13 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 		h.blank()
 		h.open("variable \"azure_ssh_public_key\"")
 		h.attr("type", "string")
+		h.close()
+	}
+	if hasKind(rs, "database") {
+		h.blank()
+		h.open("variable \"db_password\"")
+		h.attr("type", "string")
+		h.attr("sensitive", "true")
 		h.close()
 	}
 	h.blank()
@@ -234,6 +258,17 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("storage_account_name", "azurerm_storage_account.wavelet.name")
 			h.attr("container_access_type", str("private"))
 			h.close()
+		case Database:
+			h.open("resource \"azurerm_postgresql_flexible_server\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("version", str("15"))
+			h.attr("administrator_login", str("wavelet"))
+			h.attr("administrator_password", "var.db_password")
+			h.attr("sku_name", str("B_Standard_B1ms"))
+			h.attr("storage_mb", "32768")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -313,6 +348,15 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_storage_bucket\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
 			h.attr("location", "var.gcp_region")
+			h.close()
+		case Database:
+			h.open("resource \"google_sql_database_instance\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("database_version", str("POSTGRES_15"))
+			h.attr("deletion_protection", "false")
+			h.open("settings")
+			h.attr("tier", str("db-f1-micro"))
+			h.close()
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

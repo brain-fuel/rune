@@ -48,6 +48,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_s3_bucket", "azure": "azurerm_storage_container", "gcp": "google_storage_bucket"}},
 		{"compute", Compute{Name: "x", Replicas: 2}, map[string]string{
 			"aws": "aws_instance", "azure": "azurerm_linux_virtual_machine", "gcp": "google_compute_instance"}},
+		{"database", Database{Name: "x"}, map[string]string{
+			"aws": "aws_db_instance", "azure": "azurerm_postgresql_flexible_server", "gcp": "google_sql_database_instance"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -134,6 +136,21 @@ func TestComputePodman(t *testing.T) {
 	}
 }
 
+// TestDatabasePostgres checks the self-hosted PostgreSQL backend.
+func TestDatabasePostgres(t *testing.T) {
+	e, _ := ByTarget("postgres")
+	art, err := e.Emit([]Resource{Database{Name: "appdb"}})
+	if err != nil {
+		t.Fatalf("postgres emit: %v", err)
+	}
+	if !strings.Contains(art.Files["compose.yaml"], "postgres:16") {
+		t.Errorf("postgres compose missing image:\n%s", art.Files["compose.yaml"])
+	}
+	if !strings.Contains(art.Files["connection.env"], "WAVELET_DATABASE_BACKEND=postgres") {
+		t.Errorf("postgres connection.env wrong:\n%s", art.Files["connection.env"])
+	}
+}
+
 // TestQueueFOSSBackends checks the self-hosted queue backends emit a runnable Compose
 // spec + a connection.env, with the same logical set as the clouds.
 func TestQueueFOSSBackends(t *testing.T) {
@@ -176,7 +193,8 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"queue":   {Queue{Name: "events"}},
 		"kv":      {KV{Name: "cache"}},
 		"object":  {Bucket{Name: "assets"}},
-		"compute": {Compute{Name: "worker", Image: "docker.io/library/erlang:slim", Replicas: 3}},
+		"compute":  {Compute{Name: "worker", Image: "docker.io/library/erlang:slim", Replicas: 3}},
+		"database": {Database{Name: "appdb"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

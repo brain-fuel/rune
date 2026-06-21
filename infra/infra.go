@@ -93,6 +93,18 @@ func (c Compute) imageRef() string {
 	return c.Image
 }
 
+// Database is a managed relational (SQL) database — a control-plane resource the app
+// connects to via the emitted connection config (no data-plane .rune interface; the
+// SQL surface is a separate design). PostgreSQL is the anchor engine (RDS / Azure
+// Flexible Server / Cloud SQL native, PostgreSQL self-hosted).
+type Database struct {
+	Name string
+}
+
+func (Database) isResource()           {}
+func (Database) Kind() string          { return "database" }
+func (d Database) LogicalName() string { return d.Name }
+
 // LogicalResource is the abstract shape an emitter claims to realize for a given
 // resource: the agnostic kind + name, INDEPENDENT of the concrete provider type.
 // Two targets are EQUIVALENT for a configuration when their LogicalResource sets are
@@ -129,7 +141,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{},
 	}
 }
 

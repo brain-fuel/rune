@@ -157,6 +157,42 @@ func (Podman) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// Postgres is the self-hosted relational-database backend (the PostgreSQL anchor
+// engine — the same wire protocol/driver serves managed RDS/Flexible Server/Cloud
+// SQL and self-hosted Postgres).
+type Postgres struct{}
+
+func (Postgres) Target() string { return "postgres" }
+func (Postgres) Cloud() bool    { return false }
+
+func (Postgres) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("postgres", "database", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - PostgreSQL backend for the wavelet \"database\" abstraction.\n" +
+		"# bring up:  podman-compose up -d\n" +
+		"services:\n" +
+		"  postgres:\n" +
+		"    image: docker.io/library/postgres:16\n" +
+		"    environment:\n" +
+		"      - POSTGRES_USER=wavelet\n" +
+		"      - POSTGRES_PASSWORD=wavelet\n" +
+		"    ports:\n" +
+		"      - \"5432:5432\"\n"
+	env := map[string]string{
+		"WAVELET_DATABASE_BACKEND": "postgres",
+		"WAVELET_DATABASE_URL":     "postgres://wavelet:wavelet@localhost:5432/wavelet",
+	}
+	for _, n := range names {
+		env["WAVELET_DATABASE_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Valkey is the self-hosted key/value backend (Redis wire protocol — the same
 // client serves managed Redis and self-hosted Valkey).
 type Valkey struct{}
