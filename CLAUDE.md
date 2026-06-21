@@ -799,7 +799,9 @@ first and forces only on mismatch, so the fast path logs nothing.
     - **D3 reals/LA + R-FFI** — f64 `Float` + a contract-GUARDED BLAS kernel across all
       backends (ch217), the OpenBLAS SWAP on the native C/LLVM backends behind a tolerance
       contract (ch218), arbitrary-length array marshalling (ch219), `gemm` matrix BLAS
-      (ch220). Effectively done bar `with post guard` sugar + JVM float bodies.
+      (ch220). The `with post guard` SUGAR LANDED (v3.317.0, ch440 — a pure-parser
+      postfix desugaring to a let-bound single-eval check-and-blame; GRAMMAR §5.8;
+      REPL-tested). Done bar JVM float bodies (java-25 emitter, untestable on local java-17).
     - **D4 ML interop** — the NumPy suite (npDot/npMean/npMatSum/npVar/npMax/npNorm,
       ch221–227), each REAL numpy on py / OpenBLAS on native / hand floor elsewhere, all
       contract-guarded + 7-backend identical; a capstone mean→center→norm pipeline (ch228);
@@ -830,20 +832,32 @@ first and forces only on mismatch, so the fast path logs nothing.
     - **E4 / WAVELET cloud-abstraction layer (v3.291.0 → v3.295.0, branch
       feat/wavelet-infra, ref_docs/wootz/R-INFRA.md).** E4's deploy half opened as a
       provider-agnostic infra layer — a new `infra/` package (the deploy-side dual of
-      `codegen/`: Resource model → Emitter plugins, zero core). LANDED: five matrix rows
-      (queue/kv/object/compute/database) each across AWS/Azure/GCP (OpenTofu/Terraform
-      HCL, `terraform fmt -check` gated) + a self-hosted Podman backend (RabbitMQ/NATS,
-      Valkey, Garage, Podman, Postgres); the equal-config→equivalent-deployment
-      equivalence gate; data-plane `.rune` interfaces (queue/kv/object) that type-check;
-      the `protocol … end` block (a CONTEXTUAL keyword — checked CvRDT grouping that
-      REJECTS a missing convergence proof); and `rune deploy` in two modes — infra
-      (`--resource …`) and workload (`FILE --target beam` RUNS a verified protocol's
-      actors live on BEAM to convergence, the Lambert gate). REMAINING: runtime
-      data-plane foreign-op binding + live Podman round-trip; matrix breadth
-      (networking/messaging/storage/security/devops/ai-ml); real cloud apply.
-    - **Frontier (open nodes):** the wavelet matrix tail (above), D4 tail
-      (plotting + CPython embed), D5 tail (non-BEAM scheduler shim + unbounded-stream
-      Eventually), D7 live hot-reload (`code_change` on BEAM). Everything else landed or
+      `codegen/`: Resource model → Emitter plugins, zero core). LANDED: a 22-ROW MATRIX
+      (queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/stream/cdn/lb/
+      metrics/iam/k8s/network/firewall/logs/registry/paas) each across AWS/Azure/GCP
+      (OpenTofu/Terraform HCL, `fmt -check` gated, canonical hcl writer) + 15 self-hosted
+      FOSS-under-Podman backends (RabbitMQ/NATS, Valkey, Garage, Podman, Postgres, Dotenv,
+      DynamoLocal, CoreDNS, registry:2, Redpanda, Loki, Prometheus, k3s, NFS, Vault +
+      Vault-transit) covering every row with a sane self-hosted form — exercisable with NO
+      cloud account; the equal-config→equivalent-deployment equivalence gate (app-level,
+      incl cdn+lb); data-plane `.rune` interfaces (queue/kv/object) that type-check + RUN
+      cross-backend; the `protocol … end` block (CONTEXTUAL keyword — checked CvRDT
+      grouping that REJECTS a missing convergence proof); `infra.Kinds()` single-sourcing
+      the kind list + CLI-completeness gates (every kind × every cloud, single + manifest
+      modes); examples/app.wav a 9-resource web app; and `rune deploy` in two modes — infra
+      (`--resource …`/`--manifest`) and workload (`FILE --target beam` RUNS a verified
+      protocol's actors live on BEAM to convergence, the Lambert gate). REMAINING: runtime
+      data-plane foreign-op binding + live Podman round-trip; the dependency-heavy matrix
+      tail (serverless/warehouse/archival/devops/ai-ml — each has one messy provider);
+      real cloud apply.
+    - **D5 distributed liveness** — UNBOUNDED restart-liveness LANDED (v3.317.x, ch206:
+      `runStuck`/`stableRestart` prove recovery persists for ALL step counts; `unmonitoredStuck`
+      the safety dual), the ∀-strengthening of the bounded k=1 witness, by conversion.
+    - **Frontier (open nodes):** the dependency-heavy wavelet matrix tail + live Podman
+      round-trip (above), D4 tail (plotting + CPython embed), D5 tail (non-BEAM scheduler
+      shim + COINDUCTIVE-stream Eventually — the inductive always-property is done; the
+      stream version hits the documented dfix wall), D7 live hot-reload (`code_change` on
+      BEAM). Everything else landed or
       parked by demonstrated-need (PARKING-LOT.md). See the DAG for deps + implications.
 
 ## Standing rules
