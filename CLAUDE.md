@@ -827,7 +827,21 @@ first and forces only on mismatch, so the fast path logs nothing.
       and prefix NEGATION promotion (v3.290.0) — `negate` is result-indexed `NegR R A`
       (`Whole→Int`/`Int→Int`/`Frac→Frac`), so `-3 : Int` (was `: Frac`), `-1/3 : Frac`
       preserved via a new `Div Int`. All surface/elaborator/prelude-only, outer kernel fixed.
-    - **Frontier (open nodes):** E4 surface sugar (design-gated — user decision), D4 tail
+    - **E4 / WAVELET cloud-abstraction layer (v3.291.0 → v3.295.0, branch
+      feat/wavelet-infra, ref_docs/wootz/R-INFRA.md).** E4's deploy half opened as a
+      provider-agnostic infra layer — a new `infra/` package (the deploy-side dual of
+      `codegen/`: Resource model → Emitter plugins, zero core). LANDED: five matrix rows
+      (queue/kv/object/compute/database) each across AWS/Azure/GCP (OpenTofu/Terraform
+      HCL, `terraform fmt -check` gated) + a self-hosted Podman backend (RabbitMQ/NATS,
+      Valkey, Garage, Podman, Postgres); the equal-config→equivalent-deployment
+      equivalence gate; data-plane `.rune` interfaces (queue/kv/object) that type-check;
+      the `protocol … end` block (a CONTEXTUAL keyword — checked CvRDT grouping that
+      REJECTS a missing convergence proof); and `rune deploy` in two modes — infra
+      (`--resource …`) and workload (`FILE --target beam` RUNS a verified protocol's
+      actors live on BEAM to convergence, the Lambert gate). REMAINING: runtime
+      data-plane foreign-op binding + live Podman round-trip; matrix breadth
+      (networking/messaging/storage/security/devops/ai-ml); real cloud apply.
+    - **Frontier (open nodes):** the wavelet matrix tail (above), D4 tail
       (plotting + CPython embed), D5 tail (non-BEAM scheduler shim + unbounded-stream
       Eventually), D7 live hot-reload (`code_change` on BEAM). Everything else landed or
       parked by demonstrated-need (PARKING-LOT.md). See the DAG for deps + implications.
