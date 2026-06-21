@@ -249,6 +249,46 @@ func (DynamoLocal) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// CoreDNS is the self-hosted DNS backend (CoreDNS, Apache-2.0). The compose mounts a
+// minimal Corefile serving the zone(s) from a hosts file.
+type CoreDNS struct{}
+
+func (CoreDNS) Target() string { return "coredns" }
+func (CoreDNS) Cloud() bool    { return false }
+
+func (CoreDNS) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("coredns", "dns", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - CoreDNS backend for the wavelet \"dns\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (Corefile is mounted from this dir)\n" +
+		"services:\n" +
+		"  coredns:\n" +
+		"    image: docker.io/coredns/coredns:latest\n" +
+		"    command: [\"-conf\", \"/etc/coredns/Corefile\"]\n" +
+		"    ports:\n" +
+		"      - \"5353:53/udp\"\n" +
+		"    volumes:\n" +
+		"      - ./Corefile:/etc/coredns/Corefile:ro\n"
+	corefile := ".:53 {\n    health\n    log\n    errors\n    forward . 1.1.1.1\n}\n"
+	env := map[string]string{
+		"WAVELET_DNS_BACKEND": "coredns",
+		"WAVELET_DNS_ADDR":    "localhost:5353",
+	}
+	for _, n := range names {
+		env["WAVELET_DNS_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files: map[string]string{
+			"compose.yaml":   compose,
+			"Corefile":       corefile,
+			"connection.env": envFile(env),
+		},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Valkey is the self-hosted key/value backend (Redis wire protocol — the same
 // client serves managed Redis and self-hosted Valkey).
 type Valkey struct{}

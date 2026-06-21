@@ -126,6 +126,25 @@ func (NoSQL) isResource()           {}
 func (NoSQL) Kind() string          { return "nosql" }
 func (n NoSQL) LogicalName() string { return n.Name }
 
+// DNS is a managed DNS zone (Route 53 / Azure DNS / Cloud DNS native, CoreDNS
+// self-hosted). Domain is the zone's domain; it defaults to "<name>.example.com".
+type DNS struct {
+	Name   string
+	Domain string
+}
+
+func (DNS) isResource()           {}
+func (DNS) Kind() string          { return "dns" }
+func (d DNS) LogicalName() string { return d.Name }
+
+// domain returns the zone domain or a sane default.
+func (d DNS) domain() string {
+	if d.Domain == "" {
+		return d.Name + ".example.com"
+	}
+	return d.Domain
+}
+
 // LogicalResource is the abstract shape an emitter claims to realize for a given
 // resource: the agnostic kind + name, INDEPENDENT of the concrete provider type.
 // Two targets are EQUIVALENT for a configuration when their LogicalResource sets are
@@ -162,7 +181,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{},
 	}
 }
 

@@ -135,6 +135,10 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("type", str("S"))
 			h.close()
 			h.close()
+		case DNS:
+			h.open("resource \"aws_route53_zone\" %s", str(v.Name))
+			h.attr("name", str(v.domain()))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -337,6 +341,11 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("failover_priority", "0")
 			h.close()
 			h.close()
+		case DNS:
+			h.open("resource \"azurerm_dns_zone\" %s", str(v.Name))
+			h.attr("name", str(v.domain()))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -443,6 +452,11 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("location_id", "var.gcp_region")
 			h.attr("type", str("FIRESTORE_NATIVE"))
+			h.close()
+		case DNS:
+			h.open("resource \"google_dns_managed_zone\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("dns_name", str(v.domain()+"."))
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)
