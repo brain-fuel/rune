@@ -169,6 +169,11 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"aws_efs_file_system\" %s", str(v.Name))
 			h.attr("creation_token", str(v.Name))
 			h.close()
+		case Stream:
+			h.open("resource \"aws_kinesis_stream\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("shard_count", "1")
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -253,6 +258,15 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 		h.blank()
 		h.open("resource \"azurerm_servicebus_namespace\" \"wavelet\"")
 		h.attr("name", str("wavelet-ns"))
+		h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+		h.attr("location", "azurerm_resource_group.wavelet.location")
+		h.attr("sku", str("Standard"))
+		h.close()
+	}
+	if hasKind(rs, "stream") {
+		h.blank()
+		h.open("resource \"azurerm_eventhub_namespace\" \"wavelet\"")
+		h.attr("name", str("wavelet-ehns"))
 		h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
 		h.attr("location", "azurerm_resource_group.wavelet.location")
 		h.attr("sku", str("Standard"))
@@ -401,6 +415,14 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("storage_account_name", "azurerm_storage_account.wavelet.name")
 			h.attr("quota", "50")
 			h.close()
+		case Stream:
+			h.open("resource \"azurerm_eventhub\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("namespace_name", "azurerm_eventhub_namespace.wavelet.name")
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("partition_count", "2")
+			h.attr("message_retention", "1")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -542,6 +564,11 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("network", str("default"))
 			h.attr("modes", "[\"MODE_IPV4\"]")
 			h.close()
+			h.close()
+		case Stream:
+			h.open("resource \"google_pubsub_topic\" %s", str(v.Name+"_stream"))
+			h.attr("name", str(v.Name))
+			h.attr("message_retention_duration", str("86400s"))
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

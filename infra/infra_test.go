@@ -62,6 +62,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_kms_key", "azure": "azurerm_key_vault_key", "gcp": "google_kms_crypto_key"}},
 		{"file", File{Name: "x"}, map[string]string{
 			"aws": "aws_efs_file_system", "azure": "azurerm_storage_share", "gcp": "google_filestore_instance"}},
+		{"stream", Stream{Name: "x"}, map[string]string{
+			"aws": "aws_kinesis_stream", "azure": "azurerm_eventhub", "gcp": "google_pubsub_topic"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -243,6 +245,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"disk":     {Disk{Name: "data", SizeGB: 50}},
 		"kms":      {KMS{Name: "appkey"}},
 		"file":     {File{Name: "shared"}},
+		"stream":   {Stream{Name: "events"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

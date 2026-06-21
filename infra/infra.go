@@ -177,6 +177,16 @@ func (File) isResource()           {}
 func (File) Kind() string          { return "file" }
 func (f File) LogicalName() string { return f.Name }
 
+// Stream is a managed event stream — distinct from Queue's point-to-point delivery:
+// AWS Kinesis / Azure Event Hubs / GCP Pub/Sub. Control-plane, cloud-only.
+type Stream struct {
+	Name string
+}
+
+func (Stream) isResource()           {}
+func (Stream) Kind() string          { return "stream" }
+func (s Stream) LogicalName() string { return s.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20
