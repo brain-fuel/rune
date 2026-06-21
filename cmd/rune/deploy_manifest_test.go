@@ -49,6 +49,29 @@ func TestManifestDeploy(t *testing.T) {
 	}
 }
 
+// TestExampleManifest gates the committed examples/app.wav: it parses and lowers to
+// each cloud, with the shared scaffolding de-duplicated.
+func TestExampleManifest(t *testing.T) {
+	rs, err := parseManifest("../../examples/app.wav")
+	if err != nil {
+		t.Fatalf("examples/app.wav did not parse: %v", err)
+	}
+	if len(rs) != 6 {
+		t.Errorf("expected 6 resources in app.wav, got %d", len(rs))
+	}
+	for _, c := range cloudCloudTargets {
+		var out bytes.Buffer
+		if err := runDeploy([]string{"--manifest", "../../examples/app.wav", "--backend", c}, &out); err != nil {
+			t.Errorf("[%s] example manifest deploy: %v", c, err)
+		}
+		if !strings.Contains(out.String(), "resource \"") {
+			t.Errorf("[%s] no resources emitted", c)
+		}
+	}
+}
+
+var cloudCloudTargets = []string{"aws", "azure", "gcp"}
+
 // TestManifestErrors checks manifest parse errors are clear.
 func TestManifestErrors(t *testing.T) {
 	cases := []struct{ body, want string }{

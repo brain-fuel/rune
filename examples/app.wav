@@ -1,0 +1,17 @@
+# examples/app.wav — a wavelet infrastructure manifest (a whole app's resource graph).
+#
+# Deploy it to any provider with ONE command; each provider's shared scaffolding
+# (resource group, namespaces, storage account, key vault) is emitted once:
+#
+#   rune deploy --manifest examples/app.wav --backend aws    > app.tf
+#   rune deploy --manifest examples/app.wav --backend azure  > app.tf
+#   rune deploy --manifest examples/app.wav --backend gcp    > app.tf
+#
+# One agnostic manifest -> an equivalent deployment on every cloud (OpenTofu/Terraform).
+
+compute  worker   replicas=3 image=docker.io/library/erlang:slim
+queue    events
+kv       cache
+database appdb
+secret   apikey
+iam      worker-role

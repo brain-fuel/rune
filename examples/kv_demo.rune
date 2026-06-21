@@ -1,0 +1,29 @@
+-- examples/kv_demo.rune — the wavelet KV data plane, RUNNING.
+--
+-- A self-contained program that PUTs a value under a key and reads it back through
+-- the kv abstraction's foreign ops. With the in-process backend bound (codegen), it
+-- runs unaided on every source backend:
+--
+--   rune run examples/kv_demo.rune main --target js   -> 42
+--   rune run examples/kv_demo.rune main --target py   -> 42
+--   rune run examples/kv_demo.rune main --target go   -> 42
+--   rune run examples/kv_demo.rune main --target erl  -> 42
+--
+-- The managed-Redis / Valkey bindings are ports of the same ops over a real client;
+-- the abstraction is one interface, the backend a deploy-time choice.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign kvPutCode : Nat -> Nat -> IO Nat end   -- key -> value -> ack
+foreign kvGetCode : Nat -> IO Nat end          -- key -> value (0 if absent)
+foreign printNat  : Nat -> IO Nat end
+
+main : IO Nat is
+  bindIO Nat Nat (kvPutCode 1 42) (fn (a : Nat) is
+    bindIO Nat Nat (kvGetCode 1) (fn (v : Nat) is
+      printNat v
+    end)
+  end)
+end
