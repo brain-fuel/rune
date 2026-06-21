@@ -64,6 +64,35 @@ func (Bucket) isResource()          {}
 func (Bucket) Kind() string         { return "object" }
 func (b Bucket) LogicalName() string { return b.Name }
 
+// Compute is N replicas of a container Image — the workload substrate a verified
+// protocol's actors run on (EC2 / Azure VM / GCE running the OCI image, or local
+// Podman). The image is the portable unit; the substrate is the deploy-time choice.
+type Compute struct {
+	Name     string
+	Image    string // OCI image reference (e.g. docker.io/library/erlang:slim)
+	Replicas int    // number of replica instances (>= 1)
+}
+
+func (Compute) isResource()           {}
+func (Compute) Kind() string          { return "compute" }
+func (c Compute) LogicalName() string { return c.Name }
+
+// replicas returns a sane replica count (>= 1).
+func (c Compute) replicaCount() int {
+	if c.Replicas < 1 {
+		return 1
+	}
+	return c.Replicas
+}
+
+// image returns the image or a sane default.
+func (c Compute) imageRef() string {
+	if c.Image == "" {
+		return "docker.io/library/erlang:slim"
+	}
+	return c.Image
+}
+
 // LogicalResource is the abstract shape an emitter claims to realize for a given
 // resource: the agnostic kind + name, INDEPENDENT of the concrete provider type.
 // Two targets are EQUIVALENT for a configuration when their LogicalResource sets are
@@ -100,7 +129,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{},
 	}
 }
 
@@ -110,6 +139,7 @@ var targetAliases = map[string]string{
 	"azurerm": "azure", "az": "azure",
 	"google": "gcp", "gcloud": "gcp", "googlecloud": "gcp",
 	"rabbit": "rabbitmq", "amqp": "rabbitmq",
+	"container": "podman", "oci": "podman", "docker": "podman",
 }
 
 // ByTarget returns the emitter selected by a provider/backend name (canonical or a

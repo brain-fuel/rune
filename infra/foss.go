@@ -115,6 +115,48 @@ func (NATS) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// Podman is the local-container compute backend: it runs the workload's OCI image as
+// N named replica services (stable names + a PEERS list, gossip-friendly), so a
+// verified protocol's actors run locally with no cloud account — the Savage on-ramp
+// and the CI gate for the compute substrate. Buildah/Podman are Apache-2.0.
+type Podman struct{}
+
+func (Podman) Target() string { return "podman" }
+func (Podman) Cloud() bool    { return false }
+
+func (Podman) Emit(rs []Resource) (Artifact, error) {
+	var services strings.Builder
+	env := map[string]string{"WAVELET_COMPUTE_BACKEND": "podman"}
+	for _, r := range rs {
+		c, ok := r.(Compute)
+		if !ok {
+			return Artifact{}, unsupported("podman", r)
+		}
+		n := c.replicaCount()
+		peers := make([]string, n)
+		for i := 0; i < n; i++ {
+			peers[i] = fmt.Sprintf("%s-%d", c.Name, i)
+		}
+		peerList := strings.Join(peers, ",")
+		for i := 0; i < n; i++ {
+			fmt.Fprintf(&services, "  %s-%d:\n", c.Name, i)
+			fmt.Fprintf(&services, "    image: %s\n", c.imageRef())
+			services.WriteString("    environment:\n")
+			fmt.Fprintf(&services, "      - REPLICA_ID=%d\n", i)
+			fmt.Fprintf(&services, "      - PEERS=%s\n", peerList)
+		}
+		env["WAVELET_COMPUTE_"+strings.ToUpper(c.Name)+"_REPLICAS"] = fmt.Sprintf("%d", n)
+		env["WAVELET_COMPUTE_"+strings.ToUpper(c.Name)+"_PEERS"] = peerList
+	}
+	compose := "# podman-compose spec - local compute backend for the wavelet \"compute\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (N replica services, peers wired by env)\n" +
+		"services:\n" + services.String()
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Valkey is the self-hosted key/value backend (Redis wire protocol — the same
 // client serves managed Redis and self-hosted Valkey).
 type Valkey struct{}

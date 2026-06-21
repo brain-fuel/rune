@@ -35,6 +35,24 @@ func TestDeployFOSS(t *testing.T) {
 	}
 }
 
+// TestDeployCompute checks compute lowers to N replicas on a cloud and locally.
+func TestDeployCompute(t *testing.T) {
+	var aws bytes.Buffer
+	if err := runDeploy([]string{"--resource", "compute", "--name", "w", "--replicas", "3", "--backend", "aws"}, &aws); err != nil {
+		t.Fatalf("deploy aws compute: %v", err)
+	}
+	if !strings.Contains(aws.String(), "count         = 3") {
+		t.Errorf("aws compute missing replica count:\n%s", aws.String())
+	}
+	var local bytes.Buffer
+	if err := runDeploy([]string{"--resource", "compute", "--name", "w", "--replicas", "2", "--image", "img:1", "--backend", "container"}, &local); err != nil {
+		t.Fatalf("deploy container compute: %v", err)
+	}
+	if !strings.Contains(local.String(), "w-0:") || !strings.Contains(local.String(), "image: img:1") {
+		t.Errorf("container compute wrong:\n%s", local.String())
+	}
+}
+
 // TestDeployErrors checks the verb rejects bad input clearly.
 func TestDeployErrors(t *testing.T) {
 	cases := []struct {

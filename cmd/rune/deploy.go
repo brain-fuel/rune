@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"goforge.dev/rune/v3/infra"
@@ -21,8 +22,9 @@ import (
 // Slice 1 drives the resource from flags (--resource/--name); declaring resources
 // in-language (an `infra`/`protocol` block in FILE) is the next step.
 func runDeploy(args []string, out io.Writer) error {
-	var resource, name, backend, outDir string
+	var resource, name, backend, outDir, image string
 	fifo := false
+	replicas := 1
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		val := func() (string, error) {
@@ -44,6 +46,26 @@ func runDeploy(args []string, out io.Writer) error {
 			outDir, err = val()
 		case a == "--fifo":
 			fifo = true
+		case a == "--image":
+			image, err = val()
+		case a == "--replicas":
+			var v string
+			v, err = val()
+			if err == nil {
+				if n, perr := strconv.Atoi(v); perr == nil && n >= 1 {
+					replicas = n
+				} else {
+					err = fmt.Errorf("--replicas needs a positive integer")
+				}
+			}
+		case strings.HasPrefix(a, "--image="):
+			image = strings.TrimPrefix(a, "--image=")
+		case strings.HasPrefix(a, "--replicas="):
+			if n, perr := strconv.Atoi(strings.TrimPrefix(a, "--replicas=")); perr == nil && n >= 1 {
+				replicas = n
+			} else {
+				err = fmt.Errorf("--replicas needs a positive integer")
+			}
 		case strings.HasPrefix(a, "--resource="):
 			resource = strings.TrimPrefix(a, "--resource=")
 		case strings.HasPrefix(a, "--name="):
@@ -64,7 +86,7 @@ func runDeploy(args []string, out io.Writer) error {
 			strings.Join(infra.Targets(), "|"))
 	}
 
-	r, err := resourceFor(resource, name, fifo)
+	r, err := resourceFor(resource, name, fifo, image, replicas)
 	if err != nil {
 		return err
 	}
@@ -81,7 +103,7 @@ func runDeploy(args []string, out io.Writer) error {
 }
 
 // resourceFor builds an agnostic Resource from the CLI flags.
-func resourceFor(kind, name string, fifo bool) (infra.Resource, error) {
+func resourceFor(kind, name string, fifo bool, image string, replicas int) (infra.Resource, error) {
 	switch kind {
 	case "queue":
 		return infra.Queue{Name: name, FIFO: fifo}, nil
@@ -89,8 +111,10 @@ func resourceFor(kind, name string, fifo bool) (infra.Resource, error) {
 		return infra.KV{Name: name}, nil
 	case "object":
 		return infra.Bucket{Name: name}, nil
+	case "compute":
+		return infra.Compute{Name: name, Image: image, Replicas: replicas}, nil
 	default:
-		return nil, fmt.Errorf("rune deploy: unknown resource %q (queue|kv|object)", kind)
+		return nil, fmt.Errorf("rune deploy: unknown resource %q (queue|kv|object|compute)", kind)
 	}
 }
 

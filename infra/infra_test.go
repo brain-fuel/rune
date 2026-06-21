@@ -46,6 +46,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_elasticache_cluster", "azure": "azurerm_redis_cache", "gcp": "google_redis_instance"}},
 		{"object", Bucket{Name: "x"}, map[string]string{
 			"aws": "aws_s3_bucket", "azure": "azurerm_storage_container", "gcp": "google_storage_bucket"}},
+		{"compute", Compute{Name: "x", Replicas: 2}, map[string]string{
+			"aws": "aws_instance", "azure": "azurerm_linux_virtual_machine", "gcp": "google_compute_instance"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -113,6 +115,25 @@ func TestKVObjectFOSS(t *testing.T) {
 	}
 }
 
+// TestComputePodman checks the local container backend emits N named replica services
+// with a stable PEERS list (gossip-friendly), and resolves via the container alias.
+func TestComputePodman(t *testing.T) {
+	e, ok := ByTarget("container") // alias for podman
+	if !ok {
+		t.Fatal("no emitter for the container alias")
+	}
+	art, err := e.Emit([]Resource{Compute{Name: "rep", Image: "img:1", Replicas: 3}})
+	if err != nil {
+		t.Fatalf("podman compute emit: %v", err)
+	}
+	compose := art.Files["compose.yaml"]
+	for _, want := range []string{"rep-0:", "rep-1:", "rep-2:", "PEERS=rep-0,rep-1,rep-2", "image: img:1"} {
+		if !strings.Contains(compose, want) {
+			t.Errorf("compose.yaml missing %q\n%s", want, compose)
+		}
+	}
+}
+
 // TestQueueFOSSBackends checks the self-hosted queue backends emit a runnable Compose
 // spec + a connection.env, with the same logical set as the clouds.
 func TestQueueFOSSBackends(t *testing.T) {
@@ -152,9 +173,10 @@ func TestQueueHCLFormatted(t *testing.T) {
 		t.Skip("no tofu/terraform binary in PATH")
 	}
 	graphs := map[string][]Resource{
-		"queue":  {Queue{Name: "events"}},
-		"kv":     {KV{Name: "cache"}},
-		"object": {Bucket{Name: "assets"}},
+		"queue":   {Queue{Name: "events"}},
+		"kv":      {KV{Name: "cache"}},
+		"object":  {Bucket{Name: "assets"}},
+		"compute": {Compute{Name: "worker", Image: "docker.io/library/erlang:slim", Replicas: 3}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {
