@@ -178,8 +178,10 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 		return infra.Disk{Name: name}, nil
 	case "kms":
 		return infra.KMS{Name: name}, nil
+	case "file":
+		return infra.File{Name: name}, nil
 	default:
-		return nil, fmt.Errorf("rune deploy: unknown resource %q (queue|kv|object|compute|database|secret|nosql|dns|disk|kms)", kind)
+		return nil, fmt.Errorf("rune deploy: unknown resource %q (queue|kv|object|compute|database|secret|nosql|dns|disk|kms|file)", kind)
 	}
 }
 

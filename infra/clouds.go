@@ -34,6 +34,12 @@ func needsKeyVault(rs []Resource) bool {
 	return hasKind(rs, "secret") || hasKind(rs, "kms")
 }
 
+// needsStorageAccount reports whether the Azure graph needs the shared storage
+// account (both Bucket/object and File hang off it).
+func needsStorageAccount(rs []Resource) bool {
+	return hasKind(rs, "object") || hasKind(rs, "file")
+}
+
 // tfFile wraps an HCL string as the standard single-file artifact.
 func tfFile(h *hcl, rs []Resource) Artifact {
 	return Artifact{Files: map[string]string{"main.tf": h.String()}, Logical: logicalSet(rs)}
@@ -159,6 +165,10 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str("alias/"+v.Name))
 			h.attr("target_key_id", "aws_kms_key."+v.Name+".key_id")
 			h.close()
+		case File:
+			h.open("resource \"aws_efs_file_system\" %s", str(v.Name))
+			h.attr("creation_token", str(v.Name))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -248,7 +258,7 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 		h.attr("sku", str("Standard"))
 		h.close()
 	}
-	if hasKind(rs, "object") {
+	if needsStorageAccount(rs) {
 		h.blank()
 		h.open("resource \"azurerm_storage_account\" \"wavelet\"")
 		h.attr("name", str("waveletstorage"))
@@ -385,6 +395,12 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("key_size", "2048")
 			h.attr("key_opts", "[\"encrypt\", \"decrypt\"]")
 			h.close()
+		case File:
+			h.open("resource \"azurerm_storage_share\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("storage_account_name", "azurerm_storage_account.wavelet.name")
+			h.attr("quota", "50")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -512,6 +528,20 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_kms_crypto_key\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
 			h.attr("key_ring", "google_kms_key_ring."+v.Name+".id")
+			h.close()
+		case File:
+			h.open("resource \"google_filestore_instance\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("location", "var.gcp_zone")
+			h.attr("tier", str("BASIC_HDD"))
+			h.open("file_shares")
+			h.attr("name", str("share1"))
+			h.attr("capacity_gb", "1024")
+			h.close()
+			h.open("networks")
+			h.attr("network", str("default"))
+			h.attr("modes", "[\"MODE_IPV4\"]")
+			h.close()
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

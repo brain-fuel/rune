@@ -167,6 +167,16 @@ func (KMS) isResource()           {}
 func (KMS) Kind() string          { return "kms" }
 func (k KMS) LogicalName() string { return k.Name }
 
+// File is a managed shared file system (AWS EFS / Azure Files / GCP Filestore).
+// Control-plane, cloud-only. On Azure it shares the storage account with Bucket.
+type File struct {
+	Name string
+}
+
+func (File) isResource()           {}
+func (File) Kind() string          { return "file" }
+func (f File) LogicalName() string { return f.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20
