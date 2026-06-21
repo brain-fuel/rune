@@ -435,6 +435,40 @@ func (Loki) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// VaultKMS is the self-hosted KMS backend (HashiCorp Vault's transit secrets engine —
+// encryption-as-a-service, the canonical self-hosted equivalent of AWS KMS / Azure Key
+// Vault key / GCP KMS). It backs the "kms" abstraction with NO cloud account; enable
+// the transit engine after start with `vault secrets enable transit`.
+type VaultKMS struct{}
+
+func (VaultKMS) Target() string { return "vaultkms" }
+func (VaultKMS) Cloud() bool    { return false }
+
+func (VaultKMS) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("vaultkms", "kms", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Vault transit (encryption-as-a-service) backend for the wavelet \"kms\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   then  vault secrets enable transit  (API on http://localhost:8200, token \"root\")\n" +
+		"services:\n" +
+		composeService("vault-kms", "docker.io/hashicorp/vault:1.18",
+			[]string{"8200:8200"},
+			"server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200")
+	env := map[string]string{
+		"WAVELET_KMS_BACKEND": "vaulttransit",
+		"WAVELET_KMS_ADDR":    "http://localhost:8200",
+		"WAVELET_KMS_TOKEN":   "root",
+	}
+	for _, n := range names {
+		env["WAVELET_KMS_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // NFS is the self-hosted shared-filesystem backend (an NFS server container — the
 // local equivalent of EFS / Azure Files / Filestore). It backs the "file" abstraction
 // with NO cloud account. Emitted inline (the server needs `privileged: true` and an
