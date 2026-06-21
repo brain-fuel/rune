@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"goforge.dev/rune/v3/codegen"
 	"goforge.dev/rune/v3/infra"
 )
 
@@ -22,9 +23,10 @@ import (
 // Slice 1 drives the resource from flags (--resource/--name); declaring resources
 // in-language (an `infra`/`protocol` block in FILE) is the next step.
 func runDeploy(args []string, out io.Writer) error {
-	var resource, name, backend, outDir, image string
+	var resource, name, backend, outDir, image, target string
 	fifo := false
 	replicas := 1
+	var positional []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		val := func() (string, error) {
@@ -40,8 +42,10 @@ func runDeploy(args []string, out io.Writer) error {
 			resource, err = val()
 		case a == "--name":
 			name, err = val()
-		case a == "--backend", a == "--target":
+		case a == "--backend":
 			backend, err = val()
+		case a == "--target":
+			target, err = val()
 		case a == "--out":
 			outDir, err = val()
 		case a == "--fifo":
@@ -70,19 +74,33 @@ func runDeploy(args []string, out io.Writer) error {
 			resource = strings.TrimPrefix(a, "--resource=")
 		case strings.HasPrefix(a, "--name="):
 			name = strings.TrimPrefix(a, "--name=")
-		case strings.HasPrefix(a, "--backend="), strings.HasPrefix(a, "--target="):
-			backend = a[strings.IndexByte(a, '=')+1:]
+		case strings.HasPrefix(a, "--backend="):
+			backend = strings.TrimPrefix(a, "--backend=")
+		case strings.HasPrefix(a, "--target="):
+			target = strings.TrimPrefix(a, "--target=")
 		case strings.HasPrefix(a, "--out="):
 			outDir = strings.TrimPrefix(a, "--out=")
+		case strings.HasPrefix(a, "--"):
+			return fmt.Errorf("rune deploy: unexpected flag %q", a)
 		default:
-			return fmt.Errorf("rune deploy: unexpected argument %q", a)
+			positional = append(positional, a)
 		}
 		if err != nil {
 			return err
 		}
 	}
+
+	// WORKLOAD MODE: `rune deploy FILE [NAME] --target beam` deploys + RUNS a verified
+	// protocol's actor system on a real backend (the Lambert "it runs" gate). A code
+	// target or a positional FILE selects it.
+	if resource == "" && (len(positional) > 0 || isCodeTarget(target)) {
+		return runWorkloadDeploy(positional, target, out)
+	}
+
+	// INFRA MODE: lower an agnostic resource to a deployment artifact.
 	if resource == "" || name == "" || backend == "" {
-		return fmt.Errorf("rune deploy needs --resource <queue|kv|object> --name <name> --backend <%s>",
+		return fmt.Errorf("rune deploy needs either FILE [NAME] --target <backend> (run a protocol), "+
+			"or --resource <queue|kv|object|compute> --name <name> --backend <%s> (emit infra)",
 			strings.Join(infra.Targets(), "|"))
 	}
 
@@ -100,6 +118,41 @@ func runDeploy(args []string, out io.Writer) error {
 		return err
 	}
 	return writeArtifact(art, outDir, out)
+}
+
+// isCodeTarget reports whether t names a codegen backend (a runnable workload target)
+// rather than an infra backend.
+func isCodeTarget(t string) bool {
+	if t == "" {
+		return false
+	}
+	_, ok := codegen.ByTarget(t)
+	return ok
+}
+
+// runWorkloadDeploy deploys + RUNS a verified protocol's actor system on a real
+// backend: `rune deploy FILE [NAME] --target beam`. This is the Lambert gate — a
+// proven CvRDT does not just emit config, it runs (e.g. live gossiping BEAM actors
+// via the serveG projection). It reuses the emit-and-execute path (runTarget); BEAM
+// (erl) is the default distributed target.
+func runWorkloadDeploy(positional []string, target string, out io.Writer) error {
+	if len(positional) == 0 {
+		return fmt.Errorf("rune deploy FILE [NAME] --target <backend>: needs a source file")
+	}
+	file := positional[0]
+	mainName := "main"
+	if len(positional) > 1 {
+		mainName = positional[1]
+	}
+	if target == "" {
+		target = "erl" // BEAM, the distributed default
+	}
+	src, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "deploying %s (%s) on target %q…\n", file, mainName, target)
+	return runTarget(string(src), mainName, target)
 }
 
 // resourceFor builds an agnostic Resource from the CLI flags.

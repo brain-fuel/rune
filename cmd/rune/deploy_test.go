@@ -60,7 +60,7 @@ func TestDeployErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"missing flags", []string{"--resource", "queue"}, "needs --resource"},
+		{"missing flags", []string{"--resource", "queue"}, "--resource <queue|kv|object|compute>"},
 		{"unknown backend", []string{"--resource", "queue", "--name", "q", "--backend", "nope"}, "unknown backend"},
 		{"unknown resource", []string{"--resource", "blob", "--name", "q", "--backend", "aws"}, "unknown resource"},
 		{"unsupported kind", []string{"--resource", "kv", "--name", "c", "--backend", "rabbitmq"}, "does not yet support"},
