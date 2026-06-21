@@ -38,6 +38,32 @@ whose updates are not inflationary, is flagged even when a particular run happen
 to converge. `resetcounter.rune` is the inflation-side catch (the merge is
 impeccable; the op is the bug).
 
+## Wavelet infrastructure (the `rune deploy` verb, E4)
+
+`app.wav` is a whole application's resource graph (a public-facing web app:
+compute + queue + kv + database + secret + iam + object + lb + cdn). One agnostic
+manifest lowers to an equivalent deployment on every cloud:
+
+```
+rune deploy --manifest examples/app.wav --backend aws    > app.tf
+rune deploy --manifest examples/app.wav --backend azure  > app.tf
+rune deploy --manifest examples/app.wav --backend gcp    > app.tf
+```
+
+A single resource lowers with `rune deploy --resource <kind> --name <n> --backend <b>`.
+The 22 agnostic kinds (queue, kv, object, compute, database, secret, nosql, dns,
+disk, kms, file, stream, cdn, lb, metrics, iam, k8s, network, firewall, logs,
+registry, paas) each lower to AWS/Azure/GCP (OpenTofu/Terraform HCL). 13 also have a
+**self-hosted FOSS backend** that runs under Podman with NO cloud account: RabbitMQ/
+NATS (queue), Valkey (kv), Garage (object), Podman (compute), Postgres (database),
+Dotenv/Vault (secret), DynamoLocal (nosql), CoreDNS (dns), registry:2 (registry),
+Redpanda (stream), Loki (logs), Prometheus (metrics), k3s (k8s). See
+`ref_docs/wootz/R-INFRA.md`.
+
 ## Other
 
 - `sample.rune` - a small non-distributed sample.
+- `kv_demo.rune` / `kv_string_demo.rune` / `object_demo.rune` / `queue_demo.rune` -
+  wavelet data-plane demos (the typed `.rune` interface the app calls).
+- `gcounter_protocol.rune` - a `protocol … end` block (the E4 surface): a checked
+  CvRDT grouping that rejects a missing convergence proof.
