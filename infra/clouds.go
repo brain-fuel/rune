@@ -214,6 +214,11 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("sampled_requests_enabled", "false")
 			h.close()
 			h.close()
+		case Logs:
+			h.open("resource \"aws_cloudwatch_log_group\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("retention_in_days", "30")
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -497,6 +502,14 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
 			h.attr("location", "azurerm_resource_group.wavelet.location")
 			h.close()
+		case Logs:
+			h.open("resource \"azurerm_log_analytics_workspace\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("sku", str("PerGB2018"))
+			h.attr("retention_in_days", "30")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -673,6 +686,13 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.close()
 			h.close()
 			h.close()
+			h.close()
+		case Logs:
+			h.open("resource \"google_logging_project_bucket_config\" %s", str(v.Name))
+			h.attr("project", "var.gcp_project")
+			h.attr("location", str("global"))
+			h.attr("bucket_id", str(v.Name))
+			h.attr("retention_days", "30")
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

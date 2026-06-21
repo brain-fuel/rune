@@ -227,6 +227,16 @@ func (Firewall) isResource()           {}
 func (Firewall) Kind() string          { return "firewall" }
 func (f Firewall) LogicalName() string { return f.Name }
 
+// Logs is a managed log/observability sink (AWS CloudWatch log group / Azure Log
+// Analytics workspace / GCP Cloud Logging bucket). Control-plane, cloud-only.
+type Logs struct {
+	Name string
+}
+
+func (Logs) isResource()           {}
+func (Logs) Kind() string          { return "logs" }
+func (l Logs) LogicalName() string { return l.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20
