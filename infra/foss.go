@@ -404,6 +404,40 @@ func (Redpanda) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// Vault is the self-hosted secrets backend (HashiCorp Vault in dev mode — a real
+// running secret store, richer than the keys-only `Dotenv` template). It backs the
+// "secret" abstraction with NO cloud account; the API surface mirrors the managed
+// Secrets Manager / Key Vault / Secret Manager clients.
+type Vault struct{}
+
+func (Vault) Target() string { return "vault" }
+func (Vault) Cloud() bool    { return false }
+
+func (Vault) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("vault", "secret", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - HashiCorp Vault (dev mode) backend for the wavelet \"secret\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (API + UI on http://localhost:8200, token \"root\")\n" +
+		"services:\n" +
+		composeService("vault", "docker.io/hashicorp/vault:1.18",
+			[]string{"8200:8200"},
+			"server -dev -dev-root-token-id=root -dev-listen-address=0.0.0.0:8200")
+	env := map[string]string{
+		"WAVELET_SECRET_BACKEND": "vault",
+		"WAVELET_SECRET_ADDR":    "http://localhost:8200",
+		"WAVELET_SECRET_TOKEN":   "root",
+	}
+	for _, n := range names {
+		env["WAVELET_SECRET_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // LocalRegistry is the self-hosted container-registry backend (the CNCF Distribution
 // `registry:2` image — the same OCI client serves ECR/ACR/Artifact Registry and this
 // local registry). It backs the "registry" abstraction with NO cloud account, so a

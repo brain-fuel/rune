@@ -23,7 +23,7 @@ core; infra is a kernel CONSUMER (the shadow rule), emitting throwaway artifacts
   vnet+subnet) once per graph.
 - **FOSS emitters** (`infra/foss.go`) — self-hosted backends that run locally under
   Podman (Buildah/Podman, Apache-2.0): `RabbitMQ`/`NATS` (queue), `Valkey` (kv),
-  `Garage` (object), `Podman` (compute), `Postgres` (database), `Dotenv` (secret),
+  `Garage` (object), `Podman` (compute), `Postgres` (database), `Dotenv`/`Vault` (secret),
   `DynamoLocal` (nosql), `CoreDNS` (dns), `LocalRegistry` (registry:2), `Redpanda`
   (stream, Kafka API). Each emits a Compose spec + `connection.env`, so the layer is
   exercisable with NO cloud account.
@@ -41,7 +41,7 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | object  | S3 | Blob | Cloud Storage | Garage | `lib/infra/object.rune` |
 | compute | EC2 | Linux VM | Compute Engine | Podman (N replicas) | — (control-plane) |
 | database| RDS | PostgreSQL Flexible | Cloud SQL | Postgres | — (control-plane) |
-| secret  | Secrets Manager | Key Vault | Secret Manager | dotenv template | — |
+| secret  | Secrets Manager | Key Vault | Secret Manager | dotenv template, Vault (dev) | — |
 | nosql   | DynamoDB | Cosmos DB | Firestore | DynamoDB-local | — |
 | dns     | Route 53 | Azure DNS | Cloud DNS | CoreDNS | — |
 | disk    | EBS | Managed Disk | Persistent Disk | — | — |

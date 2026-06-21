@@ -228,6 +228,7 @@ func TestFOSSBackendsEmit(t *testing.T) {
 		{"dynamodb", NoSQL{Name: "n"}}, {"coredns", DNS{Name: "z"}},
 		{"localregistry", Registry{Name: "r"}},
 		{"redpanda", Stream{Name: "s"}},
+		{"vault", Secret{Name: "sec"}},
 	}
 	for _, c := range cases {
 		e, ok := ByTarget(c.backend)
