@@ -1,0 +1,107 @@
+-- Chapter 100 — A verified STRING algebra (M6 / D-track stdlib; the string story's proof
+-- side). The REPL prelude represents a string as a PACKED bignum (`Bytes`, UTF-8 bytes
+-- low-byte-first + a sentinel) so concatenation is fast and deploys to every backend; this
+-- chapter gives the MATHEMATICAL MODEL that runtime refines — a string as a list of bytes —
+-- and proves the algebra a verified string library needs:
+--
+--   sappAssoc / sappNilR : concatenation is a MONOID (associative, unit = the empty string).
+--   slenHom              : byte length is a MONOID HOMOMORPHISM, slen (s ++ t) = slen s + slen t.
+--
+-- The packed `strApp`/`strLen` (prelude) compute the same function on the compressed code;
+-- this is the model they implement (a `toCodes` view sends one to the other). All by
+-- induction over the ambient observational `Eq`/`refl`/`subst`. Self-contained (listings
+-- carry their own `Nat`/`List`, as ch73).
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+-- a byte is a Nat (0..255 in use; the algebra does not depend on the bound); a string is a
+-- list of bytes. `Str` mirrors the prelude's `String`, but unpacked for proof.
+Byte : U is Nat end
+Str  : U is List Byte end
+
+-- concatenation and byte length, the unpacked counterparts of the prelude's strApp/strLen.
+sapp : Str -> Str -> Str is
+  fn (xs : Str) (ys : Str) is
+    ListElim Byte (fn (w : Str) is Str end)
+      ys
+      (fn (x : Byte) (rest : Str) (ih : Str) is cons Byte x ih end)
+      xs
+  end
+end
+
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+slen : Str -> Nat is
+  fn (xs : Str) is
+    ListElim Byte (fn (w : Str) is Nat end)
+      zero
+      (fn (x : Byte) (rest : Str) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+
+-- the empty string (the monoid identity).
+empty : Str is nil Byte end
+
+-- equational plumbing over Eq, by subst (the sole Leibniz primitive).
+congConsS : (x : Byte) -> (xs : Str) -> (ys : Str)
+   -> Eq Str xs ys -> Eq Str (cons Byte x xs) (cons Byte x ys) is
+  fn (x : Byte) (xs : Str) (ys : Str) (e : Eq Str xs ys) is
+    subst Str xs ys e (fn (z : Str) is Eq Str (cons Byte x xs) (cons Byte x z) end)
+      (refl (cons Byte x xs))
+  end
+end
+
+congSuccN : (m : Nat) -> (n : Nat) -> Eq Nat m n -> Eq Nat (succ m) (succ n) is
+  fn (m : Nat) (n : Nat) (e : Eq Nat m n) is
+    subst Nat m n e (fn (z : Nat) is Eq Nat (succ m) (succ z) end) (refl (succ m))
+  end
+end
+
+-- RIGHT UNIT: sapp xs empty = xs (left unit `sapp empty ys ~> ys` is definitional).
+sappNilR : (xs : Str) -> Eq Str (sapp xs empty) xs is
+  fn (xs : Str) is
+    ListElim Byte (fn (w : Str) is Eq Str (sapp w empty) w end)
+      (refl empty)
+      (fn (x : Byte) (rest : Str) (ih : Eq Str (sapp rest empty) rest) is
+         congConsS x (sapp rest empty) rest ih end)
+      xs
+  end
+end
+
+-- ASSOCIATIVITY: sapp (sapp xs ys) zs = sapp xs (sapp ys zs). So (Str, sapp, empty) is a MONOID,
+-- the verified string concatenation the packed prelude `strApp` refines.
+sappAssoc : (xs : Str) -> (ys : Str) -> (zs : Str)
+   -> Eq Str (sapp (sapp xs ys) zs) (sapp xs (sapp ys zs)) is
+  fn (xs : Str) (ys : Str) (zs : Str) is
+    ListElim Byte
+      (fn (w : Str) is Eq Str (sapp (sapp w ys) zs) (sapp w (sapp ys zs)) end)
+      (refl (sapp ys zs))
+      (fn (x : Byte) (rest : Str)
+          (ih : Eq Str (sapp (sapp rest ys) zs) (sapp rest (sapp ys zs))) is
+         congConsS x (sapp (sapp rest ys) zs) (sapp rest (sapp ys zs)) ih end)
+      xs
+  end
+end
+
+-- LENGTH IS A MONOID HOMOMORPHISM: slen (sapp xs ys) = slen xs + slen ys. So byte length
+-- carries concatenation to addition (and the empty string to 0, definitionally).
+slenHom : (xs : Str) -> (ys : Str) -> Eq Nat (slen (sapp xs ys)) (add (slen xs) (slen ys)) is
+  fn (xs : Str) (ys : Str) is
+    ListElim Byte
+      (fn (w : Str) is Eq Nat (slen (sapp w ys)) (add (slen w) (slen ys)) end)
+      (refl (slen ys))
+      (fn (x : Byte) (rest : Str)
+          (ih : Eq Nat (slen (sapp rest ys)) (add (slen rest) (slen ys))) is
+         congSuccN (slen (sapp rest ys)) (add (slen rest) (slen ys)) ih end)
+      xs
+  end
+end
