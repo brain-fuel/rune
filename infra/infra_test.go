@@ -207,6 +207,48 @@ func TestDatabasePostgres(t *testing.T) {
 	}
 }
 
+// TestFOSSBackendsEmit sweeps every self-hosted backend with the resource kind it
+// serves and asserts it emits a runnable Compose spec + a connection.env — one gate
+// protecting all FOSS emitters.
+func TestFOSSBackendsEmit(t *testing.T) {
+	cases := []struct {
+		backend string
+		res     Resource
+	}{
+		{"rabbitmq", Queue{Name: "q"}}, {"nats", Queue{Name: "q"}},
+		{"valkey", KV{Name: "k"}}, {"garage", Bucket{Name: "b"}},
+		{"podman", Compute{Name: "c", Replicas: 2}}, {"postgres", Database{Name: "d"}},
+		{"dynamodb", NoSQL{Name: "n"}}, {"coredns", DNS{Name: "z"}},
+	}
+	for _, c := range cases {
+		e, ok := ByTarget(c.backend)
+		if !ok {
+			t.Errorf("no emitter for %q", c.backend)
+			continue
+		}
+		if e.Cloud() {
+			t.Errorf("%q should be a FOSS (non-cloud) backend", c.backend)
+		}
+		art, err := e.Emit([]Resource{c.res})
+		if err != nil {
+			t.Errorf("[%s] emit: %v", c.backend, err)
+			continue
+		}
+		if art.Files["compose.yaml"] == "" || !strings.Contains(art.Files["compose.yaml"], "services:") {
+			t.Errorf("[%s] missing a Compose services spec", c.backend)
+		}
+		if art.Files["connection.env"] == "" {
+			t.Errorf("[%s] missing connection.env", c.backend)
+		}
+	}
+	// dotenv is the one FOSS backend without a Compose service (a keys-only template).
+	d, _ := ByTarget("dotenv")
+	art, err := d.Emit([]Resource{Secret{Name: "s"}})
+	if err != nil || art.Files["secrets.env"] == "" {
+		t.Errorf("dotenv: %v / %q", err, art.Files["secrets.env"])
+	}
+}
+
 // TestSecretKMSShareKeyVault checks that on Azure a graph with both a Secret and a KMS
 // key emits exactly ONE shared Key Vault (the scaffolding is emitted once).
 func TestSecretKMSShareKeyVault(t *testing.T) {
