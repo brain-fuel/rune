@@ -1152,3 +1152,92 @@ end
 rtBad : Eq (Result Whole ParseErr) (parseWhole "9z") (err Whole ParseErr notNumber) is
   refl (err Whole ParseErr notNumber)
 end
+
+-- ====================================================================
+-- UNICODE: explicit levels (Rust-style). The DEFAULT level is BYTES — `strLen`/
+-- `strHead` above are UTF-8 bytes, matching the packed representation. This section
+-- adds the RUNE (codepoint) level: `runeLen` counts Unicode scalar values by skipping
+-- UTF-8 continuation bytes (0x80..0xBF), so `runeLen "é" = 1` while `strLen "é" = 2`.
+-- (GRAPHEME clusters — the user-perceived-character level — need Unicode tables and are
+-- future work; PARKING-LOT.) Fuel-bounded by byte length, never the packed code.
+-- ====================================================================
+
+-- a byte is a UTF-8 CONTINUATION byte iff 128 <= b <= 191 (it is not a scalar's leader).
+isCont : Whole -> Bool is fn (c : Whole) is andB (leW 128 c) (leW c 191) end end
+
+runeLenGo : Whole -> Whole -> Bytes -> Whole is
+  fn (fuel : Whole) is
+    WholeElim (fn (k : Whole) is Whole -> Bytes -> Whole end)
+      (fn (acc : Whole) (s : Bytes) is acc end)
+      (fn (f : Whole) (ih : Whole -> Bytes -> Whole) is
+        fn (acc : Whole) (s : Bytes) is
+          case strNull s of
+          | true  -> acc
+          | false ->
+              case isCont (strHead s) of
+              | true  -> ih acc (strTail s)
+              | false -> ih (addW acc 1) (strTail s)
+              end
+          end
+        end
+      end)
+      fuel
+  end
+end
+-- codepoint length: the number of Unicode scalar values (leading bytes) in the string.
+runeLen : Bytes -> Whole is fn (s : Bytes) is runeLenGo strFuel 0 s end end
+
+-- ====================================================================
+-- SHOW: render any value to a string, the basis of string interpolation `"{e}"`
+-- (which desugars to `++` over `show`). For the numeric tower it reuses the Binary
+-- encoders; a string shows as itself; a Bool shows as its word. Same Σ-record-class +
+-- instance-search pattern as Num/Semigroup.
+-- ====================================================================
+Show : U -> U is fn (A : U) is A -> Bytes end end
+show : {A : U} -> {d : Show A} -> A -> Bytes is fn {A : U} {d : Show A} (x : A) is d x end end
+
+instance showWhole : Show Whole is encodeWhole end
+instance showInt   : Show Int   is encodeInt end
+instance showFrac  : Show Frac  is encodeFrac end
+instance showBytes : Show Bytes is fn (s : Bytes) is s end end
+instance showBool  : Show Bool  is fn (b : Bool) is case b of | true -> "true" | false -> "false" end end end
+
+-- ====================================================================
+-- SLICING: take/drop the first n bytes (Swift Substring / Rust slice, at the byte level).
+-- Fuel-bounded by byte length; `strTake`/`strDrop` partition a string at a byte offset.
+-- ====================================================================
+strTakeGo : Whole -> Bytes -> Bytes is
+  fn (n : Whole) is
+    WholeElim (fn (k : Whole) is Bytes -> Bytes end)
+      (fn (s : Bytes) is bytes 1 end)
+      (fn (k : Whole) (ih : Bytes -> Bytes) is
+        fn (s : Bytes) is
+          case strNull s of
+          | true  -> bytes 1
+          | false -> strCons (strHead s) (ih (strTail s))
+          end
+        end
+      end)
+      n
+  end
+end
+-- the first n bytes (or the whole string if shorter).
+strTake : Whole -> Bytes -> Bytes is fn (n : Whole) (s : Bytes) is strTakeGo n s end end
+
+strDropGo : Whole -> Bytes -> Bytes is
+  fn (n : Whole) is
+    WholeElim (fn (k : Whole) is Bytes -> Bytes end)
+      (fn (s : Bytes) is s end)
+      (fn (k : Whole) (ih : Bytes -> Bytes) is
+        fn (s : Bytes) is
+          case strNull s of
+          | true  -> s
+          | false -> ih (strTail s)
+          end
+        end
+      end)
+      n
+  end
+end
+-- all but the first n bytes (or the empty string if shorter).
+strDrop : Whole -> Bytes -> Bytes is fn (n : Whole) (s : Bytes) is strDropGo n s end end

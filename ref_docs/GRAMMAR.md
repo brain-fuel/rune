@@ -61,13 +61,21 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   a non-numeral atom (`pair.1`, `(e).2`). A bare `1.` (dot not followed by a digit/`{`) and
   `1 {x}` (a brace block) are unaffected.
 - **String literal:** `"` … `"`, one token, with the escapes `\n` `\t` `\r` `\\` `\"` `\0`
-  (an unescaped newline or EOF before the closing quote is an error). A string literal is
-  parse-time sugar for a PACKED `Bytes` value: the decoded content's UTF-8 bytes c₀…cₖ₋₁ pack
-  into one big integer with the FIRST byte least-significant and a `0x01` sentinel on top
-  (`n = 1·256ᵏ + Σ cᵢ·256ⁱ`), emitted as `bytes n` — so it requires a `bytes : Whole -> Bytes`
-  constructor in scope (a tower/stdlib feature, like `/` for decimals). The sentinel makes the
-  byte length recoverable and `uncons` O(1) (head `= n % 256`, tail `= n // 256`); the value
-  computes in the kernel, so strings parse in the REPL with no host. NOT a `[Char]` list.
+  `\{` (an unescaped newline or EOF before the closing quote is an error). A PLAIN string
+  literal (no unescaped `{`) is parse-time sugar for a PACKED `Bytes` value: the decoded
+  content's UTF-8 bytes c₀…cₖ₋₁ pack into one big integer with the FIRST byte least-significant
+  and a `0x01` sentinel on top (`n = 1·256ᵏ + Σ cᵢ·256ⁱ`), emitted as `bytes n` — so it
+  requires a `bytes : Whole -> Bytes` constructor in scope (a tower/stdlib feature, like `/`
+  for decimals). The sentinel makes the byte length recoverable and `uncons` O(1) (head
+  `= n % 256`, tail `= n // 256`); the value computes in the kernel, so strings parse in the
+  REPL with no host. NOT a `[Char]` list.
+- **String interpolation:** an unescaped `{` inside a string opens an embedded **expression**
+  that runs to the matching `}` (braces nest, so implicit-argument forms `{A}` inside the
+  expression are balanced); a literal brace is `\{` (and `\}`). An interpolated string desugars
+  at lex time to a parenthesized concatenation over `show`: `"a {e} b"` ⟶ `("a " ++ show (e)
+  ++ " b")`, so it needs `++` (the Semigroup append) and a `Show` instance for each embedded
+  expression's type in scope. (A nested string literal inside `{…}` is not supported; a newline
+  or `"` inside the interpolation is an error.)
 - **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
   equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4),
   `builtin` (ergonomics rung 2), `case`, `of`, `with` (rung 4), and `calc`, `by` (rung 5). The bare underscore `_` is

@@ -753,3 +753,71 @@ func TestREPLStringConcat(t *testing.T) {
 		t.Errorf("packed `bytes <n>` form leaked\n%s", got)
 	}
 }
+
+// TestREPLStringOps covers the Phase 3/4 string library: `show` (render to a string),
+// `runeLen` (the codepoint level vs the byte level), and byte slicing strTake/strDrop.
+func TestREPLStringOps(t *testing.T) {
+	script := []string{
+		`show 42`,                 // numeric show -> "42"
+		`show true`,               // bool show -> "true"
+		`strLen "é"`,              // bytes: é is 2 UTF-8 bytes
+		`runeLen "é"`,             // runes: é is 1 codepoint
+		`strTake 3 "hello"`,       // "hel"
+		`strDrop 3 "hello"`,       // "lo"
+		`"a" ++ show 7 ++ "b"`,    // the interpolation desugaring, written by hand
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		`"42" : Bytes`,
+		`"true" : Bytes`,
+		`"hel" : Bytes`,
+		`"lo" : Bytes`,
+		`"a7b" : Bytes`,
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	// é: 2 bytes, 1 rune.
+	if !strings.Contains(got, "succ (succ zero)") && !strings.Contains(got, "2 : Whole") {
+		t.Errorf("strLen é should be 2\n%s", got)
+	}
+}
+
+// TestREPLInterpolation covers `{expr}` string interpolation: it desugars to a `++`
+// chain over `show`, embedded expressions are parsed (including arithmetic and calls),
+// and `\{` is a literal brace.
+func TestREPLInterpolation(t *testing.T) {
+	script := []string{
+		`name : Bytes is "world" end`,
+		`"hi {name}!"`,            // -> "hi world!"
+		`"len {strLen name}"`,     // -> "len 5"   (show of a computed Whole)
+		`"sum {2 + 3}"`,           // -> "sum 5"   (an arithmetic expr inside {})
+		`"{7}"`,                   // -> "7"       (no surrounding literal)
+		`"a \{ b"`,                // -> "a { b"   (escaped literal brace, no interpolation)
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, w := range []string{
+		`"hi world!" : Bytes`,
+		`"len 5" : Bytes`,
+		`"sum 5" : Bytes`,
+		`"7" : Bytes`,
+		`"a \{ b" : Bytes`, // a literal brace folds back ESCAPED, so it round-trips
+	} {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}

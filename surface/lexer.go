@@ -242,11 +242,11 @@ func lex(src string) ([]token, error) {
 			toks = append(toks, token{tOp, string(r), i})
 			i++
 		case r == '"':
-			s, end, err := scanString(rs, i)
+			stoks, end, err := scanStringToks(rs, i)
 			if err != nil {
 				return nil, err
 			}
-			toks = append(toks, token{tStr, s, i})
+			toks = append(toks, stoks...)
 			i = end
 		case unicode.IsDigit(r):
 			start := i
@@ -365,48 +365,143 @@ func keyword(word string, pos int) token {
 	}
 }
 
-// scanString reads a double-quoted string literal starting at rs[at] (the opening
-// '"') and returns the DECODED content (escapes resolved) and the offset just past
-// the closing '"'. Supported escapes: \n \t \r \\ \" \0. The content is sugar for a
-// packed `Bytes` value (the parser desugars it over the UTF-8 bytes); a newline or
-// EOF before the closing quote is an error.
-func scanString(rs []rune, at int) (string, int, error) {
-	var b []rune
+// scanStringToks reads a double-quoted string literal starting at rs[at] (the opening
+// '"') and returns the tokens it expands to plus the offset just past the closing '"'.
+// A PLAIN string (no unescaped '{') yields a single `tStr` with the DECODED content
+// (escapes \n \t \r \\ \" \0 \{ \}), the surface sugar for a packed `Bytes` (GRAMMAR §2).
+// An INTERPOLATED string `"a {e} b"` expands to the token stream for `("a " ++ show (e)
+// ++ " b")`: each `{…}` is an embedded expression (re-lexed; matched braces nest), each
+// literal run a chunk, joined by the Semigroup `++` over `show` (§5.4). `\{`/`\}` are
+// literal braces. A newline or `"` inside an interpolation, or an unterminated quote, is
+// an error. (Nested string literals inside an interpolation are not supported.)
+func scanStringToks(rs []rune, at int) ([]token, int, error) {
+	var segs []strSeg
+	var chunk []rune
+	chunkStart := at + 1
+	hasExpr := false
 	i := at + 1 // past the opening quote
 	for i < len(rs) {
 		c := rs[i]
 		switch {
 		case c == '"':
-			return string(b), i + 1, nil
+			segs = append(segs, strSeg{false, string(chunk), chunkStart})
+			toks, err := interpTokens(at, hasExpr, segs)
+			if err != nil {
+				return nil, i, err
+			}
+			return toks, i + 1, nil
 		case c == '\n':
-			return "", i, fmt.Errorf("unterminated string literal at offset %d (newline before closing quote)", at)
+			return nil, i, fmt.Errorf("unterminated string literal at offset %d (newline before closing quote)", at)
 		case c == '\\':
 			if i+1 >= len(rs) {
-				return "", i, fmt.Errorf("unterminated escape in string literal at offset %d", i)
+				return nil, i, fmt.Errorf("unterminated escape in string literal at offset %d", i)
 			}
 			switch rs[i+1] {
 			case 'n':
-				b = append(b, '\n')
+				chunk = append(chunk, '\n')
 			case 't':
-				b = append(b, '\t')
+				chunk = append(chunk, '\t')
 			case 'r':
-				b = append(b, '\r')
+				chunk = append(chunk, '\r')
 			case '\\':
-				b = append(b, '\\')
+				chunk = append(chunk, '\\')
 			case '"':
-				b = append(b, '"')
+				chunk = append(chunk, '"')
 			case '0':
-				b = append(b, 0)
+				chunk = append(chunk, 0)
+			case '{':
+				chunk = append(chunk, '{')
+			case '}':
+				chunk = append(chunk, '}')
 			default:
-				return "", i, fmt.Errorf("unknown escape %q in string literal at offset %d", string(rs[i+1]), i)
+				return nil, i, fmt.Errorf("unknown escape %q in string literal at offset %d", string(rs[i+1]), i)
 			}
 			i += 2
+		case c == '{':
+			// an interpolation: scan the expression source to the matching '}'.
+			segs = append(segs, strSeg{false, string(chunk), chunkStart})
+			chunk = nil
+			hasExpr = true
+			depth := 1
+			j := i + 1
+			exprStart := j
+			for j < len(rs) && depth > 0 {
+				switch rs[j] {
+				case '{':
+					depth++
+				case '}':
+					depth--
+				case '"', '\n':
+					return nil, j, fmt.Errorf("unterminated interpolation `{…}` in string literal at offset %d", i)
+				}
+				if depth == 0 {
+					break
+				}
+				j++
+			}
+			if depth != 0 {
+				return nil, i, fmt.Errorf("unterminated interpolation `{…}` in string literal at offset %d", i)
+			}
+			segs = append(segs, strSeg{true, string(rs[exprStart:j]), exprStart})
+			i = j + 1 // past '}'
+			chunkStart = i
 		default:
-			b = append(b, c)
+			chunk = append(chunk, c)
 			i++
 		}
 	}
-	return "", at, fmt.Errorf("unterminated string literal at offset %d (end of input)", at)
+	return nil, at, fmt.Errorf("unterminated string literal at offset %d (end of input)", at)
+}
+
+// strSeg is a scanned string segment: a literal chunk (decoded) or an embedded
+// expression source, with its source offset.
+type strSeg struct {
+	isExpr bool
+	text   string
+	pos    int
+}
+
+// interpTokens turns the scanned segments into a token stream. A plain string (no
+// interpolation) is one `tStr`. Otherwise it is `( chunk ++ show ( e ) ++ … )`: literal
+// chunks (non-empty) and `show (expr)` parts joined by `++`, parenthesized so the whole
+// interpolation is one operand wherever it appears.
+func interpTokens(at int, hasExpr bool, segs []strSeg) ([]token, error) {
+	if !hasExpr {
+		// plain string: the single literal chunk, decoded.
+		return []token{{tStr, segs[0].text, at}}, nil
+	}
+	var parts [][]token
+	for _, s := range segs {
+		if s.isExpr {
+			sub, err := lex(s.text)
+			if err != nil {
+				return nil, err
+			}
+			et := []token{{tIdent, "show", at}, {tLParen, "(", at}}
+			for _, t := range sub {
+				if t.kind == tEOF {
+					continue
+				}
+				et = append(et, token{t.kind, t.text, s.pos + t.pos})
+			}
+			et = append(et, token{tRParen, ")", at})
+			parts = append(parts, et)
+		} else if len(s.text) > 0 {
+			parts = append(parts, []token{{tStr, s.text, s.pos}})
+		}
+	}
+	if len(parts) == 0 {
+		return []token{{tStr, "", at}}, nil
+	}
+	out := []token{{tLParen, "(", at}}
+	for i, p := range parts {
+		if i > 0 {
+			out = append(out, token{tOp, "++", at})
+		}
+		out = append(out, p...)
+	}
+	out = append(out, token{tRParen, ")", at})
+	return out, nil
 }
 
 // skipBlockComment consumes a nestable {- … -} comment starting at i (positioned on

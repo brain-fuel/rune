@@ -314,8 +314,9 @@ func (p *printer) stringStr(t core.Tm) (string, bool) {
 }
 
 // quoteString renders a Go string as a Rune string literal, escaping exactly the
-// characters the lexer's scanString decodes (\n \t \r \\ \" \0) so the result
-// re-lexes to the same bytes.
+// characters the lexer's scanString decodes (\n \t \r \\ \" \0 \{) so the result
+// re-lexes to the same bytes. `{` is escaped to `\{` so a literal brace is not read back
+// as the start of a `{…}` interpolation (the round-trip contract).
 func quoteString(s string) string {
 	var sb strings.Builder
 	sb.WriteByte('"')
@@ -333,6 +334,8 @@ func quoteString(s string) string {
 			sb.WriteString("\\r")
 		case 0:
 			sb.WriteString("\\0")
+		case '{':
+			sb.WriteString("\\{")
 		default:
 			sb.WriteByte(c)
 		}
