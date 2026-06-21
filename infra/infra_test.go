@@ -87,6 +87,36 @@ func TestProviderResources(t *testing.T) {
 	}
 }
 
+// TestMultiResourceEquivalence is the app-level headline gate: a whole multi-resource
+// graph (a realistic app) lowers to the SAME logical resource set on every cloud —
+// equal config yields an equivalent deployment, for an entire application, not just
+// one resource.
+func TestMultiResourceEquivalence(t *testing.T) {
+	graph := []Resource{
+		Compute{Name: "worker", Replicas: 3}, Queue{Name: "events"}, KV{Name: "cache"},
+		Database{Name: "appdb"}, Secret{Name: "apikey"}, Identity{Name: "role"},
+		Bucket{Name: "assets"}, KMS{Name: "key"},
+	}
+	var first []LogicalResource
+	for i, tgt := range cloudTargets {
+		e, _ := ByTarget(tgt)
+		art, err := e.Emit(graph)
+		if err != nil {
+			t.Fatalf("[%s] emit: %v", tgt, err)
+		}
+		if i == 0 {
+			first = art.Logical
+			continue
+		}
+		if !reflect.DeepEqual(art.Logical, first) {
+			t.Errorf("[%s] logical set diverged from %s:\n got %v\nwant %v", tgt, cloudTargets[0], art.Logical, first)
+		}
+	}
+	if len(first) != len(graph) {
+		t.Errorf("logical set has %d entries, want %d", len(first), len(graph))
+	}
+}
+
 // TestKVObjectEquivalence extends the equal-config->equivalent-deployment gate to the
 // KV and Object abstractions: one agnostic graph lowers to the same logical set on
 // every cloud.

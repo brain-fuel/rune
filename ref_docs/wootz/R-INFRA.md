@@ -47,11 +47,14 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | file    | EFS | Azure Files | Filestore | — | — |
 | stream  | Kinesis | Event Hubs | Pub/Sub | — | — |
 | iam     | IAM role | Managed Identity | Service Account | — | — |
+| k8s     | EKS | AKS | GKE | — | — |
 
 Shared Azure scaffolding is emitted once per graph: the resource group (always), the
 Service Bus namespace (queue), Event Hub namespace (stream), storage account
 (object+file, `needsStorageAccount`), Key Vault (secret+kms, `needsKeyVault`),
-vnet+subnet (compute). 13 rows total.
+vnet+subnet (compute). 14 rows total. A whole multi-resource graph lowers to the same
+logical set on every cloud (`TestMultiResourceEquivalence`); `rune deploy --manifest`
+emits one app's graph at once.
 
 Data-plane abstractions (queue/kv/object) carry a typed `.rune` interface the app
 CALLS (enqueue/dequeue, put/get/del — over the packed-String code); they type-check on
@@ -108,9 +111,11 @@ type-checks (data-plane), the protocol block accepts/rejects correctly, and `run
   (managed Redis / SQS / S3 clients; RabbitMQ/NATS/Valkey/Garage over the wire) + a live
   Podman round-trip (deferred where Podman is absent). Rust data-plane body.
 - **Matrix breadth (remaining):** Networking (VPC/LB/CDN), Storage breadth (archival),
-  Database breadth (warehouse), Security (DDoS), Compute breadth (serverless/managed-
-  containers/PaaS), DevOps (CI/CD), AI/ML. (13 rows landed: queue/kv/object/compute/
-  database/secret/nosql/dns/disk/kms/file/stream/iam.)
+  Database breadth (warehouse), Security (DDoS), Compute breadth (serverless/PaaS),
+  DevOps (CI/CD), AI/ML. (14 rows landed: queue/kv/object/compute/database/secret/
+  nosql/dns/disk/kms/file/stream/iam/k8s.) The remaining categories mostly have one
+  dependency-heavy provider (CloudFront origins, EKS subnets, Synapse storage); add
+  them when a consumer needs them.
 - **Cloud apply:** graduate from `fmt`/`validate` to real `apply` once accounts + creds
   exist (a credentialed milestone, not CI).
 
