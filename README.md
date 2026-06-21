@@ -206,6 +206,13 @@ rune repl            # type check + normalize, definitions cached; Nat
 rune emit FILE NAME  # the erased JavaScript shadow, to stdout
 rune run  FILE NAME  # emit and execute under node
 rune simulate FILE [n]  # run a distributed protocol under a fault policy (see above)
+
+rune deploy FILE [NAME] --target beam        # deploy + RUN a verified protocol live
+rune deploy --resource <kind> --name N --backend <b>   # one resource -> HCL / Compose
+rune deploy --manifest app.wav --backend aws # a whole app's graph -> one main.tf
+#   kinds:    queue kv object compute database secret nosql dns disk kms file
+#             stream iam k8s network firewall logs registry paas
+#   backends: aws azure gcp | rabbitmq nats valkey garage podman postgres ...
 ```
 
 Everything `rune` touches is TYPE CHECKED first; ill-typed files are rejected with
