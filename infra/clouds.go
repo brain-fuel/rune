@@ -139,6 +139,11 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"aws_route53_zone\" %s", str(v.Name))
 			h.attr("name", str(v.domain()))
 			h.close()
+		case Disk:
+			h.open("resource \"aws_ebs_volume\" %s", str(v.Name))
+			h.attr("availability_zone", "\"${var.aws_region}a\"")
+			h.attr("size", fmt.Sprintf("%d", v.sizeGB()))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -346,6 +351,15 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.domain()))
 			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
 			h.close()
+		case Disk:
+			h.open("resource \"azurerm_managed_disk\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("storage_account_type", str("Standard_LRS"))
+			h.attr("create_option", str("Empty"))
+			h.attr("disk_size_gb", fmt.Sprintf("%d", v.sizeGB()))
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -457,6 +471,12 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_dns_managed_zone\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
 			h.attr("dns_name", str(v.domain()+"."))
+			h.close()
+		case Disk:
+			h.open("resource \"google_compute_disk\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("size", fmt.Sprintf("%d", v.sizeGB()))
+			h.attr("zone", "var.gcp_zone")
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

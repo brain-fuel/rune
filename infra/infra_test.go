@@ -56,6 +56,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_dynamodb_table", "azure": "azurerm_cosmosdb_account", "gcp": "google_firestore_database"}},
 		{"dns", DNS{Name: "x"}, map[string]string{
 			"aws": "aws_route53_zone", "azure": "azurerm_dns_zone", "gcp": "google_dns_managed_zone"}},
+		{"disk", Disk{Name: "x"}, map[string]string{
+			"aws": "aws_ebs_volume", "azure": "azurerm_managed_disk", "gcp": "google_compute_disk"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -220,6 +222,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"secret":   {Secret{Name: "apikey"}},
 		"nosql":    {NoSQL{Name: "sessions"}},
 		"dns":      {DNS{Name: "web"}},
+		"disk":     {Disk{Name: "data", SizeGB: 50}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

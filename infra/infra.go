@@ -145,6 +145,25 @@ func (d DNS) domain() string {
 	return d.Domain
 }
 
+// Disk is a block-storage volume (EBS / Azure Managed Disk / GCP Persistent Disk).
+// Control-plane, cloud-only (the local equivalent is a plain Podman volume). SizeGB
+// defaults to 20.
+type Disk struct {
+	Name   string
+	SizeGB int
+}
+
+func (Disk) isResource()           {}
+func (Disk) Kind() string          { return "disk" }
+func (d Disk) LogicalName() string { return d.Name }
+
+func (d Disk) sizeGB() int {
+	if d.SizeGB < 1 {
+		return 20
+	}
+	return d.SizeGB
+}
+
 // LogicalResource is the abstract shape an emitter claims to realize for a given
 // resource: the agnostic kind + name, INDEPENDENT of the concrete provider type.
 // Two targets are EQUIVALENT for a configuration when their LogicalResource sets are
