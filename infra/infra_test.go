@@ -110,6 +110,7 @@ func TestMultiResourceEquivalence(t *testing.T) {
 		Compute{Name: "worker", Replicas: 3}, Queue{Name: "events"}, KV{Name: "cache"},
 		Database{Name: "appdb"}, Secret{Name: "apikey"}, Identity{Name: "role"},
 		Bucket{Name: "assets"}, KMS{Name: "key"},
+		LoadBalancer{Name: "ingress"}, CDN{Name: "edge"},
 	}
 	var first []LogicalResource
 	for i, tgt := range cloudTargets {
