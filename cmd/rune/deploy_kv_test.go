@@ -26,19 +26,21 @@ main : IO Nat is
   end)
 end`
 
-// TestKVRunsOnJS is the "it runs" gate for the data plane: a get-after-put on the
-// wavelet KV abstraction returns the stored value when run on the JS backend (the
-// local in-process binding). Skipped where node is absent.
-func TestKVRunsOnJS(t *testing.T) {
-	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("node not in PATH")
-	}
-	f, err := os.CreateTemp("", "kv-*.rune")
+// dataPlaneBackends are the source targets with an in-process data-plane binding +
+// their runtime binary.
+var dataPlaneBackends = []struct{ target, bin string }{
+	{"js", "node"}, {"py", "python3"}, {"go", "go"}, {"erl", "escript"},
+}
+
+// runProgramCapturing runs a source program's `main` on a target, capturing stdout.
+func runProgramCapturing(t *testing.T, src, target string) string {
+	t.Helper()
+	f, err := os.CreateTemp("", "wavelet-*.rune")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.Remove(f.Name())
-	if _, err := f.WriteString(kvProgram); err != nil {
+	if _, err := f.WriteString(src); err != nil {
 		t.Fatal(err)
 	}
 	f.Close()
@@ -53,15 +55,29 @@ func TestKVRunsOnJS(t *testing.T) {
 		done <- buf.String()
 	}()
 	var banner bytes.Buffer
-	derr := runDeploy([]string{f.Name(), "main", "--target", "js"}, &banner)
+	derr := runDeploy([]string{f.Name(), "main", "--target", target}, &banner)
 	w.Close()
 	os.Stdout = old
 	got := <-done
-
 	if derr != nil {
-		t.Fatalf("kv program on js failed: %v", derr)
+		t.Fatalf("[%s] run failed: %v", target, derr)
 	}
-	if !strings.Contains(got, "42") {
-		t.Errorf("get-after-put did not return the stored value; output:\n%s", got)
+	return got
+}
+
+// TestKVRunsCrossBackend is the "it runs" gate for the data plane: a get-after-put on
+// the wavelet KV abstraction returns the stored value on every source backend with a
+// local in-process binding (js/py/go/erl). Each is skipped where its runtime is absent.
+func TestKVRunsCrossBackend(t *testing.T) {
+	for _, bk := range dataPlaneBackends {
+		t.Run(bk.target, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			got := runProgramCapturing(t, kvProgram, bk.target)
+			if !strings.Contains(got, "42") {
+				t.Errorf("[%s] get-after-put did not return 42; output:\n%s", bk.target, got)
+			}
+		})
 	}
 }

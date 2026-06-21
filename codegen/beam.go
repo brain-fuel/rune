@@ -96,6 +96,18 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "Float") {
 		b.WriteString("ff_Float() -> unit.\n")
 	}
+	// E4 / wavelet — the local in-process KV backend (the per-process dictionary,
+	// since the program runs in one process; the Nat code is the key). Absent key
+	// reads as 0.
+	if usesForeign(p, "kvPutCode") {
+		b.WriteString("ff_kvPutCode() -> fun(K) -> fun(V) -> fun(_U) -> begin erlang:put(K, V), V end end end end.\n")
+	}
+	if usesForeign(p, "kvGetCode") {
+		b.WriteString("ff_kvGetCode() -> fun(K) -> fun(_U) -> case erlang:get(K) of undefined -> 0; V -> V end end end.\n")
+	}
+	if usesForeign(p, "kvDelCode") {
+		b.WriteString("ff_kvDelCode() -> fun(K) -> fun(_U) -> begin erlang:erase(K), 0 end end end.\n")
+	}
 	if usesForeign(p, "fromNat") {
 		b.WriteString("ff_fromNat() -> fun(N) -> float(N) end.\n")
 	}

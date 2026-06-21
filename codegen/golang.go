@@ -91,6 +91,21 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "Float") {
 		b.WriteString("func Float() any { return nil }\n")
 	}
+	// E4 / wavelet — the local in-process KV backend (a package-global map keyed by
+	// the Nat code's decimal string; the Nat is a *big.Int). Absent key reads as 0.
+	if usesForeign(p, "kvPutCode") || usesForeign(p, "kvGetCode") || usesForeign(p, "kvDelCode") {
+		b.WriteString("var __kv = map[string]any{}\n")
+		b.WriteString("func __kvkey(k any) string { return fmt.Sprintf(\"%v\", k) }\n")
+	}
+	if usesForeign(p, "kvPutCode") {
+		b.WriteString("func kvPutCode() any { return func(k any) any { return func(v any) any { return func(_u any) any { __kv[__kvkey(k)] = v; return v } } } }\n")
+	}
+	if usesForeign(p, "kvGetCode") {
+		b.WriteString("func kvGetCode() any { return func(k any) any { return func(_u any) any { if x, ok := __kv[__kvkey(k)]; ok { return x }; return big.NewInt(0) } } }\n")
+	}
+	if usesForeign(p, "kvDelCode") {
+		b.WriteString("func kvDelCode() any { return func(k any) any { return func(_u any) any { delete(__kv, __kvkey(k)); return big.NewInt(0) } } }\n")
+	}
 	if usesForeign(p, "fromNat") {
 		b.WriteString("func fromNat() any { return func(n any) any { f, _ := new(big.Float).SetInt(n.(*big.Int)).Float64(); return f } }\n")
 	}

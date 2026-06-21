@@ -82,6 +82,20 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "Float") {
 		b.WriteString("def Float():\n    return None\n")
 	}
+	// E4 / wavelet — the local in-process KV backend (a module-global dict keyed by
+	// the bare Nat code), so a kv program RUNS unaided. An absent key reads as 0.
+	if usesForeign(p, "kvPutCode") || usesForeign(p, "kvGetCode") || usesForeign(p, "kvDelCode") {
+		b.WriteString("__kv = {}\n")
+	}
+	if usesForeign(p, "kvPutCode") {
+		b.WriteString("def kvPutCode():\n    return lambda k: lambda v: lambda _u: (__kv.__setitem__(k, v), v)[1]\n")
+	}
+	if usesForeign(p, "kvGetCode") {
+		b.WriteString("def kvGetCode():\n    return lambda k: lambda _u: __kv.get(k, 0)\n")
+	}
+	if usesForeign(p, "kvDelCode") {
+		b.WriteString("def kvDelCode():\n    return lambda k: lambda _u: (__kv.pop(k, 0), 0)[1]\n")
+	}
 	if usesForeign(p, "fromNat") {
 		b.WriteString("def fromNat():\n    return lambda n: float(n)\n")
 	}
