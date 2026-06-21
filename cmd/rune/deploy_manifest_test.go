@@ -56,8 +56,8 @@ func TestExampleManifest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("examples/app.wav did not parse: %v", err)
 	}
-	if len(rs) != 6 {
-		t.Errorf("expected 6 resources in app.wav, got %d", len(rs))
+	if len(rs) != 9 {
+		t.Errorf("expected 9 resources in app.wav, got %d", len(rs))
 	}
 	for _, c := range cloudCloudTargets {
 		var out bytes.Buffer

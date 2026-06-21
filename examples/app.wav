@@ -15,3 +15,6 @@ kv       cache
 database appdb
 secret   apikey
 iam      worker-role
+object   assets
+lb       ingress
+cdn      edge
