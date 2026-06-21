@@ -72,6 +72,24 @@ func TestExampleManifest(t *testing.T) {
 
 var cloudCloudTargets = []string{"aws", "azure", "gcp"}
 
+// TestDeployOutDir checks that --out writes the artifact files to a directory (the
+// FOSS path writes several files: compose.yaml + connection.env).
+func TestDeployOutDir(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	if err := runDeploy([]string{"--resource", "queue", "--name", "q", "--backend", "nats", "--out", dir}, &out); err != nil {
+		t.Fatalf("deploy --out: %v", err)
+	}
+	for _, f := range []string{"compose.yaml", "connection.env"} {
+		if _, err := os.Stat(dir + "/" + f); err != nil {
+			t.Errorf("expected %s written to --out dir: %v", f, err)
+		}
+	}
+	if !strings.Contains(out.String(), "wrote") {
+		t.Errorf("expected a 'wrote N files' message, got %q", out.String())
+	}
+}
+
 // TestManifestErrors checks manifest parse errors are clear.
 func TestManifestErrors(t *testing.T) {
 	cases := []struct{ body, want string }{
