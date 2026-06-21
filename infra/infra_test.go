@@ -52,6 +52,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_db_instance", "azure": "azurerm_postgresql_flexible_server", "gcp": "google_sql_database_instance"}},
 		{"secret", Secret{Name: "x"}, map[string]string{
 			"aws": "aws_secretsmanager_secret", "azure": "azurerm_key_vault_secret", "gcp": "google_secret_manager_secret"}},
+		{"nosql", NoSQL{Name: "x"}, map[string]string{
+			"aws": "aws_dynamodb_table", "azure": "azurerm_cosmosdb_account", "gcp": "google_firestore_database"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -214,6 +216,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"compute":  {Compute{Name: "worker", Image: "docker.io/library/erlang:slim", Replicas: 3}},
 		"database": {Database{Name: "appdb"}},
 		"secret":   {Secret{Name: "apikey"}},
+		"nosql":    {NoSQL{Name: "sessions"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

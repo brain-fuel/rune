@@ -116,6 +116,16 @@ func (Secret) isResource()           {}
 func (Secret) Kind() string          { return "secret" }
 func (s Secret) LogicalName() string { return s.Name }
 
+// NoSQL is a managed key-value / document store (distinct from KV's Redis cache):
+// AWS DynamoDB / Azure Cosmos DB / GCP Firestore native, dynamodb-local self-hosted.
+type NoSQL struct {
+	Name string
+}
+
+func (NoSQL) isResource()           {}
+func (NoSQL) Kind() string          { return "nosql" }
+func (n NoSQL) LogicalName() string { return n.Name }
+
 // LogicalResource is the abstract shape an emitter claims to realize for a given
 // resource: the agnostic kind + name, INDEPENDENT of the concrete provider type.
 // Two targets are EQUIVALENT for a configuration when their LogicalResource sets are
@@ -152,7 +162,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{},
 	}
 }
 

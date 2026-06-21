@@ -219,6 +219,36 @@ func (Dotenv) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// DynamoLocal is the self-hosted NoSQL backend: Amazon's DynamoDB-local emulator
+// (Apache-2.0), which speaks the real DynamoDB API, so dev matches the AWS target.
+type DynamoLocal struct{}
+
+func (DynamoLocal) Target() string { return "dynamodb" }
+func (DynamoLocal) Cloud() bool    { return false }
+
+func (DynamoLocal) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("dynamodb", "nosql", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - DynamoDB-local backend for the wavelet \"nosql\" abstraction.\n" +
+		"# bring up:  podman-compose up -d\n" +
+		"services:\n" +
+		composeService("dynamodb", "docker.io/amazon/dynamodb-local:latest",
+			[]string{"8000:8000"}, "")
+	env := map[string]string{
+		"WAVELET_NOSQL_BACKEND":  "dynamodb",
+		"WAVELET_NOSQL_ENDPOINT": "http://localhost:8000",
+	}
+	for _, n := range names {
+		env["WAVELET_NOSQL_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Valkey is the self-hosted key/value backend (Redis wire protocol — the same
 // client serves managed Redis and self-hosted Valkey).
 type Valkey struct{}

@@ -125,6 +125,16 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("secret_id", "aws_secretsmanager_secret."+v.Name+".id")
 			h.attr("secret_string", "var.secret_value")
 			h.close()
+		case NoSQL:
+			h.open("resource \"aws_dynamodb_table\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("billing_mode", str("PAY_PER_REQUEST"))
+			h.attr("hash_key", str("id"))
+			h.open("attribute")
+			h.attr("name", str("id"))
+			h.attr("type", str("S"))
+			h.close()
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -312,6 +322,21 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("value", "var.secret_value")
 			h.attr("key_vault_id", "azurerm_key_vault.wavelet.id")
 			h.close()
+		case NoSQL:
+			h.open("resource \"azurerm_cosmosdb_account\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("offer_type", str("Standard"))
+			h.attr("kind", str("GlobalDocumentDB"))
+			h.open("consistency_policy")
+			h.attr("consistency_level", str("Session"))
+			h.close()
+			h.open("geo_location")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("failover_priority", "0")
+			h.close()
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -412,6 +437,12 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_secret_manager_secret_version\" %s", str(v.Name))
 			h.attr("secret", "google_secret_manager_secret."+v.Name+".id")
 			h.attr("secret_data", "var.secret_value")
+			h.close()
+		case NoSQL:
+			h.open("resource \"google_firestore_database\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("location_id", "var.gcp_region")
+			h.attr("type", str("FIRESTORE_NATIVE"))
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)
