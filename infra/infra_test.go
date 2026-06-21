@@ -32,31 +32,84 @@ func TestQueueLogicalEquivalence(t *testing.T) {
 	}
 }
 
-// TestQueueProviderResources checks each cloud emits its expected concrete resource
-// type for a queue (the provider-specific lowering), with valid main.tf output.
-func TestQueueProviderResources(t *testing.T) {
-	rs := []Resource{Queue{Name: "events"}}
-	wantResource := map[string]string{
-		"aws":   "aws_sqs_queue",
-		"azure": "azurerm_servicebus_queue",
-		"gcp":   "google_pubsub_topic",
+// TestProviderResources checks each cloud emits its expected concrete resource type
+// for each agnostic resource kind (the provider-specific lowering).
+func TestProviderResources(t *testing.T) {
+	cases := []struct {
+		kind string
+		res  Resource
+		want map[string]string // provider -> expected concrete resource type
+	}{
+		{"queue", Queue{Name: "x"}, map[string]string{
+			"aws": "aws_sqs_queue", "azure": "azurerm_servicebus_queue", "gcp": "google_pubsub_topic"}},
+		{"kv", KV{Name: "x"}, map[string]string{
+			"aws": "aws_elasticache_cluster", "azure": "azurerm_redis_cache", "gcp": "google_redis_instance"}},
+		{"object", Bucket{Name: "x"}, map[string]string{
+			"aws": "aws_s3_bucket", "azure": "azurerm_storage_container", "gcp": "google_storage_bucket"}},
 	}
-	for tgt, res := range wantResource {
-		e, _ := ByTarget(tgt)
-		art, err := e.Emit(rs)
-		if err != nil {
-			t.Fatalf("[%s] emit: %v", tgt, err)
+	for _, c := range cases {
+		for tgt, res := range c.want {
+			e, _ := ByTarget(tgt)
+			art, err := e.Emit([]Resource{c.res})
+			if err != nil {
+				t.Fatalf("[%s/%s] emit: %v", tgt, c.kind, err)
+			}
+			tf := art.Files["main.tf"]
+			if !strings.Contains(tf, res) {
+				t.Errorf("[%s/%s] main.tf missing %q\n%s", tgt, c.kind, res, tf)
+			}
+			if !strings.Contains(tf, "\"x\"") {
+				t.Errorf("[%s/%s] main.tf missing the resource name", tgt, c.kind)
+			}
 		}
-		tf := art.Files["main.tf"]
-		if tf == "" {
-			t.Fatalf("[%s] no main.tf emitted", tgt)
+	}
+}
+
+// TestKVObjectEquivalence extends the equal-config->equivalent-deployment gate to the
+// KV and Object abstractions: one agnostic graph lowers to the same logical set on
+// every cloud.
+func TestKVObjectEquivalence(t *testing.T) {
+	cases := []struct {
+		rs   []Resource
+		want []LogicalResource
+	}{
+		{[]Resource{KV{Name: "cache"}}, []LogicalResource{{Kind: "kv", Name: "cache"}}},
+		{[]Resource{Bucket{Name: "assets"}}, []LogicalResource{{Kind: "object", Name: "assets"}}},
+	}
+	for _, c := range cases {
+		for _, tgt := range cloudTargets {
+			e, _ := ByTarget(tgt)
+			art, err := e.Emit(c.rs)
+			if err != nil {
+				t.Fatalf("[%s] emit: %v", tgt, err)
+			}
+			if !reflect.DeepEqual(art.Logical, c.want) {
+				t.Errorf("[%s] logical = %v, want %v", tgt, art.Logical, c.want)
+			}
 		}
-		if !strings.Contains(tf, res) {
-			t.Errorf("[%s] main.tf missing %q\n%s", tgt, res, tf)
-		}
-		if !strings.Contains(tf, "\"events\"") {
-			t.Errorf("[%s] main.tf missing the queue name", tgt)
-		}
+	}
+}
+
+// TestKVObjectFOSS checks the Valkey (kv) and Garage (object) self-hosted backends.
+func TestKVObjectFOSS(t *testing.T) {
+	v, _ := ByTarget("valkey")
+	art, err := v.Emit([]Resource{KV{Name: "cache"}})
+	if err != nil {
+		t.Fatalf("valkey emit: %v", err)
+	}
+	if !strings.Contains(art.Files["connection.env"], "WAVELET_KV_BACKEND=valkey") {
+		t.Errorf("valkey connection.env wrong:\n%s", art.Files["connection.env"])
+	}
+	g, _ := ByTarget("garage")
+	art, err = g.Emit([]Resource{Bucket{Name: "assets"}})
+	if err != nil {
+		t.Fatalf("garage emit: %v", err)
+	}
+	if art.Files["garage.toml"] == "" {
+		t.Errorf("garage emit missing garage.toml")
+	}
+	if !strings.Contains(art.Files["connection.env"], "WAVELET_OBJECT_BACKEND=garage") {
+		t.Errorf("garage connection.env wrong:\n%s", art.Files["connection.env"])
 	}
 }
 
@@ -98,16 +151,25 @@ func TestQueueHCLFormatted(t *testing.T) {
 	if bin == "" {
 		t.Skip("no tofu/terraform binary in PATH")
 	}
-	rs := []Resource{Queue{Name: "events"}}
-	for _, tgt := range cloudTargets {
-		e, _ := ByTarget(tgt)
-		art, _ := e.Emit(rs)
-		tf := art.Files["main.tf"]
-		cmd := exec.Command(bin, "fmt", "-check", "-")
-		cmd.Stdin = strings.NewReader(tf)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Errorf("[%s] %s fmt rejected the emitted HCL: %v\n%s\n--- HCL ---\n%s",
-				tgt, bin, err, out, tf)
+	graphs := map[string][]Resource{
+		"queue":  {Queue{Name: "events"}},
+		"kv":     {KV{Name: "cache"}},
+		"object": {Bucket{Name: "assets"}},
+	}
+	for kind, rs := range graphs {
+		for _, tgt := range cloudTargets {
+			e, _ := ByTarget(tgt)
+			art, err := e.Emit(rs)
+			if err != nil {
+				t.Fatalf("[%s/%s] emit: %v", tgt, kind, err)
+			}
+			tf := art.Files["main.tf"]
+			cmd := exec.Command(bin, "fmt", "-check", "-")
+			cmd.Stdin = strings.NewReader(tf)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Errorf("[%s/%s] %s fmt rejected the emitted HCL: %v\n%s\n--- HCL ---\n%s",
+					tgt, kind, bin, err, out, tf)
+			}
 		}
 	}
 }

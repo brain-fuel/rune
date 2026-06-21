@@ -1,0 +1,45 @@
+-- lib/infra/object.rune — the wavelet OBJECT STORAGE abstraction (agnostic surface).
+--
+-- A program PUTs and GETs blobs by key without naming a vendor. `rune deploy
+-- --resource object --backend <b>` provisions the backend (AWS S3 / Azure Blob / GCP
+-- Cloud Storage, or self-hosted Garage) and binds these foreign ops to it. The S3 API
+-- is the anchor: one S3 client serves AWS and self-hosted Garage alike.
+--
+-- Loaded on top of the REPL prelude (String / codeOf / bytes / Whole / leW); IO is
+-- ambient (store/io.go). `list` (returning a List of keys) lands with the runtime
+-- binding once a List is in scope (slice 2).
+
+data Unit : U is unit : Unit end
+
+-- A fetched object, or nothing when the key is absent.
+data OObj : U is onone : OObj | osome : String -> OObj end
+
+-- The host edge (assume-tier R-FFI) over the packed-String CODE (a Whole). Blobs are
+-- Strings here; binary payloads ride the same packed-bytes encoding.
+foreign objPutCode : Whole -> Whole -> IO Whole end   -- keyCode -> bytesCode -> ack
+foreign objGetCode : Whole -> IO Whole end            -- keyCode -> bytesCode (0 = absent)
+foreign objDelCode : Whole -> IO Whole end            -- keyCode -> ack
+
+put : String -> String -> IO Unit is
+  fn (key : String) (blob : String) is
+    bindIO Whole Unit (objPutCode (codeOf key) (codeOf blob))
+      (fn (a : Whole) is pureIO Unit unit end)
+  end
+end
+
+get : String -> IO OObj is
+  fn (key : String) is
+    bindIO Whole OObj (objGetCode (codeOf key)) (fn (code : Whole) is
+      case leW code 1 of
+      | true  -> pureIO OObj onone
+      | false -> pureIO OObj (osome (bytes code))
+      end
+    end)
+  end
+end
+
+del : String -> IO Unit is
+  fn (key : String) is
+    bindIO Whole Unit (objDelCode (codeOf key)) (fn (a : Whole) is pureIO Unit unit end)
+  end
+end

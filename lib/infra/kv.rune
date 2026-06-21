@@ -1,0 +1,44 @@
+-- lib/infra/kv.rune — the wavelet KEY/VALUE abstraction (agnostic surface).
+--
+-- A program PUTs and GETs String values by String key without naming a vendor.
+-- `rune deploy --resource kv --backend <b>` provisions the backend (managed Redis on
+-- AWS ElastiCache / Azure Cache for Redis / GCP Memorystore, or self-hosted Valkey)
+-- and binds these foreign ops to it. The Redis/Valkey wire protocol is the anchor:
+-- one client serves managed and self-hosted alike.
+--
+-- Loaded on top of the REPL prelude (String / codeOf / bytes / Whole / leW); IO is
+-- ambient (store/io.go).
+
+data Unit : U is unit : Unit end
+
+-- A fetched value, or nothing when the key is absent.
+data KVal : U is kvnone : KVal | kvsome : String -> KVal end
+
+-- The host edge (assume-tier R-FFI) over the packed-String CODE (a Whole).
+foreign kvPutCode : Whole -> Whole -> IO Whole end   -- keyCode -> valCode -> ack
+foreign kvGetCode : Whole -> IO Whole end            -- keyCode -> valCode (0 = absent)
+foreign kvDelCode : Whole -> IO Whole end            -- keyCode -> ack
+
+put : String -> String -> IO Unit is
+  fn (k : String) (v : String) is
+    bindIO Whole Unit (kvPutCode (codeOf k) (codeOf v))
+      (fn (a : Whole) is pureIO Unit unit end)
+  end
+end
+
+get : String -> IO KVal is
+  fn (k : String) is
+    bindIO Whole KVal (kvGetCode (codeOf k)) (fn (code : Whole) is
+      case leW code 1 of
+      | true  -> pureIO KVal kvnone
+      | false -> pureIO KVal (kvsome (bytes code))
+      end
+    end)
+  end
+end
+
+del : String -> IO Unit is
+  fn (k : String) is
+    bindIO Whole Unit (kvDelCode (codeOf k)) (fn (a : Whole) is pureIO Unit unit end)
+  end
+end
