@@ -435,6 +435,45 @@ func (Loki) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// K3s is the self-hosted Kubernetes backend (Rancher k3s — a single-binary, fully
+// conformant Kubernetes distribution; the local equivalent of EKS/AKS/GKE). It backs
+// the "k8s" abstraction with NO cloud account. Emitted inline (not via composeService)
+// because the k3s server needs `privileged: true` and a token.
+type K3s struct{}
+
+func (K3s) Target() string { return "k3s" }
+func (K3s) Cloud() bool    { return false }
+
+func (K3s) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("k3s", "k8s", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - k3s (lightweight Kubernetes) backend for the wavelet \"k8s\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (API server on https://localhost:6443, token \"wavelet\")\n" +
+		"services:\n" +
+		"  k3s-server:\n" +
+		"    image: docker.io/rancher/k3s:v1.30.5-k3s1\n" +
+		"    command: server\n" +
+		"    privileged: true\n" +
+		"    ports:\n" +
+		"      - \"6443:6443\"\n" +
+		"    environment:\n" +
+		"      - K3S_TOKEN=wavelet\n"
+	env := map[string]string{
+		"WAVELET_K8S_BACKEND": "k3s",
+		"WAVELET_K8S_SERVER":  "https://localhost:6443",
+		"WAVELET_K8S_TOKEN":   "wavelet",
+	}
+	for _, n := range names {
+		env["WAVELET_K8S_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Prometheus is the self-hosted metrics backend (Prometheus — the de-facto metrics
 // store, the local equivalent of CloudWatch / Azure Monitor / Cloud Monitoring). It
 // backs the "metrics" abstraction with NO cloud account.
