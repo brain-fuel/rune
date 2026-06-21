@@ -209,6 +209,17 @@ func (LoadBalancer) isResource()           {}
 func (LoadBalancer) Kind() string          { return "lb" }
 func (l LoadBalancer) LogicalName() string { return l.Name }
 
+// Metrics is a managed metrics/monitoring workspace (AWS CloudWatch dashboard / Azure
+// Monitor workspace = managed Prometheus / GCP Monitoring dashboard) — the metrics
+// pillar of observability, complementing Logs. Prometheus is the FOSS backend.
+type Metrics struct {
+	Name string
+}
+
+func (Metrics) isResource()           {}
+func (Metrics) Kind() string          { return "metrics" }
+func (m Metrics) LogicalName() string { return m.Name }
+
 // Identity is a managed workload identity (AWS IAM role / Azure user-assigned managed
 // identity / GCP service account) — the principal a workload runs as. Cloud-only.
 type Identity struct {
@@ -322,7 +333,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{}, Prometheus{},
 	}
 }
 

@@ -194,6 +194,11 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("load_balancer_type", str("application"))
 			h.close()
+		case Metrics:
+			h.open("resource \"aws_cloudwatch_dashboard\" %s", str(v.Name))
+			h.attr("dashboard_name", str(v.Name))
+			h.attr("dashboard_body", str("{\"widgets\":[]}"))
+			h.close()
 		case Identity:
 			h.open("resource \"aws_iam_role\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
@@ -500,6 +505,12 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("location", "azurerm_resource_group.wavelet.location")
 			h.attr("sku", str("Standard"))
 			h.close()
+		case Metrics:
+			h.open("resource \"azurerm_monitor_workspace\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.close()
 		case Identity:
 			h.open("resource \"azurerm_user_assigned_identity\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
@@ -715,6 +726,10 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("ip_protocol", str("TCP"))
 			h.attr("port_range", str("80"))
+			h.close()
+		case Metrics:
+			h.open("resource \"google_monitoring_dashboard\" %s", str(v.Name))
+			h.attr("dashboard_json", str("{\"displayName\":\""+v.Name+"\"}"))
 			h.close()
 		case Identity:
 			h.open("resource \"google_service_account\" %s", str(v.Name))

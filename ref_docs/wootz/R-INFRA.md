@@ -25,7 +25,7 @@ core; infra is a kernel CONSUMER (the shadow rule), emitting throwaway artifacts
   Podman (Buildah/Podman, Apache-2.0): `RabbitMQ`/`NATS` (queue), `Valkey` (kv),
   `Garage` (object), `Podman` (compute), `Postgres` (database), `Dotenv`/`Vault` (secret),
   `DynamoLocal` (nosql), `CoreDNS` (dns), `LocalRegistry` (registry:2), `Redpanda`
-  (stream, Kafka API), `Loki` (logs). Each emits a Compose spec + `connection.env`, so the layer is
+  (stream, Kafka API), `Loki` (logs), `Prometheus` (metrics). Each emits a Compose spec + `connection.env`, so the layer is
   exercisable with NO cloud account.
 
 **The equivalence gate** ("equal config → equivalent deployment"): one agnostic graph
@@ -57,11 +57,12 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | paas    | Beanstalk | App Service plan | App Engine | — | — |
 | cdn     | CloudFront | CDN profile | Cloud CDN backend bucket | — | — |
 | lb      | ELBv2 | Load Balancer | Forwarding rule | — | — |
+| metrics | CloudWatch dashboard | Monitor workspace | Monitoring dashboard | Prometheus | — |
 
 Shared Azure scaffolding is emitted once per graph: the resource group (always), the
 Service Bus namespace (queue), Event Hub namespace (stream), storage account
 (object+file, `needsStorageAccount`), Key Vault (secret+kms, `needsKeyVault`),
-vnet+subnet (compute). 21 rows total. A whole multi-resource graph lowers to the same
+vnet+subnet (compute). 22 rows total. A whole multi-resource graph lowers to the same
 logical set on every cloud (`TestMultiResourceEquivalence`); `rune deploy --manifest`
 emits one app's graph at once.
 
@@ -121,8 +122,8 @@ type-checks (data-plane), the protocol block accepts/rejects correctly, and `run
   Podman round-trip (deferred where Podman is absent). Rust data-plane body.
 - **Matrix breadth (remaining):** Storage breadth (archival),
   Database breadth (warehouse), Compute breadth (serverless), DevOps (CI/CD), AI/ML.
-  (21 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/
-  stream/cdn/lb/iam/k8s/network/firewall/logs/registry/paas.) The remaining categories mostly
+  (22 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/
+  stream/cdn/lb/metrics/iam/k8s/network/firewall/logs/registry/paas.) The remaining categories mostly
   have one dependency-heavy provider (CloudFront origins, LB target groups, Synapse
   storage); add them when a consumer needs them (Standing Rule 1).
 - **Cloud apply:** graduate from `fmt`/`validate` to real `apply` once accounts + creds

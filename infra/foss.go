@@ -435,6 +435,37 @@ func (Loki) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// Prometheus is the self-hosted metrics backend (Prometheus — the de-facto metrics
+// store, the local equivalent of CloudWatch / Azure Monitor / Cloud Monitoring). It
+// backs the "metrics" abstraction with NO cloud account.
+type Prometheus struct{}
+
+func (Prometheus) Target() string { return "prometheus" }
+func (Prometheus) Cloud() bool    { return false }
+
+func (Prometheus) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("prometheus", "metrics", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Prometheus backend for the wavelet \"metrics\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (UI + API on http://localhost:9090)\n" +
+		"services:\n" +
+		composeService("prometheus", "docker.io/prom/prometheus:v2.54.1",
+			[]string{"9090:9090"}, "")
+	env := map[string]string{
+		"WAVELET_METRICS_BACKEND": "prometheus",
+		"WAVELET_METRICS_URL":     "http://localhost:9090",
+	}
+	for _, n := range names {
+		env["WAVELET_METRICS_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Vault is the self-hosted secrets backend (HashiCorp Vault in dev mode — a real
 // running secret store, richer than the keys-only `Dotenv` template). It backs the
 // "secret" abstraction with NO cloud account; the API surface mirrors the managed
