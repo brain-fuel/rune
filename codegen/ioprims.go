@@ -93,6 +93,24 @@ func usesFileEnv(p Program) bool {
 	return false
 }
 
+// dataPlanePrims are the E4 / wavelet in-process data-plane ops (kv / object /
+// queue): each backend bakes a local host body so a program using these RUNS unaided.
+var dataPlanePrims = []string{
+	"kvPutCode", "kvGetCode", "kvDelCode",
+	"objPutCode", "objGetCode", "objDelCode",
+	"enqueueCode", "dequeueCode",
+}
+
+// usesDataPlane reports whether the program references any wavelet data-plane op.
+func usesDataPlane(p Program) bool {
+	for _, n := range dataPlanePrims {
+		if usesForeign(p, n) {
+			return true
+		}
+	}
+	return false
+}
+
 // usesForeign reports whether any emitted definition references a `foreign` axiom
 // of the given name (erased to an IForeign accessor). Mirrors usesOTP's walk.
 func usesForeign(p Program, name string) bool {

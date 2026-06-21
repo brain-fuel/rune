@@ -65,18 +65,58 @@ func runProgramCapturing(t *testing.T, src, target string) string {
 	return got
 }
 
-// TestKVRunsCrossBackend is the "it runs" gate for the data plane: a get-after-put on
-// the wavelet KV abstraction returns the stored value on every source backend with a
-// local in-process binding (js/py/go/erl). Each is skipped where its runtime is absent.
-func TestKVRunsCrossBackend(t *testing.T) {
+// objectProgram puts a blob under a key and reads it back (the object data plane).
+const objectProgram = `data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+foreign objPutCode : Nat -> Nat -> IO Nat end
+foreign objGetCode : Nat -> IO Nat end
+foreign printNat   : Nat -> IO Nat end
+main : IO Nat is
+  bindIO Nat Nat (objPutCode 5 99) (fn (a : Nat) is
+    bindIO Nat Nat (objGetCode 5) (fn (v : Nat) is printNat v end)
+  end)
+end`
+
+// queueProgram enqueues two messages then dequeues them, checking FIFO order.
+const queueProgram = `data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+foreign enqueueCode : Nat -> Nat -> IO Nat end
+foreign dequeueCode : Nat -> IO Nat end
+foreign printNat    : Nat -> IO Nat end
+main : IO Nat is
+  bindIO Nat Nat (enqueueCode 1 7) (fn (a : Nat) is
+    bindIO Nat Nat (enqueueCode 1 8) (fn (b : Nat) is
+      bindIO Nat Nat (dequeueCode 1) (fn (x : Nat) is
+        bindIO Nat Nat (printNat x) (fn (p : Nat) is
+          bindIO Nat Nat (dequeueCode 1) (fn (y : Nat) is printNat y end)
+        end)
+      end)
+    end)
+  end)
+end`
+
+// TestDataPlaneRunsCrossBackend is the "it runs" gate for ALL THREE data-plane
+// abstractions (kv / object / queue) on every source backend with a local in-process
+// binding (js/py/go/erl): a get-after-put returns the value, and a queue preserves
+// FIFO order. Each is skipped where its runtime is absent.
+func TestDataPlaneRunsCrossBackend(t *testing.T) {
 	for _, bk := range dataPlaneBackends {
 		t.Run(bk.target, func(t *testing.T) {
 			if _, err := exec.LookPath(bk.bin); err != nil {
 				t.Skipf("%s not in PATH", bk.bin)
 			}
-			got := runProgramCapturing(t, kvProgram, bk.target)
-			if !strings.Contains(got, "42") {
-				t.Errorf("[%s] get-after-put did not return 42; output:\n%s", bk.target, got)
+			if got := runProgramCapturing(t, kvProgram, bk.target); !strings.Contains(got, "42") {
+				t.Errorf("[%s] kv get-after-put != 42:\n%s", bk.target, got)
+			}
+			if got := runProgramCapturing(t, objectProgram, bk.target); !strings.Contains(got, "99") {
+				t.Errorf("[%s] object get-after-put != 99:\n%s", bk.target, got)
+			}
+			got := runProgramCapturing(t, queueProgram, bk.target)
+			i7, i8 := strings.Index(got, "7"), strings.Index(got, "8")
+			if i7 < 0 || i8 < 0 || i7 > i8 {
+				t.Errorf("[%s] queue not FIFO (7 before 8):\n%s", bk.target, got)
 			}
 		})
 	}

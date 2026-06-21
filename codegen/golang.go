@@ -91,11 +91,13 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "Float") {
 		b.WriteString("func Float() any { return nil }\n")
 	}
-	// E4 / wavelet — the local in-process KV backend (a package-global map keyed by
-	// the Nat code's decimal string; the Nat is a *big.Int). Absent key reads as 0.
+	// E4 / wavelet — the local in-process data-plane backends. The Nat code is a
+	// *big.Int; __kvkey gives a stable comparable map key. An absent read returns 0.
+	if usesDataPlane(p) {
+		b.WriteString("func __kvkey(k any) string { return fmt.Sprintf(\"%v\", k) }\n")
+	}
 	if usesForeign(p, "kvPutCode") || usesForeign(p, "kvGetCode") || usesForeign(p, "kvDelCode") {
 		b.WriteString("var __kv = map[string]any{}\n")
-		b.WriteString("func __kvkey(k any) string { return fmt.Sprintf(\"%v\", k) }\n")
 	}
 	if usesForeign(p, "kvPutCode") {
 		b.WriteString("func kvPutCode() any { return func(k any) any { return func(v any) any { return func(_u any) any { __kv[__kvkey(k)] = v; return v } } } }\n")
@@ -105,6 +107,29 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "kvDelCode") {
 		b.WriteString("func kvDelCode() any { return func(k any) any { return func(_u any) any { delete(__kv, __kvkey(k)); return big.NewInt(0) } } }\n")
+	}
+	// E4 / wavelet — the local OBJECT store (same shape as kv, distinct global map).
+	if usesForeign(p, "objPutCode") || usesForeign(p, "objGetCode") || usesForeign(p, "objDelCode") {
+		b.WriteString("var __obj = map[string]any{}\n")
+	}
+	if usesForeign(p, "objPutCode") {
+		b.WriteString("func objPutCode() any { return func(k any) any { return func(v any) any { return func(_u any) any { __obj[__kvkey(k)] = v; return v } } } }\n")
+	}
+	if usesForeign(p, "objGetCode") {
+		b.WriteString("func objGetCode() any { return func(k any) any { return func(_u any) any { if x, ok := __obj[__kvkey(k)]; ok { return x }; return big.NewInt(0) } } }\n")
+	}
+	if usesForeign(p, "objDelCode") {
+		b.WriteString("func objDelCode() any { return func(k any) any { return func(_u any) any { delete(__obj, __kvkey(k)); return big.NewInt(0) } } }\n")
+	}
+	// E4 / wavelet — the local QUEUE (a FIFO slice per queue code).
+	if usesForeign(p, "enqueueCode") || usesForeign(p, "dequeueCode") {
+		b.WriteString("var __q = map[string][]any{}\n")
+	}
+	if usesForeign(p, "enqueueCode") {
+		b.WriteString("func enqueueCode() any { return func(q any) any { return func(m any) any { return func(_u any) any { kk := __kvkey(q); __q[kk] = append(__q[kk], m); return m } } } }\n")
+	}
+	if usesForeign(p, "dequeueCode") {
+		b.WriteString("func dequeueCode() any { return func(q any) any { return func(_u any) any { kk := __kvkey(q); if len(__q[kk]) > 0 { x := __q[kk][0]; __q[kk] = __q[kk][1:]; return x }; return big.NewInt(0) } } }\n")
 	}
 	if usesForeign(p, "fromNat") {
 		b.WriteString("func fromNat() any { return func(n any) any { f, _ := new(big.Float).SetInt(n.(*big.Int)).Float64(); return f } }\n")

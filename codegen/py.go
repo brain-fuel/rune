@@ -96,6 +96,29 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "kvDelCode") {
 		b.WriteString("def kvDelCode():\n    return lambda k: lambda _u: (__kv.pop(k, 0), 0)[1]\n")
 	}
+	// E4 / wavelet — the local OBJECT store (same dict shape as kv, distinct global).
+	if usesForeign(p, "objPutCode") || usesForeign(p, "objGetCode") || usesForeign(p, "objDelCode") {
+		b.WriteString("__obj = {}\n")
+	}
+	if usesForeign(p, "objPutCode") {
+		b.WriteString("def objPutCode():\n    return lambda k: lambda v: lambda _u: (__obj.__setitem__(k, v), v)[1]\n")
+	}
+	if usesForeign(p, "objGetCode") {
+		b.WriteString("def objGetCode():\n    return lambda k: lambda _u: __obj.get(k, 0)\n")
+	}
+	if usesForeign(p, "objDelCode") {
+		b.WriteString("def objDelCode():\n    return lambda k: lambda _u: (__obj.pop(k, 0), 0)[1]\n")
+	}
+	// E4 / wavelet — the local QUEUE (a FIFO list per queue code).
+	if usesForeign(p, "enqueueCode") || usesForeign(p, "dequeueCode") {
+		b.WriteString("__q = {}\n")
+	}
+	if usesForeign(p, "enqueueCode") {
+		b.WriteString("def enqueueCode():\n    return lambda q: lambda m: lambda _u: (__q.setdefault(q, []).append(m), m)[1]\n")
+	}
+	if usesForeign(p, "dequeueCode") {
+		b.WriteString("def dequeueCode():\n    return lambda q: lambda _u: (__q[q].pop(0) if __q.get(q) else 0)\n")
+	}
 	if usesForeign(p, "fromNat") {
 		b.WriteString("def fromNat():\n    return lambda n: float(n)\n")
 	}

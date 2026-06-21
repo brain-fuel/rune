@@ -94,6 +94,30 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "kvDelCode") {
 		b.WriteString("const kvDelCode = () => k => () => { __kv.delete(k.toString()); return 0n; };\n")
 	}
+	// E4 / wavelet — the local OBJECT store (same map shape as kv, distinct global).
+	if usesForeign(p, "objPutCode") || usesForeign(p, "objGetCode") || usesForeign(p, "objDelCode") {
+		b.WriteString("const __obj = new Map();\n")
+	}
+	if usesForeign(p, "objPutCode") {
+		b.WriteString("const objPutCode = () => k => v => () => { __obj.set(k.toString(), v); return v; };\n")
+	}
+	if usesForeign(p, "objGetCode") {
+		b.WriteString("const objGetCode = () => k => () => { const x = __obj.get(k.toString()); return x === undefined ? 0n : x; };\n")
+	}
+	if usesForeign(p, "objDelCode") {
+		b.WriteString("const objDelCode = () => k => () => { __obj.delete(k.toString()); return 0n; };\n")
+	}
+	// E4 / wavelet — the local QUEUE (a FIFO list per queue code). dequeue of an empty
+	// queue reads back code 0 (which `leW code 1` treats as empty).
+	if usesForeign(p, "enqueueCode") || usesForeign(p, "dequeueCode") {
+		b.WriteString("const __q = new Map();\n")
+	}
+	if usesForeign(p, "enqueueCode") {
+		b.WriteString("const enqueueCode = () => q => m => () => { const kk = q.toString(); if (!__q.has(kk)) __q.set(kk, []); __q.get(kk).push(m); return m; };\n")
+	}
+	if usesForeign(p, "dequeueCode") {
+		b.WriteString("const dequeueCode = () => q => () => { const a = __q.get(q.toString()); return (a && a.length) ? a.shift() : 0n; };\n")
+	}
 	// D3 machine floats (f64) + the BLAS dot kernel — pure host bodies (native
 	// Number arithmetic); a Float is a JS number, distinct from the BigInt Nat.
 	// `Float` is a foreign TYPE but survives erasure as ok/err's type argument, so it

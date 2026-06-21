@@ -108,6 +108,24 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "kvDelCode") {
 		b.WriteString("ff_kvDelCode() -> fun(K) -> fun(_U) -> begin erlang:erase(K), 0 end end end.\n")
 	}
+	// E4 / wavelet — the local OBJECT store (process dict, {obj,K}-tagged so it never
+	// collides with kv's bare keys).
+	if usesForeign(p, "objPutCode") {
+		b.WriteString("ff_objPutCode() -> fun(K) -> fun(V) -> fun(_U) -> begin erlang:put({obj,K}, V), V end end end end.\n")
+	}
+	if usesForeign(p, "objGetCode") {
+		b.WriteString("ff_objGetCode() -> fun(K) -> fun(_U) -> case erlang:get({obj,K}) of undefined -> 0; V -> V end end end.\n")
+	}
+	if usesForeign(p, "objDelCode") {
+		b.WriteString("ff_objDelCode() -> fun(K) -> fun(_U) -> begin erlang:erase({obj,K}), 0 end end end.\n")
+	}
+	// E4 / wavelet — the local QUEUE (process dict {q,Q} -> list, FIFO).
+	if usesForeign(p, "enqueueCode") {
+		b.WriteString("ff_enqueueCode() -> fun(Q) -> fun(M) -> fun(_U) -> begin L = case erlang:get({q,Q}) of undefined -> []; X -> X end, erlang:put({q,Q}, L ++ [M]), M end end end end.\n")
+	}
+	if usesForeign(p, "dequeueCode") {
+		b.WriteString("ff_dequeueCode() -> fun(Q) -> fun(_U) -> case erlang:get({q,Q}) of undefined -> 0; [] -> 0; [H|T] -> begin erlang:put({q,Q}, T), H end end end end.\n")
+	}
 	if usesForeign(p, "fromNat") {
 		b.WriteString("ff_fromNat() -> fun(N) -> float(N) end.\n")
 	}
