@@ -25,7 +25,7 @@ core; infra is a kernel CONSUMER (the shadow rule), emitting throwaway artifacts
   Podman (Buildah/Podman, Apache-2.0): `RabbitMQ`/`NATS` (queue), `Valkey` (kv),
   `Garage` (object), `Podman` (compute), `Postgres` (database), `Dotenv`/`Vault` (secret),
   `DynamoLocal` (nosql), `CoreDNS` (dns), `LocalRegistry` (registry:2), `Redpanda`
-  (stream, Kafka API), `Loki` (logs), `Prometheus` (metrics), `K3s` (k8s). Each emits a Compose spec + `connection.env`, so the layer is
+  (stream, Kafka API), `Loki` (logs), `Prometheus` (metrics), `K3s` (k8s), `NFS` (file). Each emits a Compose spec + `connection.env`, so the layer is
   exercisable with NO cloud account.
 
 **The equivalence gate** ("equal config → equivalent deployment"): one agnostic graph
@@ -46,7 +46,7 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | dns     | Route 53 | Azure DNS | Cloud DNS | CoreDNS | — |
 | disk    | EBS | Managed Disk | Persistent Disk | — | — |
 | kms     | KMS | Key Vault key | Cloud KMS | — | — |
-| file    | EFS | Azure Files | Filestore | — | — |
+| file    | EFS | Azure Files | Filestore | NFS server | — |
 | stream  | Kinesis | Event Hubs | Pub/Sub | Redpanda (Kafka API) | — |
 | iam     | IAM role | Managed Identity | Service Account | — | — |
 | k8s     | EKS | AKS | GKE | k3s | — |

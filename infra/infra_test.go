@@ -234,6 +234,7 @@ func TestFOSSBackendsEmit(t *testing.T) {
 		{"loki", Logs{Name: "applog"}},
 		{"prometheus", Metrics{Name: "m"}},
 		{"k3s", K8s{Name: "cluster"}},
+		{"nfs", File{Name: "shared"}},
 	}
 	for _, c := range cases {
 		e, ok := ByTarget(c.backend)

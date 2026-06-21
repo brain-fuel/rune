@@ -435,6 +435,45 @@ func (Loki) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// NFS is the self-hosted shared-filesystem backend (an NFS server container — the
+// local equivalent of EFS / Azure Files / Filestore). It backs the "file" abstraction
+// with NO cloud account. Emitted inline (the server needs `privileged: true` and an
+// exported directory).
+type NFS struct{}
+
+func (NFS) Target() string { return "nfs" }
+func (NFS) Cloud() bool    { return false }
+
+func (NFS) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("nfs", "file", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - NFS server backend for the wavelet \"file\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (mount localhost:/exports from a client)\n" +
+		"services:\n" +
+		"  nfs:\n" +
+		"    image: docker.io/itsthenetwork/nfs-server-alpine:12\n" +
+		"    privileged: true\n" +
+		"    ports:\n" +
+		"      - \"2049:2049\"\n" +
+		"    environment:\n" +
+		"      - SHARED_DIRECTORY=/exports\n" +
+		"    volumes:\n" +
+		"      - ./exports:/exports\n"
+	env := map[string]string{
+		"WAVELET_FILE_BACKEND": "nfs",
+		"WAVELET_FILE_EXPORT":  "localhost:/exports",
+	}
+	for _, n := range names {
+		env["WAVELET_FILE_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // K3s is the self-hosted Kubernetes backend (Rancher k3s — a single-binary, fully
 // conformant Kubernetes distribution; the local equivalent of EKS/AKS/GKE). It backs
 // the "k8s" abstraction with NO cloud account. Emitted inline (not via composeService)
