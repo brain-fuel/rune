@@ -404,6 +404,37 @@ func (Redpanda) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// Loki is the self-hosted log-aggregation backend (Grafana Loki — a single-binary
+// log store, the local equivalent of CloudWatch Logs / Log Analytics / Cloud Logging).
+// It backs the "logs" abstraction with NO cloud account.
+type Loki struct{}
+
+func (Loki) Target() string { return "loki" }
+func (Loki) Cloud() bool    { return false }
+
+func (Loki) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("loki", "logs", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Grafana Loki backend for the wavelet \"logs\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (push logs to http://localhost:3100/loki/api/v1/push)\n" +
+		"services:\n" +
+		composeService("loki", "docker.io/grafana/loki:3.2.0",
+			[]string{"3100:3100"}, "-config.file=/etc/loki/local-config.yaml")
+	env := map[string]string{
+		"WAVELET_LOGS_BACKEND": "loki",
+		"WAVELET_LOGS_URL":     "http://localhost:3100",
+	}
+	for _, n := range names {
+		env["WAVELET_LOGS_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // Vault is the self-hosted secrets backend (HashiCorp Vault in dev mode — a real
 // running secret store, richer than the keys-only `Dotenv` template). It backs the
 // "secret" abstraction with NO cloud account; the API surface mirrors the managed

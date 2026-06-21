@@ -25,7 +25,7 @@ core; infra is a kernel CONSUMER (the shadow rule), emitting throwaway artifacts
   Podman (Buildah/Podman, Apache-2.0): `RabbitMQ`/`NATS` (queue), `Valkey` (kv),
   `Garage` (object), `Podman` (compute), `Postgres` (database), `Dotenv`/`Vault` (secret),
   `DynamoLocal` (nosql), `CoreDNS` (dns), `LocalRegistry` (registry:2), `Redpanda`
-  (stream, Kafka API). Each emits a Compose spec + `connection.env`, so the layer is
+  (stream, Kafka API), `Loki` (logs). Each emits a Compose spec + `connection.env`, so the layer is
   exercisable with NO cloud account.
 
 **The equivalence gate** ("equal config → equivalent deployment"): one agnostic graph
@@ -52,7 +52,7 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | k8s     | EKS | AKS | GKE | — | — |
 | network | VPC | VNet | VPC | — | — |
 | firewall| WAF | DDoS Plan | Cloud Armor | — | — |
-| logs    | CloudWatch | Log Analytics | Cloud Logging | — | — |
+| logs    | CloudWatch | Log Analytics | Cloud Logging | Loki | — |
 | registry| ECR | ACR | Artifact Registry | registry:2 (Distribution) | — |
 | paas    | Beanstalk | App Service plan | App Engine | — | — |
 | cdn     | CloudFront | CDN profile | Cloud CDN backend bucket | — | — |

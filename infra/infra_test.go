@@ -229,6 +229,7 @@ func TestFOSSBackendsEmit(t *testing.T) {
 		{"localregistry", Registry{Name: "r"}},
 		{"redpanda", Stream{Name: "s"}},
 		{"vault", Secret{Name: "sec"}},
+		{"loki", Logs{Name: "applog"}},
 	}
 	for _, c := range cases {
 		e, ok := ByTarget(c.backend)
