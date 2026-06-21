@@ -39,12 +39,29 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | object  | S3 | Blob | Cloud Storage | Garage | `lib/infra/object.rune` |
 | compute | EC2 | Linux VM | Compute Engine | Podman (N replicas) | — (control-plane) |
 | database| RDS | PostgreSQL Flexible | Cloud SQL | Postgres | — (control-plane) |
+| secret  | Secrets Manager | Key Vault | Secret Manager | dotenv template | — |
+| nosql   | DynamoDB | Cosmos DB | Firestore | DynamoDB-local | — |
+| dns     | Route 53 | Azure DNS | Cloud DNS | CoreDNS | — |
+| disk    | EBS | Managed Disk | Persistent Disk | — | — |
 
 Data-plane abstractions (queue/kv/object) carry a typed `.rune` interface the app
-CALLS (enqueue/dequeue, put/get/del — over the packed-String code, assume-tier foreign
-ops `rune deploy` binds per backend); they type-check on the prelude
-(`harness/wavelet_infra_test.go`). Control-plane resources (compute/database) are
-PROVISIONED and connected to via the emitted config.
+CALLS (enqueue/dequeue, put/get/del — over the packed-String code); they type-check on
+the prelude (`harness/wavelet_infra_test.go`). Control-plane resources are PROVISIONED
+and connected to via the emitted config.
+
+## The data plane RUNS (in-process binding, cross-backend)
+
+The queue/kv/object foreign ops bind to real host bodies baked per backend (the
+`codegen/ioprims.go` `usesForeign` pattern), so a program using these abstractions
+RUNS unaided via `rune run` / `rune deploy --target <b>` — not just emits config:
+- **js** module-global `Map`, **py** dict, **go** package map keyed by the `*big.Int`
+  code's string (`usesDataPlane`-guarded `__kvkey`), **erl** the per-process dictionary
+  (the program runs in one process; object/queue keys tagged `{obj,K}`/`{q,Q}`). Queues
+  are FIFO; absent reads return code 0 (the `leW code 1` empty sentinel). Rust parked
+  (needs `OnceLock`+`Mutex`, like the fileenv prims).
+- `TestDataPlaneRunsCrossBackend`: kv get-after-put = 42, object = 99, queue FIFO, on
+  every present backend. The managed-Redis / SQS / S3 client bindings are ports of this
+  shape; a live Podman/broker round-trip is the remaining tie.
 
 ## `rune deploy` (two modes)
 
@@ -78,15 +95,17 @@ type-checks (data-plane), the protocol block accepts/rejects correctly, and `run
 
 ## Remaining (roadmap)
 
-- **Runtime data-plane binding:** bind the queue/kv/object foreign ops to backends via
-  codegen host bodies (the `codegen/ioprims.go` pattern) + live Podman round-trips
-  (deferred where Podman is absent).
-- **Matrix breadth:** Networking (VPC/DNS/LB/CDN), Messaging & Streaming, Storage
-  breadth (block/file/archival), more Database (NoSQL/warehouse/cache), Security
-  (IAM/KMS/DDoS), DevOps (CI/CD), AI/ML.
+- **Live broker binding:** point the in-process data-plane ops at real backends
+  (managed Redis / SQS / S3 clients; RabbitMQ/NATS/Valkey/Garage over the wire) + a live
+  Podman round-trip (deferred where Podman is absent). Rust data-plane body.
+- **Matrix breadth:** Networking (VPC/LB/CDN), Messaging & Streaming, Storage breadth
+  (file/archival), Database breadth (warehouse), Security (IAM/KMS/DDoS), Compute breadth
+  (serverless/managed-containers/PaaS), DevOps (CI/CD), AI/ML.
 - **Cloud apply:** graduate from `fmt`/`validate` to real `apply` once accounts + creds
   exist (a credentialed milestone, not CI).
 
-Tags: v3.291.0 (slice 1: queue/kv/object) · v3.292.0 (protocol block) · v3.293.0
-(compute + container) · v3.294.0 (deploy runs a protocol on BEAM) · v3.294.1 (contextual
-keyword fix) · v3.295.0 (database).
+Tags: v3.291.0 (queue/kv/object) · v3.292.0 (protocol block) · v3.293.0 (compute +
+container) · v3.294.0 (deploy runs a protocol on BEAM) · v3.294.1 (contextual keyword
+fix) · v3.295.0 (database) · v3.296.0 (secrets) · v3.297.0 (nosql) · v3.298.0 (dns) ·
+v3.299.0 (block storage) · v3.300.0 (kv runs on JS) · v3.301.0 (kv cross-backend) ·
+v3.302.0 (object + queue cross-backend — full data plane runs).
