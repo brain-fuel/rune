@@ -121,3 +121,22 @@ func TestDataPlaneRunsCrossBackend(t *testing.T) {
 		})
 	}
 }
+
+// TestKVStringDemo gates examples/kv_string_demo.rune: a real String ("wootz") put
+// under a String key round-trips through the data plane on every present backend.
+func TestKVStringDemo(t *testing.T) {
+	src, err := os.ReadFile("../../examples/kv_string_demo.rune")
+	if err != nil {
+		t.Fatalf("read kv_string_demo.rune: %v", err)
+	}
+	for _, bk := range dataPlaneBackends {
+		t.Run(bk.target, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runProgramCapturing(t, string(src), bk.target); !strings.Contains(got, "wootz") {
+				t.Errorf("[%s] String round-trip did not return \"wootz\":\n%s", bk.target, got)
+			}
+		})
+	}
+}

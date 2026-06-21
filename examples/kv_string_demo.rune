@@ -1,0 +1,30 @@
+-- examples/kv_string_demo.rune — the wavelet KV data plane carrying real STRINGS.
+--
+-- PUTs the string "wootz" under the key "name", reads it back, and prints it — the
+-- foreign ops marshal the packed-String code (a bignum), so a real String round-trips
+-- through the in-process backend on every source target:
+--
+--   rune run examples/kv_string_demo.rune main --target js|py|go|erl   -> wootz
+--
+-- This is the typed interface (lib/infra/kv.rune's put/get over String) running for
+-- real; managed Redis / Valkey are ports of the same ops over a live client.
+
+data Unit  : U is unit : Unit end
+data Bool  : U is true : Bool | false : Bool end
+data Nat   : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign kvPutCode    : Nat -> Nat -> IO Nat end   -- keyCode -> valueCode -> ack
+foreign kvGetCode    : Nat -> IO Nat end          -- keyCode -> valueCode (0 if absent)
+foreign printStrCode : Nat -> IO Nat end          -- decode the packed code, println
+
+main : IO Unit is
+  bindIO Nat Unit (kvPutCode (codeOf "name") (codeOf "wootz")) (fn (a : Nat) is
+    bindIO Nat Unit (kvGetCode (codeOf "name")) (fn (code : Nat) is
+      bindIO Nat Unit (printStrCode code) (fn (p : Nat) is pureIO Unit unit end)
+    end)
+  end)
+end
