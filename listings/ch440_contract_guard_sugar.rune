@@ -1,0 +1,115 @@
+-- Chapter 440 — the `with post … guard … blame …` SURFACE SUGAR (D3 / R-FFI).
+--
+-- ch217 introduced the contract-GUARD tier: trust a kernel to COMPUTE but verify
+-- its postcondition at the boundary, returning a `Result A Blame` the caller must
+-- case on. There the guard was written by hand — a `case` over the postcondition
+-- with an `ok`/`err` in each arm — and ch217 flagged the surface sugar as the
+-- follow-up. This chapter IS that sugar.
+--
+-- The form is a postfix on the guarded call:
+--
+--   <call> with post r guard <cond> blame <blame>
+--
+-- which desugars (at parse time, no new core) to a let-bound, SINGLE-evaluation
+-- check-and-blame:
+--
+--   let r = <call> in
+--     case <cond> of
+--     | true  -> ok  _ _ r
+--     | false -> err _ _ <blame>
+--     end
+--
+-- Two wins over the hand-written ch217 form: (1) the kernel result is bound ONCE
+-- (ch217's `dotGuarded` evaluated `dot2 …` THREE times — once in the guard, once
+-- per arm); (2) the `case`/`ok`/`err` boilerplate disappears. `post`/`guard`/`blame`
+-- are CONTEXTUAL keywords (ordinary identifiers everywhere else; recognised only
+-- right after the `with` that opens a guard clause), so no keyword collision. The
+-- two type arguments of `ok`/`err` are holes the expected `Result A E` solves.
+--
+-- We demonstrate over `Nat` (so the whole thing COMPUTES in the kernel — the Float
+-- kernels of ch217 are foreign and stay neutral): a budget check `≤ 10`, guarding a
+-- "kernel" we trust to compute the answer but whose postcondition we verify.
+
+data Bool : U is
+  true  : Bool
+| false : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Result : U -> U -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+
+-- the blame carries the offending value (which also makes `Blame` structurally
+-- distinct from `Unit` — a bare nullary ctor would be hash-identical to it, ch217).
+data Blame : U is
+  overBudget : Nat -> Blame
+end
+
+-- recursion is by the eliminator (NatElim), the sole recursion principle — totality
+-- is by construction, no termination checker (Phase 4). `add` folds `succ` over n.
+add : Nat -> Nat -> Nat is
+  fn (n : Nat) (m : Nat) is
+    NatElim (fn (nx : Nat) is Nat end)
+      m
+      (fn (k : Nat) (rec : Nat) is succ rec end)
+      n
+  end
+end
+
+-- the budget predicate n ≤ m, recursing on n into a `Nat -> Bool`.
+leb : Nat -> Nat -> Bool is
+  fn (n : Nat) is
+    NatElim (fn (nx : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (rec : Nat -> Bool) is
+         fn (m : Nat) is
+           case m of
+           | zero    -> false
+           | succ j  -> rec j
+           end
+         end
+       end)
+      n
+  end
+end
+
+-- the "kernel" we guard: doubling. Trusted to compute, but its result must stay
+-- within budget — `guarded n` runs `double n`, binds it ONCE, and blames it if the
+-- doubled value exceeds 10. This is `dotGuarded`'s shape (ch217), now in the sugar.
+double : Nat -> Nat is
+  fn (n : Nat) is add n n end
+end
+
+guarded : Nat -> Result Nat Blame is
+  fn (n : Nat) is
+    double n with post r guard (leb r 10) blame (overBudget r)
+  end
+end
+
+-- observe a guarded result as a Nat: the value on ok, 0 on blame (the blame still
+-- carries the offending value, recoverable by casing on the Blame).
+resultToNat : Result Nat Blame -> Nat is
+  fn (x : Result Nat Blame) is
+    ResultElim Nat Blame (fn (rx : Result Nat Blame) is Nat end)
+      (fn (v : Nat) is v end)
+      (fn (b : Blame) is zero end)
+      x
+  end
+end
+
+-- within budget: double 4 = 8 ≤ 10, so `ok 8`.
+withinBudget : Result Nat Blame is guarded 4 end
+
+-- over budget: double 7 = 14 > 10, so `err (overBudget 14)`.
+overBudgetCase : Result Nat Blame is guarded 7 end
+
+-- the observed values: 8 (ok) and 0 (blamed).
+okValue : Nat is resultToNat withinBudget end
+blamedValue : Nat is resultToNat overBudgetCase end

@@ -447,7 +447,75 @@ func (p *parser) parseExpr() (Exp, error) {
 	if p.peek().kind == tLet {
 		return p.parseLet()
 	}
-	return p.parseArrow()
+	e, err := p.parseArrow()
+	if err != nil {
+		return nil, err
+	}
+	// Postfix contract-guard sugar (D3 / R-FFI): `<call> with post v guard c blame b`.
+	// `post`/`guard`/`blame` are CONTEXTUAL keywords (plain identifiers everywhere
+	// else — no lexer token, no keyword collision), recognised only right after the
+	// `with` that opens a guard clause at the spine of an expression.
+	if p.peek().kind == tWith && p.peekAt(1).kind == tIdent && p.peekAt(1).text == "post" {
+		return p.parseGuard(e)
+	}
+	return e, nil
+}
+
+// parseGuard desugars the contract-GUARD postfix sugar (the R-FFI third tier's
+// surface form, ch217's follow-up):
+//
+//	<call> with post v guard <cond> blame <blame>
+//
+// into a let-bound, single-evaluation check-and-blame —
+//
+//	let v = <call> in
+//	  case <cond> of
+//	  | true  -> ok  _ _ v
+//	  | false -> err _ _ <blame>
+//	  end
+//
+// so the kernel result is computed ONCE (the hand-written form in ch217 evaluated
+// the kernel three times) and the boilerplate `case/ok/err` vanishes. The two type
+// arguments of `ok`/`err` are holes the expected `Result A E` (the case motive,
+// supplied in checking position) solves. `cond`/`blame` are atoms — parenthesise a
+// compound form. The desugaring assumes the ambient `Result`/`ok`/`err` and
+// `Bool`/`true`/`false` vocabulary (the contract-guard tier's types).
+func (p *parser) parseGuard(call Exp) (Exp, error) {
+	p.next() // 'with'
+	if w := p.next(); w.kind != tIdent || w.text != "post" {
+		return nil, fmt.Errorf("expected 'post' after 'with' in a guard clause at offset %d", w.pos)
+	}
+	v, err := p.expect(tIdent)
+	if err != nil {
+		return nil, fmt.Errorf("a guard clause binds the result: `with post <name> …` (%w)", err)
+	}
+	if g := p.next(); g.kind != tIdent || g.text != "guard" {
+		return nil, fmt.Errorf("expected 'guard' after the result binder in a guard clause at offset %d", g.pos)
+	}
+	cond, err := p.parseAtom()
+	if err != nil {
+		return nil, err
+	}
+	if b := p.next(); b.kind != tIdent || b.text != "blame" {
+		return nil, fmt.Errorf("expected 'blame' after the guard condition in a guard clause at offset %d", b.pos)
+	}
+	blame, err := p.parseAtom()
+	if err != nil {
+		return nil, err
+	}
+	okBranch := EApp{Fn: EApp{Fn: EApp{Fn: EVar{Name: "ok"}, Arg: EHole{}}, Arg: EHole{}}, Arg: EVar{Name: v.text}}
+	errBranch := EApp{Fn: EApp{Fn: EApp{Fn: EVar{Name: "err"}, Arg: EHole{}}, Arg: EHole{}}, Arg: blame}
+	return ELet{
+		Name: v.text,
+		Val:  call,
+		Body: ECase{
+			Scrut: cond,
+			Clauses: []CaseClause{
+				{Ctor: "true", Body: okBranch},
+				{Ctor: "false", Body: errBranch},
+			},
+		},
+	}, nil
 }
 
 // parseLet parses an inline `let Ident [":" Expr] "=" Expr "in" Expr`. The `in` is
@@ -897,8 +965,10 @@ func (p *parser) numLit(t token) (Exp, error) {
 // produces, so it reuses the prelude's `/` (the Div typeclass, which yields a reduced
 // Frac) with no new AST node or elaborator change. The value of `I.N{R}` (p = |N|,
 // q = |R|) is the standard repeating-decimal fraction:
-//   terminating (q = 0): num = I·10ᵖ + N,                   den = 10ᵖ
-//   repeating  (q > 0):  num = (I·10ᵖ + N)·(10^q − 1) + R,  den = 10ᵖ·(10^q − 1)
+//
+//	terminating (q = 0): num = I·10ᵖ + N,                   den = 10ᵖ
+//	repeating  (q > 0):  num = (I·10ᵖ + N)·(10^q − 1) + R,  den = 10ᵖ·(10^q − 1)
+//
 // e.g. 1.3 → 13/10, 1.{3} → 12/9 (= 4/3), 0.1{6} → 15/90 (= 1/6). Lowest-terms
 // reduction is the prelude `/`'s job (`divWF` → `reduce`).
 func (p *parser) decLit(t token) (Exp, error) {

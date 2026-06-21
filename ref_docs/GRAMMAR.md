@@ -385,6 +385,34 @@ spine-level `=` is the ladder's own separator (the §5.4 carve-out mechanism); p
 equality proposition appearing within a step. `calc` is an atom; like the other blocks it is
 input-only sugar (§8).
 
+### 5.8 `with post … guard … blame …` (the contract-guard sugar)
+
+```
+dot2 a0 a1 b0 b1 with post r guard (leq r budget) blame (overBudget r)
+```
+
+A postfix on any expression — the guarded *call* — for the R-FFI contract-GUARD tier
+(trust a kernel to COMPUTE, verify its postcondition at the boundary, blame it on
+violation). It desugars at parse time to a let-bound, SINGLE-evaluation check-and-blame:
+
+```
+let r = <call> in
+  case <cond> of
+  | true  -> ok  _ _ r
+  | false -> err _ _ <blame>
+  end
+```
+
+so the kernel result `r` is computed **once** and the `case`/`ok`/`err` boilerplate
+vanishes. `post`, `guard`, `blame` are **contextual keywords** — ordinary identifiers
+everywhere else, recognised only immediately after the `with` that opens a guard clause
+at the spine of an expression (no reserved word, no lexer token). The result binder `r`
+is in scope in both `<cond>` and `<blame>`. `<cond>` and `<blame>` are atoms
+(parenthesize a compound form). The two type arguments of `ok`/`err` are holes the
+expected `Result A E` solves, so the guarded expression elaborates in **checking
+position** (the enclosing type supplies the `case` motive). The desugaring assumes the
+ambient `Result`/`ok`/`err` and `Bool`/`true`/`false` vocabulary. Listing ch440.
+
 ## 6. Desugaring to core
 
 Surface is sugar over the core; resolution lowers as follows.

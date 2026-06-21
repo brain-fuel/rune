@@ -217,6 +217,18 @@ func TestListingsRun(t *testing.T) {
 				`(fn (y : El B) is refl end) (fn (y : El B) is refl end))) x end`,
 			"fn (B : U) (x : U) is x end")
 	})
+	t.Run("ch440", func(t *testing.T) {
+		s := loadListing(t, "ch440_contract_guard_sugar.rune")
+		// The `with post … guard … blame …` sugar desugars to a let-bound
+		// check-and-blame and COMPUTES: within budget it yields `ok`, over it blames.
+		normalizesTo(t, s, `withinBudget`, "ok Nat Blame 8")
+		normalizesTo(t, s, `overBudgetCase`, "err Nat Blame (overBudget 14)")
+		// observed through the eliminator: the value on ok, the 0 sentinel on blame.
+		normalizesTo(t, s, `okValue`, "8")
+		// the blame arm's sentinel is the bare `zero` ctor (C7 folds arithmetic
+		// results to a NatLit digit, but a literal `zero` stays `zero`).
+		normalizesTo(t, s, `blamedValue`, "zero")
+	})
 }
 
 // TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant

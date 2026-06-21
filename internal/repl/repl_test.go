@@ -220,11 +220,11 @@ func TestREPLNegationPromotes(t *testing.T) {
 	}
 	got := out.String()
 	wants := []string{
-		"-3 : Int",   // -3
-		"-2 : Int",   // -3 + 1
-		"-6 : Int",   // -3 * 2
-		"3 : Int",    // negate (negate 3)
-		"-5 : Int",   // -3 - 2
+		"-3 : Int",    // -3
+		"-2 : Int",    // -3 + 1
+		"-6 : Int",    // -3 * 2
+		"3 : Int",     // negate (negate 3)
+		"-5 : Int",    // -3 - 2
 		"-1/3 : Frac", // -1/3
 		"-1/2 : Frac", // -2/4 reduced
 	}
@@ -244,11 +244,11 @@ func TestREPLNegationPromotes(t *testing.T) {
 // results stay fractional (input-only sugar), and `|> to_radix` recovers a decimal.
 func TestREPLDecimalLiterals(t *testing.T) {
 	script := []string{
-		"1.3 + 2.5",            // 13/10 + 5/2 = 19/5
-		"1.{3} + 2/3",          // 4/3 + 2/3 = 2
-		"0.1{6}",               // repeating input reduces to 1/6
-		"0.75",                 // terminating reduces to 3/4
-		"-2.5",                 // prefix minus on a decimal
+		"1.3 + 2.5",               // 13/10 + 5/2 = 19/5
+		"1.{3} + 2/3",             // 4/3 + 2/3 = 2
+		"0.1{6}",                  // repeating input reduces to 1/6
+		"0.75",                    // terminating reduces to 3/4
+		"-2.5",                    // prefix minus on a decimal
 		"(1.3 + 2.5) |> to_radix", // back to a decimal for display
 		":quit",
 	}
@@ -273,6 +273,55 @@ func TestREPLDecimalLiterals(t *testing.T) {
 	}
 	if strings.Contains(got, "error") || strings.Contains(got, "mismatch") {
 		t.Errorf("unexpected error in decimal literals\n--- full output ---\n%s", got)
+	}
+}
+
+// TestREPLContractGuardSugar is the REPL acceptance test for the `with post …
+// guard … blame …` contract-guard sugar (D3 / R-FFI, ch440): a feature is not done
+// until it works in `rune repl`. The sugar must desugar, elaborate, and compute both
+// arms in a live session, binding the guarded call once.
+func TestREPLContractGuardSugar(t *testing.T) {
+	script := []string{
+		"data Bool : U is",
+		"  true  : Bool",
+		"| false : Bool",
+		"end",
+		"data Nat : U is",
+		"  zero : Nat",
+		"| succ : Nat -> Nat",
+		"end",
+		"builtin nat Nat zero succ",
+		"data Result : U -> U -> U is",
+		"  ok  : (A : U) -> (E : U) -> A -> Result A E",
+		"| err : (A : U) -> (E : U) -> E -> Result A E",
+		"end",
+		"data Blame : U is",
+		"  overBudget : Nat -> Blame",
+		"end",
+		"small : Nat -> Bool is fn (n : Nat) is case n of | zero -> true | succ k -> false end end end",
+		"guarded : Nat -> Result Nat Blame is fn (n : Nat) is n with post r guard (small r) blame (overBudget r) end end",
+		"guarded zero",               // small zero = true  -> ok
+		"guarded (succ (succ zero))", // small (2) = false -> err, carrying 2
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"defined guarded",              // the sugared def elaborated
+		"ok Nat Blame 0",               // the ok arm computes
+		"err Nat Blame (overBudget 2)", // the blame arm computes, carrying the value
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "error") || strings.Contains(got, "mismatch") {
+		t.Errorf("unexpected error in contract-guard sugar\n--- full output ---\n%s", got)
 	}
 }
 
@@ -660,7 +709,7 @@ func TestREPLParseFromString(t *testing.T) {
 	}
 	got := out.String()
 	wants := []string{
-		"97 : Whole",                 // strHead "abc"
+		"97 : Whole", // strHead "abc"
 		"ok 42 : Result Whole ParseErr",
 		"ok -5 : Result Int ParseErr",
 		"ok 7 : Result Int ParseErr",
@@ -688,12 +737,12 @@ func TestREPLParseFromString(t *testing.T) {
 // ops (strTail, strApp) return values that also fold to literals.
 func TestREPLStringDisplay(t *testing.T) {
 	script := []string{
-		`"hello"`,                            // a plain literal folds to itself
-		`"tab\there\nand\"quote\"\\end"`,     // every escape round-trips
-		`""`,                                 // the empty string (just the sentinel)
+		`"hello"`,                        // a plain literal folds to itself
+		`"tab\there\nand\"quote\"\\end"`, // every escape round-trips
+		`""`,                             // the empty string (just the sentinel)
 		`"this is a fairly long string well past sixty-four bits of packing"`,
-		`strTail "abc"`,                      // a computed string still folds
-		`strApp "foo" "bar"`,                 // concatenation folds
+		`strTail "abc"`,      // a computed string still folds
+		`strApp "foo" "bar"`, // concatenation folds
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -728,11 +777,11 @@ func TestREPLStringDisplay(t *testing.T) {
 // load, so reaching this test at all means they held.
 func TestREPLBinaryRoundTrip(t *testing.T) {
 	script := []string{
-		`encode 42`,                // dispatch Binary Whole -> packed "42"
-		`encode (3/4)`,             // dispatch Binary Frac  -> packed "3/4"
-		`roundWhole 42`,            // parse (encode 42) = ok 42
-		`roundInt (2 - 5)`,         // ok -3 (signed round-trip)
-		`roundFrac (1/3 - 2/3)`,    // ok -1/3 (reduced, signed)
+		`encode 42`,             // dispatch Binary Whole -> packed "42"
+		`encode (3/4)`,          // dispatch Binary Frac  -> packed "3/4"
+		`roundWhole 42`,         // parse (encode 42) = ok 42
+		`roundInt (2 - 5)`,      // ok -3 (signed round-trip)
+		`roundFrac (1/3 - 2/3)`, // ok -1/3 (reduced, signed)
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -763,12 +812,12 @@ func TestREPLBinaryRoundTrip(t *testing.T) {
 // of the user's `"hello"++"world"`.
 func TestREPLStringConcat(t *testing.T) {
 	script := []string{
-		`"hello" ++ "world"`,                 // concat, folds to "helloworld"
-		`strLen "hello"`,                     // byte length 5
-		`strEq ("foo" ++ "bar") "foobar"`,    // decidable equality
-		`strEq ("foo" ++ "bar") "foobaz"`,    // ...and its negation
-		`"" ++ "x"`,                          // left identity (empty string)
-		`"x" ++ ""`,                          // right identity
+		`"hello" ++ "world"`,              // concat, folds to "helloworld"
+		`strLen "hello"`,                  // byte length 5
+		`strEq ("foo" ++ "bar") "foobar"`, // decidable equality
+		`strEq ("foo" ++ "bar") "foobaz"`, // ...and its negation
+		`"" ++ "x"`,                       // left identity (empty string)
+		`"x" ++ ""`,                       // right identity
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -800,13 +849,13 @@ func TestREPLStringConcat(t *testing.T) {
 // `runeLen` (the codepoint level vs the byte level), and byte slicing strTake/strDrop.
 func TestREPLStringOps(t *testing.T) {
 	script := []string{
-		`show 42`,                 // numeric show -> "42"
-		`show true`,               // bool show -> "true"
-		`strLen "é"`,              // bytes: é is 2 UTF-8 bytes
-		`runeLen "é"`,             // runes: é is 1 codepoint
-		`strTake 3 "hello"`,       // "hel"
-		`strDrop 3 "hello"`,       // "lo"
-		`"a" ++ show 7 ++ "b"`,    // the interpolation desugaring, written by hand
+		`show 42`,              // numeric show -> "42"
+		`show true`,            // bool show -> "true"
+		`strLen "é"`,           // bytes: é is 2 UTF-8 bytes
+		`runeLen "é"`,          // runes: é is 1 codepoint
+		`strTake 3 "hello"`,    // "hel"
+		`strDrop 3 "hello"`,    // "lo"
+		`"a" ++ show 7 ++ "b"`, // the interpolation desugaring, written by hand
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -838,11 +887,11 @@ func TestREPLStringOps(t *testing.T) {
 func TestREPLInterpolation(t *testing.T) {
 	script := []string{
 		`name : Bytes is "world" end`,
-		`"hi {name}!"`,            // -> "hi world!"
-		`"len {strLen name}"`,     // -> "len 5"   (show of a computed Whole)
-		`"sum {2 + 3}"`,           // -> "sum 5"   (an arithmetic expr inside {})
-		`"{7}"`,                   // -> "7"       (no surrounding literal)
-		`"a \{ b"`,                // -> "a { b"   (escaped literal brace, no interpolation)
+		`"hi {name}!"`,        // -> "hi world!"
+		`"len {strLen name}"`, // -> "len 5"   (show of a computed Whole)
+		`"sum {2 + 3}"`,       // -> "sum 5"   (an arithmetic expr inside {})
+		`"{7}"`,               // -> "7"       (no surrounding literal)
+		`"a \{ b"`,            // -> "a { b"   (escaped literal brace, no interpolation)
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
