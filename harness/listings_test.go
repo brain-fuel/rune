@@ -217,6 +217,14 @@ func TestListingsRun(t *testing.T) {
 				`(fn (y : El B) is refl end) (fn (y : El B) is refl end))) x end`,
 			"fn (B : U) (x : U) is x end")
 	})
+	t.Run("ch206", func(t *testing.T) {
+		s := loadListing(t, "ch206_fault_lts.rune")
+		// Unbounded restart-liveness: the restarted child is a fixed point of the
+		// scheduler, so recovery PERSISTS for every step count (the ∀-strengthening
+		// of the bounded k=1 witness). The proof normalizes to refl at `out halt`.
+		normalizesTo(t, s, `stableRestart (succ (succ (succ zero)))`, "refl (out halt)")
+		normalizesTo(t, s, `runStuck (succ (succ zero))`, "refl (out halt)")
+	})
 	t.Run("ch440", func(t *testing.T) {
 		s := loadListing(t, "ch440_contract_guard_sugar.rune")
 		// The `with post … guard … blame …` sugar desugars to a let-bound

@@ -349,3 +349,36 @@ unmonitoredCrashStuck :
     Eq Proc (runN (succ (succ zero)) (par crash halt)) (par crash halt) is
   refl (par crash halt)
 end
+
+-- ===== UNBOUNDED liveness: recovery PERSISTS for all time (D5) =====
+--
+-- `eventuallyRestarted` is a SINGLE Σ-witness (k = 1). But OTP's stability claim is
+-- stronger: once the supervisor has restarted the child, the system STAYS recovered
+-- no matter how long it runs — an UNBOUNDED, universally-quantified liveness, not a
+-- one-shot existence. The fixed point is `restarted = out halt`: an output with no
+-- peer is STUCK (`okStep` yields `none`), so `stepState restarted ≡ restarted` by
+-- computation. Hence the restarted child is a stable equilibrium of the scheduler.
+
+-- the restarted child is a FIXED POINT of the run: running it any number of further
+-- steps leaves it in place. Proof by induction; the step case is the IH verbatim,
+-- because `runN (succ k) restarted ≡ runN k (stepState restarted) ≡ runN k restarted`
+-- holds by CONVERSION (the stuck output computes away), so no transport is needed.
+runStuck : (k : Nat) -> Eq Proc (runN k restarted) restarted is
+  fn (k : Nat) is
+    NatElim (fn (w : Nat) is Eq Proc (runN w restarted) restarted end)
+      (refl restarted)
+      (fn (k0 : Nat) (ih : Eq Proc (runN k0 restarted) restarted) is ih end)
+      k
+  end
+end
+
+-- UNBOUNDED restart-liveness: for EVERY step count k, after k+1 steps the supervised
+-- system is the restarted child — recovery, once reached at step 1, holds forever.
+-- The proof is `runStuck k` reused under conversion: `runN (succ k) supervised ≡
+-- runN k (stepState supervised) ≡ runN k restarted` (the detect-and-restart of
+-- step 1 computes), so the fixed-point lemma transports directly. This is the
+-- always-eventually (in fact always-after-one) guarantee over unbounded time, the
+-- ∀-strengthening of the bounded `eventuallyRestarted` Σ-witness.
+stableRestart : (k : Nat) -> Eq Proc (runN (succ k) supervised) restarted is
+  fn (k : Nat) is runStuck k end
+end
