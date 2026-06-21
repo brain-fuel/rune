@@ -419,9 +419,9 @@ instance divFrac  : Div Frac  is divF end
   fn {A : U} {d : Div A} (x : A) (y : A) is d x y end
 end
 
--- Negation flips the sign (prefix `-` desugars to this). 0 stays unsigned in
--- display, so `negate 0` reads back as 0.
-negate : Frac -> Frac is fn (f : Frac) is frac (not (fneg f)) (fnum f) (fden f) end end
+-- Negation at Frac flips the sign. 0 stays unsigned in display. This is the Frac
+-- instance of the promoting `negate` (defined after the Int rung, below).
+fnegate : Frac -> Frac is fn (f : Frac) is frac (not (fneg f)) (fnum f) (fden f) end end
 
 -- Fraction arithmetic — the Frac instances of the tower's `* + -`. Multiplication
 -- is componentwise with sign xor; addition puts the operands over the common
@@ -449,7 +449,7 @@ addF : Frac -> Frac -> Frac is
     end)
   end
 end
-subF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is addF x (negate y) end end
+subF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is addF x (fnegate y) end end
 
 instance numFrac : Num Frac is mkNum Frac addF mulF end
 
@@ -496,6 +496,29 @@ wsub : Whole -> Whole -> Int is
   end
 end
 instance numInt : Num Int is mkNum Int iadd imul end
+
+-- Int / Int climbs to ℚ, exactly as Whole / Whole does (ℤ is not closed under
+-- division). So `-1` (an Int from prefix `-`) divides: `-1/3` is the Frac -1/3.
+divIF : Int -> Int -> Frac is
+  fn (x : Int) (y : Int) is reduce (frac (xorB (isign x) (isign y)) (imag x) (imag y)) end
+end
+instance divInt : Div Int is divIF end
+
+-- ====================================================================
+-- NEGATION, with PROMOTION.  Negating an unsigned `Whole` has no whole answer, so
+-- `negate` PROMOTES Whole -> Int, exactly as `-` does (`0 - 3` is `-3 : Int`); Int
+-- and Frac are already signed and stay put. Result-indexed like `SubR` (the result
+-- R is a separate parameter keyed by the operand A), so a bare `-3` lands at Int and
+-- `-1/3` at Frac. Prefix `-` desugars to `negate`.
+-- ====================================================================
+NegR : U -> U -> U is fn (R : U) (A : U) is A -> R end end
+wneg : Whole -> Int is fn (n : Whole) is mkInt true n end end
+instance negWhole : NegR Int  Whole is wneg end
+instance negInt   : NegR Int  Int   is ineg end
+instance negFrac  : NegR Frac Frac  is fnegate end
+negate : {R : U} -> {A : U} -> {d : NegR R A} -> A -> R is
+  fn {R : U} {A : U} {d : NegR R A} (x : A) is d x end
+end
 
 -- ====================================================================
 -- SUBTRACTION, with PROMOTION.  `SubR R A` is the RELATION "an A subtracts to an

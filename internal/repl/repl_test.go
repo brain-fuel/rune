@@ -196,6 +196,48 @@ func TestREPLTowerArithmetic(t *testing.T) {
 	}
 }
 
+// TestREPLNegationPromotes is the acceptance gate for prefix `-`: negation PROMOTES
+// out of the unsigned wholes into the signed Int rung, exactly as binary `-` does
+// (`negate` is result-indexed `NegR R A`, with `Whole -> Int`, `Int -> Int`,
+// `Frac -> Frac`). So a bare `-3` is an Int, NOT a Frac; `-1/3` stays a Frac (the
+// operand under `/` is signed Int, and Int / Int climbs to ℚ via `divInt`).
+func TestREPLNegationPromotes(t *testing.T) {
+	script := []string{
+		"-3",                // bare negation of a whole numeral promotes to Int
+		"negate 3",          // the same, spelled out
+		"-3 + 1",            // stays Int through addition
+		"-3 * 2",            // stays Int through multiplication
+		"negate (negate 3)", // double negation, Int -> Int
+		"-3 - 2",            // Int minus Int
+		"-1/3",              // (negate 1) / 3 — the operand is Int, the quotient Frac
+		"-2/4",              // negated, reduced
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"-3 : Int",   // -3
+		"-2 : Int",   // -3 + 1
+		"-6 : Int",   // -3 * 2
+		"3 : Int",    // negate (negate 3)
+		"-5 : Int",   // -3 - 2
+		"-1/3 : Frac", // -1/3
+		"-1/2 : Frac", // -2/4 reduced
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	if strings.Contains(got, "error") || strings.Contains(got, "mismatch") {
+		t.Errorf("unexpected error in negation promotion\n--- full output ---\n%s", got)
+	}
+}
+
 // TestREPLDecimalLiterals is the acceptance gate for decimal-literal INPUT: a
 // decimal is parse-time sugar for an exact fraction, so it flows through the tower
 // like any `Frac`. Terminating (1.3) and repeating (1.{3}, 0.1{6}) forms both work;
