@@ -224,6 +224,8 @@ func TestListingsRun(t *testing.T) {
 		// of the bounded k=1 witness). The proof normalizes to refl at `out halt`.
 		normalizesTo(t, s, `stableRestart (succ (succ (succ zero)))`, "refl (out halt)")
 		normalizesTo(t, s, `runStuck (succ (succ zero))`, "refl (out halt)")
+		// Safety dual: an unmonitored crash stays stuck for every step count.
+		normalizesTo(t, s, `unmonitoredStuck (succ (succ (succ zero)))`, "refl (par crash halt)")
 	})
 	t.Run("ch440", func(t *testing.T) {
 		s := loadListing(t, "ch440_contract_guard_sugar.rune")

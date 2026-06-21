@@ -382,3 +382,18 @@ end
 stableRestart : (k : Nat) -> Eq Proc (runN (succ k) supervised) restarted is
   fn (k : Nat) is runStuck k end
 end
+
+-- The SAFETY dual (the spec is not too loose, unboundedly): an UNMONITORED crash
+-- never spuriously recovers — for EVERY step count, `par crash halt` stays exactly
+-- itself. Same proof shape as `runStuck`: `par crash halt` is a stuck fixed point
+-- (no monitor ⇒ no DETECT, crash beside halt has no rendezvous ⇒ `okStep` is none),
+-- so the step case is the IH by conversion. Recovery is EARNED by a monitor, at
+-- every point in time, not just at the bound `unmonitoredCrashStuck` checked.
+unmonitoredStuck : (k : Nat) -> Eq Proc (runN k (par crash halt)) (par crash halt) is
+  fn (k : Nat) is
+    NatElim (fn (w : Nat) is Eq Proc (runN w (par crash halt)) (par crash halt) end)
+      (refl (par crash halt))
+      (fn (k0 : Nat) (ih : Eq Proc (runN k0 (par crash halt)) (par crash halt)) is ih end)
+      k
+  end
+end
