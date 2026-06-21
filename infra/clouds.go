@@ -189,6 +189,11 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("enabled", "true")
 			h.attr("comment", str("wavelet "+v.Name))
 			h.close()
+		case LoadBalancer:
+			h.open("resource \"aws_lb\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("load_balancer_type", str("application"))
+			h.close()
 		case Identity:
 			h.open("resource \"aws_iam_role\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
@@ -488,6 +493,13 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("location", "azurerm_resource_group.wavelet.location")
 			h.attr("sku", str("Standard_Microsoft"))
 			h.close()
+		case LoadBalancer:
+			h.open("resource \"azurerm_lb\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("sku", str("Standard"))
+			h.close()
 		case Identity:
 			h.open("resource \"azurerm_user_assigned_identity\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
@@ -697,6 +709,12 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("bucket_name", str(v.Name+"-bucket"))
 			h.attr("enable_cdn", "true")
+			h.close()
+		case LoadBalancer:
+			h.open("resource \"google_compute_forwarding_rule\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("ip_protocol", str("TCP"))
+			h.attr("port_range", str("80"))
 			h.close()
 		case Identity:
 			h.open("resource \"google_service_account\" %s", str(v.Name))

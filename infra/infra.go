@@ -198,6 +198,17 @@ func (CDN) isResource()           {}
 func (CDN) Kind() string          { return "cdn" }
 func (c CDN) LogicalName() string { return c.Name }
 
+// LoadBalancer is a managed L4/L7 load balancer (AWS ELBv2 / Azure Load Balancer /
+// GCP forwarding rule) — traffic distribution across compute replicas. Control-plane,
+// cloud-only.
+type LoadBalancer struct {
+	Name string
+}
+
+func (LoadBalancer) isResource()           {}
+func (LoadBalancer) Kind() string          { return "lb" }
+func (l LoadBalancer) LogicalName() string { return l.Name }
+
 // Identity is a managed workload identity (AWS IAM role / Azure user-assigned managed
 // identity / GCP service account) — the principal a workload runs as. Cloud-only.
 type Identity struct {

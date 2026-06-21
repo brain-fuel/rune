@@ -66,6 +66,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_kinesis_stream", "azure": "azurerm_eventhub", "gcp": "google_pubsub_topic"}},
 		{"cdn", CDN{Name: "x"}, map[string]string{
 			"aws": "aws_cloudfront_distribution", "azure": "azurerm_cdn_profile", "gcp": "google_compute_backend_bucket"}},
+		{"lb", LoadBalancer{Name: "x"}, map[string]string{
+			"aws": "aws_lb", "azure": "azurerm_lb", "gcp": "google_compute_forwarding_rule"}},
 		{"iam", Identity{Name: "x"}, map[string]string{
 			"aws": "aws_iam_role", "azure": "azurerm_user_assigned_identity", "gcp": "google_service_account"}},
 		{"k8s", K8s{Name: "x"}, map[string]string{
@@ -335,6 +337,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"file":     {File{Name: "shared"}},
 		"stream":   {Stream{Name: "events"}},
 		"cdn":      {CDN{Name: "edgecache"}},
+		"lb":       {LoadBalancer{Name: "ingress"}},
 		"iam":      {Identity{Name: "worker"}},
 		"k8s":      {K8s{Name: "cluster"}},
 		"network":  {Network{Name: "vpc"}},

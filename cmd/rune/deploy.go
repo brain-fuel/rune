@@ -260,6 +260,8 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 		return infra.Stream{Name: name}, nil
 	case "cdn":
 		return infra.CDN{Name: name}, nil
+	case "lb":
+		return infra.LoadBalancer{Name: name}, nil
 	case "iam":
 		return infra.Identity{Name: name}, nil
 	case "k8s":
