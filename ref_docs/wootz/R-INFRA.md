@@ -22,8 +22,10 @@ core; infra is a kernel CONSUMER (the shadow rule), emitting throwaway artifacts
   provider scaffolding (Azure resource group / Service Bus namespace / storage account /
   vnet+subnet) once per graph.
 - **FOSS emitters** (`infra/foss.go`) — self-hosted backends that run locally under
-  Podman (Buildah/Podman, Apache-2.0): `RabbitMQ`, `NATS`, `Valkey`, `Garage`, `Podman`
-  (compute), `Postgres`. Each emits a Compose spec + `connection.env`, so the layer is
+  Podman (Buildah/Podman, Apache-2.0): `RabbitMQ`/`NATS` (queue), `Valkey` (kv),
+  `Garage` (object), `Podman` (compute), `Postgres` (database), `Dotenv` (secret),
+  `DynamoLocal` (nosql), `CoreDNS` (dns), `LocalRegistry` (registry:2), `Redpanda`
+  (stream, Kafka API). Each emits a Compose spec + `connection.env`, so the layer is
   exercisable with NO cloud account.
 
 **The equivalence gate** ("equal config → equivalent deployment"): one agnostic graph
