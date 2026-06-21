@@ -187,6 +187,16 @@ func (Stream) isResource()           {}
 func (Stream) Kind() string          { return "stream" }
 func (s Stream) LogicalName() string { return s.Name }
 
+// Identity is a managed workload identity (AWS IAM role / Azure user-assigned managed
+// identity / GCP service account) — the principal a workload runs as. Cloud-only.
+type Identity struct {
+	Name string
+}
+
+func (Identity) isResource()           {}
+func (Identity) Kind() string          { return "iam" }
+func (i Identity) LogicalName() string { return i.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20

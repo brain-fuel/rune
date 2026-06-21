@@ -174,6 +174,11 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("shard_count", "1")
 			h.close()
+		case Identity:
+			h.open("resource \"aws_iam_role\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("assume_role_policy", str("{\"Version\":\"2012-10-17\",\"Statement\":[]}"))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -423,6 +428,12 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("partition_count", "2")
 			h.attr("message_retention", "1")
 			h.close()
+		case Identity:
+			h.open("resource \"azurerm_user_assigned_identity\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -569,6 +580,11 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_pubsub_topic\" %s", str(v.Name+"_stream"))
 			h.attr("name", str(v.Name))
 			h.attr("message_retention_duration", str("86400s"))
+			h.close()
+		case Identity:
+			h.open("resource \"google_service_account\" %s", str(v.Name))
+			h.attr("account_id", str(v.Name))
+			h.attr("display_name", str("wavelet "+v.Name))
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)
