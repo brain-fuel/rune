@@ -45,7 +45,7 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | disk    | EBS | Managed Disk | Persistent Disk | — | — |
 | kms     | KMS | Key Vault key | Cloud KMS | — | — |
 | file    | EFS | Azure Files | Filestore | — | — |
-| stream  | Kinesis | Event Hubs | Pub/Sub | — | — |
+| stream  | Kinesis | Event Hubs | Pub/Sub | Redpanda (Kafka API) | — |
 | iam     | IAM role | Managed Identity | Service Account | — | — |
 | k8s     | EKS | AKS | GKE | — | — |
 | network | VPC | VNet | VPC | — | — |

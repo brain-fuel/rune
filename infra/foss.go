@@ -372,6 +372,38 @@ func (Garage) Emit(rs []Resource) (Artifact, error) {
 	}, nil
 }
 
+// Redpanda is the self-hosted event-stream backend (a Kafka-API-compatible single
+// binary — the same Kafka client serves managed Kinesis/Event Hubs/Pub-Sub-via-Kafka
+// and this local broker). It backs the "stream" abstraction with NO cloud account.
+type Redpanda struct{}
+
+func (Redpanda) Target() string { return "redpanda" }
+func (Redpanda) Cloud() bool    { return false }
+
+func (Redpanda) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("redpanda", "stream", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Redpanda (Kafka-API) backend for the wavelet \"stream\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (Kafka API on localhost:9092)\n" +
+		"services:\n" +
+		composeService("redpanda", "docker.io/redpandadata/redpanda:v24.2.7",
+			[]string{"9092:9092", "9644:9644"},
+			"redpanda start --overprovisioned --smp 1 --memory 1G --reserve-memory 0M --node-id 0 --check=false")
+	env := map[string]string{
+		"WAVELET_STREAM_BACKEND": "redpanda",
+		"WAVELET_STREAM_BROKERS": "localhost:9092",
+	}
+	for _, n := range names {
+		env["WAVELET_STREAM_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
 // LocalRegistry is the self-hosted container-registry backend (the CNCF Distribution
 // `registry:2` image — the same OCI client serves ECR/ACR/Artifact Registry and this
 // local registry). It backs the "registry" abstraction with NO cloud account, so a
