@@ -157,6 +157,16 @@ func (Disk) isResource()           {}
 func (Disk) Kind() string          { return "disk" }
 func (d Disk) LogicalName() string { return d.Name }
 
+// KMS is a managed encryption key (AWS KMS / Azure Key Vault key / GCP KMS). Control-
+// plane, cloud-only. On Azure it shares the Key Vault scaffolding with Secret.
+type KMS struct {
+	Name string
+}
+
+func (KMS) isResource()           {}
+func (KMS) Kind() string          { return "kms" }
+func (k KMS) LogicalName() string { return k.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20

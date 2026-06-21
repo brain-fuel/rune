@@ -58,6 +58,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_route53_zone", "azure": "azurerm_dns_zone", "gcp": "google_dns_managed_zone"}},
 		{"disk", Disk{Name: "x"}, map[string]string{
 			"aws": "aws_ebs_volume", "azure": "azurerm_managed_disk", "gcp": "google_compute_disk"}},
+		{"kms", KMS{Name: "x"}, map[string]string{
+			"aws": "aws_kms_key", "azure": "azurerm_key_vault_key", "gcp": "google_kms_crypto_key"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -159,6 +161,20 @@ func TestDatabasePostgres(t *testing.T) {
 	}
 }
 
+// TestSecretKMSShareKeyVault checks that on Azure a graph with both a Secret and a KMS
+// key emits exactly ONE shared Key Vault (the scaffolding is emitted once).
+func TestSecretKMSShareKeyVault(t *testing.T) {
+	e, _ := ByTarget("azure")
+	art, err := e.Emit([]Resource{Secret{Name: "s"}, KMS{Name: "k"}})
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	tf := art.Files["main.tf"]
+	if n := strings.Count(tf, "resource \"azurerm_key_vault\" \"wavelet\""); n != 1 {
+		t.Errorf("expected exactly 1 shared key vault, got %d\n%s", n, tf)
+	}
+}
+
 // TestSecretDotenv checks the local secret backend emits a keys-only template.
 func TestSecretDotenv(t *testing.T) {
 	e, _ := ByTarget("dotenv")
@@ -223,6 +239,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"nosql":    {NoSQL{Name: "sessions"}},
 		"dns":      {DNS{Name: "web"}},
 		"disk":     {Disk{Name: "data", SizeGB: 50}},
+		"kms":      {KMS{Name: "appkey"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

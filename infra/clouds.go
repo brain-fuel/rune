@@ -28,6 +28,12 @@ func hasKind(rs []Resource, kind string) bool {
 	return false
 }
 
+// needsKeyVault reports whether the Azure graph needs the shared Key Vault (both
+// Secret and KMS hang off it).
+func needsKeyVault(rs []Resource) bool {
+	return hasKind(rs, "secret") || hasKind(rs, "kms")
+}
+
 // tfFile wraps an HCL string as the standard single-file artifact.
 func tfFile(h *hcl, rs []Resource) Artifact {
 	return Artifact{Files: map[string]string{"main.tf": h.String()}, Logical: logicalSet(rs)}
@@ -144,6 +150,15 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("availability_zone", "\"${var.aws_region}a\"")
 			h.attr("size", fmt.Sprintf("%d", v.sizeGB()))
 			h.close()
+		case KMS:
+			h.open("resource \"aws_kms_key\" %s", str(v.Name))
+			h.attr("description", str("wavelet "+v.Name))
+			h.close()
+			h.blank()
+			h.open("resource \"aws_kms_alias\" %s", str(v.Name))
+			h.attr("name", str("alias/"+v.Name))
+			h.attr("target_key_id", "aws_kms_key."+v.Name+".key_id")
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -186,11 +201,13 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 		h.attr("sensitive", "true")
 		h.close()
 	}
-	if hasKind(rs, "secret") {
+	if needsKeyVault(rs) {
 		h.blank()
 		h.open("variable \"azure_tenant_id\"")
 		h.attr("type", "string")
 		h.close()
+	}
+	if hasKind(rs, "secret") {
 		h.blank()
 		h.open("variable \"secret_value\"")
 		h.attr("type", "string")
@@ -241,7 +258,7 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 		h.attr("account_replication_type", str("LRS"))
 		h.close()
 	}
-	if hasKind(rs, "secret") {
+	if needsKeyVault(rs) {
 		h.blank()
 		h.open("resource \"azurerm_key_vault\" \"wavelet\"")
 		h.attr("name", str("wavelet-kv"))
@@ -360,6 +377,14 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("create_option", str("Empty"))
 			h.attr("disk_size_gb", fmt.Sprintf("%d", v.sizeGB()))
 			h.close()
+		case KMS:
+			h.open("resource \"azurerm_key_vault_key\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("key_vault_id", "azurerm_key_vault.wavelet.id")
+			h.attr("key_type", str("RSA"))
+			h.attr("key_size", "2048")
+			h.attr("key_opts", "[\"encrypt\", \"decrypt\"]")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -477,6 +502,16 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("size", fmt.Sprintf("%d", v.sizeGB()))
 			h.attr("zone", "var.gcp_zone")
+			h.close()
+		case KMS:
+			h.open("resource \"google_kms_key_ring\" %s", str(v.Name))
+			h.attr("name", str(v.Name+"-ring"))
+			h.attr("location", "var.gcp_region")
+			h.close()
+			h.blank()
+			h.open("resource \"google_kms_crypto_key\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("key_ring", "google_kms_key_ring."+v.Name+".id")
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)
