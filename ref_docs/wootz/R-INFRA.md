@@ -52,11 +52,12 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | firewall| WAF | DDoS Plan | Cloud Armor | — | — |
 | logs    | CloudWatch | Log Analytics | Cloud Logging | — | — |
 | registry| ECR | ACR | Artifact Registry | — | — |
+| paas    | Beanstalk | App Service plan | App Engine | — | — |
 
 Shared Azure scaffolding is emitted once per graph: the resource group (always), the
 Service Bus namespace (queue), Event Hub namespace (stream), storage account
 (object+file, `needsStorageAccount`), Key Vault (secret+kms, `needsKeyVault`),
-vnet+subnet (compute). 18 rows total. A whole multi-resource graph lowers to the same
+vnet+subnet (compute). 19 rows total. A whole multi-resource graph lowers to the same
 logical set on every cloud (`TestMultiResourceEquivalence`); `rune deploy --manifest`
 emits one app's graph at once.
 
@@ -115,9 +116,9 @@ type-checks (data-plane), the protocol block accepts/rejects correctly, and `run
   (managed Redis / SQS / S3 clients; RabbitMQ/NATS/Valkey/Garage over the wire) + a live
   Podman round-trip (deferred where Podman is absent). Rust data-plane body.
 - **Matrix breadth (remaining):** Networking (LB/CDN), Storage breadth (archival),
-  Database breadth (warehouse), Compute breadth (serverless/PaaS), DevOps (CI/CD),
-  AI/ML. (18 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/
-  file/stream/iam/k8s/network/firewall/logs/registry.) The remaining categories mostly
+  Database breadth (warehouse), Compute breadth (serverless), DevOps (CI/CD), AI/ML.
+  (19 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/
+  stream/iam/k8s/network/firewall/logs/registry/paas.) The remaining categories mostly
   have one dependency-heavy provider (CloudFront origins, LB target groups, Synapse
   storage); add them when a consumer needs them (Standing Rule 1).
 - **Cloud apply:** graduate from `fmt`/`validate` to real `apply` once accounts + creds
