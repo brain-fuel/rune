@@ -360,6 +360,18 @@ func ByTarget(name string) (Emitter, bool) {
 	return nil, false
 }
 
+// Kinds lists the canonical agnostic resource KINDS the layer supports, in the
+// documented order. It is the single source for the `rune deploy` usage string and
+// the CLI-completeness gate, so the advertised kinds, the constructor switch, and the
+// provider lowerings cannot silently drift apart.
+func Kinds() []string {
+	return []string{
+		"queue", "kv", "object", "compute", "database", "secret", "nosql", "dns",
+		"disk", "kms", "file", "stream", "cdn", "lb", "metrics", "iam", "k8s",
+		"network", "firewall", "logs", "registry", "paas",
+	}
+}
+
 // Targets lists the canonical target names of every shipped emitter.
 func Targets() []string {
 	out := make([]string, 0, len(All()))

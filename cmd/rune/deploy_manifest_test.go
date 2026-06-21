@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"goforge.dev/rune/v3/infra"
 )
 
 const appManifest = `# a small app's infrastructure graph
@@ -115,12 +117,7 @@ func TestManifestErrors(t *testing.T) {
 // resourceFor AND lower to a concrete resource on aws/azure/gcp. It catches the
 // "added a kind but forgot a provider case" bug class.
 func TestAllCLIKindsLowerOnEveryCloud(t *testing.T) {
-	kinds := []string{
-		"queue", "kv", "object", "compute", "database", "secret", "nosql", "dns",
-		"disk", "kms", "file", "stream", "cdn", "lb", "metrics", "iam", "k8s",
-		"network", "firewall", "logs", "registry", "paas",
-	}
-	for _, k := range kinds {
+	for _, k := range infra.Kinds() {
 		r, err := resourceFor(k, "x", false, "", 1)
 		if err != nil {
 			t.Errorf("resourceFor(%q): %v (is the kind wired in deploy.go and the usage string?)", k, err)
