@@ -206,7 +206,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  rune deploy <file> [name] --target <backend>   (deploy + RUN a verified protocol)")
 	fmt.Fprintln(os.Stderr, "  rune deploy --resource <kind> --name <n> --backend <b> [--out dir] [--replicas N] [--image ref] [--fifo]")
 	fmt.Fprintln(os.Stderr, "  rune deploy --manifest <file> --backend <b> [--out dir]   (a whole resource graph)")
-	fmt.Fprintln(os.Stderr, "    kinds: queue kv object compute database secret nosql dns disk kms file stream iam k8s network firewall logs registry paas")
+	fmt.Fprintln(os.Stderr, "    kinds: queue kv object compute database secret nosql dns disk kms file stream cdn iam k8s network firewall logs registry paas")
 	fmt.Fprintf(os.Stderr, "  targets: %s (aliases: python, rust, golang, javascript)\n",
 		strings.Join(codegen.Targets(), ", "))
 	fmt.Fprintf(os.Stderr, "  deploy backends: %s\n", strings.Join(infra.Targets(), ", "))

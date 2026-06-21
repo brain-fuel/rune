@@ -187,6 +187,17 @@ func (Stream) isResource()           {}
 func (Stream) Kind() string          { return "stream" }
 func (s Stream) LogicalName() string { return s.Name }
 
+// CDN is a managed content-delivery network (AWS CloudFront / Azure CDN profile /
+// GCP Cloud CDN backend bucket) — edge caching in front of an origin. Control-plane,
+// cloud-only.
+type CDN struct {
+	Name string
+}
+
+func (CDN) isResource()           {}
+func (CDN) Kind() string          { return "cdn" }
+func (c CDN) LogicalName() string { return c.Name }
+
 // Identity is a managed workload identity (AWS IAM role / Azure user-assigned managed
 // identity / GCP service account) — the principal a workload runs as. Cloud-only.
 type Identity struct {
