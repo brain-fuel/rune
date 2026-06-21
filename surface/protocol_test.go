@@ -73,6 +73,28 @@ end`
 	}
 }
 
+// TestProtocolIsContextualKeyword: `protocol` stays a valid IDENTIFIER (e.g. a def
+// named `protocol`, as in ch71's M0 vertical slice) — it is a block keyword only in
+// the `protocol Name is …` form. Regression guard for the keyword collision.
+func TestProtocolIsContextualKeyword(t *testing.T) {
+	// `protocol` as a definition name (followed by `:`), not a block.
+	items, err := ParseProgram(`protocol : Nat is zero end`)
+	if err != nil {
+		t.Fatalf("`protocol` as an identifier was rejected: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 def, got %d items", len(items))
+	}
+	d, ok := items[0].(Def)
+	if !ok || d.Name != "protocol" {
+		t.Errorf("expected a def named `protocol`, got %#v", items[0])
+	}
+	// `protocol` as a reference inside another def's body still resolves to an ident.
+	if _, err := ParseProgram(`uses : Nat is protocol end`); err != nil {
+		t.Errorf("`protocol` as a reference was rejected: %v", err)
+	}
+}
+
 // TestProtocolMissingEnd: an unterminated block is incomplete (drives the REPL's
 // continuation loop), not a hard error.
 func TestProtocolMissingEnd(t *testing.T) {

@@ -106,7 +106,11 @@ func ParseProgram(src string) ([]Item, error) {
 			}
 			continue
 		}
-		if p.peek().kind == tProtocol {
+		// `protocol` is a CONTEXTUAL keyword: a block only in the form
+		// `protocol Name is …` (an identifier follows). Otherwise `protocol` is an
+		// ordinary identifier (e.g. a def named `protocol`, as in ch71), so it falls
+		// through to parseItem.
+		if p.peek().kind == tIdent && p.peek().text == "protocol" && p.peekAt(1).kind == tIdent {
 			proto, err := p.parseProtocol()
 			if err != nil {
 				return nil, err
@@ -342,8 +346,9 @@ var protocolRequired = []string{"init", "merge", "value", "mergeComm", "mergeIde
 // join-semilattice (convergence is structural, not convention). One protocol per
 // file (the members are bare). Zero new core.
 func (p *parser) parseProtocol() ([]Item, error) {
-	if _, err := p.expect(tProtocol); err != nil {
-		return nil, err
+	kw := p.next() // the contextual `protocol` keyword (an identifier)
+	if kw.kind != tIdent || kw.text != "protocol" {
+		return nil, fmt.Errorf("expected 'protocol', found %s at offset %d", kw.kind, kw.pos)
 	}
 	name := p.peek()
 	if name.kind != tIdent {

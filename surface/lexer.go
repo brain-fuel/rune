@@ -41,7 +41,6 @@ const (
 	tProj    // .1 / .2 (postfix Σ projection; text is "1" or "2")
 	tInstance // instance (a typeclass instance declaration; C2)
 	tModule   // module (a namespace block; C6)
-	tProtocol // protocol (a verified-CvRDT block; E4 / wavelet)
 	tPartial  // partial (a general-recursive definition; C4)
 	tForeign  // foreign (a typed FFI axiom; R-FFI / B4)
 	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
@@ -357,8 +356,6 @@ func keyword(word string, pos int) token {
 		return token{tInstance, word, pos}
 	case "module":
 		return token{tModule, word, pos}
-	case "protocol":
-		return token{tProtocol, word, pos}
 	case "partial":
 		return token{tPartial, word, pos}
 	case "foreign":
