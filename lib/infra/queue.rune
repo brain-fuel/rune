@@ -1,0 +1,44 @@
+-- lib/infra/queue.rune — the wavelet QUEUE abstraction (agnostic surface).
+--
+-- A program ENQUEUEs and DEQUEUEs String messages on a NAMED queue without naming a
+-- vendor. `rune deploy --resource queue --backend <b>` provisions the backend (AWS
+-- SQS / Azure Service Bus / GCP Pub-Sub, or self-hosted RabbitMQ / NATS) and binds
+-- these foreign ops to it. One interface; the backend is a deploy-time choice; equal
+-- config yields an equivalent deployment everywhere.
+--
+-- Loaded on top of the REPL prelude (String / codeOf / bytes / Whole / leW); the IO
+-- monad (IO / pureIO / bindIO) is ambient (store/io.go, C3 / R-EFFECT).
+
+-- Unit: the result of a fire-and-forget effect (the prelude does not define one).
+data Unit : U is unit : Unit end
+
+-- A dequeued message, or nothing when the queue is empty.
+data QMsg : U is qnone : QMsg | qsome : String -> QMsg end
+
+-- The host edge (assume-tier R-FFI): the queue ops over the packed-String CODE (a
+-- Whole), so no constructor crosses the boundary — exactly the D6 marshalling
+-- discipline (ch215). `rune deploy` emits each backend's binding; here they are
+-- assumed axioms.
+foreign enqueueCode : Whole -> Whole -> IO Whole end   -- queueCode -> msgCode -> ack
+foreign dequeueCode : Whole -> IO Whole end            -- queueCode -> msgCode (0 = empty)
+
+-- Enqueue a message on a named queue.
+enqueue : String -> String -> IO Unit is
+  fn (q : String) (m : String) is
+    bindIO Whole Unit (enqueueCode (codeOf q) (codeOf m))
+      (fn (a : Whole) is pureIO Unit unit end)
+  end
+end
+
+-- Dequeue the next message; qnone when empty (the host returns code 0, which `leW
+-- code 1` detects, the same emptiness test as strNull).
+dequeue : String -> IO QMsg is
+  fn (q : String) is
+    bindIO Whole QMsg (dequeueCode (codeOf q)) (fn (code : Whole) is
+      case leW code 1 of
+      | true  -> pureIO QMsg qnone
+      | false -> pureIO QMsg (qsome (bytes code))
+      end
+    end)
+  end
+end

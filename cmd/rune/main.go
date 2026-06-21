@@ -20,6 +20,7 @@ import (
 	"goforge.dev/rune/v3/codegen"
 	"os"
 
+	"goforge.dev/rune/v3/infra"
 	"goforge.dev/rune/v3/internal/repl"
 	"goforge.dev/rune/v3/internal/session"
 	"goforge.dev/rune/v3/internal/sim"
@@ -100,6 +101,10 @@ func main() {
 			n = parsed
 		}
 		if err := runSimulate(string(src), n, os.Stdout); err != nil {
+			fatal(err)
+		}
+	case "deploy":
+		if err := runDeploy(os.Args[2:], os.Stdout); err != nil {
 			fatal(err)
 		}
 	default:
@@ -198,8 +203,10 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  rune emit <file> [name] [--target js|py|go|rs|erl|jvm]")
 	fmt.Fprintln(os.Stderr, "  rune run  <file> <name> [--target js|py|go|rs|erl|jvm]")
 	fmt.Fprintln(os.Stderr, "  rune simulate <file> [replicas]   (defines init/merge/value/op0..opN)")
+	fmt.Fprintln(os.Stderr, "  rune deploy --resource queue|kv|object --name <n> --backend <b> [--out dir] [--fifo]")
 	fmt.Fprintf(os.Stderr, "  targets: %s (aliases: python, rust, golang, javascript)\n",
 		strings.Join(codegen.Targets(), ", "))
+	fmt.Fprintf(os.Stderr, "  deploy backends: %s\n", strings.Join(infra.Targets(), ", "))
 }
 
 // parseEmitArgs reads the positional <file> [name] and an optional

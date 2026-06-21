@@ -1,0 +1,153 @@
+// Package infra is the INFRA STRATUM (the "wavelet" cloud-abstraction layer): a
+// provider-agnostic resource model lowered to a concrete deployment artifact behind
+// the Emitter interface, so a new cloud or self-hosted backend is one plugin, not a
+// fork. It is the deploy-side dual of codegen/: where codegen lowers the erased IR
+// to target SOURCE, infra lowers a resource graph to target INFRASTRUCTURE (OpenTofu
+// / Terraform HCL for a cloud, or a run/compose spec for a self-hosted FOSS backend).
+//
+// The wavelet telos ("better than Winglang"): one agnostic configuration yields an
+// EQUIVALENT deployment on every target — the equivalence is the gate (a config's
+// LogicalResource set must match across providers). Foundational abstractions land
+// first (Queue, Key/Value, Object Storage), each with a permissive self-hosted
+// backend (RabbitMQ/NATS, Valkey, Garage) that runs locally under Podman, so the
+// layer is exercisable with no cloud account.
+//
+// THE SHADOW RULE (CLAUDE.md): infra is a CONSUMER of the kernel, never core. It
+// reads checked definitions and emits throwaway deployment artifacts; it adds no
+// core constructor and mutates nothing in core/store.
+package infra
+
+import "sort"
+
+// Resource is a provider-agnostic infrastructure capability requested by a program
+// — a Queue, a KV store, an object Bucket — described by WHAT it provides, not which
+// vendor product backs it. Concrete resources are the small sealed set below.
+type Resource interface {
+	isResource()
+	// Kind names the agnostic capability ("queue", "kv", "object").
+	Kind() string
+	// LogicalName is the user's name for this instance; it becomes the HCL local
+	// resource name and the FOSS container/connection name.
+	LogicalName() string
+}
+
+// Queue is an at-least-once message queue/topic — the agnostic transport. The
+// message TYPE is a wootz-side concern (lib/infra/queue.rune); the resource is the
+// channel the cloud/backend provisions.
+type Queue struct {
+	Name string // logical name
+	FIFO bool    // ordered, exactly-once-ish delivery where the backend supports it
+}
+
+func (Queue) isResource()         {}
+func (Queue) Kind() string        { return "queue" }
+func (q Queue) LogicalName() string { return q.Name }
+
+// KV is a key/value store keyed on the Redis/Valkey wire protocol (managed Redis is
+// the cloud default; Valkey is the FOSS backend).
+type KV struct {
+	Name       string
+	TTLSeconds int // 0 = no default expiry
+}
+
+func (KV) isResource()          {}
+func (KV) Kind() string         { return "kv" }
+func (k KV) LogicalName() string { return k.Name }
+
+// Bucket is object storage on the S3 API equivalence class (S3 / Blob / GCS native,
+// Garage self-hosted).
+type Bucket struct {
+	Name string
+}
+
+func (Bucket) isResource()          {}
+func (Bucket) Kind() string         { return "object" }
+func (b Bucket) LogicalName() string { return b.Name }
+
+// LogicalResource is the abstract shape an emitter claims to realize for a given
+// resource: the agnostic kind + name, INDEPENDENT of the concrete provider type.
+// Two targets are EQUIVALENT for a configuration when their LogicalResource sets are
+// equal — this is the "equal config -> equivalent deployment" gate.
+type LogicalResource struct {
+	Kind string // "queue", "kv", "object"
+	Name string
+}
+
+// Artifact is an emitted deployment artifact for one target: a set of named files
+// (e.g. "main.tf" -> HCL, or "compose.yaml" -> a Podman compose spec) plus the
+// logical resource set it realizes (the equivalence witness).
+type Artifact struct {
+	Files   map[string]string
+	Logical []LogicalResource
+}
+
+// Emitter lowers a resource graph to an Artifact for one TARGET — a cloud provider
+// via OpenTofu/Terraform HCL, or a self-hosted FOSS backend via a run/compose spec.
+// One implementation ships per target; an emitter switches on each resource's Kind.
+type Emitter interface {
+	// Target names the provider/backend ("aws", "azure", "gcp", "rabbitmq",
+	// "nats", "valkey", "garage").
+	Target() string
+	// Cloud reports whether this target is an IaC cloud provider (HCL output) as
+	// opposed to a self-hosted FOSS backend (run/compose output).
+	Cloud() bool
+	// Emit lowers the resources; an unsupported Kind is a clear error, not a panic.
+	Emit(rs []Resource) (Artifact, error)
+}
+
+// All returns every emitter the infra stratum ships, in registration order: the
+// three clouds, then the foundational FOSS backends.
+func All() []Emitter {
+	return []Emitter{
+		AWS{}, Azure{}, GCP{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{},
+	}
+}
+
+// targetAliases maps friendly names to canonical Target() values.
+var targetAliases = map[string]string{
+	"amazon": "aws", "ec2": "aws",
+	"azurerm": "azure", "az": "azure",
+	"google": "gcp", "gcloud": "gcp", "googlecloud": "gcp",
+	"rabbit": "rabbitmq", "amqp": "rabbitmq",
+}
+
+// ByTarget returns the emitter selected by a provider/backend name (canonical or a
+// friendly alias), and whether one matched.
+func ByTarget(name string) (Emitter, bool) {
+	if canon, ok := targetAliases[name]; ok {
+		name = canon
+	}
+	for _, e := range All() {
+		if e.Target() == name {
+			return e, true
+		}
+	}
+	return nil, false
+}
+
+// Targets lists the canonical target names of every shipped emitter.
+func Targets() []string {
+	out := make([]string, 0, len(All()))
+	for _, e := range All() {
+		out = append(out, e.Target())
+	}
+	return out
+}
+
+// logicalSet builds the equivalence witness for a resource graph: the agnostic
+// (kind, name) pairs, sorted, independent of any provider. Every cloud emitter must
+// realize EXACTLY this set for the same input — the equivalence gate compares it.
+func logicalSet(rs []Resource) []LogicalResource {
+	out := make([]LogicalResource, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, LogicalResource{Kind: r.Kind(), Name: r.LogicalName()})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
