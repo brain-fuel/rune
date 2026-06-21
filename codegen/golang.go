@@ -365,9 +365,8 @@ func goThunk(n string) string { return goLocal(n) + "_d" }
 
 func goLocal(n string) string {
 	if m, ok := jsOpNames[n]; ok {
-		return m
-	}
-	if i := strings.IndexByte(n, '$'); i > 0 {
+		n = m
+	} else if i := strings.IndexByte(n, '$'); i > 0 {
 		if m, ok := jsOpNames[n[:i]]; ok {
 			n = m + n[i:]
 		}

@@ -1543,3 +1543,26 @@ func TestD4ShapeProven(t *testing.T) {
 		}
 	})
 }
+
+// TestStringDeployConformance deploys the self-contained string program ch101 (concatenate
+// with the `++` operator, print via printStrCode) on every source backend. The point of the
+// string story's runtime half: `++` works in real, compiled code, not just the REPL.
+func TestStringDeployConformance(t *testing.T) {
+	const want = "Hello, wootz!\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		// rust's packed-String host body (printStrCode) is parked (PARKING-LOT, like ch213),
+		// so the string-marshalling IO prims do not deploy there yet.
+		if bk.name == "rs" {
+			continue
+		}
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch101_string_deploy.rune", "main", ""); got != want {
+				t.Errorf("[%s] string deploy printed %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}

@@ -72,11 +72,14 @@ var ioPrims = map[string]bool{
 // emits the shared codec helpers once when any of these is referenced.
 var fileEnvPrims = []string{"getEnvCode", "readFileCode", "writeFileCode", "printStrCode", "argAtCode"}
 
-// usesOS reports whether the program references any D6 prim needing the host OS
-// module (the file/env codec users plus argv/process), so the Go backend knows to
-// add the "os" import.
+// usesOS reports whether the program references any D6 prim whose Go body needs the
+// "os" module, so the Go backend knows to add the import. printStrCode is excluded:
+// its body uses fmt.Println, not os, so a program that only prints would otherwise
+// import "os" unused (a Go compile error).
 func usesOS(p Program) bool {
-	return usesFileEnv(p) || usesForeign(p, "argCountCode") || usesForeign(p, "exitWith")
+	return usesForeign(p, "getEnvCode") || usesForeign(p, "readFileCode") ||
+		usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode") ||
+		usesForeign(p, "argCountCode") || usesForeign(p, "exitWith")
 }
 
 // usesFileEnv reports whether the program references any D6 net/fs primitive, so a

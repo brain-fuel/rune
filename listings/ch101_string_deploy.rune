@@ -1,0 +1,117 @@
+-- Chapter 101 — A DEPLOYED string program (M6 / D-track stdlib; the string story's runtime
+-- side). A self-contained file that concatenates string literals with the `++` operator
+-- (defined here as packed-byte append, the same operator the REPL prelude overloads) and
+-- prints the result via the D6 `printStrCode` host primitive — so `rune run` EXECUTES it on
+-- a real backend (js / py / go / erl all print "Hello, wootz!"). The REPL prelude is
+-- REPL-only, so a deployed file carries its own definitions, as every listing does. This is
+-- the "++ in real code, not just the REPL" half of the string goal.
+--   rune run listings/ch101_string_deploy.rune main [--target erl|py|go]
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ k -> k end end end
+isZero : Nat -> Bool is fn (n : Nat) is case n of | zero -> true | succ k -> false end end end
+
+-- kernel-accelerated arithmetic (the bodies are the reference; the `builtin` lines make
+-- closed-literal ops one bigint step, so packed-string div/mod by 256 deploys fast).
+addW : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end end
+builtin natAdd addW
+mulW : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> 0 | succ k with ih -> addW ih n end end end
+builtin natMul mulW
+subW : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end end
+builtin natMonus subW
+
+leb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is true end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+
+divF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is 0 end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> 0
+        | succ k -> case leb b a of | true -> succ (ih (subW a b) b) | false -> 0 end
+        end
+      end
+    end
+  end
+end
+modF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is a end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> a
+        | succ k -> case leb b a of | true -> ih (subW a b) b | false -> a end
+        end
+      end
+    end
+  end
+end
+// : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is divF m m n end end
+% : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is modF m m n end end
+builtin natDiv //
+builtin natMod %
+
+-- the packed String (B4): one bignum of UTF-8 bytes (first byte LSB + 0x01 sentinel).
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+strNull : Bytes -> Bool  is fn (s : Bytes) is isZero (subW (codeOf s) 1) end end
+strHead : Bytes -> Nat   is fn (s : Bytes) is codeOf s % 256 end end
+strTail : Bytes -> Bytes is fn (s : Bytes) is bytes (codeOf s // 256) end end
+strCons : Nat -> Bytes -> Bytes is fn (c : Nat) (s : Bytes) is bytes (addW c (mulW 256 (codeOf s))) end end
+
+-- the byte-length bound for the structural loops. In COMPILED code the structural
+-- recursion is forced to full fuel depth (unlike the lazy REPL kernel, which stops at the
+-- sentinel), so the fuel doubles as the max deployed string length; 256 is ample here and
+-- a safe recursion depth on every backend.
+strFuel : Nat is 256 end
+strLenGo : Nat -> Nat -> Bytes -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (acc : Nat) (s : Bytes) is acc end
+    | succ f with ih -> fn (acc : Nat) (s : Bytes) is
+        case strNull s of | true -> acc | false -> ih (addW acc 1) (strTail s) end
+      end
+    end
+  end
+end
+strLen : Bytes -> Nat is fn (s : Bytes) is strLenGo strFuel 0 s end end
+
+strAppGo : Nat -> Bytes -> Bytes -> Bytes is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (s : Bytes) (t : Bytes) is t end
+    | succ f with ih -> fn (s : Bytes) (t : Bytes) is
+        case strNull s of | true -> t | false -> strCons (strHead s) (ih (strTail s) t) end
+      end
+    end
+  end
+end
+strApp : Bytes -> Bytes -> Bytes is fn (s : Bytes) (t : Bytes) is strAppGo (strLen s) s t end end
+
+-- the concat operator, here over strings (the same `++` the REPL prelude overloads).
+++ : String -> String -> String is fn (a : String) (b : String) is strApp a b end end
+
+-- D6 host primitive: decode the packed code and println it.
+foreign printStrCode : Nat -> IO Nat end
+printStr : String -> IO Unit is
+  fn (s : String) is bindIO Nat Unit (printStrCode (codeOf s)) (fn (n : Nat) is pureIO Unit unit end) end
+end
+
+-- the program: build a greeting by concatenation, then print it on the backend.
+greeting : String is "Hello, " ++ "wootz" ++ "!" end
+main : IO Unit is printStr greeting end
