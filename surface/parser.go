@@ -106,35 +106,19 @@ func ParseProgram(src string) ([]Item, error) {
 			}
 			continue
 		}
-		if p.peek().kind == tForeign {
-			d, err := p.parseForeign()
+		if p.peek().kind == tProtocol {
+			proto, err := p.parseProtocol()
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, d)
+			items = append(items, proto...)
 			continue
 		}
-		if p.peek().kind == tData {
-			d, err := p.parseData()
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, d)
-			continue
-		}
-		if p.peek().kind == tBuiltin {
-			b, err := p.parseBuiltin()
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, b)
-			continue
-		}
-		d, err := p.parseDef()
+		it, err := p.parseItem()
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, d)
+		items = append(items, it)
 	}
 	return items, nil
 }
@@ -325,6 +309,92 @@ func (p *parser) parseModule() ([]Def, error) {
 	}
 	p.next() // consume 'end'
 	return defs, nil
+}
+
+// parseItem parses ONE top-level item that is not a block (foreign axiom, datatype,
+// builtin binding, or plain definition) — the shared body of ParseProgram and the
+// block parsers.
+func (p *parser) parseItem() (Item, error) {
+	switch p.peek().kind {
+	case tForeign:
+		return p.parseForeign()
+	case tData:
+		return p.parseData()
+	case tBuiltin:
+		return p.parseBuiltin()
+	default:
+		return p.parseDef()
+	}
+}
+
+// protocolRequired are the members a `protocol … end` block MUST define: the CvRDT
+// operations the simulator/projection consume (init/merge/value + at least one
+// opN), and the three join-semilattice law proofs that make the merge converge.
+// Their PRESENCE is checked here; their well-typedness is checked by elaboration of
+// the desugared defs.
+var protocolRequired = []string{"init", "merge", "value", "mergeComm", "mergeIdem", "mergeAssoc"}
+
+// parseProtocol parses `protocol Name is <item>* end` (E4 / wavelet): a VERIFIED
+// CvRDT block. It is a checked grouping, not a namespace — the members pass through
+// as ordinary top-level defs (bare names, so `rune simulate` and the serveG
+// projection consume them unchanged), but the block REJECTS a protocol that omits a
+// required member, so a CvRDT cannot ship without proving its merge is a
+// join-semilattice (convergence is structural, not convention). One protocol per
+// file (the members are bare). Zero new core.
+func (p *parser) parseProtocol() ([]Item, error) {
+	if _, err := p.expect(tProtocol); err != nil {
+		return nil, err
+	}
+	name := p.peek()
+	if name.kind != tIdent {
+		return nil, fmt.Errorf("expected a protocol name, found %s at offset %d", name.kind, name.pos)
+	}
+	p.next()
+	if _, err := p.expect(tIs); err != nil {
+		return nil, err
+	}
+	var items []Item
+	defined := map[string]bool{}
+	hasOp := false
+	for p.peek().kind != tEnd {
+		if p.peek().kind == tEOF {
+			return nil, fmt.Errorf("%w: protocol %q is missing its 'end'", ErrIncomplete, name.text)
+		}
+		it, err := p.parseItem()
+		if err != nil {
+			return nil, err
+		}
+		switch d := it.(type) {
+		case Def:
+			defined[d.Name] = true
+			if strings.HasPrefix(d.Name, "op") {
+				hasOp = true
+			}
+		case DataDef:
+			defined[d.Name] = true
+		}
+		items = append(items, it)
+	}
+	p.next() // consume 'end'
+
+	var missing []string
+	for _, m := range protocolRequired {
+		if !defined[m] {
+			missing = append(missing, m)
+		}
+	}
+	if !hasOp {
+		missing = append(missing, "op0")
+	}
+	if len(missing) > 0 {
+		return nil, fmt.Errorf(
+			"protocol %q is missing its CvRDT contract: %s. A protocol must define "+
+				"init/merge/value + at least one local update (op0…) AND prove its merge "+
+				"is a join-semilattice (mergeComm, mergeIdem, mergeAssoc) — the laws that "+
+				"make replicas converge",
+			name.text, strings.Join(missing, ", "))
+	}
+	return items, nil
 }
 
 // parseDef parses `DefName ":" Expr "is" Expr "end"`. The type annotation is

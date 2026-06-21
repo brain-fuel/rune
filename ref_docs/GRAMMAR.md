@@ -106,10 +106,18 @@ Notation: `X*` zero+ , `X+` one+ , `[X]` optional, `|` alternation, `"…"` term
 generative skeleton; §5 gives the deterministic parse for the `(`-forms and for `seq`.
 
 ```
-Program   ::= (Definition | DataDecl | BuiltinDecl)*
+Program   ::= (Definition | DataDecl | BuiltinDecl | ProtocolDecl)*
 
 Definition ::= DefName ":" Expr "is" Expr "end"
 DefName   ::= Ident | Op
+
+-- ProtocolDecl (E4 / wavelet): a VERIFIED-CvRDT block. It is a checked grouping, not
+-- a namespace — the inner items pass through as ordinary top-level definitions (bare
+-- names), but the block is REJECTED unless it defines the CvRDT contract: init, merge,
+-- value, at least one local update op0…, AND the three join-semilattice law proofs
+-- mergeComm / mergeIdem / mergeAssoc. So a CvRDT cannot ship without proving it
+-- converges. One protocol per file (members are bare). Zero new core.
+ProtocolDecl ::= "protocol" Ident "is" (Definition | DataDecl | BuiltinDecl)* "end"
 
 BuiltinDecl ::= "builtin" "nat" Ident Ident Ident          -- type, zero, succ (§5.5)
              |  "builtin" ("natAdd"|"natMul"|"natMonus") DefName  -- accelerate a Nat op (C7 / R-NUM)

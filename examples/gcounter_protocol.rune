@@ -1,0 +1,206 @@
+-- examples/gcounter_protocol.rune — the G-Counter CvRDT as a wavelet PROTOCOL block.
+-- Identical content to gcounter.rune, wrapped in `protocol GCounter is … end`: the
+-- block REQUIRES init/merge/value/op0 + the three convergence proofs (mergeComm/
+-- mergeIdem/mergeAssoc), so the CvRDT contract is structural. Members stay bare, so
+--   rune simulate examples/gcounter_protocol.rune 2
+-- drives it exactly as the flat form does.
+protocol GCounter is
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is n end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end)
+             (succ k)
+             (fn (j : Nat) (ihj : Nat) is succ (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+symNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat b a is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat z a end) (refl a)
+  end
+end
+
+congSucc : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) (refl (succ a))
+  end
+end
+
+maxZeroR : (m : Nat) -> Eq Nat (max m zero) m is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k zero) k) is refl (succ k) end)
+      m
+  end
+end
+
+maxComm : (m : Nat) -> (n : Nat) -> Eq Nat (max m n) (max n m) is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Nat (max x n) (max n x) end)
+      (fn (n : Nat) is symNat (max n zero) n (maxZeroR n) end)
+      (fn (k : Nat) (ih : (n : Nat) -> Eq Nat (max k n) (max n k)) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Eq Nat (max (succ k) x) (max x (succ k)) end)
+             (refl (succ k))
+             (fn (j : Nat) (ihj : Eq Nat (max (succ k) j) (max j (succ k))) is
+                congSucc (max k j) (max j k) (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x x) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k k) k) is congSucc (max k k) k ih end)
+      a
+  end
+end
+
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (max (max a b) c) (max a (max b c)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (max (max x b) c) (max x (max b c)) end)
+      (fn (b : Nat) (c : Nat) is refl (max b c) end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (max (max k b) c) (max k (max b c))) is
+         fn (b : Nat) is
+           NatElim (fn (x : Nat) is (c : Nat) -> Eq Nat (max (max (succ k) x) c) (max (succ k) (max x c)) end)
+             (fn (c : Nat) is refl (max (succ k) c) end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (max (max (succ k) j) c) (max (succ k) (max j c))) is
+                fn (c : Nat) is
+                  NatElim (fn (x : Nat) is Eq Nat (max (max (succ k) (succ j)) x) (max (succ k) (max (succ j) x)) end)
+                    (refl (succ (max k j)))
+                    (fn (i : Nat) (ihc : Eq Nat (max (max (succ k) (succ j)) i) (max (succ k) (max (succ j) i))) is
+                       congSucc (max (max k j) i) (max k (max j i)) (ih j i) end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+data GC : U is
+  gc : Nat -> Nat -> GC
+end
+
+value : GC -> Nat is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is Nat end) (fn (a : Nat) (b : Nat) is add a b end) g
+  end
+end
+
+merge : GC -> GC -> GC is
+  fn (g : GC) (h : GC) is
+    GCElim (fn (x : GC) is GC end)
+      (fn (a : Nat) (b : Nat) is
+         GCElim (fn (y : GC) is GC end)
+           (fn (c : Nat) (d : Nat) is gc (max a c) (max b d) end)
+           h
+       end)
+      g
+  end
+end
+
+congGC : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> Eq Nat a c -> Eq Nat b d -> Eq GC (gc a b) (gc c d) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e1 : Eq Nat a c) (e2 : Eq Nat b d) is
+    subst Nat a c e1 (fn (x : Nat) is Eq GC (gc a b) (gc x d) end)
+      (subst Nat b d e2 (fn (y : Nat) is Eq GC (gc a b) (gc a y) end)
+         (refl (gc a b)))
+  end
+end
+
+mergeComm : (g : GC) -> (h : GC) -> Eq GC (merge g h) (merge h g) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> Eq GC (merge x h) (merge h x) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is Eq GC (merge (gc a b) y) (merge y (gc a b)) end)
+             (fn (c : Nat) (d : Nat) is
+                congGC (max a c) (max b d) (max c a) (max d b)
+                  (maxComm a c) (maxComm b d) end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+mergeIdem : (g : GC) -> Eq GC (merge g g) g is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is Eq GC (merge x x) x end)
+      (fn (a : Nat) (b : Nat) is congGC (max a a) (max b b) a b (maxIdem a) (maxIdem b) end)
+      g
+  end
+end
+
+mergeAssoc : (g : GC) -> (h : GC) -> (k : GC)
+   -> Eq GC (merge (merge g h) k) (merge g (merge h k)) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> (k : GC) -> Eq GC (merge (merge x h) k) (merge x (merge h k)) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is (k : GC) -> Eq GC (merge (merge (gc a b) y) k) (merge (gc a b) (merge y k)) end)
+             (fn (c : Nat) (d : Nat) is
+                fn (k : GC) is
+                  GCElim (fn (z : GC) is Eq GC (merge (merge (gc a b) (gc c d)) z) (merge (gc a b) (merge (gc c d) z)) end)
+                    (fn (e : Nat) (ff : Nat) is
+                       congGC (max (max a c) e) (max (max b d) ff) (max a (max c e)) (max b (max d ff))
+                         (maxAssoc a c e) (maxAssoc b d ff) end)
+                    k
+                end
+              end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+
+replicaA : GC is gc (succ (succ zero)) zero end
+replicaB : GC is gc zero (succ zero) end
+
+converged : Nat is value (merge replicaA replicaB) end
+
+convergedCorrect : Eq Nat converged (succ (succ (succ zero))) is
+  refl (succ (succ (succ zero)))
+end
+
+
+init : GC is gc zero zero end
+
+op0 : GC -> GC is
+  fn (s : GC) is GCElim (fn (x : GC) is GC end) (fn (a : Nat) (b : Nat) is gc (succ a) b end) s end
+end
+
+op1 : GC -> GC is
+  fn (s : GC) is GCElim (fn (x : GC) is GC end) (fn (a : Nat) (b : Nat) is gc a (succ b) end) s end
+end
+end
