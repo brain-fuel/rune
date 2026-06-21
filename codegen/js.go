@@ -76,6 +76,24 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "exitWith") {
 		b.WriteString("const exitWith = () => n => () => { process.exit(Number(n)); };\n")
 	}
+	// E4 / wavelet — the LOCAL in-process KV backend (the lib/infra/kv data plane).
+	// kvPutCode/kvGetCode/kvDelCode store the packed-String CODE (a BigInt) in a
+	// module-global Map, so a program using the kv abstraction RUNS unaided via
+	// `rune run --target js` (no broker). The managed-Redis / Valkey bindings are
+	// ports of this shape over a real client. An absent key reads back as code 0,
+	// which the Rune side's `leW code 1` treats as empty.
+	if usesForeign(p, "kvPutCode") || usesForeign(p, "kvGetCode") || usesForeign(p, "kvDelCode") {
+		b.WriteString("const __kv = new Map();\n")
+	}
+	if usesForeign(p, "kvPutCode") {
+		b.WriteString("const kvPutCode = () => k => v => () => { __kv.set(k.toString(), v); return v; };\n")
+	}
+	if usesForeign(p, "kvGetCode") {
+		b.WriteString("const kvGetCode = () => k => () => { const x = __kv.get(k.toString()); return x === undefined ? 0n : x; };\n")
+	}
+	if usesForeign(p, "kvDelCode") {
+		b.WriteString("const kvDelCode = () => k => () => { __kv.delete(k.toString()); return 0n; };\n")
+	}
 	// D3 machine floats (f64) + the BLAS dot kernel — pure host bodies (native
 	// Number arithmetic); a Float is a JS number, distinct from the BigInt Nat.
 	// `Float` is a foreign TYPE but survives erasure as ok/err's type argument, so it
