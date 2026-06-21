@@ -247,6 +247,16 @@ func (Registry) isResource()           {}
 func (Registry) Kind() string          { return "registry" }
 func (r Registry) LogicalName() string { return r.Name }
 
+// PaaS is a managed application platform (AWS Elastic Beanstalk / Azure App Service
+// plan / GCP App Engine) — the host a web app runs on. Control-plane, cloud-only.
+type PaaS struct {
+	Name string
+}
+
+func (PaaS) isResource()           {}
+func (PaaS) Kind() string          { return "paas" }
+func (p PaaS) LogicalName() string { return p.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20

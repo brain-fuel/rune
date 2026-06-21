@@ -76,6 +76,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_cloudwatch_log_group", "azure": "azurerm_log_analytics_workspace", "gcp": "google_logging_project_bucket_config"}},
 		{"registry", Registry{Name: "x"}, map[string]string{
 			"aws": "aws_ecr_repository", "azure": "azurerm_container_registry", "gcp": "google_artifact_registry_repository"}},
+		{"paas", PaaS{Name: "x"}, map[string]string{
+			"aws": "aws_elastic_beanstalk_application", "azure": "azurerm_service_plan", "gcp": "google_app_engine_application"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -336,6 +338,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"firewall": {Firewall{Name: "edge"}},
 		"logs":     {Logs{Name: "applog"}},
 		"registry": {Registry{Name: "images"}},
+		"paas":     {PaaS{Name: "webapp"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {
