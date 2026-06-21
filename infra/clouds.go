@@ -201,6 +201,19 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"aws_vpc\" %s", str(v.Name))
 			h.attr("cidr_block", str("10.0.0.0/16"))
 			h.close()
+		case Firewall:
+			h.open("resource \"aws_wafv2_web_acl\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("scope", str("REGIONAL"))
+			h.open("default_action")
+			h.emptyBlock("allow")
+			h.close()
+			h.open("visibility_config")
+			h.attr("cloudwatch_metrics_enabled", "false")
+			h.attr("metric_name", str(v.Name))
+			h.attr("sampled_requests_enabled", "false")
+			h.close()
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -478,6 +491,12 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("location", "azurerm_resource_group.wavelet.location")
 			h.attr("address_space", "[\"10.0.0.0/16\"]")
 			h.close()
+		case Firewall:
+			h.open("resource \"azurerm_network_ddos_protection_plan\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -640,6 +659,20 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_compute_network\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
 			h.attr("auto_create_subnetworks", "false")
+			h.close()
+		case Firewall:
+			h.open("resource \"google_compute_security_policy\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.open("rule")
+			h.attr("action", str("allow"))
+			h.attr("priority", "2147483647")
+			h.open("match")
+			h.attr("versioned_expr", str("SRC_IPS_V1"))
+			h.open("config")
+			h.attr("src_ip_ranges", "[\"*\"]")
+			h.close()
+			h.close()
+			h.close()
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

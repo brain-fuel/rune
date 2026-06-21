@@ -217,6 +217,16 @@ func (Network) isResource()           {}
 func (Network) Kind() string          { return "network" }
 func (n Network) LogicalName() string { return n.Name }
 
+// Firewall is managed edge protection (AWS WAF / Azure DDoS Protection Plan / GCP
+// Cloud Armor security policy). Control-plane, cloud-only.
+type Firewall struct {
+	Name string
+}
+
+func (Firewall) isResource()           {}
+func (Firewall) Kind() string          { return "firewall" }
+func (f Firewall) LogicalName() string { return f.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20

@@ -70,6 +70,8 @@ func TestProviderResources(t *testing.T) {
 			"aws": "aws_eks_cluster", "azure": "azurerm_kubernetes_cluster", "gcp": "google_container_cluster"}},
 		{"network", Network{Name: "x"}, map[string]string{
 			"aws": "aws_vpc", "azure": "azurerm_virtual_network", "gcp": "google_compute_network"}},
+		{"firewall", Firewall{Name: "x"}, map[string]string{
+			"aws": "aws_wafv2_web_acl", "azure": "azurerm_network_ddos_protection_plan", "gcp": "google_compute_security_policy"}},
 	}
 	for _, c := range cases {
 		for tgt, res := range c.want {
@@ -285,6 +287,7 @@ func TestQueueHCLFormatted(t *testing.T) {
 		"iam":      {Identity{Name: "worker"}},
 		"k8s":      {K8s{Name: "cluster"}},
 		"network":  {Network{Name: "vpc"}},
+		"firewall": {Firewall{Name: "edge"}},
 	}
 	for kind, rs := range graphs {
 		for _, tgt := range cloudTargets {

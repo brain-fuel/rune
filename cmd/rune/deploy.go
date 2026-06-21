@@ -264,6 +264,8 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 		return infra.K8s{Name: name}, nil
 	case "network":
 		return infra.Network{Name: name}, nil
+	case "firewall":
+		return infra.Firewall{Name: name}, nil
 	default:
 		return nil, fmt.Errorf("rune deploy: unknown resource %q (run with no args for the kind list)", kind)
 	}
