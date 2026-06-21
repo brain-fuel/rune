@@ -478,17 +478,37 @@ func (p *parser) parseEq() (Exp, error) {
 // so it composes with any function and needs no library binding: `3/4 |> to_radix`
 // is `to_radix (3/4)`, and `x |> f |> g` is `g (f x)` (§5.4).
 func (p *parser) parsePipe() (Exp, error) {
-	lhs, err := p.parseAdd()
+	lhs, err := p.parseAppend()
 	if err != nil {
 		return nil, err
 	}
 	for p.peek().kind == tOp && pipeLevel(p.peek().text) {
 		p.next() // '|>'
-		rhs, err := p.parseAdd()
+		rhs, err := p.parseAppend()
 		if err != nil {
 			return nil, err
 		}
 		lhs = EApp{Fn: rhs, Arg: lhs}
+	}
+	return lhs, nil
+}
+
+// parseAppend parses `Add ("++" Add)*`, RIGHT-associative — the Semigroup/Monoid
+// concat level, looser than `+`/`*` and tighter than `|>` (Haskell's `++` is infixr 5).
+// `x ++ y` is sugar for `(++) x y` (§5.4); right recursion gives right-associativity, so
+// `a ++ b ++ c` is `a ++ (b ++ c)` (no O(n²) left re-association for a cons-like append).
+func (p *parser) parseAppend() (Exp, error) {
+	lhs, err := p.parseAdd()
+	if err != nil {
+		return nil, err
+	}
+	if p.peek().kind == tOp && appendLevel(p.peek().text) {
+		op := p.next().text
+		rhs, err := p.parseAppend()
+		if err != nil {
+			return nil, err
+		}
+		return EApp{Fn: EApp{Fn: EVar{Name: op}, Arg: lhs}, Arg: rhs}, nil
 	}
 	return lhs, nil
 }
@@ -519,7 +539,7 @@ func (p *parser) parseMul() (Exp, error) {
 	if err != nil {
 		return nil, err
 	}
-	for p.peek().kind == tOp && !addLevel(p.peek().text) && !pipeLevel(p.peek().text) {
+	for p.peek().kind == tOp && !addLevel(p.peek().text) && !pipeLevel(p.peek().text) && !appendLevel(p.peek().text) {
 		op := p.next().text
 		rhs, err := p.parseUnary()
 		if err != nil {
@@ -553,6 +573,12 @@ func (p *parser) parseUnary() (Exp, error) {
 // closed operator table of GRAMMAR §3 has three levels (pipe < add < mul).
 func addLevel(op string) bool {
 	return op == "+" || op == "-"
+}
+
+// appendLevel reports whether an operator sits at the concat level (Semigroup/Monoid
+// `++`), looser than additive and tighter than the pipe (GRAMMAR §3).
+func appendLevel(op string) bool {
+	return op == "++"
 }
 
 // pipeLevel reports whether an operator is the pipe `|>` (the loosest level).

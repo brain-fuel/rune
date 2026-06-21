@@ -107,6 +107,27 @@ instance numWhole : Num Whole is mkNum Whole addW mulW end
 + : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.1) x y end end
 * : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.2) x y end end
 
+-- ====================================================================
+-- SEMIGROUP / MONOID — the overloaded append `++` (and `mempty`), built on the SAME
+-- Σ-record-class + instance-search pattern as `Num`/`+`. `++` is DISTINCT from the
+-- numeric `+` (Raku's lesson: keep `+` arithmetic) and resolves to whatever instance
+-- the argument type carries: String (packed `Bytes`, below) and List (in the listings).
+-- A Semigroup is just an associative append; a Monoid adds an identity (`mempty`).
+-- `++` is right-associative and looser than `+` (Haskell's `++`); GRAMMAR §3.
+-- ====================================================================
+Semigroup : U -> U is fn (A : U) is A -> A -> A end end
+Monoid    : U -> U is fn (A : U) is Sig (A -> A -> A) (fn (_p : A -> A -> A) is A end) end end
+mkMonoid : (A : U) -> (A -> A -> A) -> A -> Monoid A is
+  fn (A : U) (a : A -> A -> A) (e : A) is
+    Pair (A -> A -> A) (fn (_p : A -> A -> A) is A end) a e
+  end
+end
+
+++ : {A : U} -> {d : Semigroup A} -> A -> A -> A is
+  fn {A : U} {d : Semigroup A} (x : A) (y : A) is d x y end
+end
+mempty : {A : U} -> {d : Monoid A} -> A is fn {A : U} {d : Monoid A} is d.2 end end
+
 -- leb m n decides m <= n; recursion on m produces the comparison FUNCTION,
 -- so the induction hypothesis is "compare against k" awaiting its argument.
 leb : Whole -> Whole -> Bool is
@@ -810,6 +831,71 @@ strHead : Bytes -> Whole is fn (s : Bytes) is codeOf s % 256 end end
 strTail : Bytes -> Bytes is fn (s : Bytes) is bytes (codeOf s // 256) end end
 
 andB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end end
+
+-- prepend a byte `c` (0 <= c < 256) to a string: the new packed code is `c + 256*n`
+-- (the bytes shift up one place, the sentinel rides along). O(1) via the accel ops;
+-- verified against the existing accessors: strHead (c+256n) = c, strTail = bytes n,
+-- and c+256n >= 256 > 1 so it is never null.
+strCons : Whole -> Bytes -> Bytes is
+  fn (c : Whole) (s : Bytes) is bytes (addW c (mulW 256 (codeOf s))) end
+end
+
+-- byte length and concatenation are structural recursion on FUEL (byte count), NEVER on
+-- the packed code (~256^length — a code-sized recursion OOMs the eager codegen, the leb
+-- lesson). The loops early-return at the sentinel, so runtime is O(length); `strFuel` is
+-- only a safety bound far past any practical string.
+strFuel : Whole is 1048576 end
+
+strLenGo : Whole -> Whole -> Bytes -> Whole is
+  fn (fuel : Whole) is
+    WholeElim (fn (k : Whole) is Whole -> Bytes -> Whole end)
+      (fn (acc : Whole) (s : Bytes) is acc end)
+      (fn (f : Whole) (ih : Whole -> Bytes -> Whole) is
+        fn (acc : Whole) (s : Bytes) is
+          case strNull s of
+          | true  -> acc
+          | false -> ih (addW acc 1) (strTail s)
+          end
+        end
+      end)
+      fuel
+  end
+end
+strLen : Bytes -> Whole is fn (s : Bytes) is strLenGo strFuel 0 s end end
+
+strAppGo : Whole -> Bytes -> Bytes -> Bytes is
+  fn (fuel : Whole) is
+    WholeElim (fn (k : Whole) is Bytes -> Bytes -> Bytes end)
+      (fn (s : Bytes) (t : Bytes) is t end)
+      (fn (f : Whole) (ih : Bytes -> Bytes -> Bytes) is
+        fn (s : Bytes) (t : Bytes) is
+          case strNull s of
+          | true  -> t
+          | false -> strCons (strHead s) (ih (strTail s) t)
+          end
+        end
+      end)
+      fuel
+  end
+end
+-- concatenation: cons each byte of `s` onto `t`. Fuel is exactly `strLen s` (a literal
+-- for a closed string, so the loop runs exactly length-of-s times).
+strApp : Bytes -> Bytes -> Bytes is fn (s : Bytes) (t : Bytes) is strAppGo (strLen s) s t end end
+
+-- decidable string equality: the codes are equal (each <= the other). Uses subW/isZero
+-- (O(1) accel), NOT leb (which is O(code) in compiled code). Sound because the sentinel
+-- makes the packed encoding injective.
+strEq : Bytes -> Bytes -> Bool is
+  fn (a : Bytes) (b : Bytes) is
+    andB (isZero (subW (codeOf a) (codeOf b))) (isZero (subW (codeOf b) (codeOf a)))
+  end
+end
+
+-- String is a Semigroup and a Monoid under concatenation (identity = the empty string,
+-- packed code 1). So `++` works on string literals; the laws are proven in the listings.
+instance semigroupBytes : Semigroup Bytes is strApp end
+instance monoidBytes    : Monoid Bytes is mkMonoid Bytes strApp (bytes 1) end
+
 eqW  : Whole -> Whole -> Bool is fn (a : Whole) (b : Whole) is andB (leb a b) (leb b a) end end
 -- a byte is an ASCII decimal digit iff 48 ('0') <= c <= 57 ('9').
 isDigitB : Whole -> Bool is fn (c : Whole) is andB (leb 48 c) (leb c 57) end end

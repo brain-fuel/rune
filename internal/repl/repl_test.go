@@ -714,3 +714,42 @@ func TestREPLBinaryRoundTrip(t *testing.T) {
 		t.Errorf("unexpected error\n--- full output ---\n%s", got)
 	}
 }
+
+// TestREPLStringConcat is the acceptance test for the overloaded `++` (Semigroup
+// append) on packed-Bytes strings: concatenation COMPUTES in the REPL and folds back to
+// a string literal, byte length is right, and `strEq` decides equality. The whole point
+// of the user's `"hello"++"world"`.
+func TestREPLStringConcat(t *testing.T) {
+	script := []string{
+		`"hello" ++ "world"`,                 // concat, folds to "helloworld"
+		`strLen "hello"`,                     // byte length 5
+		`strEq ("foo" ++ "bar") "foobar"`,    // decidable equality
+		`strEq ("foo" ++ "bar") "foobaz"`,    // ...and its negation
+		`"" ++ "x"`,                          // left identity (empty string)
+		`"x" ++ ""`,                          // right identity
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		`"helloworld" : Bytes`,
+		"true : Bool",
+		"false : Bool",
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+	// both identity laws hold observationally: "x" appears on its own line for "" ++ "x".
+	if !strings.Contains(got, `"x" : Bytes`) {
+		t.Errorf("string identity (empty ++) did not fold to \"x\"\n--- full output ---\n%s", got)
+	}
+	if strings.Contains(got, "bytes ") {
+		t.Errorf("packed `bytes <n>` form leaked\n%s", got)
+	}
+}

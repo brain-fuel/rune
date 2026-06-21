@@ -78,15 +78,16 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
 - **Punctuation:** `(` `)` `:` `=` `->` `;`. The lexer takes the longest match, so `->`
   is one token and is never read as `-` `-` `>`, and `--` begins a comment rather than two `-`.
 - **Operators** (ergonomics, 2026-06; `//` added by the numeric-tower amendment, 2026-06; `|>`
-  the pipe added 2026-06): `+` `-` `*` `/` `//` `%` are **symbolic identifiers** — they
-  name top-level definitions exactly as alphabetic identifiers do, and additionally parse infix
-  (§3, §5.4). The set is **closed**; no other token lexes as an operator and there are no user
-  fixity declarations. The pipe `|>` also lexes as an operator token but is NOT a name — it is
-  reverse-application syntax (`x |> f` ⟶ `f x`, §5.4). `=` is punctuation that *also* parses
-  infix as the equality-proposition sugar (§5.4); it is not an identifier and cannot be defined.
-  A bare `-` is the operator (binary subtraction, or — before an operand — prefix negation sugar
-  `-e` ⟶ `negate e`, §5.4); `--` and `->` still take the longest match, `//` is one token never `/`
-  `/`, and `|>` is one token never `|` `>`.
+  the pipe added 2026-06; `++` the Semigroup/Monoid append added 2026-06): `+` `-` `*` `/` `//`
+  `%` `++` are **symbolic identifiers** — they name top-level definitions exactly as alphabetic
+  identifiers do, and additionally parse infix (§3, §5.4). The set is **closed**; no other token
+  lexes as an operator and there are no user fixity declarations. The pipe `|>` also lexes as an
+  operator token but is NOT a name — it is reverse-application syntax (`x |> f` ⟶ `f x`, §5.4).
+  `=` is punctuation that *also* parses infix as the equality-proposition sugar (§5.4); it is not
+  an identifier and cannot be defined. A bare `-` is the operator (binary subtraction, or —
+  before an operand — prefix negation sugar `-e` ⟶ `negate e`, §5.4); `--` and `->` still take
+  the longest match, `//` is one token never `/` `/`, `++` is one token never `+` `+`, and `|>`
+  is one token never `|` `>`.
   By convention (ref_docs/rune-numeric-tower.md): `//` is the flooring quotient and `%` its
   matched flooring remainder at every numeric type; `/` is exact division and is defined only
   where exact division is total (fields).
@@ -121,13 +122,15 @@ Arrow     ::= Binder "->" Expr            -- dependent:     (x : A) -> B   (righ
            |  EqE ["->" Expr]             -- non-dependent: A -> B,  or just EqE
 
 EqE       ::= Pipe ["=" Pipe]             -- equality proposition; NON-associative (§5.4)
-Pipe      ::= Add ("|>" Add)*             -- left-associative; LOOSEST binary level
+Pipe      ::= Append ("|>" Append)*       -- left-associative; LOOSEST binary level
+Append    ::= Add ("++" Add)*             -- RIGHT-associative; Semigroup/Monoid concat
 Add       ::= Mul (AddOp Mul)*            -- left-associative
 Mul       ::= Unary (MulOp Unary)*        -- left-associative
 Unary     ::= "-" Unary | App            -- prefix minus: `-e` ⟶ `negate e`
 AddOp     ::= "+" | "-"
 MulOp     ::= "*" | "/" | "//" | "%"
-Op        ::= AddOp | MulOp | "|>"
+AppendOp  ::= "++"
+Op        ::= AddOp | MulOp | AppendOp | "|>"
 
 App       ::= Atom Arg*                   -- application, left-associative
 Arg       ::= Atom                        -- explicit argument
@@ -171,8 +174,9 @@ Calc      ::= "calc" Expr ("=" Expr "by" Expr)+ "end"   -- equational ladder (§
 ```
 
 Precedence, loosest to tightest: `let … in` and `->` (arrow is **right-associative**), then
-`=` (**non-associative**), then `|>` (**left**), then `+` `-` (**left**), then `*` `/` `//` `%`
-(**left**), then prefix `-` (**right**, binds an application), then application
+`=` (**non-associative**), then `|>` (**left**), then `++` (**right**, the Semigroup/Monoid
+concat — looser than `+`, like Haskell's `infixr 5`), then `+` `-` (**left**), then `*` `/` `//`
+`%` (**left**), then prefix `-` (**right**, binds an application), then application
 (**left-associative**), then atoms. So `3/4 |> to_radix_sigfig 1` is `(to_radix_sigfig 1) (3/4)`
 and `-3/4 |> f` is `f ((negate 3)/4)`. So `a = b -> c = d` is an implication between
 equations, and `a + b * c = c * b + a` parses as mathematics reads it. `fn`, `seq`, and

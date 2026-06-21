@@ -431,6 +431,7 @@ var jsOpNames = map[string]string{
 	"/":  "$div",
 	"//": "$fdiv",
 	"%":  "$mod",
+	"++": "$append",
 }
 
 // jsName sanitizes a rune identifier into a JS one. Alphabetic rune identifiers

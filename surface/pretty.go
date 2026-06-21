@@ -14,24 +14,33 @@ import (
 // application. (The '=' sugar is input-only and has no printing level; core Eq
 // prints prefix, at application precedence.)
 const (
-	precLow   = 0 // lambda, let, and the bodies of arrows
-	precArrow = 1 // dependent and non-dependent function types
-	precAdd   = 2 // infix + -
-	precMul   = 3 // infix * / %
-	precApp   = 4 // application
-	precAtom  = 5 // variables, U, references, parenthesized forms
+	precLow    = 0 // lambda, let, and the bodies of arrows
+	precArrow  = 1 // dependent and non-dependent function types
+	precAppend = 2 // infix ++ (Semigroup/Monoid concat, right-associative)
+	precAdd    = 3 // infix + -
+	precMul    = 4 // infix * / %
+	precApp    = 5 // application
+	precAtom   = 6 // variables, U, references, parenthesized forms
 )
 
 // opPrec returns the printing precedence of an infix operator name, or -1 when
 // the name is not in the closed operator table of GRAMMAR §3.
 func opPrec(name string) int {
 	switch name {
+	case "++":
+		return precAppend
 	case "+", "-":
 		return precAdd
 	case "*", "/", "//", "%":
 		return precMul
 	}
 	return -1
+}
+
+// opRightAssoc reports whether an infix operator name is right-associative (only `++`,
+// the Semigroup/Monoid concat); the rest are left-associative (GRAMMAR §3).
+func opRightAssoc(name string) bool {
+	return name == "++"
 }
 
 // Pretty turns a core term back into named surface syntax. This is the inverse
@@ -484,10 +493,17 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		// infix at its table level; left operand at the level (left-associative),
 		// right operand one tighter. Re-parsing reads it back to the same core.
 		if name, l, r, lvl, ok := p.infixApp(x); ok {
+			// The tighter side carries +1 so re-parsing recovers the same tree: for a
+			// left-associative operator that is the right operand; for a right-associative
+			// one (`++`) it is the left operand.
+			lLvl, rLvl := lvl, lvl+1
+			if opRightAssoc(name) {
+				lLvl, rLvl = lvl+1, lvl
+			}
 			p.wrap(sb, prec, lvl, func() {
-				p.print(sb, l, names, lvl)
+				p.print(sb, l, names, lLvl)
 				sb.WriteString(" " + name + " ")
-				p.print(sb, r, names, lvl+1)
+				p.print(sb, r, names, rLvl)
 			})
 			return
 		}
