@@ -50,11 +50,13 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | k8s     | EKS | AKS | GKE | — | — |
 | network | VPC | VNet | VPC | — | — |
 | firewall| WAF | DDoS Plan | Cloud Armor | — | — |
+| logs    | CloudWatch | Log Analytics | Cloud Logging | — | — |
+| registry| ECR | ACR | Artifact Registry | — | — |
 
 Shared Azure scaffolding is emitted once per graph: the resource group (always), the
 Service Bus namespace (queue), Event Hub namespace (stream), storage account
 (object+file, `needsStorageAccount`), Key Vault (secret+kms, `needsKeyVault`),
-vnet+subnet (compute). 16 rows total. A whole multi-resource graph lowers to the same
+vnet+subnet (compute). 18 rows total. A whole multi-resource graph lowers to the same
 logical set on every cloud (`TestMultiResourceEquivalence`); `rune deploy --manifest`
 emits one app's graph at once.
 
@@ -114,10 +116,10 @@ type-checks (data-plane), the protocol block accepts/rejects correctly, and `run
   Podman round-trip (deferred where Podman is absent). Rust data-plane body.
 - **Matrix breadth (remaining):** Networking (LB/CDN), Storage breadth (archival),
   Database breadth (warehouse), Compute breadth (serverless/PaaS), DevOps (CI/CD),
-  AI/ML. (16 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/
-  file/stream/iam/k8s/network/firewall.) The remaining categories mostly have one
-  dependency-heavy provider (CloudFront origins, LB target groups, Synapse storage);
-  add them when a consumer needs them.
+  AI/ML. (18 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/
+  file/stream/iam/k8s/network/firewall/logs/registry.) The remaining categories mostly
+  have one dependency-heavy provider (CloudFront origins, LB target groups, Synapse
+  storage); add them when a consumer needs them (Standing Rule 1).
 - **Cloud apply:** graduate from `fmt`/`validate` to real `apply` once accounts + creds
   exist (a credentialed milestone, not CI).
 
@@ -125,4 +127,9 @@ Tags: v3.291.0 (queue/kv/object) · v3.292.0 (protocol block) · v3.293.0 (compu
 container) · v3.294.0 (deploy runs a protocol on BEAM) · v3.294.1 (contextual keyword
 fix) · v3.295.0 (database) · v3.296.0 (secrets) · v3.297.0 (nosql) · v3.298.0 (dns) ·
 v3.299.0 (block storage) · v3.300.0 (kv runs on JS) · v3.301.0 (kv cross-backend) ·
-v3.302.0 (object + queue cross-backend — full data plane runs).
+v3.302.0 (object + queue cross-backend — full data plane runs) · v3.303.0 (kms) ·
+v3.304.0 (file) · v3.305.0 (stream) · v3.306.0 (iam) · v3.307.0 (manifest mode) ·
+v3.308.0 (String data plane) · v3.309.0 (k8s) · v3.310.0 (app-level equivalence) ·
+v3.311.0 (network) · v3.312.0 (firewall) · v3.313.0 (logs) · v3.314.0 (registry).
+18 matrix rows; the data plane runs cross-backend; `rune deploy` does infra / workload
+/ manifest modes.
