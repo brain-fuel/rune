@@ -23,7 +23,7 @@ import (
 // Slice 1 drives the resource from flags (--resource/--name); declaring resources
 // in-language (an `infra`/`protocol` block in FILE) is the next step.
 func runDeploy(args []string, out io.Writer) error {
-	var resource, name, backend, outDir, image, target string
+	var resource, name, backend, outDir, image, target, manifest string
 	fifo := false
 	replicas := 1
 	var positional []string
@@ -48,6 +48,10 @@ func runDeploy(args []string, out io.Writer) error {
 			target, err = val()
 		case a == "--out":
 			outDir, err = val()
+		case a == "--manifest":
+			manifest, err = val()
+		case strings.HasPrefix(a, "--manifest="):
+			manifest = strings.TrimPrefix(a, "--manifest=")
 		case a == "--fifo":
 			fifo = true
 		case a == "--image":
@@ -97,11 +101,29 @@ func runDeploy(args []string, out io.Writer) error {
 		return runWorkloadDeploy(positional, target, out)
 	}
 
-	// INFRA MODE: lower an agnostic resource to a deployment artifact.
+	// MANIFEST MODE: emit ONE artifact for a whole app's resource graph (shared
+	// provider scaffolding emitted once). `rune deploy --manifest app.wav --backend aws`.
+	if manifest != "" {
+		rs, err := parseManifest(manifest)
+		if err != nil {
+			return err
+		}
+		e, ok := infra.ByTarget(backend)
+		if !ok {
+			return fmt.Errorf("rune deploy: unknown backend %q (have %s)", backend,
+				strings.Join(infra.Targets(), ", "))
+		}
+		art, err := e.Emit(rs)
+		if err != nil {
+			return err
+		}
+		return writeArtifact(art, outDir, out)
+	}
+
+	// INFRA MODE: lower a single agnostic resource to a deployment artifact.
 	if resource == "" || name == "" || backend == "" {
-		return fmt.Errorf("rune deploy needs either FILE [NAME] --target <backend> (run a protocol), "+
-			"or --resource <queue|kv|object|compute> --name <name> --backend <%s> (emit infra)",
-			strings.Join(infra.Targets(), "|"))
+		return fmt.Errorf("rune deploy needs FILE [NAME] --target <b> (run a protocol), " +
+			"--resource <kind> --name <n> --backend <b> (one resource), or --manifest FILE --backend <b> (a graph)")
 	}
 
 	r, err := resourceFor(resource, name, fifo, image, replicas)
@@ -118,6 +140,60 @@ func runDeploy(args []string, out io.Writer) error {
 		return err
 	}
 	return writeArtifact(art, outDir, out)
+}
+
+// parseManifest reads a wavelet manifest: one resource per line, `<kind> <name>
+// [key=val ...]` (keys: replicas, image, fifo, size), blank lines and `#` comments
+// ignored. It builds the agnostic resource graph a single Emit lowers together.
+func parseManifest(path string) ([]infra.Resource, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var rs []infra.Resource
+	for i, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			return nil, fmt.Errorf("manifest line %d: expected `<kind> <name> [key=val…]`, got %q", i+1, line)
+		}
+		kind, nm := fields[0], fields[1]
+		fifo := false
+		image := ""
+		replicas := 1
+		for _, opt := range fields[2:] {
+			k, v, ok := strings.Cut(opt, "=")
+			if !ok {
+				return nil, fmt.Errorf("manifest line %d: option %q must be key=val", i+1, opt)
+			}
+			switch k {
+			case "fifo":
+				fifo = v == "true"
+			case "image":
+				image = v
+			case "replicas", "size":
+				n, perr := strconv.Atoi(v)
+				if perr != nil || n < 1 {
+					return nil, fmt.Errorf("manifest line %d: %s needs a positive integer", i+1, k)
+				}
+				replicas = n
+			default:
+				return nil, fmt.Errorf("manifest line %d: unknown option %q", i+1, k)
+			}
+		}
+		r, err := resourceFor(kind, nm, fifo, image, replicas)
+		if err != nil {
+			return nil, fmt.Errorf("manifest line %d: %w", i+1, err)
+		}
+		rs = append(rs, r)
+	}
+	if len(rs) == 0 {
+		return nil, fmt.Errorf("manifest %q has no resources", path)
+	}
+	return rs, nil
 }
 
 // isCodeTarget reports whether t names a codegen backend (a runnable workload target)
