@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"fmt"
+
 	"goforge.dev/rune/v3/infra"
 )
 
@@ -135,6 +137,41 @@ func TestAllCLIKindsLowerOnEveryCloud(t *testing.T) {
 			if !strings.Contains(out.String(), "resource \"") {
 				t.Errorf("[%s/%s] emitted no HCL resource", cloud, k)
 			}
+		}
+	}
+}
+
+// TestManifestEveryKind exercises the --manifest path across ALL agnostic kinds (not
+// just app.wav's subset): a manifest with one line per infra.Kind() parses into a
+// resource graph that lowers to a single artifact on every cloud, sharing scaffolding.
+func TestManifestEveryKind(t *testing.T) {
+	var b strings.Builder
+	for i, k := range infra.Kinds() {
+		fmt.Fprintf(&b, "%s res%d\n", k, i)
+	}
+	f, err := os.CreateTemp("", "allkinds-*.wav")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.WriteString(b.String()); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	rs, err := parseManifest(f.Name())
+	if err != nil {
+		t.Fatalf("all-kinds manifest did not parse: %v", err)
+	}
+	if len(rs) != len(infra.Kinds()) {
+		t.Errorf("parsed %d resources, want %d", len(rs), len(infra.Kinds()))
+	}
+	for _, cloud := range []string{"aws", "azure", "gcp"} {
+		var out bytes.Buffer
+		if err := runDeploy([]string{"--manifest", f.Name(), "--backend", cloud}, &out); err != nil {
+			t.Errorf("[%s] all-kinds manifest deploy: %v", cloud, err)
+		}
+		if !strings.Contains(out.String(), "resource \"") {
+			t.Errorf("[%s] all-kinds manifest emitted nothing", cloud)
 		}
 	}
 }
