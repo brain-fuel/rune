@@ -318,9 +318,9 @@ func TestQueueHCLFormatted(t *testing.T) {
 		t.Skip("no tofu/terraform binary in PATH")
 	}
 	graphs := map[string][]Resource{
-		"queue":   {Queue{Name: "events"}},
-		"kv":      {KV{Name: "cache"}},
-		"object":  {Bucket{Name: "assets"}},
+		"queue":    {Queue{Name: "events"}},
+		"kv":       {KV{Name: "cache"}},
+		"object":   {Bucket{Name: "assets"}},
 		"compute":  {Compute{Name: "worker", Image: "docker.io/library/erlang:slim", Replicas: 3}},
 		"database": {Database{Name: "appdb"}},
 		"secret":   {Secret{Name: "apikey"}},

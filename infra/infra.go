@@ -36,11 +36,11 @@ type Resource interface {
 // channel the cloud/backend provisions.
 type Queue struct {
 	Name string // logical name
-	FIFO bool    // ordered, exactly-once-ish delivery where the backend supports it
+	FIFO bool   // ordered, exactly-once-ish delivery where the backend supports it
 }
 
-func (Queue) isResource()         {}
-func (Queue) Kind() string        { return "queue" }
+func (Queue) isResource()           {}
+func (Queue) Kind() string          { return "queue" }
 func (q Queue) LogicalName() string { return q.Name }
 
 // KV is a key/value store keyed on the Redis/Valkey wire protocol (managed Redis is
@@ -50,8 +50,8 @@ type KV struct {
 	TTLSeconds int // 0 = no default expiry
 }
 
-func (KV) isResource()          {}
-func (KV) Kind() string         { return "kv" }
+func (KV) isResource()           {}
+func (KV) Kind() string          { return "kv" }
 func (k KV) LogicalName() string { return k.Name }
 
 // Bucket is object storage on the S3 API equivalence class (S3 / Blob / GCS native,
@@ -60,8 +60,8 @@ type Bucket struct {
 	Name string
 }
 
-func (Bucket) isResource()          {}
-func (Bucket) Kind() string         { return "object" }
+func (Bucket) isResource()           {}
+func (Bucket) Kind() string          { return "object" }
 func (b Bucket) LogicalName() string { return b.Name }
 
 // Compute is N replicas of a container Image — the workload substrate a verified
