@@ -109,3 +109,35 @@ func TestManifestErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestAllCLIKindsLowerOnEveryCloud is the completeness gate tying the CLI help to
+// real support: every agnostic kind the usage string advertises must build via
+// resourceFor AND lower to a concrete resource on aws/azure/gcp. It catches the
+// "added a kind but forgot a provider case" bug class.
+func TestAllCLIKindsLowerOnEveryCloud(t *testing.T) {
+	kinds := []string{
+		"queue", "kv", "object", "compute", "database", "secret", "nosql", "dns",
+		"disk", "kms", "file", "stream", "cdn", "lb", "metrics", "iam", "k8s",
+		"network", "firewall", "logs", "registry", "paas",
+	}
+	for _, k := range kinds {
+		r, err := resourceFor(k, "x", false, "", 1)
+		if err != nil {
+			t.Errorf("resourceFor(%q): %v (is the kind wired in deploy.go and the usage string?)", k, err)
+			continue
+		}
+		if r.Kind() != k {
+			t.Errorf("resourceFor(%q) built a %q resource", k, r.Kind())
+		}
+		for _, cloud := range []string{"aws", "azure", "gcp"} {
+			var out bytes.Buffer
+			if err := runDeploy([]string{"--resource", k, "--name", "x", "--backend", cloud}, &out); err != nil {
+				t.Errorf("[%s/%s] deploy: %v", cloud, k, err)
+				continue
+			}
+			if !strings.Contains(out.String(), "resource \"") {
+				t.Errorf("[%s/%s] emitted no HCL resource", cloud, k)
+			}
+		}
+	}
+}
