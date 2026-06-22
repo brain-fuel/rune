@@ -14,6 +14,8 @@
 -- That sidesteps the fuel-DECOMPOSITION the general proof founders on: the fuel stays a
 -- single running budget, and the structural induction is on the tower height. Not the full
 -- all-P refinement (still open), but the first proof of adequacy over an unbounded family.
+-- The trace content is then fully pinned (towerExact): visibleRun n (tower n) is EXACTLY n
+-- failures, adequacy composed with the projection's exact content.
 
 data Bool : U is true : Bool | false : Bool end
 data Nat  : U is zero : Nat | succ : Nat -> Nat end
@@ -187,6 +189,28 @@ towerAdequacy : (n : Nat) -> Eq (List Label) (visibleRun n (tower n)) (project (
               (parHaltNeutral m (tower m)) ih) end)
       n
   end
+end
+
+-- the trace content is fully PINNED: the tower's projection is exactly n failures, so with
+-- towerAdequacy the runtime emits exactly n lfails over n fuel. (project (tower (succ n)) =
+-- append (project unit)(project (tower n)) = lfail : project (tower n); nLfails matches.)
+nLfails : Nat -> List Label is
+  fn (n : Nat) is NatElim (fn (w : Nat) is List Label end) (nil Label) (fn (k : Nat) (ih : List Label) is cons Label lfail ih end) n end
+end
+towerProj : (n : Nat) -> Eq (List Label) (project (tower n)) (nLfails n) is
+  fn (n : Nat) is
+    NatElim (fn (m : Nat) is Eq (List Label) (project (tower m)) (nLfails m) end)
+      refl
+      (fn (m : Nat) (ih : Eq (List Label) (project (tower m)) (nLfails m)) is
+         cong (List Label) (List Label) (fn (r : List Label) is cons Label lfail r end)
+           (project (tower m)) (nLfails m) ih end)
+      n
+  end
+end
+-- the headline corollary: over n fuel the supervised tower's observable run is EXACTLY n
+-- failures, for every n. Adequacy (runtime = spec) composed with the spec's exact content.
+towerExact : (n : Nat) -> Eq (List Label) (visibleRun n (tower n)) (nLfails n) is
+  fn (n : Nat) is transEq (List Label) (visibleRun n (tower n)) (project (tower n)) (nLfails n) (towerAdequacy n) (towerProj n) end
 end
 
 data Unit : U is unit0 : Unit end
