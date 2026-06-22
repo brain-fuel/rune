@@ -126,11 +126,22 @@ cross-provider logical equivalence + the FOSS Compose/env. Plus the `.rune` inte
 type-checks (data-plane), the protocol block accepts/rejects correctly, and `rune deploy
 … --target beam` runs the verified CvRDT to convergence (skip-if-escript-absent).
 
+## Live data-plane binding (LANDED v3.327.0–v3.327.x, ch444/ch445)
+
+The in-process data-plane ops now point at a REAL broker. `kvSetLive`/`kvGetLive` (ch444)
+and `enqueue`/`dequeue` (ch445) speak RESP over a raw socket (stdlib `net`, dep-free) to
+`$WAVELET_KV_URL`: kv = SET/GET, queue = Valkey LIST LPUSH/RPOP (FIFO), object = the same
+SET/GET as kv. LANDED on Go+JVM+JS (Go/JVM block on the socket, JS awaits `node:net`);
+`TestLiveKVRoundTrip` round-trips all three against one real Valkey through docker → "world".
+The live Valkey round-trip itself is `TestKVLiveRoundTripDocker` (emit spec → docker compose
+up → PONG → down, skip-if-no-docker).
+
 ## Remaining (roadmap)
 
-- **Live broker binding:** point the in-process data-plane ops at real backends
-  (managed Redis / SQS / S3 clients; RabbitMQ/NATS/Valkey/Garage over the wire) + a live
-  Podman round-trip (deferred where Podman is absent). Rust data-plane body.
+- **Rust live data-plane body:** the one source backend still config-only for the live ops
+  (the other three speak RESP to a real broker).
+- **Managed-cloud clients:** beyond the self-hosted RESP broker — managed Redis / SQS / S3
+  clients over the wire (needs accounts, the cloud-apply milestone).
 - **Matrix breadth (remaining):** Storage breadth (archival),
   Database breadth (warehouse), Compute breadth (serverless), DevOps (CI/CD), AI/ML.
   (22 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/
@@ -147,6 +158,8 @@ v3.299.0 (block storage) · v3.300.0 (kv runs on JS) · v3.301.0 (kv cross-backe
 v3.302.0 (object + queue cross-backend — full data plane runs) · v3.303.0 (kms) ·
 v3.304.0 (file) · v3.305.0 (stream) · v3.306.0 (iam) · v3.307.0 (manifest mode) ·
 v3.308.0 (String data plane) · v3.309.0 (k8s) · v3.310.0 (app-level equivalence) ·
-v3.311.0 (network) · v3.312.0 (firewall) · v3.313.0 (logs) · v3.314.0 (registry).
-18 matrix rows; the data plane runs cross-backend; `rune deploy` does infra / workload
-/ manifest modes.
+v3.311.0 (network) · v3.312.0 (firewall) · v3.313.0 (logs) · v3.314.0 (registry) · … · v3.323.1 (live Valkey docker round-trip) ·
+v3.327.0 (LIVE kv data-plane binding, ch444) · v3.327.1 (LIVE queue binding, ch445) ·
+v3.327.x (JVM + JS live bindings) · v3.327.4 (WALKTHROUGH.md end-to-end).
+22 matrix rows; the data plane runs cross-backend AND binds LIVE to a real broker on
+Go+JVM+JS; `rune deploy` does infra / workload / manifest modes.

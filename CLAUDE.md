@@ -869,11 +869,25 @@ first and forces only on mismatch, so the fast path logs nothing.
         `:reload` REPL wire. Effectively complete.
       • **E4 live round-trip** — emitted Valkey spec brought up on docker, PONGs (gated);
         20→22 matrix rows + 15 FOSS backends earlier.
+      • **E4 LIVE data-plane binding** (ch444 kv, ch445 queue) — `kvSetLive`/`kvGetLive` and
+        `enqueue`/`dequeue` speak RESP over a raw socket to `$WAVELET_KV_URL` (kv = SET/GET,
+        queue = LPUSH/RPOP FIFO, object = same as kv), dep-free (stdlib net). LANDED on
+        Go+JVM+JS (Go/JVM block on the socket, JS awaits node:net); TestLiveKVRoundTrip
+        round-trips all three vs one real Valkey through docker → "world". The data plane is
+        LIVE, not just config/in-process — the non-Go live-binding item is CLOSED.
+      • **D4 shape-checked matrix×vector** (ch446, v3.328.0/.1) — `safeMatVec` requires a typed
+        `Eq Nat (cols M)(len v)`, so a dimension mismatch is a COMPILE error (erased proof,
+        no runtime check); [[1,2],[3,4]]·[5,6] = [17,39] in exact Nat. The in-language half of
+        the `Array dt sh` handle (lifts ch233's shape contract to 2-D); gated by a run
+        (TestD4ShapeMatVec) since the eliminator-built dot normalizes to a succ-chain not a NatLit.
+      • **WALKTHROUGH.md** (v3.327.4) — the Savage teachable artifact: the full
+        prove→simulate→deploy→RUN→LIVE "better than Winglang" pipeline from one source.
     - **Frontier (genuinely-hard tail; all tractable items above are done):** D5 live-procs-⊨-models
-      bisimulation (E2/E3 research); D4 CPython embed + `Array dt sh` (design-heavy); E4 deeper
-      data-plane foreign-op binding to a LIVE broker (RESP/client) + the dependency-heavy matrix
-      tail; D7's `primUpgrade` sugar (ch443 shows it unnecessary). A10 + the always-eventually
-      fairness (dfix wall) parked. See the DAG for deps + implications.
+      bisimulation (E2/E3 research); D4 CPython embed + the FOREIGN `Array dt sh` handle (CArray
+      CRepr, design-heavy — the in-language shape safety is done, ch446); E4 the Rust live
+      data-plane body + the dependency-heavy matrix tail + real cloud apply (accounts); D7's
+      `primUpgrade` sugar (ch443 shows it unnecessary). A10 + the always-eventually fairness
+      (dfix wall) parked. See the DAG for deps + implications.
 
 ## Standing rules
 
