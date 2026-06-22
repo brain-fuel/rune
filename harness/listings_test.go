@@ -78,6 +78,45 @@ func TestLiveKVRoundTrip(t *testing.T) {
 			t.Fatalf("live data-plane %s gave %q, want it to contain %q", c.file, got, c.want)
 		}
 	}
+	// Flush the broker so the JVM phase starts clean (the Go queue run left an item).
+	flush := exec.Command("docker", "compose", "exec", "-T", "valkey", "valkey-cli", "FLUSHALL")
+	flush.Dir = cdir
+	flush.Run()
+	// The same live bindings on the JVM (java.net.Socket blocks like Go — synchronous
+	// RESP, no async). Proves the live data plane is cross-backend, not Go-only.
+	if javac25, java25, ok := findJava25(); ok {
+		for _, c := range []struct{ file, want string }{
+			{"ch444_live_kv.rune", "world"},
+			{"ch445_live_queue.rune", "first"},
+		} {
+			s := loadListing(t, c.file)
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := codegen.JVM{}.Emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jdir := t.TempDir()
+			jf := filepath.Join(jdir, "main.java")
+			if err := os.WriteFile(jf, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := exec.Command(javac25, "--release", "25", "-d", jdir, jf).CombinedOutput(); err != nil {
+				t.Fatalf("[jvm %s] javac: %v\n%s", c.file, err, out)
+			}
+			run := exec.Command(java25, "-cp", jdir, "main")
+			run.Env = append(os.Environ(), "WAVELET_KV_URL=redis://localhost:6399")
+			out, err := run.Output()
+			if err != nil {
+				t.Fatalf("[jvm %s] run: %v", c.file, err)
+			}
+			if !strings.Contains(string(out), c.want) {
+				t.Errorf("[jvm %s] live data-plane gave %q, want %q", c.file, strings.TrimSpace(string(out)), c.want)
+			}
+		}
+	}
 }
 
 // The v1.0.0 freeze criterion (ref_docs/rune-v1-design.md): every listing in

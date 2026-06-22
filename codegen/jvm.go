@@ -98,6 +98,22 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 		b.WriteString("  static V primExit() { return fun(_M -> fun(p -> fun(_u -> { ((VProc)p).down().countDown(); return UNIT; }))); }\n")
 		b.WriteString("  static V primMonitor() { return fun(_M -> fun(p -> fun(_u -> { try { ((VProc)p).down().await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } return UNIT; }))); }\n")
 	}
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("  static V printStrCode() { return fun(c -> fun(_u -> { System.out.println(__s2h(c)); return c; })); }\n")
+	}
+	if usesLiveKV(p) {
+		// E4: the JVM live-broker data-plane binding. java.net.Socket BLOCKS, so RESP
+		// is synchronous (like Go, unlike the JS async path). A packed String code is a
+		// VNat bignum; __s2h/__h2s are the ASCII byte codec (first byte LSB + 0x01).
+		b.WriteString("  static String __s2h(V v) { var b = _nat(v); var m = java.math.BigInteger.valueOf(256); var sb = new StringBuilder(); while (b.compareTo(java.math.BigInteger.ONE) > 0) { var qr = b.divideAndRemainder(m); sb.append((char) qr[1].intValue()); b = qr[0]; } return sb.toString(); }\n")
+		b.WriteString("  static V __h2s(String s) { var n = java.math.BigInteger.ONE; var m = java.math.BigInteger.valueOf(256); for (int i = s.length() - 1; i >= 0; i--) { n = n.multiply(m).add(java.math.BigInteger.valueOf(s.charAt(i))); } return new VNat(n); }\n")
+		b.WriteString("  static String __kvAddr() { var u = System.getenv(\"WAVELET_KV_URL\"); if (u == null) u = \"\"; u = u.replace(\"redis://\", \"\"); if (u.isEmpty()) u = \"localhost:6379\"; return u; }\n")
+		b.WriteString("  static String __resp(String... args) { try { var hp = __kvAddr().split(\":\"); var sock = new java.net.Socket(hp[0], Integer.parseInt(hp[1])); var out = sock.getOutputStream(); var sb = new StringBuilder(); sb.append(\"*\").append(args.length).append(\"\\r\\n\"); for (var a : args) { sb.append(\"$\").append(a.length()).append(\"\\r\\n\").append(a).append(\"\\r\\n\"); } out.write(sb.toString().getBytes()); out.flush(); var in = new java.io.BufferedReader(new java.io.InputStreamReader(sock.getInputStream())); var line = in.readLine(); String res = \"\"; if (line != null && !line.isEmpty()) { char t = line.charAt(0); if (t == '+') res = line.substring(1); else if (t == '$') { int n = Integer.parseInt(line.substring(1)); if (n >= 0) { char[] buf = new char[n]; int got = 0; while (got < n) { int r = in.read(buf, got, n - got); if (r < 0) break; got += r; } res = new String(buf, 0, got); } } } sock.close(); return res; } catch (Exception e) { return \"\"; } }\n")
+		b.WriteString("  static V kvSetLive() { return fun(k -> fun(v -> fun(_u -> { __resp(\"SET\", __s2h(k), __s2h(v)); return v; }))); }\n")
+		b.WriteString("  static V kvGetLive() { return fun(k -> fun(_u -> __h2s(__resp(\"GET\", __s2h(k))))); }\n")
+		b.WriteString("  static V enqueueLive() { return fun(q -> fun(m -> fun(_u -> { __resp(\"LPUSH\", __s2h(q), __s2h(m)); return m; }))); }\n")
+		b.WriteString("  static V dequeueLive() { return fun(q -> fun(_u -> __h2s(__resp(\"RPOP\", __s2h(q))))); }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatJVM(&b, *p.Nat)
