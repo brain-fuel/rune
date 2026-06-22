@@ -261,6 +261,92 @@ func TestIOArgvExitConformance(t *testing.T) {
 	}
 }
 
+// TestD6FileEnvRust brings Rust to D6 fs+env conformance (the cross-backend parity
+// companion to TestIOFileEnvConformance's js/py/go/erl). Rust needs a compile step, so
+// like the JVM float gate it gets its own test rather than the interpret-or-prebuilt
+// ioCLIBackends loop. ch215 reads $RUNE_D6, writes+reads a temp file, prints the same
+// "hello, wootz\nok\nunit" the other backends do — proving getEnvCode/readFileCode/
+// writeFileCode/printStrCode are byte-identical on Rust (std::env + std::fs).
+func TestD6FileEnvRust(t *testing.T) {
+	rustc, err := exec.LookPath("rustc")
+	if err != nil {
+		t.Skip("rustc not in PATH")
+	}
+	dir := t.TempDir()
+	s := loadListing(t, "ch215_io_fs_env.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Rust{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf := filepath.Join(dir, "main.rs")
+	if err := os.WriteFile(rf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "main")
+	if out, err := exec.Command(rustc, "--edition", "2021", rf, "-o", bin).CombinedOutput(); err != nil {
+		t.Fatalf("[rust] rustc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = dir // relative path "d6.tmp" resolves here
+	cmd.Env = append(os.Environ(), "RUNE_D6=ok")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("[rust] run: %v", err)
+	}
+	if want := "hello, wootz\nok\nunit"; strings.TrimSpace(string(out)) != want {
+		t.Errorf("[rust] D6 fs+env run gave %q, want %q", strings.TrimSpace(string(out)), want)
+	}
+}
+
+// TestD6ArgvExitRust brings Rust to D6 argv+process conformance: ch216 reads its argv
+// (argCountCode/argAtCode) and exits with status = argc (exitWith). Run with `alpha beta`,
+// stdout is "2\nalpha\nbeta" and the exit status is 2, identical to js/py/go/erl. Rust is
+// compiled to a binary (like the go case), so the child's exit code passes through.
+func TestD6ArgvExitRust(t *testing.T) {
+	rustc, err := exec.LookPath("rustc")
+	if err != nil {
+		t.Skip("rustc not in PATH")
+	}
+	dir := t.TempDir()
+	s := loadListing(t, "ch216_io_argv_exit.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Rust{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rf := filepath.Join(dir, "main.rs")
+	if err := os.WriteFile(rf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "main")
+	if out, err := exec.Command(rustc, "--edition", "2021", rf, "-o", bin).CombinedOutput(); err != nil {
+		t.Fatalf("[rust] rustc: %v\n%s", err, out)
+	}
+	cmd := exec.Command(bin, "alpha", "beta")
+	out, err := cmd.Output()
+	exitCode := 0
+	if err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			exitCode = ee.ExitCode()
+		} else {
+			t.Fatalf("[rust] run failed: %v", err)
+		}
+	}
+	if got, want := strings.TrimSpace(string(out)), "2\nalpha\nbeta"; got != want {
+		t.Errorf("[rust] argv stdout = %q, want %q", got, want)
+	}
+	if exitCode != 2 {
+		t.Errorf("[rust] exit status = %d, want 2", exitCode)
+	}
+}
+
 // TestIOFloatBlasConformance is the D3 machine-float gate: the IEEE-754 f64 element
 // type + the native dot-product BLAS kernel compute byte-identically across
 // js/py/go/erl. ch217 prints the dot product 3·1+4·2 = 11, a div/mul/sub chain

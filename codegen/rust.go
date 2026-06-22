@@ -128,11 +128,34 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	// queue = Valkey LIST LPUSH/RPOP (FIFO). A packed-string V::Nat is marshalled to/from
 	// host bytes by _s2h/_h2s (the same base-256 packing the other backends use). This is
 	// the fourth source backend's live body, closing the cross-backend live data plane.
-	if usesLiveKV(p) || usesForeign(p, "printStrCode") {
+	if usesRustStrMarshal(p) {
 		b.WriteString(rustStrMarshal)
 	}
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("fn printStrCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { println!(\"{}\", String::from_utf8_lossy(&_s2h(&c))); c.clone() }) }) }\n")
+	}
+	// D6 / R-EFFECT: the standard OS vocabulary on Rust (env / file / argv / process-exit),
+	// the cross-backend parity companion to the js/py/go/erl bodies. Strings marshal through
+	// the same _s2h/_h2s; the empty-string / error sentinel is the packed bignum 1, matching
+	// the other backends. Brings Rust to full D6 conformance so a Rust E4/infra program can
+	// read its environment and files like every other source backend.
+	if usesForeign(p, "getEnvCode") {
+		b.WriteString("fn getEnvCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { let key = String::from_utf8_lossy(&_s2h(&c)).to_string(); let val = std::env::var(&key).unwrap_or_default(); _h2s(val.as_bytes()) }) }) }\n")
+	}
+	if usesForeign(p, "readFileCode") {
+		b.WriteString("fn readFileCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { let path = String::from_utf8_lossy(&_s2h(&c)).to_string(); match std::fs::read(&path) { Ok(d) => _h2s(&d), Err(_) => Rc::new(V::Nat(_big_from_u64(1))) } }) }) }\n")
+	}
+	if usesForeign(p, "writeFileCode") {
+		b.WriteString("fn writeFileCode() -> Rc<V> { vfun(|p: Rc<V>| vfun(move |c: Rc<V>| { let p = p.clone(); vfun(move |_u: Rc<V>| { let path = String::from_utf8_lossy(&_s2h(&p)).to_string(); let _ = std::fs::write(&path, _s2h(&c)); c.clone() }) })) }\n")
+	}
+	if usesForeign(p, "argCountCode") {
+		b.WriteString("fn argCountCode() -> Rc<V> { vfun(|_u: Rc<V>| { let n = std::env::args().count().saturating_sub(1) as u64; Rc::new(V::Nat(_big_from_u64(n))) }) }\n")
+	}
+	if usesForeign(p, "argAtCode") {
+		b.WriteString("fn argAtCode() -> Rc<V> { vfun(|i: Rc<V>| { let i = i.clone(); vfun(move |_u: Rc<V>| { let idx: usize = _big_to_string(_nat(&i)).parse::<usize>().unwrap_or(0) + 1; let args: Vec<String> = std::env::args().collect(); if idx < args.len() { _h2s(args[idx].as_bytes()) } else { Rc::new(V::Nat(_big_from_u64(1))) } }) }) }\n")
+	}
+	if usesForeign(p, "exitWith") {
+		b.WriteString("fn exitWith() -> Rc<V> { vfun(|n: Rc<V>| { let n = n.clone(); vfun(move |_u: Rc<V>| { let code: i32 = _big_to_string(_nat(&n)).parse::<i32>().unwrap_or(0); std::process::exit(code) }) }) }\n")
 	}
 	if usesLiveKV(p) {
 		b.WriteString(rustRespRuntime)
@@ -593,6 +616,13 @@ fn _show(v: &Rc<V>) -> String {
     }
 }
 `
+
+// usesRustStrMarshal reports whether any emitted body needs the packed-string <-> host
+// marshalling (_s2h/_h2s): the live data-plane ops plus the D6 string-valued OS ops.
+func usesRustStrMarshal(p Program) bool {
+	return usesLiveKV(p) || usesForeign(p, "printStrCode") || usesForeign(p, "getEnvCode") ||
+		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode")
+}
 
 // rustStrMarshal is the packed-string <-> host-bytes marshalling shared by the live
 // data-plane ops and printStrCode: _s2h decodes a base-256 V::Nat to bytes by repeated

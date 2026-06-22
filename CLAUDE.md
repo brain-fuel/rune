@@ -741,7 +741,13 @@ first and forces only on mismatch, so the fast path logs nothing.
     "2\nalpha\nbeta" + exit 2 on js/py/go/erl (`TestIOArgvExitConformance`; go is BUILT
     to a binary since `go run` masks the child status; erl drops the script-name head of
     `init:get_plain_arguments`). **D6 is now COMPLETE** for the demonstrated-need scope
-    (OS/time/fs/env/argv/process, all baked + cross-backend). PARKED: raw network
+    (OS/time/fs/env/argv/process, all baked + cross-backend). **RUST D6 PARITY LANDED
+    (v3.328.6):** the OS vocabulary now runs on the Rust backend too (getEnvCode/readFile
+    Code/writeFileCode/argCountCode/argAtCode/exitWith over std::env+std::fs, the same
+    base-256 _s2h/_h2s marshalling, empty/error sentinel = packed bignum 1); ch215 →
+    "hello, wootz\nok\nunit" and ch216 → "2\nalpha\nbeta" + exit 2 on Rust, byte-identical
+    to js/py/go/erl (TestD6FileEnvRust / TestD6ArgvExitRust — separate, like the JVM gate,
+    since Rust needs a compile step). So the five source backends agree on the OS surface. PARKED: raw network
     SOCKETS — async accept/connect has no uniform sequential-`IO` shape across backends
     and no consumer; needs its own effect-shape design doc (PARKING-LOT). Distribution
     rides the proven process calculus (E1–E3), not raw sockets. (rust excluded from the
