@@ -908,6 +908,10 @@ first and forces only on mismatch, so the fast path logs nothing.
         SAME sum by the EXACT proven shape-safe matMul (ch447), summed in Nat. Σ of
         [[1,2],[3,4]]·[[5,6],[7,8]] = 134 both ways, agreement=1 on js/py/go/erl/rust
         (TestFurnaceMatMul) — trust the fast path because it MATCHES the machine-checked one.
+      • **D4 furnace max tier-bridge** (ch451, v3.328.9) — the furnace's third op-shape, a
+        REDUCTION BY ORDER: fast numpy npMax vs the exact proven natMax fold (ch369–373's
+        lattice max); max [3,7,2,5] = 7 both ways, agreement=1 on js/py/go/erl/rust
+        (TestFurnaceMax). The tiered-assurance bar covers arithmetic + 2-D LA + order.
       • **WALKTHROUGH.md** (v3.327.4) — the Savage teachable artifact: the full
         prove→simulate→deploy→RUN→LIVE "better than Winglang" pipeline from one source.
     - **Frontier (genuinely-hard tail; all tractable items above are done):** D5 live-procs-⊨-models

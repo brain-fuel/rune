@@ -1,0 +1,69 @@
+-- Chapter 451 — the FURNACE bridges a SECOND foreign op: order, not arithmetic (Savage).
+--
+-- ch232 tied the fast foreign DOT to the exact proven dot; ch449 the fast MATMUL. This
+-- ties a different shape of operation — REDUCTION BY ORDER: the maximum of a list, by
+--   (a) FOREIGN numpy (`npMax`, real np.max on py / a reference floor elsewhere), and
+--   (b) the EXACT proven `natMax` fold (the structural max on Nat, ch369–373's distributive-
+--       lattice operation — no foreign anything),
+-- and the furnace confirms they AGREE. A 1 means the fast order-reduction concurs with the
+-- machine-checked lattice max. The tiered-assurance bar is not just for arithmetic: it
+-- covers order too. max [3,7,2,5] = 7. Observable: "7\n1\nunit".
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+
+foreign Float : U end
+data FList : U is fnil : FList | fcons : Float -> FList -> FList end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fabsP      : Float -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fleqN      : Float -> Float -> Nat end
+foreign npMax      : FList -> Float end
+
+-- the EXACT proven world: structural max on Nat (ch369–373's lattice operation), folded
+-- over a list. natMax a b = the larger of a, b by simultaneous recursion.
+natMax : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is m end)
+      (fn (k : Nat) (maxK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is succ (maxK j) end) m
+         end end)
+      a b
+  end
+end
+maxList : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is Nat end) zero
+      (fn (h : Nat) (r : NatList) (ih : Nat) is natMax h ih end) xs
+  end
+end
+
+ns : NatList is ncons 3 (ncons 7 (ncons 2 (ncons 5 nnil))) end
+exactMax : Nat is maxList ns end
+
+-- the FAST foreign world: the same values as floats, maxed by numpy.
+fs : FList is fcons (fromNat 3) (fcons (fromNat 7) (fcons (fromNat 2) (fcons (fromNat 5) fnil))) end
+
+eps : Float is fdiv (fromNat 1) (fromNat 1000000) end
+
+-- the bridge verdict: does the fast numpy max match the exact proven lattice max (lifted)?
+agree : Nat is
+  fleqN (fabsP (fsub (npMax fs) (fromNat exactMax))) eps
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (npMax fs))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat agree) (fn (u2 : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end

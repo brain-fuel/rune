@@ -1794,6 +1794,31 @@ func TestFurnaceMatMul(t *testing.T) {
 	}
 }
 
+// TestFurnaceMax ties the two tiers for a REDUCTION-BY-ORDER op: the maximum of a list
+// computed by FOREIGN numpy (npMax) is checked against the SAME max by the EXACT proven
+// natMax fold (ch369–373's lattice operation). A 1 means the fast order-reduction agrees
+// with the machine-checked lattice max. max [3,7,2,5] = 7: "7\n1\nunit" on js/py/go/erl/rust.
+func TestFurnaceMax(t *testing.T) {
+	const want = "7\n1\nunit"
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if bk.name == "py" {
+				if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+					t.Skip("numpy not installed")
+				}
+			}
+			if got := runIOListing(t, bk, "ch451_furnace_max.rune", "main", ""); got != want {
+				t.Errorf("[%s] furnace-max gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}
+
 // TestD4ShapeProven realizes the R-INTEROP headline (shapes proven, not checked) on the
 // current substrate: safeDot requires a proof Eq Nat (len xs) (len ys), so a mismatched
 // call is a compile error (verified manually: "refl does not prove the equation"), and the dot is
