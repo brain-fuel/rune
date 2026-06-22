@@ -864,6 +864,38 @@ func TestE3MaxRegisterInflation(t *testing.T) {
 	}
 }
 
+// TestE3AdequacyClosure gates ch460: adequacy as a CLOSURE — the adequate class (trace =
+// projection) is closed under prepending a supervised unit (closureUnit) and a halt
+// (closureHalt), abstracting ch459's induction step into reusable lemmas (pure computation
+// via parHaltNeutral, no fuel decomposition). Generalizes the tower beyond right-nesting.
+// The proofs type-check under TestListingsElaborateAndCheck; a closure-built two-unit
+// process runs to a 2-failure trace (prints 2).
+func TestE3AdequacyClosure(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch460_adequacy_closure.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "2" {
+		t.Errorf("closure-built adequacy witness = %q, want first line 2", strings.TrimSpace(string(out)))
+	}
+}
+
 // TestE3TowerAdequacy gates ch459: the first PARAMETRIC adequacy — visibleRun n (tower n)
 // = project (tower n) for the INFINITE family of supervised towers (n units par crash
 // (mon halt) in parallel), one proof by induction on n. The key parHaltNeutral lemma (a

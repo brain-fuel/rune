@@ -829,7 +829,11 @@ first and forces only on mismatch, so the fast path logs nothing.
       neutral, visibleRun k (par halt X) = visibleRun k X) threads the par-interleaving by
       absorbing the inert par-halt residue each detected unit leaves — sidestepping fuel
       decomposition. Not the full all-P refinement, but the first adequacy over an unbounded
-      family. Plus: a VERIFIED CRDT corpus over two
+      family. GENERALIZED to a CLOSURE (ch460, v3.328.23): the adequate class is closed under
+      prepending a supervised unit (closureUnit: adequate p -> adequate (par unit p)) and a
+      halt (closureHalt) — reusable lemmas abstracting ch459's induction step, so any process
+      built by prepending units/halts to an adequate seed is adequate (tower = closureUnit^n).
+      Plus: a VERIFIED CRDT corpus over two
       lattices carrying convergence+safety+stability (G-Counter/G-Set/PN-Counter
       ch410–419), refutations matching the simulator's law linter (ch416/417); the
       `internal/sim` + `rune simulate` better-than-Winglang SIMULATOR (v3.230–v3.248,
