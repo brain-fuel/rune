@@ -829,7 +829,9 @@ first and forces only on mismatch, so the fast path logs nothing.
       ch429, OR-Set ch430, inflation ch431, gossip-converges ch432, N-replica VCs ch437,
       the grow-only MAX-REGISTER ch453 — a register CAN be a CvRDT when its merge is a JOIN
       (natMax), proven comm/idem/assoc by lifting ch369–373's lattice laws, the honest
-      resolution of ch416's naive take-peer LWW refutation, v3.328.11; its INFLATION/
+      resolution of ch416's naive take-peer LWW refutation, v3.328.11; RUNS on native C +
+      LLVM too — TestE3MaxRegisterNative, so the verified CvRDT executes across source +
+      native backends, v3.328.14; its INFLATION/
       monotonicity half ch455 — mergeInflationary leb(val x)(val(merge x y))=true via the
       structural max bound lebMaxL, completing the convergent+monotone CvRDT correctness
       pair, v3.328.13); the Savage FURNACE
