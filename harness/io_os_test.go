@@ -417,8 +417,8 @@ func TestD4CPythonEmbed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("[c] run: %v", err)
 	}
-	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "1024\n81") {
-		t.Errorf("CPython-embed pyPow gave %q, want it to start 1024\\n81", got)
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "1024\n81\n4\n9") {
+		t.Errorf("CPython-embed gave %q, want it to start 1024\\n81\\n4\\n9", got)
 	}
 }
 

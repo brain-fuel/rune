@@ -549,13 +549,21 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// D4 item: the native runtime can call real CPython. Nats marshal via long (the host
 	// model's full Array-dt-sh handle is the heavier remaining design). Link: python3-config
 	// --includes --ldflags --embed.
-	if usesForeign(p, "pyPow") {
+	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") {
 		b.WriteString("#include <Python.h>\n")
 		b.WriteString("static int rune_py_inited = 0;\n")
 		b.WriteString("static void rune_py_ensure(void) { if (!rune_py_inited) { Py_Initialize(); rune_py_inited = 1; } }\n")
+	}
+	if usesForeign(p, "pyPow") {
 		b.WriteString("static Value pyPow_c2(Value bb, Value* env) { Value aa = env[0]; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); long b = IS_INT(bb) ? INT_VAL(bb) : (long)big_to_double(bb); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"pow(%ld,%ld)\", a, b); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); long res = 0; if (r) { res = PyLong_AsLong(r); Py_XDECREF(r); } else { PyErr_Clear(); } return big_from_long(res); }\n")
 		b.WriteString("static Value pyPow_c1(Value a, Value* env) { (void)env; Value c = mkclo(&pyPow_c2, 1); clo_set(c, 0, a); return c; }\n")
 		b.WriteString("static Value pyPow(void) { return mkclo(&pyPow_c1, 0); }\n")
+	}
+	// pySqrt n = Python's math.sqrt(n) in the embedded interpreter — a FLOAT return (and a
+	// stdlib import via __import__), so the embed marshals both directions: nat in, f64 out.
+	if usesForeign(p, "pySqrt") {
+		b.WriteString("static Value pySqrt_c(Value aa, Value* env) { (void)env; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"__import__('math').sqrt(%ld)\", a); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); double d = 0.0; if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } return mkfloat(d); }\n")
+		b.WriteString("static Value pySqrt(void) { return mkclo(&pySqrt_c, 0); }\n")
 	}
 	if usesForeign(p, "Float") {
 		b.WriteString("static Value Float(void) { return UNIT; }\n")
