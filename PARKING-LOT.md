@@ -339,3 +339,21 @@ or a later-phase feature with no current consumer.
     transport for the E-track) actually demands it; BEAM's `gen_tcp` + the OTP runtime
     is the natural first target. Until then, distribution rides the proven process
     calculus (E1–E3), not raw sockets.
+
+- **C / LLVM backend — curried function-returning `NatElim` is EXPONENTIAL (2026-06-22).**
+  Discovered while building the furnace↔CPython-embed bridge (ch465). An eliminator whose
+  MOTIVE is a function type and which is then applied — the classic decidable-equality shape
+  `beqNat : Nat -> Nat -> Bool` defined as `NatElim (… : Nat -> Bool) base step a` applied to
+  `b` — runs in EXPONENTIAL time on the native C/LLVM backends, while the source backends
+  (go/js/rust) evaluate it in linear time. Measured on C: `beqNat n n` takes n=8 → 4ms,
+  n=16 → 191ms, n=32 → >5s (timeout). So ~2^n. CONSEQUENCE: a program that compares moderately
+  large nats with `beqNat` works on go/js but appears to HANG on C/LLVM — a real cross-backend
+  CONFORMANCE GAP (telos-2's "same observable on every backend" holds only for SMALL inputs of
+  this pattern). ROOT CAUSE (suspected): the native `NatElim` lowering rebuilds / re-forces the
+  inductive hypothesis closure `ihk` per inner-eliminator step instead of memoizing it, so the
+  nested NatElim in `beqNat` compounds multiplicatively. WORKAROUND: keep `beqNat`-style
+  comparisons to small nats on the native backends (ch465 uses 2^4=16, not 2^10=1024). PARKED:
+  the fix is a native-`NatElim` codegen change (thunk/memoize the per-level IH closure) —
+  high-caution core-codegen work, property+perf-tested, no current consumer beyond this furnace
+  nicety. The proven LISTINGS that use `beqNat` are proof-only (elaborate-check) or run on the
+  source backends, so none regress; only the native RUN of a large-nat `beqNat` is affected.
