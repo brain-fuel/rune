@@ -737,6 +737,37 @@ func TestE3MaxRegisterInflation(t *testing.T) {
 	}
 }
 
+// TestE3VisibleRunLenBound gates ch456: the adequacy bound lenBound — the runtime
+// observation over n fuel has at most n labels (leb (len (visibleRun n p)) n = true), each
+// step emitting at most one observable. With ch452's prefix-monotonicity this pins the
+// growth: from k to k+1 the trace grows by 0 or 1. The proof type-checks under
+// TestListingsElaborateAndCheck; a supervised-crash witness over 5 fuel prints 1.
+func TestE3VisibleRunLenBound(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch456_visiblerun_lenbound.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "1" {
+		t.Errorf("lenBound witness = %q, want first line 1", strings.TrimSpace(string(out)))
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {

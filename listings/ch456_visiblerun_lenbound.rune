@@ -1,0 +1,252 @@
+-- Chapter 456 — the runtime observation cannot outpace its fuel (E3 adequacy).
+--
+-- ch452 proved visibleRun is fuel-MONOTONE (k-run ⊑ (k+1)-run). This proves the matching
+-- UPPER bound on its growth: the observation length is at most the fuel,
+--
+--   lenBound : (n : Nat) (p : Proc) -> leb (len (visibleRun n p)) n = true
+--
+-- because each fuel step emits at most ONE observable label (consVis drops ltau, keeps a
+-- single lfail). With ch452's prefix-monotonicity this pins the growth completely: from k
+-- to k+1 the trace grows by 0 or 1 — the finite runs are an ω-chain that climbs by at most
+-- one rung per step. Induction on the fuel; the some-step uses consVisLenBound (a visible
+-- label adds one and matches the succ, an ltau adds none and weakens by lebTrans/lebSuccR).
+-- Over the real four-label calculus of ch409/ch421. Proof-only.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+
+data Label : U is ltau : Label | lsend : Label | lrecv : Label | lfail : Label end
+
+data Proc : U is
+  halt : Proc | out : Proc -> Proc | inp : Proc -> Proc | mon : Proc -> Proc
+| par : Proc -> Proc -> Proc | crash : Proc
+end
+
+data Trans : U is tr : Label -> Proc -> Trans end
+labelOf : Trans -> Label is fn (t : Trans) is TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t end end
+procOf : Trans -> Proc is fn (t : Trans) is TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t end end
+
+-- ===== leb (<=) and the two ordering lemmas the bound needs (ch251/ch252) =====
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is true end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ih j end) m
+         end end)
+      a b
+  end
+end
+lebSuccR : (n : Nat) -> Eq Bool (leb n (succ n)) true is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Eq Bool (leb x (succ x)) true end)
+      refl
+      (fn (k : Nat) (ih : Eq Bool (leb k (succ k)) true) is ih end)
+      n
+  end
+end
+everythingTrue : Eq Bool false true -> (x : Bool) -> Eq Bool x true is
+  fn (h : Eq Bool false true) (x : Bool) is
+    BoolElim (fn (z : Bool) is Eq Bool z true end) refl h x
+  end
+end
+lebTrans : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Bool (leb a b) true -> Eq Bool (leb b c) true -> Eq Bool (leb a c) true is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) ->
+               Eq Bool (leb x b) true -> Eq Bool (leb b c) true -> Eq Bool (leb x c) true end)
+      (fn (b : Nat) (c : Nat) (h1 : Eq Bool (leb zero b) true) (h2 : Eq Bool (leb b c) true) is refl end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) ->
+              Eq Bool (leb k b) true -> Eq Bool (leb b c) true -> Eq Bool (leb k c) true) is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is (c : Nat) -> Eq Bool (leb (succ k) bb) true ->
+                      Eq Bool (leb bb c) true -> Eq Bool (leb (succ k) c) true end)
+             (fn (c : Nat) (h1 : Eq Bool (leb (succ k) zero) true) (h2 : Eq Bool (leb zero c) true) is
+                everythingTrue h1 (leb (succ k) c) end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Bool (leb (succ k) j) true ->
+                     Eq Bool (leb j c) true -> Eq Bool (leb (succ k) c) true) is
+                fn (c : Nat) is
+                  NatElim (fn (cc : Nat) is Eq Bool (leb (succ k) (succ j)) true ->
+                             Eq Bool (leb (succ j) cc) true -> Eq Bool (leb (succ k) cc) true end)
+                    (fn (h1 : Eq Bool (leb (succ k) (succ j)) true) (h2 : Eq Bool (leb (succ j) zero) true) is
+                       everythingTrue h2 (leb (succ k) zero) end)
+                    (fn (i : Nat) (ihc : Eq Bool (leb (succ k) (succ j)) true ->
+                            Eq Bool (leb (succ j) i) true -> Eq Bool (leb (succ k) i) true) is
+                       fn (h1 : Eq Bool (leb (succ k) (succ j)) true) (h2 : Eq Bool (leb (succ j) (succ i)) true) is
+                         ih j i h1 h2 end end)
+                    c
+                end end)
+             b
+         end end)
+      a
+  end
+end
+
+-- ===== the ok-fault step, verbatim from ch409/ch421/ch452 =====
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end) (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc) x
+  end
+end
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end) (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc) x
+  end
+end
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end) (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc) x
+  end
+end
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end) false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true x
+  end
+end
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end) rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end) ra
+  end
+end
+commT : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (interleaveT iha ihb a b)
+      (fn (pa : Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+           (interleaveT iha ihb a b)
+           (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+           (inpCont b) end)
+      (outCont a)
+  end
+end
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (commT a b iha ihb)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (commT a b iha ihb)
+      (isCrash a)
+  end
+end
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end) (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans) x
+  end
+end
+
+-- ===== the observable trace + its length =====
+visible : Label -> Bool is fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false true true true l end end
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is
+    BoolElim (fn (w : Bool) is List Label end) (cons Label l rest) rest (visible l)
+  end
+end
+len : List Label -> Nat is
+  fn (xs : List Label) is
+    ListElim Label (fn (w : List Label) is Nat end) zero (fn (l : Label) (t : List Label) (ih : Nat) is succ ih end) xs
+  end
+end
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (okStep p)
+         end end)
+      n
+  end
+end
+
+-- (lemma) consing one step's observable onto a length-<=k trace gives a length-<=(k+1)
+-- trace. Case on the label: a VISIBLE one adds exactly one (leb (succ (len xs))(succ k) =
+-- leb (len xs) k, the hypothesis); ltau adds none and weakens by lebTrans through lebSuccR.
+consVisLenBound : (l : Label) -> (xs : List Label) -> (k : Nat) ->
+    Eq Bool (leb (len xs) k) true -> Eq Bool (leb (len (consVis l xs)) (succ k)) true is
+  fn (l : Label) is
+    LabelElim
+      (fn (w : Label) is (xs : List Label) -> (k : Nat) ->
+         Eq Bool (leb (len xs) k) true -> Eq Bool (leb (len (consVis w xs)) (succ k)) true end)
+      (fn (xs : List Label) (k : Nat) (h : Eq Bool (leb (len xs) k) true) is
+         lebTrans (len xs) k (succ k) h (lebSuccR k) end)
+      (fn (xs : List Label) (k : Nat) (h : Eq Bool (leb (len xs) k) true) is h end)
+      (fn (xs : List Label) (k : Nat) (h : Eq Bool (leb (len xs) k) true) is h end)
+      (fn (xs : List Label) (k : Nat) (h : Eq Bool (leb (len xs) k) true) is h end)
+      l
+  end
+end
+
+-- THE LENGTH BOUND: the observation over n fuel has at most n labels. Induction on n; the
+-- some-step feeds the IH (length of the k-deep recursion <= k) through consVisLenBound.
+lenBound : (n : Nat) -> (p : Proc) -> Eq Bool (leb (len (visibleRun n p)) n) true is
+  fn (n : Nat) is
+    NatElim (fn (m : Nat) is (p : Proc) -> Eq Bool (leb (len (visibleRun m p)) m) true end)
+      (fn (p : Proc) is refl end)
+      (fn (k : Nat) (ih : (p : Proc) -> Eq Bool (leb (len (visibleRun k p)) k) true) is
+         fn (p : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq Bool (leb (len (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun k (procOf t)) end)
+                     o)) (succ k)) true end)
+             refl
+             (fn (t : Trans) is
+                consVisLenBound (labelOf t) (visibleRun k (procOf t)) k (ih (procOf t)) end)
+             (okStep p)
+         end end)
+      n
+  end
+end
+
+data Unit : U is unit : Unit end
+foreign printNat : Nat -> IO Nat end
+boolToNat : Bool -> Nat is fn (b : Bool) is BoolElim (fn (w : Bool) is Nat end) (succ zero) zero b end end
+
+-- witness: over 5 fuel a supervised crash emits one lfail then halts, so len <= 5 holds;
+-- the bound check leb (len (visibleRun 5 (par crash (mon halt)))) 5 = true. Print 1.
+demo : Proc is par crash (mon halt) end
+five : Nat is succ (succ (succ (succ (succ zero)))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (boolToNat (leb (len (visibleRun five demo)) five))) (fn (u1 : Nat) is pureIO Unit unit end)
+end

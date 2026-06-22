@@ -819,7 +819,10 @@ first and forces only on mismatch, so the fast path logs nothing.
       toward it landed (ch452, v3.328.10): `prefixMono` — the k-step runtime observation is a
       PREFIX of the (k+1)-step one for ALL fuel + ALL processes (the monotonicity bridging
       bounded runs ch207 to the coinductive stream ch209; does NOT close the par-interleave
-      wall). Plus: a VERIFIED CRDT corpus over two
+      wall). Its growth UPPER bound landed too (ch456, v3.328.16): lenBound — the observation
+      over n fuel has at most n labels (leb (len (visibleRun n p)) n = true), so from k to k+1
+      the trace grows by exactly 0 or 1; both building blocks for the refinement, neither
+      closes the wall. Plus: a VERIFIED CRDT corpus over two
       lattices carrying convergence+safety+stability (G-Counter/G-Set/PN-Counter
       ch410–419), refutations matching the simulator's law linter (ch416/417); the
       `internal/sim` + `rune simulate` better-than-Winglang SIMULATOR (v3.230–v3.248,
