@@ -881,6 +881,12 @@ first and forces only on mismatch, so the fast path logs nothing.
         no runtime check); [[1,2],[3,4]]·[5,6] = [17,39] in exact Nat. The in-language half of
         the `Array dt sh` handle (lifts ch233's shape contract to 2-D); gated by a run
         (TestD4ShapeMatVec) since the eliminator-built dot normalizes to a succ-chain not a NatLit.
+      • **D4 shape-checked matrix×MATRIX** (ch447, v3.328.4) — completes the shape-safe LA trio
+        (dot ch233 / M·v ch446 / A·B ch447): `safeMatMul` requires `Eq Nat (cols A)(rows B)` (the
+        inner-dimension agreement), a non-conformable product is a COMPILE error at `refl`
+        (verified — a 3-row B against a 2-col A is rejected with a diagnostic). Row-combination
+        formulation (each result row = Σ rowA[i]·B_row_i — no transpose, no indexing);
+        [[1,2],[3,4]]·[[5,6],[7,8]] = [[19,22],[43,50]], (0,0)=19 on go/rust/js (TestD4ShapeMatMul).
       • **WALKTHROUGH.md** (v3.327.4) — the Savage teachable artifact: the full
         prove→simulate→deploy→RUN→LIVE "better than Winglang" pipeline from one source.
     - **Frontier (genuinely-hard tail; all tractable items above are done):** D5 live-procs-⊨-models

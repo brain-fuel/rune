@@ -1,0 +1,111 @@
+-- Chapter 447 — shapes PROVEN in 2-D, part II: a shape-checked matrix×MATRIX (D4).
+--
+-- ch446 lifted ch233's Eq-Nat shape contract to a matrix×VECTOR. This completes the
+-- core linear-algebra trio (dot ch233, M·v ch446, A·B here): a matrix product `A·B`
+-- requires a typed proof `Eq Nat (cols A) (rows B)` — the inner-dimension agreement —
+-- so a NON-CONFORMABLE product is a COMPILE ERROR, never a runtime shape check, the
+-- proof erased. The product computes in exact Nat by the row-combination formulation:
+-- each result row is `rowA · B = Σ_i rowA[i] · (B's row i)` (scale each row of B by the
+-- matching element of rowA, sum) — structural over the rows, NO transpose, NO indexing
+-- (rune has no indexed families). Futhark/safe-tensor shape safety on a dependent core.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data NatMat  : U is mnil : NatMat  | mcons : NatList -> NatMat -> NatMat end
+
+foreign printNat : Nat -> IO Nat end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a end
+end
+len : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is Nat end) zero (fn (h : Nat) (r : NatList) (ih : Nat) is succ ih end) xs end
+end
+headOr0 : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is Nat end) zero (fn (h : Nat) (r : NatList) (ih : Nat) is h end) xs end
+end
+tailList : NatList -> NatList is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is NatList end) nnil (fn (h : Nat) (r : NatList) (ih : NatList) is r end) xs end
+end
+
+-- rows = number of rows; cols = width of the FIRST row (the matrix's column count).
+rows : NatMat -> Nat is
+  fn (m : NatMat) is NatMatElim (fn (x : NatMat) is Nat end) zero (fn (h : NatList) (r : NatMat) (ih : Nat) is succ ih end) m end
+end
+cols : NatMat -> Nat is
+  fn (m : NatMat) is NatMatElim (fn (x : NatMat) is Nat end) zero (fn (h : NatList) (r : NatMat) (ih : Nat) is len h end) m end
+end
+
+-- scale a row by a scalar; add two rows elementwise (the shorter list pads with the
+-- longer's tail, so the final fold lands at the right width with no length bookkeeping).
+scaleRow : Nat -> NatList -> NatList is
+  fn (c : Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end) nnil
+      (fn (h : Nat) (r : NatList) (ih : NatList) is ncons (natMul c h) ih end) xs
+  end
+end
+addRows : NatList -> NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList -> NatList end)
+      (fn (ys : NatList) is ys end)
+      (fn (h : Nat) (r : NatList) (ih : NatList -> NatList) is
+         fn (ys : NatList) is
+           NatListElim (fn (y : NatList) is NatList end)
+             (ncons h r)
+             (fn (yh : Nat) (yr : NatList) (ih2 : NatList) is ncons (natAdd h yh) (ih yr) end)
+             ys
+         end end)
+      xs
+  end
+end
+
+-- rowA · B = Σ_i rowA[i] · (B's row i). Recurse over B with the remaining rowA threaded
+-- through; at B's end the contribution is the empty (width-correct) row.
+vecMat : NatList -> NatMat -> NatList is
+  fn (r : NatList) (b : NatMat) is
+    NatMatElim (fn (x : NatMat) is NatList -> NatList end)
+      (fn (rr : NatList) is nnil end)
+      (fn (brow : NatList) (brest : NatMat) (ih : NatList -> NatList) is
+         fn (rr : NatList) is
+           addRows (scaleRow (headOr0 rr) brow) (ih (tailList rr))
+         end end)
+      b r
+  end
+end
+
+-- A·B : each row of A combined against B (structural over A's rows; exact Nat).
+matMul : NatMat -> NatMat -> NatMat is
+  fn (a : NatMat) (b : NatMat) is
+    NatMatElim (fn (x : NatMat) is NatMat end)
+      mnil
+      (fn (arow : NatList) (arest : NatMat) (ih : NatMat) is mcons (vecMat arow b) ih end)
+      a
+  end
+end
+
+-- THE 2-D SHAPE CONTRACT: the product type-checks only when A's column count equals B's
+-- row count (the inner dimension). The proof is erased; conformance is settled at compile
+-- time. A B whose rows ≠ cols A would be a COMPILE ERROR at `refl`.
+safeMatMul : (a : NatMat) -> (b : NatMat) -> Eq Nat (cols a) (rows b) -> NatMat is
+  fn (a : NatMat) (b : NatMat) (pf : Eq Nat (cols a) (rows b)) is matMul a b end
+end
+
+headRow : NatMat -> NatList is
+  fn (m : NatMat) is NatMatElim (fn (x : NatMat) is NatList end) nnil (fn (h : NatList) (r : NatMat) (ih : NatList) is h end) m end
+end
+
+-- A = [[1,2],[3,4]], B = [[5,6],[7,8]]; cols A = 2 = rows B, so the contract is `refl`.
+-- A·B = [[1*5+2*7, 1*6+2*8],[3*5+4*7, 3*6+4*8]] = [[19,22],[43,50]]; print the (0,0)
+-- entry, 19. A B with 3 rows (rows B = 3 ≠ 2 = cols A) would not type-check at `refl`.
+matA : NatMat is mcons (ncons 1 (ncons 2 nnil)) (mcons (ncons 3 (ncons 4 nnil)) mnil) end
+matB : NatMat is mcons (ncons 5 (ncons 6 nnil)) (mcons (ncons 7 (ncons 8 nnil)) mnil) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (headOr0 (headRow (safeMatMul matA matB refl)))) (fn (u1 : Nat) is pureIO Unit unit end)
+end

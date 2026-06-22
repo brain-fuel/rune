@@ -352,6 +352,38 @@ func TestD4ShapeMatVec(t *testing.T) {
 	}
 }
 
+// TestD4ShapeMatMul is the D4 2-D shape-safety gate, part II: the shape-checked
+// matrix×matrix (ch447) elaborates — the inner-dimension contract `Eq Nat (cols A)
+// (rows B)` type-checks — and computes the product. A·B for [[1,2],[3,4]]·[[5,6],[7,8]]
+// = [[19,22],[43,50]]; main prints the (0,0) entry, 19. (A B with rows ≠ cols A would be
+// a COMPILE ERROR at `refl`, the non-conformable shape the type rejects.)
+func TestD4ShapeMatMul(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch447_shape_matmul.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if first, _, _ := strings.Cut(got, "\n"); first != "19" {
+		t.Errorf("shape-checked A·B (0,0) = %q, want first line 19", got)
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {
