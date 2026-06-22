@@ -620,6 +620,47 @@ func TestListingsOTPJVM(t *testing.T) {
 	}
 }
 
+// TestListingsOTPJS runs the OTP suite on the FOURTH backend — the JS cooperative
+// scheduler shim. JS is single-threaded and can't block, so OTP programs get an ASYNC
+// IO monad (bindIO awaits; primReceive returns a Promise) + a microtask scheduler, with
+// actor-local identity carried by Node's AsyncLocalStorage. The async IO is contained
+// to usesOTP programs (ordinary js IO stays synchronous). R0 (ch205 -> 3), faults
+// (ch214 -> 1), live hot reload (ch443 -> 0) — same observable as BEAM/Go/JVM.
+func TestListingsOTPJS(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not in PATH")
+	}
+	cases := []struct{ file, want string }{
+		{"ch205_otp_live.rune", "succ (succ (succ zero))"},
+		{"ch214_otp_fault_live.rune", "succ zero"},
+		{"ch443_hot_reload_live.rune", "0"},
+	}
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			s := loadListing(t, c.file)
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := codegen.JS{}.Emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := filepath.Join(t.TempDir(), "main.mjs")
+			if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out, err := exec.Command("node", f).Output()
+			if err != nil {
+				t.Fatalf("node run: %v", err)
+			}
+			if strings.TrimSpace(string(out)) != c.want {
+				t.Errorf("JS OTP %s gave %q, want %q", c.file, strings.TrimSpace(string(out)), c.want)
+			}
+		})
+	}
+}
+
 // TestListingsReplicatedActorsBeam is the E4 live-actor projection gate (built on D5):
 // the verified replicated counter runs as TWO genuine BEAM processes that hold replica
 // state, gossip it, and merge. ch433 spawns replicas A and B, ticks each replica's own

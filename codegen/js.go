@@ -30,7 +30,14 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesQuot(p) {
 		b.WriteString(quotRuntime)
 	}
-	if usesIO(p) {
+	if usesOTP(p) {
+		// D5 / R-OTP: an OTP program needs an ASYNC IO monad (primReceive blocks ->
+		// awaits) + the cooperative microtask scheduler. Contained to usesOTP programs:
+		// ordinary IO keeps the synchronous runtime, so all other js conformance is
+		// untouched.
+		b.WriteString(ioRuntimeAsync)
+		b.WriteString(jsOTPRuntime)
+	} else if usesIO(p) {
 		b.WriteString(ioRuntime)
 	}
 	// D6 / R-EFFECT: bake the standard OS/IO host bodies when referenced.
@@ -219,7 +226,14 @@ func (JS) Emit(p Program) (TargetSource, error) {
 			// An IO main is a world thunk: run it (force) before showing.
 			mainExpr += "()"
 		}
-		fmt.Fprintf(&b, "console.log($show(%s));\n", mainExpr)
+		if p.IOMain && usesOTP(p) {
+			// OTP's IO is async (the thunk returns a Promise): run main inside its own
+			// mailbox context (so primSelf/primReceive work for main too), then await.
+			thunk := jsName(p.Main) + "()"
+			fmt.Fprintf(&b, "(async () => { console.log($show(await __als.run(__mkbox(), () => %s))); })();\n", thunk)
+		} else {
+			fmt.Fprintf(&b, "console.log($show(%s));\n", mainExpr)
+		}
 	}
 	return TargetSource(b.String()), nil
 }
@@ -229,6 +243,32 @@ func (JS) Emit(p Program) (TargetSource, error) {
 // result to k, run that. Type arguments arrive as units. World/IO erase to units.
 const ioRuntime = `const pureIO = A => a => () => a;
 const bindIO = A => B => m => k => () => k(m())();
+`
+
+// ioRuntimeAsync is the IO monad for OTP programs (D5): IO A is a thunk returning a
+// Promise, so bindIO AWAITS each step — primReceive can block (await a message). `await`
+// of a plain value is the value, so the synchronous foreign prims compose unchanged.
+const ioRuntimeAsync = `const pureIO = A => a => () => a;
+const bindIO = A => B => m => k => () => (async () => { const v = await m(); return await (k(v)()); })();
+`
+
+// jsOTPRuntime is the LIVE OTP runtime for the JS backend (D5 / R-OTP) — a single-
+// threaded COOPERATIVE scheduler on the event loop (the R-OTP "JS microtask" shim). A
+// Pid is a mailbox {q: queue, w: receive-waiters, done: exit-waiters, dead}. Actor-
+// local identity (whose mailbox primSelf/primReceive read, ACROSS awaits) is carried by
+// Node's AsyncLocalStorage — the JS analogue of the Go goroutine-id / JVM ThreadLocal.
+const jsOTPRuntime = `import { AsyncLocalStorage } from 'node:async_hooks';
+const __als = new AsyncLocalStorage();
+const __mkbox = () => ({ q: [], w: [], done: [], dead: false });
+const __self = () => __als.getStore();
+const __mark = box => { if (!box.dead) { box.dead = true; box.done.forEach(r => r()); box.done = []; } };
+const Pid = () => _M => $unit;
+const primSelf = () => _M => () => __self();
+const primSpawn = () => _M => b => () => { const box = __mkbox(); __als.run(box, () => { Promise.resolve(b(box)()).finally(() => __mark(box)); }); return box; };
+const primSend = () => _M => p => x => () => { if (p.w.length) p.w.shift()(x); else p.q.push(x); return $unit; };
+const primReceive = () => _M => () => new Promise(res => { const box = __self(); if (box.q.length) res(box.q.shift()); else box.w.push(res); });
+const primExit = () => _M => p => () => { __mark(p); return $unit; };
+const primMonitor = () => _M => p => () => new Promise(res => { if (p.dead) res($unit); else p.done.push(() => res($unit)); });
 `
 
 // usesIO reports whether any emitted definition references an IO builtin.
