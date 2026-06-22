@@ -501,6 +501,37 @@ func TestD4MatMulRows(t *testing.T) {
 	}
 }
 
+// TestD4MatVecLen gates ch450: the machine-checked theorem len(matVec M v) = rows M (the
+// product vector has exactly one entry per row of M, for ALL M, v — induction over M,
+// cong succ on the IH), the output-shape dual of ch446's input contract. The proof
+// type-checks under TestListingsElaborateAndCheck; the witness runs and prints rows M = 2.
+func TestD4MatVecLen(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch450_matvec_len.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if first, _, _ := strings.Cut(got, "\n"); first != "2" {
+		t.Errorf("len(matVec M v) = %q, want first line 2", got)
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {

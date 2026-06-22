@@ -1,0 +1,81 @@
+-- Chapter 450 — the shape-safe M·v is PROVEN to have one entry per row (D2/D4).
+--
+-- ch446's safeMatVec carries an INPUT shape contract (cols M = len v). This proves the
+-- matching OUTPUT shape: `len (matVec M v) = rows M`, the product vector has exactly one
+-- entry per row of M, for ALL M and v. Together the two pin the operation's full shape
+-- behaviour — input conformance settled at the boundary, output dimension a theorem in the
+-- core — the companion to ch448's `rows (matMul A B) = rows A`. Induction over M
+-- (NatMatElim): base mnil (0 = 0, refl), step cong succ on the inductive hypothesis.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data NatMat  : U is mnil : NatMat  | mcons : NatList -> NatMat -> NatMat end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a end
+end
+len : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is Nat end) zero (fn (h : Nat) (r : NatList) (ih : Nat) is succ ih end) xs end
+end
+rows : NatMat -> Nat is
+  fn (m : NatMat) is NatMatElim (fn (x : NatMat) is Nat end) zero (fn (h : NatList) (r : NatMat) (ih : Nat) is succ ih end) m end
+end
+
+-- the dot of two rows (exact Nat) and M·v = dot each row of M with v (ch446).
+natDot : NatList -> NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList -> Nat end)
+      (fn (ys : NatList) is zero end)
+      (fn (h : Nat) (rest : NatList) (ih : NatList -> Nat) is
+         fn (ys : NatList) is
+           NatListElim (fn (y : NatList) is Nat end) zero
+             (fn (yh : Nat) (yrest : NatList) (ih2 : Nat) is natAdd (natMul h yh) (ih yrest) end) ys
+         end end)
+      xs
+  end
+end
+matVec : NatMat -> NatList -> NatList is
+  fn (m : NatMat) (v : NatList) is
+    NatMatElim (fn (x : NatMat) is NatList end)
+      nnil
+      (fn (h : NatList) (r : NatMat) (ih : NatList) is ncons (natDot h v) ih end)
+      m
+  end
+end
+
+-- THE THEOREM: for all M and v, M·v has exactly rows M entries. Induction on M.
+--   base  M = mnil:  len (matVec mnil v) = 0 = rows mnil                  (refl)
+--   step  M = mcons row rest: both sides reduce to `succ`, and the IH
+--         `len (matVec rest v) = rows rest` lifts under `succ` by cong.
+matVecLen : (m : NatMat) -> (v : NatList) -> Eq Nat (len (matVec m v)) (rows m) is
+  fn (m : NatMat) (v : NatList) is
+    NatMatElim (fn (x : NatMat) is Eq Nat (len (matVec x v)) (rows x) end)
+      refl
+      (fn (row : NatList) (rest : NatMat) (ih : Eq Nat (len (matVec rest v)) (rows rest)) is
+         cong Nat Nat succ (len (matVec rest v)) (rows rest) ih end)
+      m
+  end
+end
+
+-- a concrete witness so the chapter also RUNS: M = [[1,2],[3,4]], v = [5,6]; M·v = [17,39]
+-- has 2 entries = rows M. Print 2 (the proof guarantees this for every M, v).
+mat : NatMat is mcons (ncons 1 (ncons 2 nnil)) (mcons (ncons 3 (ncons 4 nnil)) mnil) end
+vec : NatList is ncons 5 (ncons 6 nnil) end
+
+foreign printNat : Nat -> IO Nat end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (len (matVec mat vec))) (fn (u1 : Nat) is pureIO Unit unit end)
+end

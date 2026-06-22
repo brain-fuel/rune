@@ -898,6 +898,11 @@ first and forces only on mismatch, so the fast path logs nothing.
         base refl, step cong succ on the IH). Machine-checked under TestListingsElaborateAndCheck;
         the witness runs to 2 (TestD4MatMulRows). The LA dimensions are theorems in the core,
         not just boundary contracts — the telos-3 tiered-stdlib bar applied to linear algebra.
+      • **D4 matVec row-count theorem** (ch450, v3.328.8) — the output-shape dual of ch446's
+        input contract: `len (matVec M v) = rows M` (the product vector has one entry per row
+        of M, for ALL M, v), induction over M, cong succ on the IH (TestD4MatVecLen). With
+        ch448 the two pin the full shape behaviour of the safe LA ops — input conformance at
+        the boundary, output dimension a core theorem.
       • **D4 furnace matmul tier-bridge** (ch449, v3.328.7) — the Savage furnace extended to
         2-D LA: the entry-sum of A·B by FOREIGN numpy matmul (npMatSum) is checked against the
         SAME sum by the EXACT proven shape-safe matMul (ch447), summed in Nat. Σ of
