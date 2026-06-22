@@ -470,6 +470,61 @@ func TestD4ShapeMatMul(t *testing.T) {
 	}
 }
 
+// TestD4ShapeMatMulNative carries ch447's shape-safe matrix×matrix to the NATIVE backends:
+// the same dimension-contract-checked product RUNS on C (self-contained) and LLVM-IR (emit
+// + EmitRuntimeFor runtime, clang), computing (A·B)(0,0)=19 identically to the source
+// backends. The in-language shape-safe LA executes across source + native.
+func TestD4ShapeMatMulNative(t *testing.T) {
+	s := loadListing(t, "ch447_shape_matmul.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("c", func(t *testing.T) {
+		if _, err := exec.LookPath("cc"); err != nil {
+			t.Skip("cc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.C{}.Emit(p)
+		f := filepath.Join(dir, "main.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+			t.Fatalf("[c] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[c] run: %v", err)
+		}
+		if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "19" {
+			t.Errorf("[c] A·B (0,0) = %q, want first line 19", strings.TrimSpace(string(out)))
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if _, err := exec.LookPath("clang"); err != nil {
+			t.Skip("clang not in PATH")
+		}
+		dir := t.TempDir()
+		ll, _ := codegen.LL{}.Emit(p)
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		f := filepath.Join(dir, "main.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(ll), 0o644)
+		os.WriteFile(rtf, []byte(rt), 0o644)
+		if out, err := exec.Command("clang", f, rtf, "-o", bin).CombinedOutput(); err != nil {
+			t.Fatalf("[ll] compile: %v\n%s", err, out)
+		}
+		out, err := exec.Command(bin).Output()
+		if err != nil {
+			t.Fatalf("[ll] run: %v", err)
+		}
+		if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "19" {
+			t.Errorf("[ll] A·B (0,0) = %q, want first line 19", strings.TrimSpace(string(out)))
+		}
+	})
+}
+
 // TestD4MatMulRows gates ch448: the machine-checked theorem rows(matMul A B) = rows A
 // (the product preserves the left operand's row count, for ALL A and B — induction over
 // A, cong succ on the IH). The proof type-checks under TestListingsElaborateAndCheck;
