@@ -1164,6 +1164,38 @@ func TestE3AdequacyClosure(t *testing.T) {
 	}
 }
 
+// TestE3QuietNeutral gates ch464: parQuietNeutral — ANY quiescent non-crash peer is
+// observationally neutral (visibleRun k (par p x) = visibleRun k x when okStep p = none and
+// isCrash p = false), generalizing ch459's halt-only parHaltNeutral. The crux okStepParQuiet
+// reduces okStep (par p x) via the two hypotheses (double subst). Broadens the adequate class
+// to peers beyond halt. Proofs type-check under TestListingsElaborateAndCheck; the witness (a
+// par-halt-halt peer beside a supervised crash) keeps the 1-failure trace (prints 1).
+func TestE3QuietNeutral(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch464_quiet_neutral.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "1" {
+		t.Errorf("quiet-neutral witness = %q, want first line 1", strings.TrimSpace(string(out)))
+	}
+}
+
 // TestE3TowerAdequacy gates ch459: the first PARAMETRIC adequacy — visibleRun n (tower n)
 // = project (tower n) for the INFINITE family of supervised towers (n units par crash
 // (mon halt) in parallel), one proof by induction on n. The key parHaltNeutral lemma (a
