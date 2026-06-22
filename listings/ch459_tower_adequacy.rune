@@ -1,0 +1,204 @@
+-- Chapter 459 — adequacy for an INFINITE family: the supervised tower (E3).
+--
+-- ch207 proved `visibleRun k P ≡ project P` for SPECIFIC well-supervised protocols, each by
+-- refl. The general all-P refinement is blocked on par-interleave fuel-threading. This
+-- lands the first PARAMETRIC adequacy — a single proof covering an infinite family of
+-- processes, by induction:
+--
+--   towerAdequacy : (n : Nat) -> visibleRun n (tower n) = project (tower n)
+--
+-- where `tower n` is n supervised units `par crash (mon halt)` composed in parallel. The
+-- key that threads the par-interleaving is `parHaltNeutral`: a HALTED left branch is
+-- observationally neutral (`visibleRun k (par halt X) = visibleRun k X`), so the inert
+-- `par halt` residue each detected unit leaves behind does not perturb the rest of the run.
+-- That sidesteps the fuel-DECOMPOSITION the general proof founders on: the fuel stays a
+-- single running budget, and the structural induction is on the tower height. Not the full
+-- all-P refinement (still open), but the first proof of adequacy over an unbounded family.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+data Label : U is ltau : Label | lfail : Label end
+data Proc : U is halt : Proc | mon : Proc -> Proc | par : Proc -> Proc -> Proc | crash : Proc end
+data Trans : U is tr : Label -> Proc -> Trans end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end) ys (fn (h : A) (t : List A) (ih : List A) is cons A h ih end) xs
+  end
+end
+labelOf : Trans -> Label is fn (t : Trans) is TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t end end
+procOf : Trans -> Proc is fn (t : Trans) is TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t end end
+
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+-- the fault-fragment step: par interleaves its branches; a crashed branch beside a monitor
+-- is DETECTed (one lfail). No communication prefixes in this fragment, so the rendezvous
+-- case of ch207's commT collapses to plain interleaving.
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (interleaveT iha ihb a b)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (interleaveT iha ihb a b)
+      (isCrash a)
+  end
+end
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+visible : Label -> Bool is fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false true l end end
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is BoolElim (fn (w : Bool) is List Label end) (cons Label l rest) rest (visible l) end
+end
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (okStep p)
+         end end)
+      n
+  end
+end
+project : Proc -> List Label is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is List Label end)
+      (nil Label)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (a : Proc) (b : Proc) (iha : List Label) (ihb : List Label) is append Label iha ihb end)
+      (cons Label lfail (nil Label))
+      x
+  end
+end
+
+-- THE KEY LEMMA: a halted left branch is observationally NEUTRAL. okStep (par halt X)
+-- re-emits exactly X's label and steps to `par halt X'`, so by induction on the fuel the
+-- whole run matches X's. Cases on okStep X (none -> both nil; some tb -> same head, the IH
+-- handles the persistent `par halt` residue on the tail).
+parHaltNeutral : (k : Nat) -> (x : Proc) -> Eq (List Label) (visibleRun k (par halt x)) (visibleRun k x) is
+  fn (k : Nat) is
+    NatElim (fn (m : Nat) is (x : Proc) -> Eq (List Label) (visibleRun m (par halt x)) (visibleRun m x) end)
+      (fn (x : Proc) is refl end)
+      (fn (m : Nat) (ih : (x : Proc) -> Eq (List Label) (visibleRun m (par halt x)) (visibleRun m x)) is
+         fn (x : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq (List Label)
+                  (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end)
+                     (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+                        (none Trans)
+                        (fn (tb : Trans) is some Trans (tr (labelOf tb) (par halt (procOf tb))) end)
+                        o))
+                  (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end)
+                     o)
+                end)
+             refl
+             (fn (tb : Trans) is
+                cong (List Label) (List Label) (fn (r : List Label) is consVis (labelOf tb) r end)
+                  (visibleRun m (par halt (procOf tb))) (visibleRun m (procOf tb)) (ih (procOf tb)) end)
+             (okStep x)
+         end
+       end)
+      k
+  end
+end
+
+-- the supervised tower: n units `par crash (mon halt)` in parallel (tower 0 = halt).
+unit : Proc is par crash (mon halt) end
+tower : Nat -> Proc is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Proc end) halt (fn (k : Nat) (t : Proc) is par unit t end) n end
+end
+
+-- THE PARAMETRIC ADEQUACY. Induction on n. Base: tower 0 = halt, both nil. Step: okStep of
+-- `par unit (tower n)` emits one lfail and steps to `par halt (tower n)` (the unit detects
+-- its own crash, leaving an inert halt); parHaltNeutral strips that halt, the IH closes the
+-- rest, and project's append prepends the same lfail.
+towerAdequacy : (n : Nat) -> Eq (List Label) (visibleRun n (tower n)) (project (tower n)) is
+  fn (n : Nat) is
+    NatElim (fn (m : Nat) is Eq (List Label) (visibleRun m (tower m)) (project (tower m)) end)
+      refl
+      (fn (m : Nat) (ih : Eq (List Label) (visibleRun m (tower m)) (project (tower m))) is
+         cong (List Label) (List Label) (fn (r : List Label) is cons Label lfail r end)
+           (visibleRun m (par halt (tower m))) (project (tower m))
+           (transEq (List Label)
+              (visibleRun m (par halt (tower m))) (visibleRun m (tower m)) (project (tower m))
+              (parHaltNeutral m (tower m)) ih) end)
+      n
+  end
+end
+
+data Unit : U is unit0 : Unit end
+foreign printNat : Nat -> IO Nat end
+
+-- witness: tower 3 has three supervised crashes; visibleRun 3 detects all three, matching
+-- project's three lfails. Print the length of visibleRun 3 (tower 3) = 3.
+lenL : List Label -> Nat is
+  fn (xs : List Label) is ListElim Label (fn (w : List Label) is Nat end) zero (fn (h : Label) (t : List Label) (ih : Nat) is succ ih end) xs end
+end
+three : Nat is succ (succ (succ zero)) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (lenL (visibleRun three (tower three)))) (fn (u : Nat) is pureIO Unit unit0 end)
+end

@@ -822,7 +822,14 @@ first and forces only on mismatch, so the fast path logs nothing.
       wall). Its growth UPPER bound landed too (ch456, v3.328.16): lenBound — the observation
       over n fuel has at most n labels (leb (len (visibleRun n p)) n = true), so from k to k+1
       the trace grows by exactly 0 or 1; both building blocks for the refinement, neither
-      closes the wall. Plus: a VERIFIED CRDT corpus over two
+      closes the wall. FIRST PARAMETRIC ADEQUACY landed (ch459, v3.328.21): towerAdequacy —
+      visibleRun n (tower n) = project (tower n) over the INFINITE family of supervised towers
+      (n units par crash (mon halt) in parallel), ONE proof by induction on n (ch207 had only
+      per-protocol refl). The key parHaltNeutral (a halted left branch is observationally
+      neutral, visibleRun k (par halt X) = visibleRun k X) threads the par-interleaving by
+      absorbing the inert par-halt residue each detected unit leaves — sidestepping fuel
+      decomposition. Not the full all-P refinement, but the first adequacy over an unbounded
+      family. Plus: a VERIFIED CRDT corpus over two
       lattices carrying convergence+safety+stability (G-Counter/G-Set/PN-Counter
       ch410–419), refutations matching the simulator's law linter (ch416/417); the
       `internal/sim` + `rune simulate` better-than-Winglang SIMULATOR (v3.230–v3.248,

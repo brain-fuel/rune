@@ -864,6 +864,38 @@ func TestE3MaxRegisterInflation(t *testing.T) {
 	}
 }
 
+// TestE3TowerAdequacy gates ch459: the first PARAMETRIC adequacy — visibleRun n (tower n)
+// = project (tower n) for the INFINITE family of supervised towers (n units par crash
+// (mon halt) in parallel), one proof by induction on n. The key parHaltNeutral lemma (a
+// halted left branch is observationally neutral) threads the par-interleaving that blocks
+// the general all-P refinement. The proofs type-check under TestListingsElaborateAndCheck;
+// the witness runs tower 3 to a 3-failure trace (prints 3).
+func TestE3TowerAdequacy(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch459_tower_adequacy.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "3" {
+		t.Errorf("tower-3 adequacy witness = %q, want first line 3", strings.TrimSpace(string(out)))
+	}
+}
+
 // TestE3VisibleRunLenBound gates ch456: the adequacy bound lenBound — the runtime
 // observation over n fuel has at most n labels (leb (len (visibleRun n p)) n = true), each
 // step emitting at most one observable. With ch452's prefix-monotonicity this pins the
