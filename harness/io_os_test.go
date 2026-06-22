@@ -602,6 +602,61 @@ func TestD4CPythonNumpyLL(t *testing.T) {
 	}
 }
 
+// TestFurnaceCPythonEmbed is the Savage furnace bridge for the CPython embed: a^b computed
+// by FOREIGN embedded Python (pyPow) is checked equal (beqNat) to the EXACT proven natPow
+// (NatElim over the Nat semiring). A 1 means the embedded interpreter agrees with the
+// machine-checked arithmetic — the tested→proven on-ramp now reaches the CPython host. 2^4 =
+// 16 both ways: "16\n1". Native C + libpython (python3-config --embed); skips without them.
+func TestFurnaceCPythonEmbed(t *testing.T) {
+	if _, err := exec.LookPath("cc"); err != nil {
+		t.Skip("cc not in PATH")
+	}
+	pyCfg, err := exec.LookPath("python3-config")
+	if err != nil {
+		t.Skip("python3-config not in PATH")
+	}
+	incOut, err := exec.Command(pyCfg, "--includes").Output()
+	if err != nil {
+		t.Skipf("python3-config --includes failed: %v", err)
+	}
+	ldOut, err := exec.Command(pyCfg, "--ldflags", "--embed").Output()
+	if err != nil {
+		ldOut, err = exec.Command(pyCfg, "--ldflags").Output()
+		if err != nil {
+			t.Skipf("python3-config --ldflags failed: %v", err)
+		}
+	}
+	s := loadListing(t, "ch465_furnace_cpython.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.C{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cf := filepath.Join(dir, "main.c")
+	bin := filepath.Join(dir, "main.bin")
+	if err := os.WriteFile(cf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{cf}
+	args = append(args, strings.Fields(string(incOut))...)
+	args = append(args, "-o", bin)
+	args = append(args, strings.Fields(string(ldOut))...)
+	if out, err := exec.Command("cc", args...).CombinedOutput(); err != nil {
+		t.Skipf("[c] compile with libpython failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("[c] run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "16\n1") {
+		t.Errorf("furnace-cpython agreement = %q, want it to start 16\\n1", got)
+	}
+}
+
 func TestD4PlottingPy(t *testing.T) {
 	py, err := exec.LookPath("python3")
 	if err != nil {

@@ -1,0 +1,48 @@
+-- Chapter 465 — the FURNACE bridges the CPython embed to the proven tier (Savage).
+--
+-- The furnace ties a FAST/foreign world to the EXACT proven world (ch232 numpy, ch449/451
+-- matmul/max). This ties the newest foreign world — the EMBEDDED CPython (ch462) — to the
+-- proven Nat arithmetic: compute a^b BOTH ways and confirm they agree.
+--   (a) by FOREIGN embedded Python (`pyPow`, real CPython pow() inside the native binary), and
+--   (b) by the EXACT proven `natPow` (NatElim over the Nat semiring — no foreign anything),
+-- and the furnace checks they are EQUAL (decidable beqNat). A 1 means the embedded interpreter
+-- agrees with the machine-checked arithmetic — the Savage on-ramp now reaches the CPython host.
+-- 2^4 = 16 both ways. Observable (native + python): "16\n1". (A small exponent keeps the proven natPow cheap on the native eliminator.)
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a end
+end
+-- EXACT proven exponentiation: a^b by recursion on b over the Nat semiring.
+natPow : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) (succ zero) (fn (k : Nat) (ih : Nat) is natMul a ih end) b end
+end
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (b : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) b end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (b : Nat) is NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ihk j end) b end end)
+      a
+  end
+end
+boolToNat : Bool -> Nat is fn (b : Bool) is BoolElim (fn (w : Bool) is Nat end) (succ zero) zero b end end
+
+foreign printNat : Nat -> IO Nat end
+foreign pyPow    : Nat -> Nat -> Nat end
+
+-- the bridge verdict: does the embedded-Python pow agree with the proven natPow?
+agree : Nat is boolToNat (beqNat (pyPow 2 4) (natPow 2 4)) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (pyPow 2 4)) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat agree) (fn (u2 : Nat) is pureIO Unit unit end)
+  end)
+end
