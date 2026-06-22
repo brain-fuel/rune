@@ -30,13 +30,18 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesQuot(p) {
 		b.WriteString(quotRuntime)
 	}
-	if usesOTP(p) {
-		// D5 / R-OTP: an OTP program needs an ASYNC IO monad (primReceive blocks ->
-		// awaits) + the cooperative microtask scheduler. Contained to usesOTP programs:
-		// ordinary IO keeps the synchronous runtime, so all other js conformance is
-		// untouched.
+	if usesOTP(p) || usesLiveKV(p) {
+		// An OTP program (primReceive blocks) or a live-broker program (socket I/O is
+		// async on Node) needs the ASYNC IO monad (bindIO awaits). Contained to these
+		// programs: ordinary IO keeps the synchronous runtime, so all other js
+		// conformance is untouched.
 		b.WriteString(ioRuntimeAsync)
-		b.WriteString(jsOTPRuntime)
+		if usesOTP(p) {
+			b.WriteString(jsOTPRuntime)
+		}
+		if usesLiveKV(p) {
+			b.WriteString(jsLiveKVRuntime)
+		}
 	} else if usesIO(p) {
 		b.WriteString(ioRuntime)
 	}
@@ -55,7 +60,7 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	}
 	// D6 net/fs: the packed-String codec (decode code->string, encode string->code)
 	// + env/file host bodies, over bare Nat codes (the Rune side wraps `bytes`).
-	if usesFileEnv(p) {
+	if usesFileEnv(p) || usesLiveKV(p) {
 		// globalThis.String (NOT bare `String`): a Rune `String : U` def emits a
 		// top-level `const String` that would shadow the JS builtin.
 		b.WriteString("const __s2h = n => { let s = ''; while (n > 1n) { s += globalThis.String.fromCharCode(Number(n % 256n)); n = n / 256n; } return s; };\n")
@@ -231,6 +236,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 			// mailbox context (so primSelf/primReceive work for main too), then await.
 			thunk := jsName(p.Main) + "()"
 			fmt.Fprintf(&b, "(async () => { console.log($show(await __als.run(__mkbox(), () => %s))); })();\n", thunk)
+		} else if p.IOMain && usesLiveKV(p) {
+			// live-kv IO is async (socket round-trips); await main before showing.
+			fmt.Fprintf(&b, "(async () => { console.log($show(await %s())); })();\n", jsName(p.Main))
 		} else {
 			fmt.Fprintf(&b, "console.log($show(%s));\n", mainExpr)
 		}
@@ -269,6 +277,19 @@ const primSend = () => _M => p => x => () => { if (p.w.length) p.w.shift()(x); e
 const primReceive = () => _M => () => new Promise(res => { const box = __self(); if (box.q.length) res(box.q.shift()); else box.w.push(res); });
 const primExit = () => _M => p => () => { __mark(p); return $unit; };
 const primMonitor = () => _M => p => () => new Promise(res => { if (p.dead) res($unit); else p.done.push(() => res($unit)); });
+`
+
+// jsLiveKVRuntime is the E4 live-broker data-plane binding for the JS backend: kv +
+// queue ops speak RESP over a Node socket to $WAVELET_KV_URL. Node sockets are async,
+// so each op returns a Promise the async IO monad awaits (the Go/JVM bindings block
+// instead). Hand-rolled RESP, no third-party dependency (node:net only).
+const jsLiveKVRuntime = `import * as __net from 'node:net';
+const __kvAddr = () => { let u = (process.env.WAVELET_KV_URL || '').replace('redis://', ''); if (!u) u = 'localhost:6379'; const ix = u.indexOf(':'); return { h: u.slice(0, ix), p: Number(u.slice(ix + 1)) }; };
+const __resp = (...args) => new Promise(res => { const { h, p } = __kvAddr(); const sock = __net.connect(p, h, () => { let cmd = '*' + args.length + '\r\n'; for (const a of args) cmd += '$' + a.length + '\r\n' + a + '\r\n'; sock.write(cmd); }); let buf = ''; let done = false; const fin = v => { if (!done) { done = true; res(v); sock.end(); } }; sock.on('data', d => { buf += d.toString('latin1'); const i = buf.indexOf('\r\n'); if (i < 0) return; const line = buf.slice(0, i); if (line[0] === '+') fin(line.slice(1)); else if (line[0] === '$') { const n = parseInt(line.slice(1)); if (n < 0) { fin(''); return; } if (buf.length >= i + 2 + n) fin(buf.slice(i + 2, i + 2 + n)); } else fin(''); }); sock.on('error', () => fin('')); });
+const kvSetLive = () => k => v => () => __resp('SET', __s2h(k), __s2h(v)).then(() => v);
+const kvGetLive = () => k => () => __resp('GET', __s2h(k)).then(r => __h2s(r));
+const enqueueLive = () => q => m => () => __resp('LPUSH', __s2h(q), __s2h(m)).then(() => m);
+const dequeueLive = () => q => () => __resp('RPOP', __s2h(q)).then(r => __h2s(r));
 `
 
 // usesIO reports whether any emitted definition references an IO builtin.

@@ -117,6 +117,43 @@ func TestLiveKVRoundTrip(t *testing.T) {
 			}
 		}
 	}
+	// And on JS (node:net async RESP, awaited by the async IO monad) — the third source
+	// backend with a live binding (Go/JVM block on the socket; JS awaits).
+	if _, err := exec.LookPath("node"); err == nil {
+		flush2 := exec.Command("docker", "compose", "exec", "-T", "valkey", "valkey-cli", "FLUSHALL")
+		flush2.Dir = cdir
+		flush2.Run()
+		for _, c := range []struct{ file, want string }{
+			{"ch444_live_kv.rune", "world"},
+			{"ch445_live_queue.rune", "first"},
+		} {
+			s := loadListing(t, c.file)
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := codegen.JS{}.Emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			jf := filepath.Join(t.TempDir(), "main.mjs")
+			if err := os.WriteFile(jf, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			run := exec.Command("node", jf)
+			run.Env = append(os.Environ(), "WAVELET_KV_URL=redis://localhost:6399")
+			out, err := run.Output()
+			if err != nil {
+				t.Fatalf("[js %s] run: %v", c.file, err)
+			}
+			if !strings.Contains(string(out), c.want) {
+				t.Errorf("[js %s] live data-plane gave %q, want %q", c.file, strings.TrimSpace(string(out)), c.want)
+			}
+			f2 := exec.Command("docker", "compose", "exec", "-T", "valkey", "valkey-cli", "FLUSHALL")
+			f2.Dir = cdir
+			f2.Run()
+		}
+	}
 }
 
 // The v1.0.0 freeze criterion (ref_docs/rune-v1-design.md): every listing in
