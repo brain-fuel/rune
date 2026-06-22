@@ -826,7 +826,10 @@ first and forces only on mismatch, so the fast path logs nothing.
       gates by observed behaviour — safety/robustness/durability — with a `Diagnose` CvRDT
       law linter + `Stabilize` liveness check); expanded algebra (2P-Set ch422, the generic
       CvRDT SEC theorem ch423, VECTOR CLOCKS ch424–427, causal delivery ch428, MV-Register
-      ch429, OR-Set ch430, inflation ch431, gossip-converges ch432, N-replica VCs ch437);
+      ch429, OR-Set ch430, inflation ch431, gossip-converges ch432, N-replica VCs ch437,
+      the grow-only MAX-REGISTER ch453 — a register CAN be a CvRDT when its merge is a JOIN
+      (natMax), proven comm/idem/assoc by lifting ch369–373's lattice laws, the honest
+      resolution of ch416's naive take-peer LWW refutation, v3.328.11);
       and the LIVE-ACTOR projection — the verified replicated counter RUNS as gossiping BEAM
       processes, the fault-tolerance trilogy live (converge/durability/recovery ch433–435)
       + the GENERIC protocol→actors library `serveG` over any CvRDT (ch436). Remaining E4:

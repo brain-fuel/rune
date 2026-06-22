@@ -565,6 +565,37 @@ func TestE3VisibleRunPrefix(t *testing.T) {
 	}
 }
 
+// TestE3MaxRegister gates ch453: the grow-only max-register is a CvRDT — merge = natMax,
+// proven commutative/idempotent/associative (the convergence ch416's naive take-peer LWW
+// FAILS), lifted from ch369–373's lattice laws by cong reg. The proofs type-check under
+// TestListingsElaborateAndCheck; the witness merges replicas {3,7} both orders and prints
+// 7 twice — convergence to the max.
+func TestE3MaxRegister(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch453_max_register_crdt.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "7\n7") {
+		t.Errorf("max-register convergence = %q, want it to start 7\\n7", got)
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {
