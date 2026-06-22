@@ -321,6 +321,37 @@ func TestD4PlottingPy(t *testing.T) {
 	}
 }
 
+// TestD4ShapeMatVec is the D4 2-D shape-safety gate: the shape-checked matrix×vector
+// (ch446) elaborates — the dimension contract `Eq Nat (cols M) (len v)` type-checks —
+// and computes the product. [[1,2],[3,4]]·[5,6] = [17,39]; main prints the head, 17.
+// (A length-3 vector would be a COMPILE ERROR, the shape mismatch the type rejects.)
+func TestD4ShapeMatVec(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch446_shape_matvec.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if first, _, _ := strings.Cut(got, "\n"); first != "17" {
+		t.Errorf("shape-checked M·v head = %q, want first line 17", got)
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {
