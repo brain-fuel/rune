@@ -426,7 +426,8 @@ func TestD4CPythonEmbed(t *testing.T) {
 // marshals a Rune FList into a Python list and runs REAL numpy in the embedded interpreter —
 // ch463's pyNpSum [1,2,3,4] = 10, and pyNpScale returns an ARRAY back as a Rune FList
 // ((np*3).tolist() = [3,6,9,12], summed in-language to 30) — the bidirectional structured
-// bridge. Compiled with python3-config --embed; skips without cc / python3-config / numpy.
+// bridge. pyNpMatVec adds the 2-D rung: a flat (2x2) matrix @ a vector via numpy reshape =
+// [17,39], summed to 56. Compiled with python3-config --embed; skips without cc / numpy.
 func TestD4CPythonNumpy(t *testing.T) {
 	if _, err := exec.LookPath("cc"); err != nil {
 		t.Skip("cc not in PATH")
@@ -475,8 +476,8 @@ func TestD4CPythonNumpy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("[c] run: %v", err)
 	}
-	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "10\n30") {
-		t.Errorf("CPython-numpy gave %q, want it to start 10\\n30", got)
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "10\n30\n56") {
+		t.Errorf("CPython-numpy gave %q, want it to start 10\\n30\\n56", got)
 	}
 }
 

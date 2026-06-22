@@ -822,8 +822,10 @@ first and forces only on mismatch, so the fast path logs nothing.
       into a Python list and runs REAL numpy.array(xs).sum() in the embedded interpreter ([1,2,3,4]
       → 10); pyNpScale returns an ARRAY back as a Rune FList ((np*3).tolist() walked into fcons/
       fnil via mkcon, summed in-language to 30, v3.328.29) — so the BIDIRECTIONAL structured
-      bridge round-trips (Rune list → numpy → Rune list). The embed now spans nat/float/bignum/
-      list both ways + stdlib + numpy. Remaining: the general `Array dt sh` ndarray handle (shapes/dtypes).
+      bridge round-trips (Rune list → numpy → Rune list). pyNpMatVec adds the 2-D rung (v3.328.30):
+      a flat (m×k) matrix + vector → numpy reshape + A@v → result FList ([[1,2],[3,4]]@[5,6]=[17,39]).
+      The embed now spans nat/float/bignum/1-D-list/2-D-shaped both ways + stdlib + numpy.
+      Remaining: the general `Array dt sh` ndarray handle (arbitrary shapes/dtypes).
     - **E3/E4 distributed** — the big one. General all-P adequacy: SOUNDNESS ch409 +
       COMPLETENESS ch421 over the full four-label calculus closed; the all-P REFINEMENT stays
       open (blocked on par-interleave fuel-threading, documented). A first building block

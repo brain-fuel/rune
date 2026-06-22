@@ -22,8 +22,12 @@ foreign floatToNat : Float -> Nat end
 foreign fadd       : Float -> Float -> Float end
 foreign pyNpSum    : FList -> Float end
 foreign pyNpScale  : FList -> Nat -> FList end
+foreign pyNpMatVec : FList -> Nat -> Nat -> FList -> FList end
 
 xs : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+-- a 2x2 matrix [[1,2],[3,4]] flat row-major, and a vector [5,6].
+matA : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+vecB : FList is fcons (fromNat 5) (fcons (fromNat 6) fnil) end
 
 -- in-language fold proving the numpy-returned FList is a real, usable Rune value.
 sumFList : FList -> Float is
@@ -35,6 +39,8 @@ end
 
 main : IO Unit is
   bindIO Nat Unit (printNat (floatToNat (pyNpSum xs))) (fn (u1 : Nat) is
-    bindIO Nat Unit (printNat (floatToNat (sumFList (pyNpScale xs 3)))) (fn (u2 : Nat) is pureIO Unit unit end)
+    bindIO Nat Unit (printNat (floatToNat (sumFList (pyNpScale xs 3)))) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat (floatToNat (sumFList (pyNpMatVec matA 2 2 vecB)))) (fn (u3 : Nat) is pureIO Unit unit end)
+    end)
   end)
 end
