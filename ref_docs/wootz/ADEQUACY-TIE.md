@@ -79,3 +79,49 @@ trust boundary, not a running one — recorded here so it reads as what it is.
   the fault tie closes by *adding runtime*, never by weakening a proof.
 - **Savage:** the correspondence is teachable as three readable listings
   (`ch206` spec, `ch207`/`ch209` proof, `ch205` run) plus this one-page tie.
+
+## Toward the general all-P refinement (the open research item — scoping, 2026-06-22)
+
+`ch207` proves the projection refines the fault LTS **per protocol** (single/multi-
+fault/survivor/quiet/fuel-stable). `ch409` + `ch421` close the *alphabet* halves for
+ALL P (soundness: both semantics stay observable; completeness: the runtime emits only
+`{ltau, lfail}`). What stays open is the **general refinement for every well-supervised
+P at once**: `visibleRun k P ≡ project P`. It is blocked on **par-interleave fuel-
+threading** — for `par a b`, the `k` steps interleave `a` and `b` unpredictably, so the
+fixed-fuel induction cannot recurse on a "fuel for `a`" + "fuel for `b`" split; the fuel
+does not decompose over `par`.
+
+**What the 2026-06-22 lemmas add.** Two structural facts about `visibleRun` now hold for
+ALL fuel and ALL processes:
+- `prefixMono` (`ch452`): `visibleRun k P` is a PREFIX of `visibleRun (k+1) P`.
+- `lenBound` (`ch456`): `len (visibleRun n P) ≤ n` (each step emits ≤ 1 observable).
+
+Together the finite runs form a **monotone, length-bounded ω-chain** that grows by 0 or 1
+per step. That is exactly the data an order-theoretic limit argument needs.
+
+**Three candidate attacks (in decreasing promise):**
+1. **State the refinement at the LIMIT, not at fixed fuel.** The ω-chain's supremum is the
+   coinductive observation stream `ch209` already builds (`fib (Option Label)` over
+   `fib Proc`). Comparing the LIMIT traces of runtime vs spec turns the par problem from
+   fuel-arithmetic into a **bisimulation** — and `ch208`'s `traceBisim` already handles
+   interleaving coinductively (no fuel bound). `prefixMono`/`lenBound` are the bridge lemmas
+   justifying that the finite runs converge to that limit, so the fixed-`k` obligation is
+   discharged by "every finite prefix agrees" rather than a `k`-indexed induction. This
+   reuses the machinery that ALREADY closed `ch209` and sidesteps fuel decomposition
+   entirely. **Most promising; consistent with the coinductive route that worked.**
+2. **A simulation relation closed under `par`.** Define `R` between runtime and spec states,
+   prove it a weak simulation, and — the crux — prove `R` is closed under parallel
+   composition (`a R a'`, `b R b'` ⟹ `par a b R par a' b'`). Par-closure of a (bi)simulation
+   is the standard CCS technique and needs no fuel; the work is the closure lemma, which the
+   `interleaveT`/`commT`/`parOk` structure of `okStep` should support directly.
+3. **Replace fuel with a structural measure on `Proc`** that decomposes over `par`
+   (e.g. total observable-emitting depth). Least promising — inventing a well-founded
+   measure that both decomposes over `par` and bounds the run is itself the hard part the
+   fuel was standing in for.
+
+**Recommendation.** Pursue (1): restate the general refinement as trace-equality of the
+LIMIT streams via `traceBisim`, using `prefixMono`/`lenBound` as the finite-approximation
+bridge. This keeps the proof coinductive (where `par` interleaving is already solved in
+`ch208`/`ch209`) and the outer kernel fixed (Thompson). This is a scoping note, not a
+proof — the open item remains open — but the attack is now concrete and leverages landed
+machinery rather than waiting on a fuel-decomposition lemma that does not exist.
