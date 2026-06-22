@@ -106,6 +106,17 @@ proven → deployed → in-process-run → LIVE on a real broker.
   Lambert "it runs" gate: ch436's generic serveG replica, deployed at a G-Counter, comes
   up as live gossiping BEAM actors and converges to its certified value (4). Proven,
   deployed, running, from one source.
+- **Apply mode (`--apply`, LANDED):** emit is not the end; `--apply` STANDS THE ARTIFACT
+  UP (`infra/apply.go`, `infra.Apply`). Dispatched on `Emitter.Cloud()`: a FOSS backend
+  comes up on `docker compose up -d` (and `down -v` on `--destroy`); a cloud backend
+  applies through `terraform init`/`apply`. `--localstack[=URL]` writes a terraform
+  OVERRIDE file (`localstack_override.tf`, whose `_override.tf` merge replaces the
+  base `provider "aws"` endpoints + creds) so the UNCHANGED emitter HCL applies against a
+  local fake cloud with NO account and NO bill. `--destroy` is the apply-then-teardown
+  lifecycle (a CI gate or a free-tier demo that leaves nothing running). So the same
+  agnostic source emits, then stands up, on a self-hosted broker AND a cloud-API target,
+  both for free. The shadow rule holds: Apply writes throwaway files into a work dir and
+  shells out to the standard tools, never touching core/store.
 
 ## The `protocol … end` block (E4 surface)
 
@@ -125,6 +136,12 @@ Per row: provider-resource golden + `terraform fmt -check` on every emitted main
 cross-provider logical equivalence + the FOSS Compose/env. Plus the `.rune` interface
 type-checks (data-plane), the protocol block accepts/rejects correctly, and `rune deploy
 … --target beam` runs the verified CvRDT to convergence (skip-if-escript-absent).
+The APPLY path is gated live with NO cloud account: `TestApplyFOSSStandingRoundTrip`
+(infra) + `TestDeployApplyFOSSCLI` (cmd) stand a real Valkey up via compose and PING it;
+`TestApplyLocalStackBucketReallyCreated` (infra) + `TestDeployApplyLocalStackCLI` (cmd)
+apply an S3 bucket from the AWS emitter HCL against LocalStack, VERIFY the bucket really
+exists, then destroy it. All skip cleanly without docker / terraform / the LocalStack
+image, so the suite stays green offline.
 
 ## Live data-plane binding (LANDED v3.327.0–v3.327.x, ch444/ch445)
 
@@ -150,8 +167,11 @@ up → PONG → down, skip-if-no-docker).
   stream/cdn/lb/metrics/iam/k8s/network/firewall/logs/registry/paas.) The remaining categories mostly
   have one dependency-heavy provider (CloudFront origins, LB target groups, Synapse
   storage); add them when a consumer needs them (Standing Rule 1).
-- **Cloud apply:** graduate from `fmt`/`validate` to real `apply` once accounts + creds
-  exist (a credentialed milestone, not CI).
+- **Cloud apply:** the apply LIFECYCLE is LANDED and gated live against LocalStack with no
+  account (`--apply --localstack`, see Apply mode above). What REMAINS is real-account
+  apply against billed AWS/Azure/GCP: the same `--apply` path with the LocalStack override
+  dropped (credentials from the environment); a credentialed milestone, not CI. The cloud
+  `endpoints` override is AWS-only today; Azure/GCP local-emulation is a later add.
 
 Tags: v3.291.0 (queue/kv/object) · v3.292.0 (protocol block) · v3.293.0 (compute +
 container) · v3.294.0 (deploy runs a protocol on BEAM) · v3.294.1 (contextual keyword

@@ -40,6 +40,28 @@ rune deploy --manifest examples/app.wav --backend gcp    > app.tf   # … same l
 deployment equivalence is the gate. 13 abstractions also have a self-hosted FOSS backend
 (`--backend valkey|redpanda|…`) that runs under Podman/Docker with no cloud account.
 
+### 3b. APPLY: emit is not enough, stand it up (no cloud account, no bill)
+
+`--apply` does not just write the artifact, it runs it. A FOSS backend comes up on
+docker compose; a cloud backend applies through terraform, and `--localstack` redirects
+the AWS provider at a local fake cloud so the unchanged emitter HCL applies with no
+account. `--destroy` tears it back down (the apply-then-destroy lifecycle a CI gate or a
+free-tier demo wants):
+
+```sh
+# FOSS: stand a real Valkey up from the emitted compose, then tear it down.
+rune deploy --resource kv --name cache --backend valkey --apply --destroy
+
+# CLOUD via LocalStack: apply an S3 bucket from the AWS emitter HCL, no account.
+docker run -d --name ls -p 4566:4566 localstack/localstack:3      # the local fake cloud
+rune deploy --resource object --name data --backend aws --apply --localstack --destroy
+```
+
+The same agnostic source emits, then stands up, on a self-hosted broker AND on a
+cloud-API-compatible target, both for free. (Gated by `TestApplyFOSSStandingRoundTrip`,
+which PINGs the standing Valkey, and `TestApplyLocalStackBucketReallyCreated`, which
+applies an S3 bucket and verifies it really exists in LocalStack before destroying it.)
+
 ## 4. RUN — the verified value executes, cross-backend
 
 ```sh

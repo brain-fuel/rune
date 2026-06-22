@@ -13,6 +13,11 @@ import (
 	"goforge.dev/rune/v3/infra"
 )
 
+// defaultLocalStackEndpoint is the LocalStack edge address `--localstack` (bare) uses
+// — the standard LocalStack Community edge port. It lets `rune deploy --apply` stand a
+// cloud manifest up against a local fake AWS with no account and no bill.
+const defaultLocalStackEndpoint = "http://localhost:4566"
+
 // runDeploy is the `rune deploy` verb (E4 / the wavelet infra layer): it lowers an
 // agnostic resource to a concrete deployment artifact for the chosen backend — an
 // OpenTofu/Terraform main.tf for a cloud (aws|azure|gcp), or a Podman Compose spec +
@@ -20,11 +25,18 @@ import (
 // --out the files are written to a directory; otherwise they print to stdout. One
 // agnostic config yields an equivalent deployment on every backend.
 //
+// With --apply the artifact is not just written but STOOD UP (infra.Apply): docker
+// compose for a FOSS backend, or terraform for a cloud backend. --localstack[=URL]
+// redirects a cloud apply at LocalStack so it needs no account and no bill; --destroy
+// tears the deployment down right after (the apply-then-destroy lifecycle).
+//
 // Slice 1 drives the resource from flags (--resource/--name); declaring resources
 // in-language (an `infra`/`protocol` block in FILE) is the next step.
 func runDeploy(args []string, out io.Writer) error {
-	var resource, name, backend, outDir, image, target, manifest string
+	var resource, name, backend, outDir, image, target, manifest, localstack string
 	fifo := false
+	apply := false
+	destroy := false
 	replicas := 1
 	var positional []string
 	for i := 0; i < len(args); i++ {
@@ -54,6 +66,16 @@ func runDeploy(args []string, out io.Writer) error {
 			manifest = strings.TrimPrefix(a, "--manifest=")
 		case a == "--fifo":
 			fifo = true
+		case a == "--apply":
+			apply = true
+		case a == "--destroy":
+			destroy = true
+		case a == "--localstack":
+			// Bare flag uses the default LocalStack endpoint; `--localstack=URL`
+			// (handled below) overrides it.
+			localstack = defaultLocalStackEndpoint
+		case strings.HasPrefix(a, "--localstack="):
+			localstack = strings.TrimPrefix(a, "--localstack=")
 		case a == "--image":
 			image, err = val()
 		case a == "--replicas":
@@ -94,6 +116,15 @@ func runDeploy(args []string, out io.Writer) error {
 		}
 	}
 
+	// --localstack alone means "apply against LocalStack"; --destroy means the
+	// apply-then-teardown lifecycle, which only makes sense with --apply.
+	if localstack != "" {
+		apply = true
+	}
+	if destroy {
+		apply = true
+	}
+
 	// WORKLOAD MODE: `rune deploy FILE [NAME] --target beam` deploys + RUNS a verified
 	// protocol's actor system on a real backend (the Lambert "it runs" gate). A code
 	// target or a positional FILE selects it.
@@ -117,7 +148,7 @@ func runDeploy(args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		return writeArtifact(art, outDir, out)
+		return finishDeploy(e, art, outDir, apply, destroy, localstack, out)
 	}
 
 	// INFRA MODE: lower a single agnostic resource to a deployment artifact.
@@ -139,7 +170,42 @@ func runDeploy(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return writeArtifact(art, outDir, out)
+	return finishDeploy(e, art, outDir, apply, destroy, localstack, out)
+}
+
+// finishDeploy either WRITES the emitted artifact (the default emit-only behaviour) or
+// — with --apply — STANDS IT UP via infra.Apply: docker compose for a FOSS backend, or
+// terraform-against-LocalStack for a cloud backend. With --destroy it tears down again
+// right after (the apply-then-destroy lifecycle: a CI gate or a free-tier demo that
+// leaves nothing running).
+func finishDeploy(e infra.Emitter, art infra.Artifact, outDir string, apply, destroy bool, localstack string, out io.Writer) error {
+	if !apply {
+		return writeArtifact(art, outDir, out)
+	}
+	res, err := infra.Apply(e, art, infra.ApplyOptions{
+		WorkDir:    outDir,
+		Destroy:    destroy,
+		LocalStack: localstack,
+		Out:        out,
+	})
+	if err != nil {
+		return err
+	}
+	status := "standing"
+	if !res.Standing {
+		status = "torn down"
+	}
+	fmt.Fprintf(out, "deploy: %s %s (%d resource(s))%s\n",
+		res.Target, status, len(res.Logical), endpointNote(res.Endpoint))
+	return nil
+}
+
+// endpointNote renders " at <endpoint>" when known, else "".
+func endpointNote(ep string) string {
+	if ep == "" {
+		return ""
+	}
+	return " at " + ep
 }
 
 // parseManifest reads a wavelet manifest: one resource per line, `<kind> <name>

@@ -206,6 +206,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  rune deploy <file> [name] --target <backend>   (deploy + RUN a verified protocol)")
 	fmt.Fprintln(os.Stderr, "  rune deploy --resource <kind> --name <n> --backend <b> [--out dir] [--replicas N] [--image ref] [--fifo]")
 	fmt.Fprintln(os.Stderr, "  rune deploy --manifest <file> --backend <b> [--out dir]   (a whole resource graph)")
+	fmt.Fprintln(os.Stderr, "    add --apply to STAND IT UP (docker compose for FOSS; terraform for cloud),")
+	fmt.Fprintln(os.Stderr, "    --localstack[=URL] applies a cloud manifest to LocalStack (no account), --destroy tears down after")
 	fmt.Fprintf(os.Stderr, "    kinds: %s\n", strings.Join(infra.Kinds(), " "))
 	fmt.Fprintf(os.Stderr, "  targets: %s (aliases: python, rust, golang, javascript)\n",
 		strings.Join(codegen.Targets(), ", "))
