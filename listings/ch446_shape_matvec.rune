@@ -1,0 +1,78 @@
+-- Chapter 446 — shapes PROVEN in 2-D: a shape-checked matrix×vector (D4, Array-dt-sh).
+--
+-- ch233 settled a vector op's shape conformance in the TYPE (equal length as an Eq-Nat
+-- contract, discharged by the checker, erased at runtime). This lifts that to the 2-D
+-- "Array dt sh" handle R-INTEROP wants — WITHOUT indexed families (rune has none): a
+-- matrix×vector `M·v` requires a typed proof `Eq Nat (cols M) (len v)`, so a
+-- DIMENSION-MISMATCHED multiply is a COMPILE ERROR, never a runtime shape check. The
+-- product itself computes in exact Nat (each row dotted with v — structural, no
+-- transpose). Futhark/safe-tensor shape safety on a dependent substrate.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data NatMat  : U is mnil : NatMat  | mcons : NatList -> NatMat -> NatMat end
+
+foreign printNat : Nat -> IO Nat end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a end
+end
+len : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is Nat end) zero (fn (h : Nat) (r : NatList) (ih : Nat) is succ ih end) xs end
+end
+natDot : NatList -> NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList -> Nat end)
+      (fn (ys : NatList) is zero end)
+      (fn (h : Nat) (rest : NatList) (ih : NatList -> Nat) is
+         fn (ys : NatList) is
+           NatListElim (fn (y : NatList) is Nat end) zero
+             (fn (yh : Nat) (yrest : NatList) (ih2 : Nat) is natAdd (natMul h yh) (ih yrest) end) ys
+         end end)
+      xs
+  end
+end
+
+-- rows = number of rows; cols = width of the FIRST row (the matrix's column count).
+rows : NatMat -> Nat is
+  fn (m : NatMat) is NatMatElim (fn (x : NatMat) is Nat end) zero (fn (h : NatList) (r : NatMat) (ih : Nat) is succ ih end) m end
+end
+cols : NatMat -> Nat is
+  fn (m : NatMat) is NatMatElim (fn (x : NatMat) is Nat end) zero (fn (h : NatList) (r : NatMat) (ih : Nat) is len h end) m end
+end
+
+-- M·v : dot each row with v (structural over the rows; exact Nat).
+matVec : NatMat -> NatList -> NatList is
+  fn (m : NatMat) (v : NatList) is
+    NatMatElim (fn (x : NatMat) is NatList end)
+      nnil
+      (fn (h : NatList) (r : NatMat) (ih : NatList) is ncons (natDot h v) ih end)
+      m
+  end
+end
+
+-- THE 2-D SHAPE CONTRACT: the multiply type-checks only when the matrix's column count
+-- equals the vector's length. The proof is erased; conformance is settled at compile time.
+safeMatVec : (m : NatMat) -> (v : NatList) -> Eq Nat (cols m) (len v) -> NatList is
+  fn (m : NatMat) (v : NatList) (pf : Eq Nat (cols m) (len v)) is matVec m v end
+end
+
+headOr0 : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is Nat end) zero (fn (h : Nat) (r : NatList) (ih : Nat) is h end) xs end
+end
+
+-- M = [[1,2],[3,4]], v = [5,6]; cols M = 2 = len v, so the contract is `refl`. M·v =
+-- [1*5+2*6, 3*5+4*6] = [17, 39]; we print the head, 17. A v of length 3 would be a
+-- COMPILE ERROR at `refl` (cols M = 2 ≠ 3 = len v) — the shape mismatch the type rejects.
+mat : NatMat is mcons (ncons 1 (ncons 2 nnil)) (mcons (ncons 3 (ncons 4 nnil)) mnil) end
+vec : NatList is ncons 5 (ncons 6 nnil) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (headOr0 (safeMatVec mat vec refl))) (fn (u1 : Nat) is pureIO Unit unit end)
+end

@@ -285,6 +285,14 @@ func TestListingsRun(t *testing.T) {
 				`(fn (y : El B) is refl end) (fn (y : El B) is refl end))) x end`,
 			"fn (B : U) (x : U) is x end")
 	})
+	t.Run("ch446", func(t *testing.T) {
+		s := loadListing(t, "ch446_shape_matvec.rune")
+		// D4 shape-safety: the shape-checked M·v computes (head of [[1,2],[3,4]]·[5,6]
+		// = 1*5+2*6 = 17; the full product vector is [17, 39]). The dimension contract
+		// (cols M = len v) is discharged by the checker — a mismatch is a compile error.
+		normalizesTo(t, s, `headOr0 (safeMatVec mat vec refl)`, "17")
+		normalizesTo(t, s, `safeMatVec mat vec refl`, "ncons 17 (ncons 39 nnil)")
+	})
 	t.Run("ch442", func(t *testing.T) {
 		s := loadListing(t, "ch442_hot_reload.rune")
 		// D7 proven tier: code_change as univalence transport. The migration COMPUTES
