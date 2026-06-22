@@ -178,6 +178,103 @@ type CDefSpec struct {
 	Body CIr
 }
 
+// NatElimSpine unwinds a closure-converted application spine and, if its head is
+// the builtin-nat eliminator `natElim` saturated to at least 4 arguments
+// (m, c0, c1, x, [extra...]), returns those arguments. This mirrors the source
+// backends' nat-dispatch recognition (js.go natDispatch) for the NATIVE backends,
+// which consume the closure-converted CIr rather than the raw Ir.
+func NatElimSpine(natElim string, app AppClosure) ([]CIr, bool) {
+	if natElim == "" {
+		return nil, false
+	}
+	var args []CIr
+	var t CIr = app
+	for {
+		a, ok := t.(AppClosure)
+		if !ok {
+			break
+		}
+		args = append([]CIr{a.Arg}, args...)
+		t = a.Clo
+	}
+	g, ok := t.(CGlobal)
+	if !ok || g.Name != natElim || len(args) < 4 {
+		return nil, false
+	}
+	return args, true
+}
+
+// StepIgnoresIH reports whether a NatElim successor step `c1` provably ignores its
+// induction hypothesis. After closure conversion `c1 = fn (k)(ihk) is BODY` is an
+// outer MkClosure whose code block's body is the inner MkClosure (`fn (ihk) is
+// BODY`); the IH is the inner block's ARGUMENT (CVar index 0). The step ignores the
+// IH exactly when that argument never occurs in the inner block's body. Such an
+// eliminator is a constant-time CASE on the nat (zero -> c0, succ k -> c1 k _), so
+// the native backends can emit a one-peel dispatch instead of the eager fold —
+// turning the super-exponential `beqNat`-shape into linear (matches js/go/rust).
+func StepIgnoresIH(blocks map[string]CodeBlock, c1 CIr) bool {
+	outerMk, ok := c1.(MkClosure)
+	if !ok {
+		return false
+	}
+	outer, ok := blocks[outerMk.Code]
+	if !ok {
+		return false
+	}
+	innerMk, ok := outer.Body.(MkClosure)
+	if !ok {
+		return false
+	}
+	inner, ok := blocks[innerMk.Code]
+	if !ok {
+		return false
+	}
+	return !cirUsesArg(inner.Body, 0)
+}
+
+// cirUsesArg reports whether the de Bruijn index idx is referenced in t, scanning
+// WITHIN a single code block. A MkClosure's code block is a separate closed scope
+// (closure conversion's invariant), so its body is not followed; only its Env
+// captures — terms evaluated in the current scope — are scanned. CLet introduces a
+// binder (idx shifts); CCase arms share the enclosing context (no shift).
+func cirUsesArg(t CIr, idx int) bool {
+	switch x := t.(type) {
+	case CVar:
+		return x.Idx == idx
+	case MkClosure:
+		for _, e := range x.Env {
+			if cirUsesArg(e, idx) {
+				return true
+			}
+		}
+		return false
+	case AppClosure:
+		return cirUsesArg(x.Clo, idx) || cirUsesArg(x.Arg, idx)
+	case CLet:
+		return cirUsesArg(x.Val, idx) || cirUsesArg(x.Body, idx+1)
+	case CPair:
+		return cirUsesArg(x.A, idx) || cirUsesArg(x.B, idx)
+	case CFst:
+		return cirUsesArg(x.P, idx)
+	case CSnd:
+		return cirUsesArg(x.P, idx)
+	case CField:
+		return cirUsesArg(x.Scrut, idx)
+	case CCase:
+		if cirUsesArg(x.Scrut, idx) {
+			return true
+		}
+		for _, a := range x.Arms {
+			if cirUsesArg(a.Body, idx) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
 // freeVars returns the de Bruijn indices that occur FREE in an Ir term, as seen
 // from the term's own top (i.e. an index that escapes all the binders inside the
 // term). The result is the ascending, de-duplicated set — the canonical capture

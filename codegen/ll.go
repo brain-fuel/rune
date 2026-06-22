@@ -53,6 +53,10 @@ func (LL) Emit(p Program) (TargetSource, error) {
 		em.natElim = p.Nat.ElimName
 		em.accel = p.Nat.Ops
 	}
+	em.blocks = make(map[string]CodeBlock, len(cp.Blocks))
+	for _, blk := range cp.Blocks {
+		em.blocks[blk.Name] = blk
+	}
 
 	// The function bodies are written to `body` first so the string-constant
 	// globals they reference (collected into em.strs) can be flushed to module
@@ -388,8 +392,9 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 type llEmitter struct {
 	natElim  string
 	accel    map[string]core.NatOp
-	strs     map[string]string // string content -> its global symbol (@.str.N)
-	strOrder []string          // first-seen order, for deterministic output
+	blocks   map[string]CodeBlock // code-block lookup for the IH-ignoring nat dispatch
+	strs     map[string]string    // string content -> its global symbol (@.str.N)
+	strOrder []string             // first-seen order, for deterministic output
 }
 
 // intern returns (and registers, on first sight) the module-scope symbol for a
@@ -616,6 +621,46 @@ func (em *llEmitter) emitNatLL(b *strings.Builder, n NatSpec) {
 		fmt.Fprintf(b, "  %s = call i64 @rt_mkclo(i64 (i64, i64*)* @%s_b0, i32 0)\n", rr, base)
 		return rr
 	})
+	// One-peel CASE form for an IH-ignoring eliminator (see StepIgnoresIH), the LL
+	// dual of c.go's `<base>_case`: zero -> c0, succ k -> c1 k unit. Emitted instead
+	// of the b3 fold when the step is provably IH-independent, turning the
+	// super-exponential `beqNat`-shape into linear.
+	fmt.Fprintf(b, "define i64 @%s_case(i64 %%c0, i64 %%c1, i64 %%x) {\nentry:\n", base)
+	b.WriteString("  %z = call i64 @rt_big_from_long(i64 0)\n")
+	b.WriteString("  %c = call i64 @rt_big_cmp(i64 %x, i64 %z)\n")
+	b.WriteString("  %iz = icmp eq i64 %c, 0\n")
+	b.WriteString("  br i1 %iz, label %zero, label %succ\n")
+	b.WriteString("zero:\n  ret i64 %c0\n")
+	b.WriteString("succ:\n")
+	b.WriteString("  %one = call i64 @rt_big_from_long(i64 1)\n")
+	b.WriteString("  %p = call i64 @rt_nat_monus(i64 %x, i64 %one)\n")
+	b.WriteString("  %s = call i64 @rt_apply(i64 %c1, i64 %p)\n")
+	b.WriteString("  %u = load i64, i64* @UNIT\n")
+	b.WriteString("  %r = call i64 @rt_apply(i64 %s, i64 %u)\n")
+	b.WriteString("  ret i64 %r\n}\n")
+}
+
+// natDispatch emits the constant-time one-peel CASE for a saturated `NatElim m c0
+// c1 x [extra...]` whose step ignores its IH, the LL dual of the c.go optimization
+// (and the source backends' $natD). Without it the native b3 fold is
+// super-exponential on the decidable-equality shape.
+func (f *llFunc) natDispatch(b *strings.Builder, app AppClosure, locals []string) (string, bool) {
+	args, ok := NatElimSpine(f.em.natElim, app)
+	if !ok || !StepIgnoresIH(f.em.blocks, args[2]) {
+		return "", false
+	}
+	c0 := f.emitIn(b, args[1], locals)
+	c1 := f.emitIn(b, args[2], locals)
+	xv := f.emitIn(b, args[3], locals)
+	r := f.fresh()
+	fmt.Fprintf(b, "  %s = call i64 @%s_case(i64 %s, i64 %s, i64 %s)\n", r, llName(f.em.natElim), c0, c1, xv)
+	for _, extra := range args[4:] {
+		e := f.emitIn(b, extra, locals)
+		nr := f.fresh()
+		fmt.Fprintf(b, "  %s = call i64 @rt_apply(i64 %s, i64 %s)\n", nr, r, e)
+		r = nr
+	}
+	return r, true
 }
 
 // emitCurryBlock emits one currying block of a primitive: it builds the next
@@ -680,6 +725,9 @@ func (f *llFunc) emitIn(b *strings.Builder, t CIr, locals []string) string {
 	case MkClosure:
 		return f.emitMkClosure(b, x, locals)
 	case AppClosure:
+		if out, ok := f.natDispatch(b, x, locals); ok {
+			return out
+		}
 		if out, ok := f.accelDispatch(b, x, locals); ok {
 			return out
 		}
