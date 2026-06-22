@@ -115,6 +115,7 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 type replState struct {
 	lineNo     int
 	lastResult int
+	lastLoad   string // the most recent :load path, for :reload (the D7 dev-loop)
 }
 
 // resultRefRe matches a numbered result reference $N (jshell-style). It is rewritten
@@ -293,7 +294,19 @@ func runCommand(s *session.Session, cfg Config, st *replState, line string, out 
 		fmt.Fprintln(out, "session cleared")
 		return nil
 	case ":load":
-		return loadFile(s, arg, out)
+		if err := loadFile(s, arg, out); err != nil {
+			return err
+		}
+		st.lastLoad = arg
+		return nil
+	case ":reload":
+		// The D7 dev-loop: re-read the last-loaded file from disk. Content-addressing
+		// makes it a hot reload — unchanged definitions hit the proof cache (same hash,
+		// no re-check), edited ones re-elaborate and overwrite their name (latest-wins).
+		if st.lastLoad == "" {
+			return fmt.Errorf(":reload: nothing loaded yet (use :load <path> first)")
+		}
+		return loadFile(s, st.lastLoad, out)
 	case ":core":
 		return showCore(s, arg, out)
 	case ":ast":
@@ -395,6 +408,7 @@ func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "  :run <expr>    evaluate through the erased shadow (fast, computation only — no certificate)")
 	fmt.Fprintln(out, "  :list           list session definitions")
 	fmt.Fprintln(out, "  :load <path>    load definitions from a file")
+	fmt.Fprintln(out, "  :reload         re-load the last :load'd file (hot reload; content-addressed cache)")
 	fmt.Fprintln(out, "  :reset          clear the session (reloads the prelude unless --no-prelude)")
 	fmt.Fprintln(out, "  :help           (:h) show this help")
 	fmt.Fprintln(out, "  :quit           (:q) exit (Ctrl-D also exits)")

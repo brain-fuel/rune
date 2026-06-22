@@ -2,10 +2,48 @@ package repl
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"goforge.dev/rune/v3/internal/session"
 )
+
+// TestREPLReload is the D7 dev-loop gate: :reload re-reads the last :load'd file from
+// disk, so an edit on disk takes effect live. Content-addressing makes it a hot reload
+// — the unchanged data decl hits the cache, the edited `dv` re-elaborates and its name
+// rebinds (latest-wins). We load dv = 1, edit the file to dv = 2, :reload, and see 2.
+func TestREPLReload(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "m.rune")
+	v1 := "data Nat : U is zero : Nat | succ : Nat -> Nat end\ndv : Nat is succ zero end\n"
+	v2 := "data Nat : U is zero : Nat | succ : Nat -> Nat end\ndv : Nat is succ (succ zero) end\n"
+	if err := os.WriteFile(path, []byte(v1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := session.New()
+	st := &replState{}
+	var out bytes.Buffer
+	if err := runCommand(s, Config{NoPrelude: true}, st, ":load "+path, &out); err != nil {
+		t.Fatalf(":load: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(v2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := runCommand(s, Config{NoPrelude: true}, st, ":reload", &out); err != nil {
+		t.Fatalf(":reload: %v", err)
+	}
+	out.Reset()
+	if err := runForm(s, st, "dv", &out); err != nil {
+		t.Fatalf("eval dv: %v", err)
+	}
+	if !strings.Contains(out.String(), "succ (succ zero)") {
+		t.Errorf("after :reload, dv = %q, want it to reflect the edit (succ (succ zero))", out.String())
+	}
+}
 
 // TestREPLSession drives a full scripted session through a bare (--no-prelude) REPL
 // and checks the loop reads, resolves, shows, accumulates definitions, runs the
