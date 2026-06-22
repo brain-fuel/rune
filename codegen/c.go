@@ -549,10 +549,21 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// D4 item: the native runtime can call real CPython. Nats marshal via long (the host
 	// model's full Array-dt-sh handle is the heavier remaining design). Link: python3-config
 	// --includes --ldflags --embed.
-	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") {
+	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") {
 		b.WriteString("#include <Python.h>\n")
 		b.WriteString("static int rune_py_inited = 0;\n")
 		b.WriteString("static void rune_py_ensure(void) { if (!rune_py_inited) { Py_Initialize(); rune_py_inited = 1; } }\n")
+	}
+	// pyFactorial n = Python's math.factorial(n) — ARBITRARY PRECISION: the nat marshals to a
+	// DECIMAL STRING (big_to_decstr), Python computes the (possibly huge) factorial as a bignum,
+	// and the result returns as a decimal string parsed back into a Rune bignum (big_from_decstr).
+	// So Python's arbitrary-precision ints and Rune's builtin-nat bignums interoperate directly —
+	// factorial(25) = 15511210043330985984000000, far beyond a machine long.
+	if usesForeign(p, "pyFactorial") {
+		b.WriteString("static void big_to_decstr(Value v, char* out, int outsz) { int n = big_nlimbs(v); if (n == 0) { snprintf(out, outsz, \"0\"); return; } int off = snprintf(out, outsz, \"%ld\", big_limb(v, n - 1)); for (int i = n - 2; i >= 0 && off < outsz; i--) off += snprintf(out + off, outsz - off, \"%09ld\", big_limb(v, i)); }\n")
+		b.WriteString("static Value big_from_decstr(const char* s) { Value n = mkbig(0); Value ten = big_from_long(10); for (; *s; s++) { if (*s < '0' || *s > '9') continue; n = big_add(big_mul(n, ten), big_from_long(*s - '0')); } return n; }\n")
+		b.WriteString("static Value pyFactorial_c(Value aa, Value* env) { (void)env; char inbuf[512]; if (IS_INT(aa)) snprintf(inbuf, sizeof inbuf, \"%ld\", INT_VAL(aa)); else big_to_decstr(aa, inbuf, sizeof inbuf); rune_py_ensure(); char buf[600]; snprintf(buf, sizeof buf, \"str(__import__('math').factorial(%s))\", inbuf); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); Value res = big_from_long(0); if (r) { const char* s = PyUnicode_AsUTF8(r); if (s) res = big_from_decstr(s); Py_XDECREF(r); } else { PyErr_Clear(); } return res; }\n")
+		b.WriteString("static Value pyFactorial(void) { return mkclo(&pyFactorial_c, 0); }\n")
 	}
 	if usesForeign(p, "pyPow") {
 		b.WriteString("static Value pyPow_c2(Value bb, Value* env) { Value aa = env[0]; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); long b = IS_INT(bb) ? INT_VAL(bb) : (long)big_to_double(bb); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"pow(%ld,%ld)\", a, b); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); long res = 0; if (r) { res = PyLong_AsLong(r); Py_XDECREF(r); } else { PyErr_Clear(); } return big_from_long(res); }\n")

@@ -814,10 +814,12 @@ first and forces only on mismatch, so the fast path logs nothing.
       SHAPES-PROVEN safeDot (a ragged call is a compile error, ch233). MINIMAL CPYTHON EMBED
       landed (ch462, v3.328.25): the native C backend links libpython and calls real CPython
       via the C API (pyPow → Python's pow = 1024/81; pySqrt → math.sqrt = 4/9, a FLOAT return
-      + a stdlib import, so the embed marshals nat->Python->nat AND ->float and reaches the
-      stdlib; python3-config --embed; TestD4CPythonEmbed) — the first cut of the embed
-      host-model item, native runtime calling CPython not the py emitter. Remaining: the
-      `Array dt sh` handle + the full host model (Python objects <-> Rune values, numpy via embed).
+      + a stdlib import; pyFactorial → math.factorial marshalled as a DECIMAL STRING, so
+      Python's arbitrary-precision ints and Rune's builtin-nat bignums interoperate directly
+      (factorial(25) = a 26-digit bignum); python3-config --embed; TestD4CPythonEmbed) — native
+      runtime calling CPython not the py emitter, marshalling nat/float/bignum both ways +
+      stdlib reach. Remaining: the `Array dt sh` handle + numpy-via-embed (Python objects <->
+      Rune structured values).
     - **E3/E4 distributed** — the big one. General all-P adequacy: SOUNDNESS ch409 +
       COMPLETENESS ch421 over the full four-label calculus closed; the all-P REFINEMENT stays
       open (blocked on par-interleave fuel-threading, documented). A first building block

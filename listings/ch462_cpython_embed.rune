@@ -15,17 +15,22 @@ data Unit : U is unit : Unit end
 data Nat : U is zero : Nat | succ : Nat -> Nat end
 builtin nat Nat zero succ
 
-foreign Float      : U end
-foreign printNat   : Nat -> IO Nat end
-foreign floatToNat : Float -> Nat end
-foreign pyPow      : Nat -> Nat -> Nat end
-foreign pySqrt     : Nat -> Float end
+-- pyFactorial marshals ARBITRARY PRECISION: math.factorial(25) is a 26-digit bignum, passed
+-- both ways as a decimal string, so Python's bignums and Rune's builtin-nat interoperate.
+foreign Float       : U end
+foreign printNat    : Nat -> IO Nat end
+foreign floatToNat  : Float -> Nat end
+foreign pyPow       : Nat -> Nat -> Nat end
+foreign pySqrt      : Nat -> Float end
+foreign pyFactorial : Nat -> Nat end
 
 main : IO Unit is
   bindIO Nat Unit (printNat (pyPow 2 10)) (fn (u1 : Nat) is
     bindIO Nat Unit (printNat (pyPow 3 4)) (fn (u2 : Nat) is
       bindIO Nat Unit (printNat (floatToNat (pySqrt 16))) (fn (u3 : Nat) is
-        bindIO Nat Unit (printNat (floatToNat (pySqrt 81))) (fn (u4 : Nat) is pureIO Unit unit end)
+        bindIO Nat Unit (printNat (floatToNat (pySqrt 81))) (fn (u4 : Nat) is
+          bindIO Nat Unit (printNat (pyFactorial 25)) (fn (u5 : Nat) is pureIO Unit unit end)
+        end)
       end)
     end)
   end)
