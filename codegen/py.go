@@ -167,6 +167,13 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npMean") {
 		b.WriteString("def npMean():\n    import numpy as np\n    def _m(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.mean(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _m(xs)\n")
 	}
+	// D4 PLOTTING reach (telos 3): plotSave renders the FList as a line plot via REAL
+	// matplotlib (Agg backend, headless) and writes wavelet_plot.png, returning the
+	// point count. Plotting is the py-specific reach (no cross-backend artifact); the
+	// IO Nat result is the observable the other backends floor.
+	if usesForeign(p, "plotSave") {
+		b.WriteString("def plotSave():\n    def _p(xs):\n        import matplotlib; matplotlib.use(\"Agg\")\n        import matplotlib.pyplot as plt\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        plt.figure(); plt.plot(a); plt.savefig(\"wavelet_plot.png\"); plt.close()\n        return len(a)\n    return lambda xs: lambda _u: _p(xs)\n")
+	}
 	// D4 interop: npNorm binds REAL numpy.linalg.norm on the py backend (Euclidean L2).
 	if usesForeign(p, "npNorm") {
 		b.WriteString("def npNorm():\n    import numpy as np\n    def _n(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.linalg.norm(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _n(xs)\n")

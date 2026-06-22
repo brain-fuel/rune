@@ -275,6 +275,52 @@ func TestIOArgvExitConformance(t *testing.T) {
 // host bodies fromNat/fadd/.../floatToNat/fleqN/dot2 + printNat as `static V`
 // methods). ch217 prints the SAME 11/13/11/0/unit the source backends do — float
 // parity across all of js/py/go/erl/rust/C/LLVM/JVM.
+// TestD4PlottingPy is the D4 PLOTTING-reach gate (telos 3): ch441 renders a float
+// vector through REAL matplotlib on the py backend and writes a PNG, returning the
+// point count. We run it in a temp dir and assert both the observable count (4) and
+// a non-empty wavelet_plot.png. Skips when matplotlib is absent (the plotting reach
+// is py-specific; bin/setup.sh pip-installs it).
+func TestD4PlottingPy(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not in PATH")
+	}
+	if err := exec.Command(py, "-c", "import matplotlib").Run(); err != nil {
+		t.Skip("matplotlib not installed (run bin/setup.sh)")
+	}
+	s := loadListing(t, "ch441_plotting.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Py{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "main.py")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(py, f)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("python run: %v", err)
+	}
+	if !strings.Contains(string(out), "4") {
+		t.Errorf("plotSave count = %q, want 4", strings.TrimSpace(string(out)))
+	}
+	png := filepath.Join(dir, "wavelet_plot.png")
+	fi, err := os.Stat(png)
+	if err != nil {
+		t.Fatalf("no plot written: %v", err)
+	}
+	if fi.Size() == 0 {
+		t.Errorf("wavelet_plot.png is empty")
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {

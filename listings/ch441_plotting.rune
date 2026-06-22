@@ -1,0 +1,37 @@
+-- Chapter 441 — the PLOTTING reach (D4 / R-INTEROP, telos 3).
+--
+-- "Python's numeric/ML/PLOTTING reach (via interop)" is part of telos 3. ch221–228
+-- bound NumPy behind contract guards; this chapter adds the plotting leaf: a foreign
+-- `plotSave` renders a vector of machine floats as a line plot via REAL matplotlib
+-- (the py backend's Agg headless renderer) and writes `wavelet_plot.png`, returning
+-- the point count as the observable. Plotting is inherently py-specific (a PNG is not
+-- a cross-backend byte-identical artifact, unlike the contract-guarded numeric ops),
+-- so the IO Nat count is what a portable program observes; the picture is the py reach.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+-- machine floats (the D3 f64 element type) + the FList vector (ch219's shape).
+foreign Float   : U end
+foreign fromNat : Nat -> Float end
+
+data FList : U is
+  fnil  : FList
+| fcons : Float -> FList -> FList
+end
+
+-- the plotting kernel + a console print (both baked host bodies on py).
+foreign plotSave : FList -> IO Nat end
+foreign printNat : Nat -> IO Nat end
+
+-- a small data series [1, 2, 4, 3] — four points.
+series : FList is
+  fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 4) (fcons (fromNat 3) fnil)))
+end
+
+-- plot the series to a PNG, then print the point count (4). The PNG is the side
+-- effect; the count is the portable observable.
+main : IO Nat is
+  bindIO Nat Nat (plotSave series) (fn (n : Nat) is printNat n end)
+end
