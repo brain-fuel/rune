@@ -423,9 +423,10 @@ func TestD4CPythonEmbed(t *testing.T) {
 }
 
 // TestD4CPythonNumpy is the structured-value rung of the CPython embed: the native C binary
-// marshals a Rune FList into a Python list and runs REAL numpy on it in the embedded
-// interpreter — ch463's pyNpSum [1,2,3,4] = numpy.array(xs).sum() = 10. Compiled with
-// python3-config --embed and -lpython; skips without cc / python3-config / numpy.
+// marshals a Rune FList into a Python list and runs REAL numpy in the embedded interpreter —
+// ch463's pyNpSum [1,2,3,4] = 10, and pyNpScale returns an ARRAY back as a Rune FList
+// ((np*3).tolist() = [3,6,9,12], summed in-language to 30) — the bidirectional structured
+// bridge. Compiled with python3-config --embed; skips without cc / python3-config / numpy.
 func TestD4CPythonNumpy(t *testing.T) {
 	if _, err := exec.LookPath("cc"); err != nil {
 		t.Skip("cc not in PATH")
@@ -474,8 +475,8 @@ func TestD4CPythonNumpy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("[c] run: %v", err)
 	}
-	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "10" {
-		t.Errorf("CPython-numpy pyNpSum gave %q, want first line 10", strings.TrimSpace(string(out)))
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "10\n30") {
+		t.Errorf("CPython-numpy gave %q, want it to start 10\\n30", got)
 	}
 }
 

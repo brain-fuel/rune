@@ -4,8 +4,10 @@
 -- value rung of the host model: a Rune FList of floats marshals into a Python list (PyList of
 -- PyFloats), real numpy reduces it inside the embedded interpreter, and the scalar returns —
 -- so the NATIVE binary runs actual numpy on a Rune value, not the py emitter. `pyNpSum xs`
--- is numpy.array(xs).sum(): [1,2,3,4] -> 10. The first cut of "numpy via embed" (the heavier
--- Array-dt-sh handle is full ndarray <-> Rune marshalling; this is the reduction slice).
+-- is numpy.array(xs).sum(): [1,2,3,4] -> 10. pyNpScale returns an ARRAY back as a Rune FList
+-- (the REVERSE direction): (np.array(xs) * 3).tolist() = [3,6,9,12], walked into a Rune FList
+-- and summed IN-LANGUAGE to 30 — so the bidirectional structured bridge (Rune list -> numpy ->
+-- Rune list) round-trips. (The full Array-dt-sh handle is general ndarray marshalling.)
 
 data Unit : U is unit : Unit end
 data Nat : U is zero : Nat | succ : Nat -> Nat end
@@ -17,10 +19,22 @@ data FList : U is fnil : FList | fcons : Float -> FList -> FList end
 foreign printNat   : Nat -> IO Nat end
 foreign fromNat    : Nat -> Float end
 foreign floatToNat : Float -> Nat end
+foreign fadd       : Float -> Float -> Float end
 foreign pyNpSum    : FList -> Float end
+foreign pyNpScale  : FList -> Nat -> FList end
 
 xs : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
 
+-- in-language fold proving the numpy-returned FList is a real, usable Rune value.
+sumFList : FList -> Float is
+  fn (ys : FList) is
+    FListElim (fn (w : FList) is Float end) (fromNat 0)
+      (fn (h : Float) (r : FList) (ih : Float) is fadd h ih end) ys
+  end
+end
+
 main : IO Unit is
-  bindIO Nat Unit (printNat (floatToNat (pyNpSum xs))) (fn (u1 : Nat) is pureIO Unit unit end)
+  bindIO Nat Unit (printNat (floatToNat (pyNpSum xs))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (floatToNat (sumFList (pyNpScale xs 3)))) (fn (u2 : Nat) is pureIO Unit unit end)
+  end)
 end
