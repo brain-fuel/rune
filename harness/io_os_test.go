@@ -596,6 +596,37 @@ func TestE3MaxRegister(t *testing.T) {
 	}
 }
 
+// TestE3MaxRegisterInflation gates ch455: the monotonicity half of CvRDT correctness for
+// the max-register — mergeInflationary, leb(val x)(val(merge x y)) = true, a replica's
+// value never decreases under merge (state climbs the lattice). Rests on the structural
+// max bound lebMaxL. With ch453's convergence this completes the correctness pair. The
+// proof type-checks under TestListingsElaborateAndCheck; the witness prints 1.
+func TestE3MaxRegisterInflation(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch455_max_register_inflationary.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "1" {
+		t.Errorf("max-register inflation witness = %q, want first line 1", strings.TrimSpace(string(out)))
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {
