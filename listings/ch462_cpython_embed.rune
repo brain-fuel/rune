@@ -1,0 +1,22 @@
+-- Chapter 462 — a MINIMAL CPython EMBED on the native backend (D4).
+--
+-- The numpy interop (ch221–228) ran on the PY backend (the program emitted AS Python). This
+-- is different: the NATIVE C backend links libpython INTO the compiled binary and calls real
+-- CPython through the C API — the first cut of the "embed/port CPython host model" D4 item.
+-- `pyPow a b` runs Python's own `pow(a,b)` in an embedded interpreter (Py_Initialize once,
+-- lazily) and marshals the result back to a Rune nat. Nats marshal via long here; the full
+-- Array-dt-sh host model (Python objects <-> Rune values) is the heavier remaining design.
+-- pyPow 2 10 = 1024, pyPow 3 4 = 81 — computed by CPython, inside the native binary.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+foreign pyPow : Nat -> Nat -> Nat end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (pyPow 2 10)) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (pyPow 3 4)) (fn (u2 : Nat) is pureIO Unit unit end)
+  end)
+end

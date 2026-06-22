@@ -366,6 +366,62 @@ func TestD6ArgvExitRust(t *testing.T) {
 // point count. We run it in a temp dir and assert both the observable count (4) and
 // a non-empty wavelet_plot.png. Skips when matplotlib is absent (the plotting reach
 // is py-specific; bin/setup.sh pip-installs it).
+// TestD4CPythonEmbed is the D4 CPython-embed gate: the NATIVE C backend links libpython
+// INTO the compiled binary and calls real CPython through the C API (not a subprocess, not
+// the py emitter). ch462's pyPow a b runs Python's own pow(a,b) in an embedded interpreter
+// and marshals the result back to a Rune nat: pyPow 2 10 = 1024, pyPow 3 4 = 81. Compiled
+// with python3-config --includes --ldflags --embed. Skips cleanly without cc / python3-config.
+func TestD4CPythonEmbed(t *testing.T) {
+	if _, err := exec.LookPath("cc"); err != nil {
+		t.Skip("cc not in PATH")
+	}
+	pyCfg, err := exec.LookPath("python3-config")
+	if err != nil {
+		t.Skip("python3-config not in PATH")
+	}
+	incOut, err := exec.Command(pyCfg, "--includes").Output()
+	if err != nil {
+		t.Skipf("python3-config --includes failed: %v", err)
+	}
+	ldOut, err := exec.Command(pyCfg, "--ldflags", "--embed").Output()
+	if err != nil {
+		// older python3-config without --embed
+		ldOut, err = exec.Command(pyCfg, "--ldflags").Output()
+		if err != nil {
+			t.Skipf("python3-config --ldflags failed: %v", err)
+		}
+	}
+	s := loadListing(t, "ch462_cpython_embed.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.C{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cf := filepath.Join(dir, "main.c")
+	bin := filepath.Join(dir, "main.bin")
+	if err := os.WriteFile(cf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{cf}
+	args = append(args, strings.Fields(string(incOut))...)
+	args = append(args, "-o", bin)
+	args = append(args, strings.Fields(string(ldOut))...)
+	if out, err := exec.Command("cc", args...).CombinedOutput(); err != nil {
+		t.Skipf("[c] compile with libpython failed (no python dev libs?): %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("[c] run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "1024\n81") {
+		t.Errorf("CPython-embed pyPow gave %q, want it to start 1024\\n81", got)
+	}
+}
+
 func TestD4PlottingPy(t *testing.T) {
 	py, err := exec.LookPath("python3")
 	if err != nil {

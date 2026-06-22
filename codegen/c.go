@@ -542,6 +542,21 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value printNat_c1(Value n, Value* env) { (void)env; Value c = mkclo(&printNat_c2, 1); clo_set(c, 0, n); return c; }\n")
 		b.WriteString("static Value printNat(void) { return mkclo(&printNat_c1, 0); }\n")
 	}
+	// D4 / R-INTEROP: a MINIMAL CPython EMBED on the native C backend — not a subprocess
+	// or the py emitter, but libpython linked INTO the binary (Py_Initialize once, lazily).
+	// pyPow a b runs Python's own `pow(a,b)` in the embedded interpreter and marshals the
+	// result back to a Rune nat. The proof-of-concept for the "embed/port CPython host model"
+	// D4 item: the native runtime can call real CPython. Nats marshal via long (the host
+	// model's full Array-dt-sh handle is the heavier remaining design). Link: python3-config
+	// --includes --ldflags --embed.
+	if usesForeign(p, "pyPow") {
+		b.WriteString("#include <Python.h>\n")
+		b.WriteString("static int rune_py_inited = 0;\n")
+		b.WriteString("static void rune_py_ensure(void) { if (!rune_py_inited) { Py_Initialize(); rune_py_inited = 1; } }\n")
+		b.WriteString("static Value pyPow_c2(Value bb, Value* env) { Value aa = env[0]; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); long b = IS_INT(bb) ? INT_VAL(bb) : (long)big_to_double(bb); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"pow(%ld,%ld)\", a, b); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); long res = 0; if (r) { res = PyLong_AsLong(r); Py_XDECREF(r); } else { PyErr_Clear(); } return big_from_long(res); }\n")
+		b.WriteString("static Value pyPow_c1(Value a, Value* env) { (void)env; Value c = mkclo(&pyPow_c2, 1); clo_set(c, 0, a); return c; }\n")
+		b.WriteString("static Value pyPow(void) { return mkclo(&pyPow_c1, 0); }\n")
+	}
 	if usesForeign(p, "Float") {
 		b.WriteString("static Value Float(void) { return UNIT; }\n")
 	}
