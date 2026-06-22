@@ -839,7 +839,10 @@ first and forces only on mismatch, so the fast path logs nothing.
       structural max bound lebMaxL, completing the convergent+monotone CvRDT correctness
       pair, v3.328.13; the MIN-register CvRDT the MEET dual ch457 — merge=natMin lifted from
       ch369–373, converging {3,7}->3, so the same (Nat,min,max) distributive lattice carries
-      two CvRDTs one climbing one descending, v3.328.19); the Savage FURNACE
+      two CvRDTs one climbing one descending, v3.328.19; the INTERVAL CRDT ch458 — the
+      PRODUCT of the min+max registers tracking the observed [lo,hi] range, merging
+      componentwise, convergence lifted from the PAIR of component laws via cong2,
+      [4,4]⊔[2,7]=[2,7], v3.328.20); the Savage FURNACE
       reaches the distributed track (ch454, v3.328.12 — a runnable CvRDT-convergence property
       suite, the tested-tier on-ramp to ch453's proofs, "1\n1\n1" on js/py/go/erl/rust);
       and the LIVE-ACTOR projection — the verified replicated counter RUNS as gossiping BEAM

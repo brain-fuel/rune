@@ -772,6 +772,37 @@ func TestE3MaxRegisterNative(t *testing.T) {
 	})
 }
 
+// TestE3IntervalCRDT gates ch458: the interval CRDT, the PRODUCT of the min- and max-
+// registers — an interval [lo,hi] tracking the observed range, merging componentwise (lo by
+// natMin, hi by natMax). Convergence (comm/idem/assoc) proven by lifting the PAIR of
+// component lattice laws through cong2. The proofs type-check under TestListingsElaborate
+// AndCheck; the witness merges [4,4] with [2,7] to [2,7] (prints lo=2, hi=7).
+func TestE3IntervalCRDT(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch458_interval_crdt.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "2\n7") {
+		t.Errorf("interval CRDT merge = %q, want it to start 2\\n7", got)
+	}
+}
+
 // TestE3MinRegister gates ch457: the min-register CvRDT, the MEET dual of ch453's max-
 // register — merge = natMin, proven commutative/idempotent/associative by lifting ch369–373's
 // lattice laws via cong mreg. The proofs type-check under TestListingsElaborateAndCheck; the

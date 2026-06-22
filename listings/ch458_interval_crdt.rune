@@ -1,0 +1,198 @@
+-- Chapter 458 — the interval CRDT: a PRODUCT of the min- and max-registers (E3/E4).
+--
+-- ch453 (max-register, join) and ch457 (min-register, meet) are the two semilattice CRDTs
+-- on the Nat lattice. Their PRODUCT is a CvRDT too (ch242: the product of CvRDTs is a
+-- CvRDT): an interval [lo, hi] that tracks the observed RANGE, merging componentwise —
+-- lo by natMin (the lowest seen), hi by natMax (the highest seen). So replicas that each
+-- saw different values converge to the tightest interval covering all of them. Used for
+-- range/extent aggregation (min+max in one monotone state). Convergence = the three
+-- semilattice laws on the product merge, lifted from the component min/max laws by `cong2`.
+-- Proof-only + a run. The composition capstone of the register CRDT pair.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is subst A x y p (fn (z : A) is Eq A z x end) refl end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+-- cong2 : a binary function respects equality in both arguments (cong twice + trans).
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) ->
+        (x : A) -> (x2 : A) -> (y : B) -> (y2 : B) ->
+        Eq A x x2 -> Eq B y y2 -> Eq C (f x y) (f x2 y2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C) (x : A) (x2 : A) (y : B) (y2 : B)
+     (px : Eq A x x2) (py : Eq B y y2) is
+    transEq C (f x y) (f x2 y) (f x2 y2)
+      (cong A C (fn (u : A) is f u y end) x x2 px)
+      (cong B C (fn (v : B) is f x2 v end) y y2 py)
+  end
+end
+
+-- ===== the two component lattice operations + their laws (ch369–373) =====
+natMin : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (m : Nat) is zero end)
+      (fn (k : Nat) (minK : Nat -> Nat) is
+         fn (m : Nat) is NatElim (fn (y : Nat) is Nat end) zero (fn (j : Nat) (ih2 : Nat) is succ (minK j) end) m end end)
+      a b
+  end
+end
+natMax : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (m : Nat) is m end)
+      (fn (k : Nat) (maxK : Nat -> Nat) is
+         fn (m : Nat) is NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is succ (maxK j) end) m end end)
+      a b
+  end
+end
+minZeroR : (a : Nat) -> Eq Nat (natMin a zero) zero is
+  fn (a : Nat) is NatElim (fn (x : Nat) is Eq Nat (natMin x zero) zero end) refl (fn (k : Nat) (ih : Eq Nat (natMin k zero) zero) is refl end) a end
+end
+maxZeroR : (a : Nat) -> Eq Nat (natMax a zero) a is
+  fn (a : Nat) is NatElim (fn (x : Nat) is Eq Nat (natMax x zero) x end) refl (fn (k : Nat) (ih : Eq Nat (natMax k zero) k) is refl end) a end
+end
+minComm : (a : Nat) -> (b : Nat) -> Eq Nat (natMin a b) (natMin b a) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (natMin x b) (natMin b x) end)
+      (fn (b : Nat) is symEq Nat (natMin b zero) zero (minZeroR b) end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Nat (natMin k b) (natMin b k)) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Eq Nat (natMin (succ k) y) (natMin y (succ k)) end) refl
+             (fn (j : Nat) (ihj : Eq Nat (natMin (succ k) j) (natMin j (succ k))) is cong Nat Nat succ (natMin k j) (natMin j k) (ih j) end) b
+         end end)
+      a
+  end
+end
+maxComm : (a : Nat) -> (b : Nat) -> Eq Nat (natMax a b) (natMax b a) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (natMax x b) (natMax b x) end)
+      (fn (b : Nat) is symEq Nat (natMax b zero) b (maxZeroR b) end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Nat (natMax k b) (natMax b k)) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Eq Nat (natMax (succ k) y) (natMax y (succ k)) end) refl
+             (fn (j : Nat) (ihj : Eq Nat (natMax (succ k) j) (natMax j (succ k))) is cong Nat Nat succ (natMax k j) (natMax j k) (ih j) end) b
+         end end)
+      a
+  end
+end
+minIdem : (a : Nat) -> Eq Nat (natMin a a) a is
+  fn (a : Nat) is NatElim (fn (x : Nat) is Eq Nat (natMin x x) x end) refl (fn (k : Nat) (ih : Eq Nat (natMin k k) k) is cong Nat Nat succ (natMin k k) k ih end) a end
+end
+maxIdem : (a : Nat) -> Eq Nat (natMax a a) a is
+  fn (a : Nat) is NatElim (fn (x : Nat) is Eq Nat (natMax x x) x end) refl (fn (k : Nat) (ih : Eq Nat (natMax k k) k) is cong Nat Nat succ (natMax k k) k ih end) a end
+end
+minAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) -> Eq Nat (natMin (natMin a b) c) (natMin a (natMin b c)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (natMin (natMin x b) c) (natMin x (natMin b c)) end)
+      (fn (b : Nat) (c : Nat) is refl end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (natMin (natMin k b) c) (natMin k (natMin b c))) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is (c : Nat) -> Eq Nat (natMin (natMin (succ k) y) c) (natMin (succ k) (natMin y c)) end)
+             (fn (c : Nat) is refl end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (natMin (natMin (succ k) j) c) (natMin (succ k) (natMin j c))) is
+                fn (c : Nat) is
+                  NatElim (fn (z : Nat) is Eq Nat (natMin (natMin (succ k) (succ j)) z) (natMin (succ k) (natMin (succ j) z)) end) refl
+                    (fn (i : Nat) (ihc : Eq Nat (natMin (natMin (succ k) (succ j)) i) (natMin (succ k) (natMin (succ j) i))) is cong Nat Nat succ (natMin (natMin k j) i) (natMin k (natMin j i)) (ih j i) end) c
+                end end) b
+         end end)
+      a
+  end
+end
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) -> Eq Nat (natMax (natMax a b) c) (natMax a (natMax b c)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (natMax (natMax x b) c) (natMax x (natMax b c)) end)
+      (fn (b : Nat) (c : Nat) is refl end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (natMax (natMax k b) c) (natMax k (natMax b c))) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is (c : Nat) -> Eq Nat (natMax (natMax (succ k) y) c) (natMax (succ k) (natMax y c)) end)
+             (fn (c : Nat) is refl end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (natMax (natMax (succ k) j) c) (natMax (succ k) (natMax j c))) is
+                fn (c : Nat) is
+                  NatElim (fn (z : Nat) is Eq Nat (natMax (natMax (succ k) (succ j)) z) (natMax (succ k) (natMax (succ j) z)) end) refl
+                    (fn (i : Nat) (ihc : Eq Nat (natMax (natMax (succ k) (succ j)) i) (natMax (succ k) (natMax (succ j) i))) is cong Nat Nat succ (natMax (natMax k j) i) (natMax k (natMax j i)) (ih j i) end) c
+                end end) b
+         end end)
+      a
+  end
+end
+
+-- ===== the interval register and its product merge =====
+data Iv : U is iv : Nat -> Nat -> Iv end       -- iv lo hi
+ivLo : Iv -> Nat is fn (r : Iv) is IvElim (fn (w : Iv) is Nat end) (fn (lo : Nat) (hi : Nat) is lo end) r end end
+ivHi : Iv -> Nat is fn (r : Iv) is IvElim (fn (w : Iv) is Nat end) (fn (lo : Nat) (hi : Nat) is hi end) r end end
+-- merge componentwise: lo by meet (lowest seen), hi by join (highest seen).
+imerge : Iv -> Iv -> Iv is
+  fn (x : Iv) (y : Iv) is iv (natMin (ivLo x) (ivLo y)) (natMax (ivHi x) (ivHi y)) end
+end
+
+-- CONVERGENCE = the three semilattice laws on imerge, each lifted from the PAIR of
+-- component laws (min on lo, max on hi) by cong2.
+imergeComm : (x : Iv) -> (y : Iv) -> Eq Iv (imerge x y) (imerge y x) is
+  fn (x : Iv) is
+    IvElim (fn (wx : Iv) is (y : Iv) -> Eq Iv (imerge wx y) (imerge y wx) end)
+      (fn (al : Nat) (ah : Nat) is
+         fn (y : Iv) is
+           IvElim (fn (wy : Iv) is Eq Iv (imerge (iv al ah) wy) (imerge wy (iv al ah)) end)
+             (fn (bl : Nat) (bh : Nat) is
+                cong2 Nat Nat Iv iv (natMin al bl) (natMin bl al) (natMax ah bh) (natMax bh ah)
+                  (minComm al bl) (maxComm ah bh) end)
+             y
+         end end)
+      x
+  end
+end
+imergeIdem : (x : Iv) -> Eq Iv (imerge x x) x is
+  fn (x : Iv) is
+    IvElim (fn (wx : Iv) is Eq Iv (imerge wx wx) wx end)
+      (fn (al : Nat) (ah : Nat) is
+         cong2 Nat Nat Iv iv (natMin al al) al (natMax ah ah) ah (minIdem al) (maxIdem ah) end)
+      x
+  end
+end
+imergeAssoc : (x : Iv) -> (y : Iv) -> (z : Iv) ->
+              Eq Iv (imerge (imerge x y) z) (imerge x (imerge y z)) is
+  fn (x : Iv) is
+    IvElim (fn (wx : Iv) is (y : Iv) -> (z : Iv) -> Eq Iv (imerge (imerge wx y) z) (imerge wx (imerge y z)) end)
+      (fn (al : Nat) (ah : Nat) is
+         fn (y : Iv) is
+           IvElim (fn (wy : Iv) is (z : Iv) -> Eq Iv (imerge (imerge (iv al ah) wy) z) (imerge (iv al ah) (imerge wy z)) end)
+             (fn (bl : Nat) (bh : Nat) is
+                fn (z : Iv) is
+                  IvElim (fn (wz : Iv) is Eq Iv (imerge (imerge (iv al ah) (iv bl bh)) wz) (imerge (iv al ah) (imerge (iv bl bh) wz)) end)
+                    (fn (cl : Nat) (ch : Nat) is
+                       cong2 Nat Nat Iv iv
+                         (natMin (natMin al bl) cl) (natMin al (natMin bl cl))
+                         (natMax (natMax ah bh) ch) (natMax ah (natMax bh ch))
+                         (minAssoc al bl cl) (maxAssoc ah bh ch) end)
+                    z
+                end end)
+             y
+         end end)
+      x
+  end
+end
+
+foreign printNat : Nat -> IO Nat end
+
+-- witness: a replica saw [4,4], another saw [2,7]; merge -> [min 2, max 7] = [2,7],
+-- order-independent. Print lo then hi of (imerge p q): 2, 7.
+p : Iv is iv (succ (succ (succ (succ zero)))) (succ (succ (succ (succ zero)))) end       -- [4,4]
+q : Iv is iv (succ (succ zero)) (succ (succ (succ (succ (succ (succ (succ zero))))))) end -- [2,7]
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (ivLo (imerge p q))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (ivHi (imerge p q))) (fn (u2 : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end
