@@ -549,7 +549,7 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// D4 item: the native runtime can call real CPython. Nats marshal via long (the host
 	// model's full Array-dt-sh handle is the heavier remaining design). Link: python3-config
 	// --includes --ldflags --embed.
-	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") {
+	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") || usesForeign(p, "pyNpSum") {
 		b.WriteString("#include <Python.h>\n")
 		b.WriteString("static int rune_py_inited = 0;\n")
 		b.WriteString("static void rune_py_ensure(void) { if (!rune_py_inited) { Py_Initialize(); rune_py_inited = 1; } }\n")
@@ -626,11 +626,19 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	}
 	// shared FList marshaller: walk a Rune FList (fcons tag 1, head slot 0, tail slot 1)
 	// into a C double[]. Used by dotList/npDot (vectors) and gemmSum/npMatSum (matrices).
-	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") {
+	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") || usesForeign(p, "pyNpSum") {
 		b.WriteString("static void fl_fill(Value lst, double* a) { int i = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { a[i++] = float_val(obj(lst)->slots[0]); lst = obj(lst)->slots[1]; } }\n")
 	}
-	if usesForeign(p, "dotList") || usesForeign(p, "npDot") {
+	if usesForeign(p, "dotList") || usesForeign(p, "npDot") || usesForeign(p, "pyNpSum") {
 		b.WriteString("static int fl_len(Value lst) { int n = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { n++; lst = obj(lst)->slots[1]; } return n; }\n")
+	}
+	// pyNpSum xs = numpy.array(xs).sum() in the EMBEDDED interpreter — the structured-value
+	// reach of the host model: a Rune FList marshals to a Python list (PyList of PyFloats), real
+	// numpy reduces it, the scalar comes back. So the native binary runs actual numpy on a Rune
+	// list, not just builtins/stdlib. (fl_fill/fl_len + rune_py_ensure defined above.)
+	if usesForeign(p, "pyNpSum") {
+		b.WriteString("static Value pyNpSum_c(Value xs, Value* env) { (void)env; int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); free(X); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); double d = 0.0; if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"xs\", lst); PyObject* r = PyRun_String(\"float(np.array(xs).sum())\", Py_eval_input, g, g); if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(lst); return mkfloat(d); }\n")
+		b.WriteString("static Value pyNpSum(void) { return mkclo(&pyNpSum_c, 0); }\n")
 	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("static Value dot2_c4(Value b1, Value* env) { double X[2] = { float_val(env[0]), float_val(env[1]) }; double Y[2] = { float_val(env[2]), float_val(b1) }; return mkfloat(cblas_ddot(2, X, 1, Y, 1)); }\n")

@@ -818,8 +818,10 @@ first and forces only on mismatch, so the fast path logs nothing.
       Python's arbitrary-precision ints and Rune's builtin-nat bignums interoperate directly
       (factorial(25) = a 26-digit bignum); python3-config --embed; TestD4CPythonEmbed) — native
       runtime calling CPython not the py emitter, marshalling nat/float/bignum both ways +
-      stdlib reach. Remaining: the `Array dt sh` handle + numpy-via-embed (Python objects <->
-      Rune structured values).
+      stdlib reach. NUMPY VIA EMBED landed too (ch463, v3.328.28): pyNpSum marshals a Rune FList
+      into a Python list and runs REAL numpy.array(xs).sum() in the embedded interpreter ([1,2,3,4]
+      → 10) — the structured-value rung, native binary running numpy on a Rune value. Remaining:
+      the full `Array dt sh` handle (ndarray <-> Rune structured values, both ways).
     - **E3/E4 distributed** — the big one. General all-P adequacy: SOUNDNESS ch409 +
       COMPLETENESS ch421 over the full four-label calculus closed; the all-P REFINEMENT stays
       open (blocked on par-interleave fuel-threading, documented). A first building block

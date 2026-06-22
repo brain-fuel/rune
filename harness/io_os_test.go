@@ -422,6 +422,63 @@ func TestD4CPythonEmbed(t *testing.T) {
 	}
 }
 
+// TestD4CPythonNumpy is the structured-value rung of the CPython embed: the native C binary
+// marshals a Rune FList into a Python list and runs REAL numpy on it in the embedded
+// interpreter — ch463's pyNpSum [1,2,3,4] = numpy.array(xs).sum() = 10. Compiled with
+// python3-config --embed and -lpython; skips without cc / python3-config / numpy.
+func TestD4CPythonNumpy(t *testing.T) {
+	if _, err := exec.LookPath("cc"); err != nil {
+		t.Skip("cc not in PATH")
+	}
+	pyCfg, err := exec.LookPath("python3-config")
+	if err != nil {
+		t.Skip("python3-config not in PATH")
+	}
+	if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+		t.Skip("numpy not importable")
+	}
+	incOut, err := exec.Command(pyCfg, "--includes").Output()
+	if err != nil {
+		t.Skipf("python3-config --includes failed: %v", err)
+	}
+	ldOut, err := exec.Command(pyCfg, "--ldflags", "--embed").Output()
+	if err != nil {
+		ldOut, err = exec.Command(pyCfg, "--ldflags").Output()
+		if err != nil {
+			t.Skipf("python3-config --ldflags failed: %v", err)
+		}
+	}
+	s := loadListing(t, "ch463_cpython_numpy.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.C{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cf := filepath.Join(dir, "main.c")
+	bin := filepath.Join(dir, "main.bin")
+	if err := os.WriteFile(cf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{cf}
+	args = append(args, strings.Fields(string(incOut))...)
+	args = append(args, "-o", bin)
+	args = append(args, strings.Fields(string(ldOut))...)
+	if out, err := exec.Command("cc", args...).CombinedOutput(); err != nil {
+		t.Skipf("[c] compile with libpython failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("[c] run: %v", err)
+	}
+	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "10" {
+		t.Errorf("CPython-numpy pyNpSum gave %q, want first line 10", strings.TrimSpace(string(out)))
+	}
+}
+
 func TestD4PlottingPy(t *testing.T) {
 	py, err := exec.LookPath("python3")
 	if err != nil {

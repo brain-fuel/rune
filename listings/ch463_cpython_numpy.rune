@@ -1,0 +1,26 @@
+-- Chapter 463 — the CPython embed runs real NUMPY on a Rune list (D4).
+--
+-- ch462 embedded CPython for scalars (pow / sqrt / factorial). This reaches the STRUCTURED-
+-- value rung of the host model: a Rune FList of floats marshals into a Python list (PyList of
+-- PyFloats), real numpy reduces it inside the embedded interpreter, and the scalar returns —
+-- so the NATIVE binary runs actual numpy on a Rune value, not the py emitter. `pyNpSum xs`
+-- is numpy.array(xs).sum(): [1,2,3,4] -> 10. The first cut of "numpy via embed" (the heavier
+-- Array-dt-sh handle is full ndarray <-> Rune marshalling; this is the reduction slice).
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign Float      : U end
+data FList : U is fnil : FList | fcons : Float -> FList -> FList end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign floatToNat : Float -> Nat end
+foreign pyNpSum    : FList -> Float end
+
+xs : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (pyNpSum xs))) (fn (u1 : Nat) is pureIO Unit unit end)
+end
