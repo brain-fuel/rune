@@ -83,6 +83,21 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dot2") {
 		b.WriteString("  static V dot2() { return fun(a0 -> fun(a1 -> fun(b0 -> fun(b1 -> new VFloat(_float(a0)*_float(b0) + _float(a1)*_float(b1)))))); }\n")
 	}
+	// D5 / R-OTP: the JVM scheduler shim. Java 25 virtual threads CAN block on a queue,
+	// so the actor blocks on a real receive — no CPS (the JS shim's problem). A Pid is a
+	// VProc (a BlockingQueue mailbox + a CountDownLatch DOWN signal); goroutine-local
+	// identity is a ThreadLocal. Mirrors goOTPRuntime/beamOTPRuntime on the JVM.
+	if usesOTP(p) {
+		b.WriteString("  static final ThreadLocal<VProc> __self = new ThreadLocal<>();\n")
+		b.WriteString("  static VProc __me() { VProc p = __self.get(); if (p == null) { p = new VProc(new LinkedBlockingQueue<V>(), new CountDownLatch(1)); __self.set(p); } return p; }\n")
+		b.WriteString("  static V Pid() { return fun(_M -> UNIT); }\n")
+		b.WriteString("  static V primSelf() { return fun(_M -> fun(_u -> __me())); }\n")
+		b.WriteString("  static V primSpawn() { return fun(_M -> fun(b -> fun(_u -> { VProc pr = new VProc(new LinkedBlockingQueue<V>(), new CountDownLatch(1)); Thread.ofVirtual().start(() -> { __self.set(pr); try { ap(ap(b, pr), unit()); } finally { pr.down().countDown(); } }); return pr; }))); }\n")
+		b.WriteString("  static V primSend() { return fun(_M -> fun(p -> fun(x -> fun(_u -> { try { ((VProc)p).mb().put(x); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } return UNIT; })))); }\n")
+		b.WriteString("  static V primReceive() { return fun(_M -> fun(_u -> { try { return __me().mb().take(); } catch (InterruptedException e) { throw new RuntimeException(e); } })); }\n")
+		b.WriteString("  static V primExit() { return fun(_M -> fun(p -> fun(_u -> { ((VProc)p).down().countDown(); return UNIT; }))); }\n")
+		b.WriteString("  static V primMonitor() { return fun(_M -> fun(p -> fun(_u -> { try { ((VProc)p).down().await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } return UNIT; }))); }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatJVM(&b, *p.Nat)
@@ -334,7 +349,8 @@ var jvmReserved = map[string]bool{
 
 // jvmRuntime is the sealed value interface and its record variants (Java 25).
 const jvmRuntime = `import java.util.function.Function;
-sealed interface V permits VUnit, VInt, VNat, VFloat, VStr, VPtr, VFun, VCtor, VPair {}
+import java.util.concurrent.*;
+sealed interface V permits VUnit, VInt, VNat, VFloat, VStr, VPtr, VFun, VCtor, VPair, VProc {}
 record VUnit() implements V {}
 record VInt(long n) implements V {}            // host machine int (FFI LitInt)
 record VNat(java.math.BigInteger n) implements V {} // builtin-nat: arbitrary precision
@@ -344,6 +360,7 @@ record VPtr(long h) implements V {} // opaque host pointer (B4): never shown str
 record VFun(Function<V,V> f) implements V {}
 record VCtor(int tag, String name, V[] args) implements V {}
 record VPair(V a, V b) implements V {}
+record VProc(BlockingQueue<V> mb, CountDownLatch down) implements V {} // D5 OTP: a live process (typed mailbox + DOWN)
 `
 
 // jvmHelpers are the shared runtime helpers (methods of class `main`): application,
@@ -404,6 +421,7 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
       case VInt i -> Long.toString(i.n());
       case VNat i -> i.n().toString();
       case VFloat f -> Double.toString(f.d());
+      case VProc p -> "<proc>";
       case VStr s -> s.s();
       case VPtr p -> "<ptr>";
       case VFun f -> "<function>";

@@ -575,6 +575,51 @@ func TestListingsHotReloadLiveGo(t *testing.T) {
 	}
 }
 
+// TestListingsOTPJVM runs the full OTP suite on a THIRD backend — the JVM scheduler
+// shim (Java 25 virtual threads + a BlockingQueue mailbox + a CountDownLatch DOWN, a
+// ThreadLocal self). Java 25 threads block on receive, so no CPS is needed (the JS
+// shim's problem). R0 (ch205 -> 3), fail-stop faults (ch214 -> 1), and live hot reload
+// (ch443 -> 0) all produce the SAME observable as the BEAM and Go runtimes.
+func TestListingsOTPJVM(t *testing.T) {
+	javac25, java25, ok := findJava25()
+	if !ok {
+		t.Skip("no JDK 25 (asdf temurin-25)")
+	}
+	cases := []struct{ file, want string }{
+		{"ch205_otp_live.rune", "succ (succ (succ zero))"},
+		{"ch214_otp_fault_live.rune", "succ zero"},
+		{"ch443_hot_reload_live.rune", "0"},
+	}
+	for _, c := range cases {
+		t.Run(c.file, func(t *testing.T) {
+			s := loadListing(t, c.file)
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := codegen.JVM{}.Emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			f := filepath.Join(dir, "main.java")
+			if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := exec.Command(javac25, "--release", "25", "-d", dir, f).CombinedOutput(); err != nil {
+				t.Fatalf("javac: %v\n%s", err, out)
+			}
+			out, err := exec.Command(java25, "-cp", dir, "main").Output()
+			if err != nil {
+				t.Fatalf("java run: %v", err)
+			}
+			if strings.TrimSpace(string(out)) != c.want {
+				t.Errorf("JVM OTP %s gave %q, want %q", c.file, strings.TrimSpace(string(out)), c.want)
+			}
+		})
+	}
+}
+
 // TestListingsReplicatedActorsBeam is the E4 live-actor projection gate (built on D5):
 // the verified replicated counter runs as TWO genuine BEAM processes that hold replica
 // state, gossip it, and merge. ch433 spawns replicas A and B, ticks each replica's own
