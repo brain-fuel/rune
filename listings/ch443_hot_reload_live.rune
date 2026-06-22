@@ -1,0 +1,61 @@
+-- Chapter 443 — hot reload, LIVE: an actor upgrades its state representation mid-run
+-- (D7 + D5). ch442 proved code_change-as-univalence-transport in the kernel; here a
+-- genuinely RUNNING actor (on the OTP scheduler — BEAM, or the Go goroutine shim)
+-- receives an `upgrade` message and migrates its live state by that SAME transport,
+-- then keeps serving. The proven migration and the live process are the one mechanism:
+-- the upgrade computes to the flipped representation, the server answers from it.
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+not : Bool -> Bool is fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end end
+boolF : UF is fib Bool end
+notNot : (b : Bool) -> Eq Bool (not (not b)) b is
+  fn (b : Bool) is BoolElim (fn (x : Bool) is Eq Bool (not (not x)) x end) refl refl b end end
+upgradePath : pathU boolF boolF is ua boolF boolF not not notNot notNot end
+-- code_change: migrate the state by transport along the equivalence (ch442).
+codeChange : Bool -> Bool is fn (s : Bool) is castU boolF boolF upgradePath s end end
+boolToNat : Bool -> Nat is fn (b : Bool) is BoolElim (fn (x : Bool) is Nat end) (succ zero) zero b end end
+
+-- the OTP runtime primitives (D5 / R-OTP Layer R0).
+foreign Pid : U -> U end
+foreign primSelf    : (M : U) -> IO (Pid M) end
+foreign primSpawn   : (M : U) -> (Pid M -> IO Unit) -> IO (Pid M) end
+foreign primSend    : (M : U) -> Pid M -> M -> IO Unit end
+foreign primReceive : (M : U) -> IO M end
+
+-- the protocol: query the current state (reply as a Nat) or upgrade the state rep.
+data Msg : U is
+  query   : Pid Nat -> Msg
+| upgrade : Msg
+end
+
+-- the server loop: on `query` reply the state as a Nat and keep it; on `upgrade`
+-- migrate the live state via code_change and continue. A `partial` receive loop.
+partial serve : Bool -> IO Unit is
+  fn (st : Bool) is
+    bindIO Msg Unit (primReceive Msg) (fn (m : Msg) is
+      MsgElim (fn (w : Msg) is IO Unit end)
+        (fn (rp : Pid Nat) is
+           bindIO Unit Unit (primSend Nat rp (boolToNat st)) (fn (u : Unit) is serve st end) end)
+        (serve (codeChange st))
+        m
+      end)
+  end
+end
+
+-- start the server in state `true`, UPGRADE it (state -> code_change true = false),
+-- then query: the migrated state answers 0 (false). Live hot reload, observable.
+main : IO Nat is
+  bindIO (Pid Nat) Nat (primSelf Nat) (fn (me : Pid Nat) is
+    bindIO (Pid Msg) Nat (primSpawn Msg (fn (sp : Pid Msg) is serve true end)) (fn (w : Pid Msg) is
+      bindIO Unit Nat (primSend Msg w upgrade) (fn (u1 : Unit) is
+        bindIO Unit Nat (primSend Msg w (query me)) (fn (u2 : Unit) is
+          primReceive Nat
+        end)
+      end)
+    end)
+  end)
+end

@@ -540,6 +540,41 @@ func TestListingsOTPFaultLiveGo(t *testing.T) {
 	}
 }
 
+// TestListingsHotReloadLiveGo is the D7+D5 LIVE hot-reload gate: a running actor (on
+// the Go goroutine shim) receives an `upgrade` and migrates its live state by the SAME
+// univalence transport ch442 proved (code_change = castU along the equivalence), then
+// keeps serving. Started in state `true`, upgraded (-> false), queried -> 0. The proven
+// migration and the live process are one mechanism, off the BEAM.
+func TestListingsHotReloadLiveGo(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch443_hot_reload_live.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("go run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "0"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("live hot-reload on the Go shim printed %q, want %q (state upgraded true->false)", got, want)
+	}
+}
+
 // TestListingsReplicatedActorsBeam is the E4 live-actor projection gate (built on D5):
 // the verified replicated counter runs as TWO genuine BEAM processes that hold replica
 // state, gossip it, and merge. ch433 spawns replicas A and B, ticks each replica's own
