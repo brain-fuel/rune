@@ -850,15 +850,30 @@ first and forces only on mismatch, so the fast path logs nothing.
       data-plane foreign-op binding + live Podman round-trip; the dependency-heavy matrix
       tail (serverless/warehouse/archival/devops/ai-ml — each has one messy provider);
       real cloud apply.
-    - **D5 distributed liveness** — UNBOUNDED restart-liveness LANDED (v3.317.x, ch206:
-      `runStuck`/`stableRestart` prove recovery persists for ALL step counts; `unmonitoredStuck`
-      the safety dual), the ∀-strengthening of the bounded k=1 witness, by conversion.
-    - **Frontier (open nodes):** the dependency-heavy wavelet matrix tail + live Podman
-      round-trip (above), D4 tail (plotting + CPython embed), D5 tail (non-BEAM scheduler
-      shim + COINDUCTIVE-stream Eventually — the inductive always-property is done; the
-      stream version hits the documented dfix wall), D7 live hot-reload (`code_change` on
-      BEAM). Everything else landed or
-      parked by demonstrated-need (PARKING-LOT.md). See the DAG for deps + implications.
+    - **2026-06-21 OVERNIGHT SESSION (v3.321–v3.326.x) — env provisioning + a frontier sweep.**
+      First the env deps were met the project way (.tool-versions java-25 + opentofu, bin/setup.sh,
+      DEVELOPMENT.md; matplotlib/opentofu installed; docker verified), reclassifying D3/D4/E4
+      from env-blocked to implementable. Then, landed in sequence:
+      • **D3 CLOSED** — JVM float bodies (VFloat + the kit; ch217 on Java 25 = 11/13/11/0/unit);
+        f64 byte-identical across ALL 8 backends.
+      • **D4 plotting** — `plotSave` via real matplotlib (ch441), the telos-3 plotting reach.
+      • **D5 Eventually-over-unbounded-stream** (ch209): `Sig Nat (λk. P (streamAt k s))` — the
+        research finding that "eventually" is INDUCTIVE (no dfix wall; the wall is only the
+        greatest-fixpoint always-eventually fairness, parked).
+      • **D5 NON-BEAM SCHEDULER SHIM COMPLETE** — OTP runs on ALL FOUR source backends:
+        Go (goroutine+chan), JVM (virtual threads+BlockingQueue), JS (async IO+AsyncLocalStorage,
+        contained to usesOTP). ch205 (R0)/ch214 (faults)/ch443 all run BEAM/Go/JVM/JS-identical.
+      • **D5 unbounded restart-liveness** (ch206 runStuck/stableRestart/unmonitoredStuck).
+      • **D7 hot reload** — proven tier (ch442: code_change = univalence transport, invariant
+        preserved via subst), LIVE actor migration (ch443, on Go/JVM/JS), and the dev-loop
+        `:reload` REPL wire. Effectively complete.
+      • **E4 live round-trip** — emitted Valkey spec brought up on docker, PONGs (gated);
+        20→22 matrix rows + 15 FOSS backends earlier.
+    - **Frontier (genuinely-hard tail; all tractable items above are done):** D5 live-procs-⊨-models
+      bisimulation (E2/E3 research); D4 CPython embed + `Array dt sh` (design-heavy); E4 deeper
+      data-plane foreign-op binding to a LIVE broker (RESP/client) + the dependency-heavy matrix
+      tail; D7's `primUpgrade` sugar (ch443 shows it unnecessary). A10 + the always-eventually
+      fairness (dfix wall) parked. See the DAG for deps + implications.
 
 ## Standing rules
 
