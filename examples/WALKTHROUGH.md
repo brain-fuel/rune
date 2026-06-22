@@ -1,0 +1,71 @@
+# Better than Winglang: the full pipeline, end to end
+
+The telos-4 claim is "infra-as-code that is provably correct, simulated and deployed
+from the same verified source." Here it is, with real commands you can run, on the
+artifacts in this directory. Every stage is gated by a test in the suite.
+
+## 1. PROVE — the protocol carries its own convergence certificate
+
+`examples/gcounter.rune` is a G-Counter CRDT. Its `merge` is proven a join-semilattice
+(`mergeComm`/`mergeIdem`/`mergeAssoc`, from `maxComm` &c.), so it converges under ANY
+gossip schedule — and "it loads" *is* "the proof checks" (the kernel re-validates every
+definition on entry).
+
+```sh
+rune emit examples/gcounter.rune converged    # elaborates => the proof is machine-checked
+```
+
+## 2. SIMULATE — the better-than-Winglang surface catches non-convergence
+
+```sh
+rune simulate examples/gcounter.rune 2
+# … step 2 gossip => r0=3 r1=3  [converged] … verdict: CONVERGED (and the join laws
+# hold, so under ANY schedule)
+```
+
+The simulator drives the protocol's OWN verified ops under a fault policy (partition,
+duplicate, crash) and a CvRDT law linter. A non-join `merge` (see `lww.rune`,
+`badcounter.rune`) is flagged as "schedule luck, not a property" — the catch no
+YAML/HCL tool can make.
+
+## 3. DEPLOY — one agnostic manifest, an equivalent deployment on every cloud
+
+```sh
+rune deploy --manifest examples/app.wav --backend aws    > app.tf   # OpenTofu/Terraform
+rune deploy --manifest examples/app.wav --backend gcp    > app.tf   # … same logical set
+```
+
+`app.wav` is a 9-resource web app (compute/queue/kv/db/secret/iam/object/lb/cdn). The
+22-row matrix lowers each kind to AWS/Azure/GCP HCL; the equal-config → equivalent-
+deployment equivalence is the gate. 13 abstractions also have a self-hosted FOSS backend
+(`--backend valkey|redpanda|…`) that runs under Podman/Docker with no cloud account.
+
+## 4. RUN — the verified value executes, cross-backend
+
+```sh
+rune run examples/gcounter.rune converged --target go    # => succ (succ (succ zero)) = 3
+rune run examples/gcounter.rune converged --target erl   # => 3 (the BEAM, the natural target)
+```
+
+The proven protocol's actors run live on the OTP scheduler — on the BEAM, or off it
+(the Go/JVM/JS scheduler shims: goroutines+channels / virtual-threads+queues / async+
+AsyncLocalStorage), all observationally identical, with crash/detect/restart faults.
+
+## 5. LIVE STATE — the data plane talks to a real broker
+
+```sh
+# bring up the FOSS kv backend, then run the live-binding listing against it:
+rune deploy --resource kv --name cache --backend valkey --out ./kv && (cd kv && docker compose up -d)
+WAVELET_KV_URL=redis://localhost:6379 rune run listings/ch444_live_kv.rune main --target go   # => world
+```
+
+`kvSetLive`/`kvGetLive` (ch444) and `enqueueLive`/`dequeueLive` (ch445) speak RESP over a
+raw socket — the wavelet kv/queue abstraction reads and writes a REAL Valkey, on Go/JVM/JS,
+with no third-party dependency. (Gated by `TestLiveKVRoundTrip`, which runs all three
+backends against one broker.)
+
+---
+
+**One verified source → proven → simulated → deployed (any cloud) → run (any backend) →
+live on a real broker.** That is the "better than Winglang" pipeline, and every arrow is
+a test in `go test ./...`.
