@@ -1883,6 +1883,27 @@ func TestFurnaceMax(t *testing.T) {
 	}
 }
 
+// TestFurnaceCRDT carries the Savage furnace on-ramp to the DISTRIBUTED track: a runnable
+// property suite for max-register convergence (ch453's CvRDT) — merge commutativity,
+// idempotence, associativity tested on concrete divergent states, reported 1/0 per law.
+// The tested tier whose proven tier is ch453's mergeComm/mergeIdem/mergeAssoc. Pure Rune
+// (no numpy): "1\n1\n1\nunit" on js/py/go/erl/rust.
+func TestFurnaceCRDT(t *testing.T) {
+	const want = "1\n1\n1\nunit"
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch454_furnace_crdt.rune", "main", ""); got != want {
+				t.Errorf("[%s] furnace-crdt gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}
+
 // TestD4ShapeProven realizes the R-INTEROP headline (shapes proven, not checked) on the
 // current substrate: safeDot requires a proof Eq Nat (len xs) (len ys), so a mismatched
 // call is a compile error (verified manually: "refl does not prove the equation"), and the dot is

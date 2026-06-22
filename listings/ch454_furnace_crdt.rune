@@ -1,0 +1,71 @@
+-- Chapter 454 — the FURNACE reaches the DISTRIBUTED track (Savage).
+--
+-- The furnace's on-ramp ("test it, THEN prove it") was seeded for numerics (ch230–232,
+-- ch449/451). This carries it to the distributed track: a runnable PROPERTY SUITE for CvRDT
+-- convergence, the tested tier whose proven tier is ch453's mergeComm/mergeIdem/mergeAssoc.
+-- A learner first CONFIRMS the max-register converges on concrete divergent states — merge
+-- in both orders, with duplication, in any grouping, all reach the same value — reported
+-- 1/0 per law, then meets the machine-checked proof that it holds for ALL states. The
+-- continuous Savage on-ramp now spans numerics AND distributed systems.
+--
+-- COMMUTATIVITY merge a b = merge b a, IDEMPOTENCE merge a a = a, ASSOCIATIVITY
+-- merge(merge a b)c = merge a(merge b c) — all pass on the sampled states: "1\n1\n1\nunit".
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+natMax : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is m end)
+      (fn (k : Nat) (maxK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is succ (maxK j) end) m
+         end end)
+      a b
+  end
+end
+
+data Reg : U is reg : Nat -> Reg end
+val : Reg -> Nat is fn (r : Reg) is RegElim (fn (w : Reg) is Nat end) (fn (n : Nat) is n end) r end end
+merge : Reg -> Reg -> Reg is fn (x : Reg) (y : Reg) is reg (natMax (val x) (val y)) end end
+
+-- decidable equality on Nat (nested NatElim), lifted to registers — the furnace's runtime
+-- verdict for "did these two states converge to the same value?".
+beqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (b : Nat) is NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) b end)
+      (fn (k : Nat) (ihk : Nat -> Bool) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih2 : Bool) is ihk j end) b
+         end end)
+      a
+  end
+end
+beqReg : Reg -> Reg -> Bool is fn (x : Reg) (y : Reg) is beqNat (val x) (val y) end end
+boolToNat : Bool -> Nat is fn (b : Bool) is BoolElim (fn (w : Bool) is Nat end) (succ zero) zero b end end
+
+-- sample divergent states.
+ra : Reg is reg (succ (succ (succ zero))) end                                  -- 3
+rb : Reg is reg (succ (succ (succ (succ (succ (succ (succ zero))))))) end       -- 7
+rc : Reg is reg (succ (succ (succ (succ (succ zero))))) end                     -- 5
+
+-- the three convergence properties, tested on the samples (1 = holds).
+commProp  : Nat is boolToNat (beqReg (merge ra rb) (merge rb ra)) end
+idemProp  : Nat is boolToNat (beqReg (merge ra ra) ra) end
+assocProp : Nat is boolToNat (beqReg (merge (merge ra rb) rc) (merge ra (merge rb rc))) end
+
+foreign printNat : Nat -> IO Nat end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat commProp) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat idemProp) (fn (u2 : Nat) is
+      bindIO Nat Unit (printNat assocProp) (fn (u3 : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
