@@ -1,0 +1,196 @@
+-- Chapter 461 — supervision is NECESSARY: an unmonitored crash is inadequate (E3).
+--
+-- ch459/ch460 proved adequacy (`visibleRun k P = project P`) for SUPERVISED processes —
+-- every crash beside a monitor. This proves the hypothesis is NECESSARY, not decorative: an
+-- UNMONITORED crash breaks adequacy. For `par crash halt` (a crash beside a plain halt, no
+-- monitor) the projection still emits one failure (`project = [lfail]`, crash projects to
+-- primExit) but the runtime DETECTS nothing (`okStep` finds no monitor, so visibleRun = nil).
+-- The spec OVER-approximates: it predicts a failure observation the running system never
+-- makes. So the refinement genuinely depends on supervision — the dual of ch207's "no
+-- over-approximation" for the supervised case, and the companion to ch416's LWW refutation.
+--
+--   crashUnmonitoredInadequate :
+--     Eq (List Label) (visibleRun 2 (par crash halt)) (project (par crash halt)) -> Eq Nat zero (succ zero)
+--
+-- assuming adequacy here forces 0 = 1 (lengths 0 vs 1), absurd. Proof-only + a run showing
+-- the runtime trace is empty (length 0) while the projection has one failure.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+data Label : U is ltau : Label | lfail : Label end
+data Proc : U is halt : Proc | mon : Proc -> Proc | par : Proc -> Proc -> Proc | crash : Proc end
+data Trans : U is tr : Label -> Proc -> Trans end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end) ys (fn (h : A) (t : List A) (ih : List A) is cons A h ih end) xs
+  end
+end
+labelOf : Trans -> Label is fn (t : Trans) is TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t end end
+procOf : Trans -> Proc is fn (t : Trans) is TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t end end
+
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+-- the fault-fragment step: par interleaves its branches; a crashed branch beside a monitor
+-- is DETECTed (one lfail). No communication prefixes in this fragment, so the rendezvous
+-- case of ch207's commT collapses to plain interleaving.
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (interleaveT iha ihb a b)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (interleaveT iha ihb a b)
+      (isCrash a)
+  end
+end
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+visible : Label -> Bool is fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false true l end end
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is BoolElim (fn (w : Bool) is List Label end) (cons Label l rest) rest (visible l) end
+end
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (okStep p)
+         end end)
+      n
+  end
+end
+project : Proc -> List Label is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is List Label end)
+      (nil Label)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (a : Proc) (b : Proc) (iha : List Label) (ihb : List Label) is append Label iha ihb end)
+      (cons Label lfail (nil Label))
+      x
+  end
+end
+
+-- THE KEY LEMMA: a halted left branch is observationally NEUTRAL. okStep (par halt X)
+-- re-emits exactly X's label and steps to `par halt X'`, so by induction on the fuel the
+-- whole run matches X's. Cases on okStep X (none -> both nil; some tb -> same head, the IH
+-- handles the persistent `par halt` residue on the tail).
+parHaltNeutral : (k : Nat) -> (x : Proc) -> Eq (List Label) (visibleRun k (par halt x)) (visibleRun k x) is
+  fn (k : Nat) is
+    NatElim (fn (m : Nat) is (x : Proc) -> Eq (List Label) (visibleRun m (par halt x)) (visibleRun m x) end)
+      (fn (x : Proc) is refl end)
+      (fn (m : Nat) (ih : (x : Proc) -> Eq (List Label) (visibleRun m (par halt x)) (visibleRun m x)) is
+         fn (x : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq (List Label)
+                  (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end)
+                     (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+                        (none Trans)
+                        (fn (tb : Trans) is some Trans (tr (labelOf tb) (par halt (procOf tb))) end)
+                        o))
+                  (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end)
+                     o)
+                end)
+             refl
+             (fn (tb : Trans) is
+                cong (List Label) (List Label) (fn (r : List Label) is consVis (labelOf tb) r end)
+                  (visibleRun m (par halt (procOf tb))) (visibleRun m (procOf tb)) (ih (procOf tb)) end)
+             (okStep x)
+         end
+       end)
+      k
+  end
+end
+
+-- the supervised tower: n units `par crash (mon halt)` in parallel (tower 0 = halt).
+unit : Proc is par crash (mon halt) end
+
+-- ===== the refutation: assuming adequacy for an unmonitored crash forces 0 = 1 =====
+lenL : List Label -> Nat is
+  fn (xs : List Label) is ListElim Label (fn (w : List Label) is Nat end) zero (fn (h : Label) (t : List Label) (ih : Nat) is succ ih end) xs end
+end
+
+-- the unmonitored crash: a crash beside a plain halt (NOT a monitor).
+bad : Proc is par crash halt end
+
+-- visibleRun 2 bad = nil (okStep bad = none: a crashed branch beside a non-monitor does not
+-- DETECT), so its length is 0; project bad = [lfail], length 1. Assuming they are equal and
+-- mapping lengths gives 0 = 1.
+crashUnmonitoredInadequate :
+    Eq (List Label) (visibleRun (succ (succ zero)) bad) (project bad) -> Eq Nat zero (succ zero) is
+  fn (h : Eq (List Label) (visibleRun (succ (succ zero)) bad) (project bad)) is
+    cong (List Label) Nat lenL (visibleRun (succ (succ zero)) bad) (project bad) h
+  end
+end
+
+data Unit : U is unit0 : Unit end
+foreign printNat : Nat -> IO Nat end
+
+-- witness: the runtime observable trace of the unmonitored crash is EMPTY (length 0), unlike
+-- its projection (length 1) — the over-approximation the inadequacy proof names. Print 0.
+main : IO Unit is
+  bindIO Nat Unit (printNat (lenL (visibleRun (succ (succ zero)) bad))) (fn (u : Nat) is pureIO Unit unit0 end)
+end

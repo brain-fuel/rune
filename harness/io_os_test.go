@@ -864,6 +864,38 @@ func TestE3MaxRegisterInflation(t *testing.T) {
 	}
 }
 
+// TestE3SupervisionNecessary gates ch461: the adequacy hypothesis (supervision) is NECESSARY.
+// For an UNMONITORED crash (par crash halt) the projection still emits one failure but the
+// runtime detects nothing (okStep finds no monitor → visibleRun = nil), so the spec
+// OVER-approximates — crashUnmonitoredInadequate turns assumed adequacy into 0 = 1. The proof
+// type-checks under TestListingsElaborateAndCheck; the witness shows the empty runtime trace
+// (length 0) vs the projection's one failure.
+func TestE3SupervisionNecessary(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch461_supervision_necessary.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "0" {
+		t.Errorf("unmonitored-crash runtime trace length = %q, want first line 0", strings.TrimSpace(string(out)))
+	}
+}
+
 // TestE3AdequacyClosure gates ch460: adequacy as a CLOSURE — the adequate class (trace =
 // projection) is closed under prepending a supervised unit (closureUnit) and a halt
 // (closureHalt), abstracting ch459's induction step into reusable lemmas (pure computation

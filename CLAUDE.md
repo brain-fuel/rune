@@ -833,7 +833,9 @@ first and forces only on mismatch, so the fast path logs nothing.
       prepending a supervised unit (closureUnit: adequate p -> adequate (par unit p)) and a
       halt (closureHalt) — reusable lemmas abstracting ch459's induction step, so any process
       built by prepending units/halts to an adequate seed is adequate (tower = closureUnit^n).
-      Plus: a VERIFIED CRDT corpus over two
+      Supervision proven NECESSARY (ch461, v3.328.24): an unmonitored crash par crash halt is
+      INADEQUATE (project [lfail] but visibleRun nil — no detect), crashUnmonitoredInadequate
+      forces 0=1, so the refinement depends on supervision (two-sided adequacy story). Plus: a VERIFIED CRDT corpus over two
       lattices carrying convergence+safety+stability (G-Counter/G-Set/PN-Counter
       ch410–419), refutations matching the simulator's law linter (ch416/417); the
       `internal/sim` + `rune simulate` better-than-Winglang SIMULATOR (v3.230–v3.248,
