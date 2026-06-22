@@ -384,6 +384,37 @@ func TestD4ShapeMatMul(t *testing.T) {
 	}
 }
 
+// TestD4MatMulRows gates ch448: the machine-checked theorem rows(matMul A B) = rows A
+// (the product preserves the left operand's row count, for ALL A and B — induction over
+// A, cong succ on the IH). The proof type-checks under TestListingsElaborateAndCheck;
+// here the concrete witness runs and prints rows A = 2.
+func TestD4MatMulRows(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch448_matmul_rows.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if first, _, _ := strings.Cut(got, "\n"); first != "2" {
+		t.Errorf("rows(A·B) = %q, want first line 2", got)
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {

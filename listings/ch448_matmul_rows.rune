@@ -1,0 +1,103 @@
+-- Chapter 448 — the shape-safe product is PROVEN to preserve the row count (D2/D4).
+--
+-- ch447 made matrix×matrix shape-SAFE (a non-conformable product is a compile error).
+-- This turns "it runs" into "it is verified": a structural theorem about that operation —
+-- `rows (matMul A B) = rows A`, the product has exactly as many rows as its left operand,
+-- for ALL A and B. Proven by induction over A (NatMatElim): the base is `mnil` (0 = 0,
+-- refl), the step is `cong succ` on the inductive hypothesis. The proof is total and
+-- machine-checked — the telos-3 "tiered-verified stdlib" bar applied to the LA module:
+-- the dimensions are not just contracts at the boundary, they are theorems in the core.
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data NatMat  : U is mnil : NatMat  | mcons : NatList -> NatMat -> NatMat end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAdd b ih end) a end
+end
+headOr0 : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is Nat end) zero (fn (h : Nat) (r : NatList) (ih : Nat) is h end) xs end
+end
+tailList : NatList -> NatList is
+  fn (xs : NatList) is NatListElim (fn (x : NatList) is NatList end) nnil (fn (h : Nat) (r : NatList) (ih : NatList) is r end) xs end
+end
+rows : NatMat -> Nat is
+  fn (m : NatMat) is NatMatElim (fn (x : NatMat) is Nat end) zero (fn (h : NatList) (r : NatMat) (ih : Nat) is succ ih end) m end
+end
+
+scaleRow : Nat -> NatList -> NatList is
+  fn (c : Nat) (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList end) nnil
+      (fn (h : Nat) (r : NatList) (ih : NatList) is ncons (natMul c h) ih end) xs
+  end
+end
+addRows : NatList -> NatList -> NatList is
+  fn (xs : NatList) is
+    NatListElim (fn (x : NatList) is NatList -> NatList end)
+      (fn (ys : NatList) is ys end)
+      (fn (h : Nat) (r : NatList) (ih : NatList -> NatList) is
+         fn (ys : NatList) is
+           NatListElim (fn (y : NatList) is NatList end)
+             (ncons h r)
+             (fn (yh : Nat) (yr : NatList) (ih2 : NatList) is ncons (natAdd h yh) (ih yr) end)
+             ys
+         end end)
+      xs
+  end
+end
+vecMat : NatList -> NatMat -> NatList is
+  fn (r : NatList) (b : NatMat) is
+    NatMatElim (fn (x : NatMat) is NatList -> NatList end)
+      (fn (rr : NatList) is nnil end)
+      (fn (brow : NatList) (brest : NatMat) (ih : NatList -> NatList) is
+         fn (rr : NatList) is
+           addRows (scaleRow (headOr0 rr) brow) (ih (tailList rr))
+         end end)
+      b r
+  end
+end
+matMul : NatMat -> NatMat -> NatMat is
+  fn (a : NatMat) (b : NatMat) is
+    NatMatElim (fn (x : NatMat) is NatMat end)
+      mnil
+      (fn (arow : NatList) (arest : NatMat) (ih : NatMat) is mcons (vecMat arow b) ih end)
+      a
+  end
+end
+
+-- THE THEOREM: for all A and B, the product A·B has exactly rows A rows. Induction on A.
+--   base  A = mnil:  rows (matMul mnil B) = 0 = rows mnil               (refl)
+--   step  A = mcons arow arest: both sides reduce to a `succ`, and the inductive
+--         hypothesis `rows (matMul arest B) = rows arest` lifts under `succ` by cong.
+matMulRows : (a : NatMat) -> (b : NatMat) -> Eq Nat (rows (matMul a b)) (rows a) is
+  fn (a : NatMat) (b : NatMat) is
+    NatMatElim (fn (x : NatMat) is Eq Nat (rows (matMul x b)) (rows x) end)
+      refl
+      (fn (arow : NatList) (arest : NatMat) (ih : Eq Nat (rows (matMul arest b)) (rows arest)) is
+         cong Nat Nat succ (rows (matMul arest b)) (rows arest) ih end)
+      a
+  end
+end
+
+-- a concrete witness so the chapter also RUNS: A·B for [[1,2],[3,4]]·[[5,6],[7,8]] has
+-- rows A = 2 rows; print 2 (the proof above guarantees this for every A, B).
+matA : NatMat is mcons (ncons 1 (ncons 2 nnil)) (mcons (ncons 3 (ncons 4 nnil)) mnil) end
+matB : NatMat is mcons (ncons 5 (ncons 6 nnil)) (mcons (ncons 7 (ncons 8 nnil)) mnil) end
+
+foreign printNat : Nat -> IO Nat end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (rows (matMul matA matB))) (fn (u1 : Nat) is pureIO Unit unit end)
+end

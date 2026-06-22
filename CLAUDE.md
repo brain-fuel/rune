@@ -887,6 +887,11 @@ first and forces only on mismatch, so the fast path logs nothing.
         (verified — a 3-row B against a 2-col A is rejected with a diagnostic). Row-combination
         formulation (each result row = Σ rowA[i]·B_row_i — no transpose, no indexing);
         [[1,2],[3,4]]·[[5,6],[7,8]] = [[19,22],[43,50]], (0,0)=19 on go/rust/js (TestD4ShapeMatMul).
+      • **D4 matMul row-count theorem** (ch448, v3.328.5) — turns ch447 from "runs" into
+        "proven": `rows (matMul A B) = rows A` for ALL A, B, by induction over A (NatMatElim,
+        base refl, step cong succ on the IH). Machine-checked under TestListingsElaborateAndCheck;
+        the witness runs to 2 (TestD4MatMulRows). The LA dimensions are theorems in the core,
+        not just boundary contracts — the telos-3 tiered-stdlib bar applied to linear algebra.
       • **WALKTHROUGH.md** (v3.327.4) — the Savage teachable artifact: the full
         prove→simulate→deploy→RUN→LIVE "better than Winglang" pipeline from one source.
     - **Frontier (genuinely-hard tail; all tractable items above are done):** D5 live-procs-⊨-models
