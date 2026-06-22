@@ -38,6 +38,11 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "fsqrt") || usesForeign(p, "npNorm") || usesForeign(p, "fpow") {
 		imports += "\t\"math\"\n"
 	}
+	if usesOTP(p) {
+		// D5 / R-OTP: the non-BEAM Go scheduler shim needs goroutine-local mailbox
+		// identity (parsed goid), a registry, and concurrency primitives.
+		imports += "\t\"bytes\"\n\t\"runtime\"\n\t\"strconv\"\n\t\"sync\"\n"
+	}
 	b.WriteString("package main\n\nimport (\n" + imports + ")\n\n")
 	b.WriteString(goRuntime)
 	if usesQuot(p) {
@@ -45,6 +50,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesIO(p) {
 		b.WriteString(goIORuntime)
+	}
+	if usesOTP(p) {
+		b.WriteString(goOTPRuntime)
 	}
 	// D6 / R-EFFECT: bake the standard OS/IO host bodies when referenced.
 	if usesForeign(p, "printNat") {
@@ -514,6 +522,28 @@ func _show(v any) string {
 // returns a constant thunk, bindIO sequences. Type arguments arrive as units.
 const goIORuntime = `func pureIO_d() any { return func(_A any) any { return func(a any) any { return func(_u any) any { return a } } } }
 func bindIO_d() any { return func(_A any) any { return func(_B any) any { return func(m any) any { return func(k any) any { return func(_u any) any { return ap(ap(k, ap(m, nil)), nil) } } } } } }
+`
+
+// goOTPRuntime is the LIVE OTP runtime for the Go backend (D5 / R-OTP Layer R0) — the
+// non-BEAM cooperative scheduler shim, realized with goroutines + buffered channels
+// (the closest non-BEAM analog, per R-OTP §shim). A Pid is a buffered `chan any`
+// mailbox; goroutine-local identity (which mailbox is "mine" for primSelf/primReceive)
+// is resolved by a registry keyed on the parsed goroutine id. The actor blocks on a
+// real channel receive, so no CPS/continuation surgery is needed (unlike the JS
+// microtask shim). Fail-stop faults (primExit/primMonitor) are the next layer.
+//
+//	primSelf    M     ~> the current goroutine's mailbox (its pid)
+//	primSpawn   M b   ~> a goroutine running `b pid unit` with a fresh mailbox; returns pid
+//	primSend    M p x ~> p <- x   (async, buffered; FIFO per sender)
+//	primReceive M     ~> <- own mailbox (blocks until a message arrives)
+const goOTPRuntime = `func Pid() any { return func(_M any) any { return nil } } // foreign type, erased
+var __mb sync.Map // goid -> chan any (the process mailbox registry)
+func __goid() int64 { b := make([]byte, 64); b = b[:runtime.Stack(b, false)]; b = bytes.TrimPrefix(b, []byte("goroutine ")); i := bytes.IndexByte(b, ' '); n, _ := strconv.ParseInt(string(b[:i]), 10, 64); return n }
+func __self() chan any { id := __goid(); if v, ok := __mb.Load(id); ok { return v.(chan any) }; c := make(chan any, 1024); __mb.Store(id, c); return c }
+func primSelf() any { return func(_M any) any { return func(_u any) any { return __self() } } }
+func primSpawn() any { return func(_M any) any { return func(b any) any { return func(_u any) any { c := make(chan any, 1024); go func() { __mb.Store(__goid(), c); ap(ap(b, c), nil) }(); return c } } } }
+func primSend() any { return func(_M any) any { return func(p any) any { return func(x any) any { return func(_u any) any { p.(chan any) <- x; return nil } } } } }
+func primReceive() any { return func(_M any) any { return func(_u any) any { return <-__self() } } }
 `
 
 const goQuotRuntime = `func qin_d() any { return func(a any) any { return func(r any) any { return func(x any) any { return x } } } }

@@ -461,6 +461,42 @@ func TestListingsOTPLiveBeam(t *testing.T) {
 	}
 }
 
+// TestListingsOTPLiveGo is the D5 / R-OTP NON-BEAM scheduler-shim gate: the same
+// ch205 OTP actor system runs OFF the BEAM, on the Go backend's goroutine + buffered-
+// channel cooperative scheduler (codegen ships goOTPRuntime — a Pid is a `chan any`
+// mailbox, goroutine-local identity resolved by a goid registry, the actor blocks on a
+// real channel receive). The worker spawns as a goroutine, drains its mailbox FIFO, and
+// the answer is the SAME 3 the BEAM produces — OTP semantics, no BEAM required.
+func TestListingsOTPLiveGo(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch205_otp_live.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("go run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ (succ (succ zero))"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("live OTP actor on the Go shim printed %q, want %q", got, want)
+	}
+}
+
 // TestListingsReplicatedActorsBeam is the E4 live-actor projection gate (built on D5):
 // the verified replicated counter runs as TWO genuine BEAM processes that hold replica
 // state, gossip it, and merge. ch433 spawns replicas A and B, ticks each replica's own
