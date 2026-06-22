@@ -898,6 +898,11 @@ first and forces only on mismatch, so the fast path logs nothing.
         base refl, step cong succ on the IH). Machine-checked under TestListingsElaborateAndCheck;
         the witness runs to 2 (TestD4MatMulRows). The LA dimensions are theorems in the core,
         not just boundary contracts — the telos-3 tiered-stdlib bar applied to linear algebra.
+      • **D4 furnace matmul tier-bridge** (ch449, v3.328.7) — the Savage furnace extended to
+        2-D LA: the entry-sum of A·B by FOREIGN numpy matmul (npMatSum) is checked against the
+        SAME sum by the EXACT proven shape-safe matMul (ch447), summed in Nat. Σ of
+        [[1,2],[3,4]]·[[5,6],[7,8]] = 134 both ways, agreement=1 on js/py/go/erl/rust
+        (TestFurnaceMatMul) — trust the fast path because it MATCHES the machine-checked one.
       • **WALKTHROUGH.md** (v3.327.4) — the Savage teachable artifact: the full
         prove→simulate→deploy→RUN→LIVE "better than Winglang" pipeline from one source.
     - **Frontier (genuinely-hard tail; all tractable items above are done):** D5 live-procs-⊨-models

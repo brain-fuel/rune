@@ -1737,6 +1737,32 @@ func TestFurnaceTierBridge(t *testing.T) {
 	})
 }
 
+// TestFurnaceMatMul ties the two tiers for 2-D linear algebra: the entry-SUM of A·B
+// computed by FOREIGN numpy matmul (npMatSum, real np `@` on py / reference loop elsewhere)
+// is checked against the SAME sum computed by the EXACT proven shape-safe product (ch447's
+// matMul, summed in Nat). A 1 means the fast numpy path agrees with the machine-checked
+// product. [[1,2],[3,4]]·[[5,6],[7,8]] has Σ entries 134: "134\n1\nunit" on js/py/go/erl/rust.
+func TestFurnaceMatMul(t *testing.T) {
+	const want = "134\n1\nunit"
+	srcBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
+	for _, bk := range srcBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if bk.name == "py" {
+				if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+					t.Skip("numpy not installed")
+				}
+			}
+			if got := runIOListing(t, bk, "ch449_furnace_matmul.rune", "main", ""); got != want {
+				t.Errorf("[%s] furnace-matmul gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}
+
 // TestD4ShapeProven realizes the R-INTEROP headline (shapes proven, not checked) on the
 // current substrate: safeDot requires a proof Eq Nat (len xs) (len ys), so a mismatched
 // call is a compile error (verified manually: "refl does not prove the equation"), and the dot is
