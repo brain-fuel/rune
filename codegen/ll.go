@@ -267,11 +267,12 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 	if usesForeign(p, "dot2") || usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") {
 		b.WriteString("#include <cblas.h>\n")
 	}
-	// shared FList marshaller (vectors + flat matrices), used by dotList/npDot and gemmSum/npMatSum.
-	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") {
+	// shared FList marshaller (vectors + flat matrices), used by dotList/npDot and gemmSum/npMatSum
+	// and the numpy-embed prims (pyNpSum/pyNpScale/pyNpMatVec).
+	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") {
 		b.WriteString("static void fl_fill(Value lst, double* a) { int i = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { a[i++] = float_val(obj(lst)->slots[0]); lst = obj(lst)->slots[1]; } }\n")
 	}
-	if usesForeign(p, "dotList") || usesForeign(p, "npDot") {
+	if usesForeign(p, "dotList") || usesForeign(p, "npDot") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") {
 		b.WriteString("static int fl_len(Value lst) { int n = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { n++; lst = obj(lst)->slots[1]; } return n; }\n")
 	}
 	if usesForeign(p, "dot2") {
@@ -340,7 +341,7 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 	// (pow / sqrt / factorial), mirroring codegen/c.go but with the LLVM runtime's rt_-prefixed
 	// closure/bignum helpers and EXTERNAL-linkage thunks the .ll calls. Cross-backend parity:
 	// the embed runs on BOTH native backends (C and LLVM). Link: python3-config --embed.
-	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") {
+	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") {
 		b.WriteString("#include <Python.h>\n")
 		b.WriteString("static int rune_py_inited = 0;\n")
 		b.WriteString("static void rune_py_ensure(void) { if (!rune_py_inited) { Py_Initialize(); rune_py_inited = 1; } }\n")
@@ -359,6 +360,24 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value big_from_decstr(const char* s) { Value n = mkbig(0); Value ten = rt_big_from_long(10); for (; *s; s++) { if (*s < '0' || *s > '9') continue; n = big_add(big_mul(n, ten), rt_big_from_long(*s - '0')); } return n; }\n")
 		b.WriteString("static Value pyFactorial_c(Value aa, Value* env) { (void)env; char inbuf[512]; if (IS_INT(aa)) snprintf(inbuf, sizeof inbuf, \"%ld\", INT_VAL(aa)); else big_to_decstr(aa, inbuf, sizeof inbuf); rune_py_ensure(); char buf[600]; snprintf(buf, sizeof buf, \"str(__import__('math').factorial(%s))\", inbuf); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); Value res = rt_big_from_long(0); if (r) { const char* s = PyUnicode_AsUTF8(r); if (s) res = big_from_decstr(s); Py_XDECREF(r); } else { PyErr_Clear(); } return res; }\n")
 		b.WriteString("Value pyFactorial(void) { return rt_mkclo(&pyFactorial_c, 0); }\n")
+	}
+	// the numpy-embed prims on LLVM (mirror codegen/c.go with rt_-prefixed mkclo/clo_set/mkcon/
+	// con_set/big_from_long; fl_fill/fl_len/mkfloat/big_to_double are the runtime's plain names).
+	if usesForeign(p, "pyNpSum") {
+		b.WriteString("static Value pyNpSum_c(Value xs, Value* env) { (void)env; int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); free(X); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); double d = 0.0; if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"xs\", lst); PyObject* r = PyRun_String(\"float(np.array(xs).sum())\", Py_eval_input, g, g); if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(lst); return mkfloat(d); }\n")
+		b.WriteString("Value pyNpSum(void) { return rt_mkclo(&pyNpSum_c, 0); }\n")
+	}
+	if usesForeign(p, "pyNpScale") {
+		b.WriteString("static Value pyNpScale_c2(Value kk, Value* env) { Value xs = env[0]; long k = IS_INT(kk) ? INT_VAL(kk) : (long)big_to_double(kk); int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); free(X); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); Value res = rt_mkcon(0, \"fnil\", 0); if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"xs\", lst); char buf[80]; snprintf(buf, sizeof buf, \"(np.array(xs) * %ld).tolist()\", k); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); if (r) { int rn = (int)PyList_Size(r); Value acc = rt_mkcon(0, \"fnil\", 0); for (int i = rn - 1; i >= 0; i--) { double d = PyFloat_AsDouble(PyList_GetItem(r, i)); Value c = rt_mkcon(1, \"fcons\", 2); rt_con_set(c, 0, mkfloat(d)); rt_con_set(c, 1, acc); acc = c; } res = acc; Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(lst); return res; }\n")
+		b.WriteString("static Value pyNpScale_c1(Value xs, Value* env) { (void)env; Value c = rt_mkclo(&pyNpScale_c2, 1); rt_clo_set(c, 0, xs); return c; }\n")
+		b.WriteString("Value pyNpScale(void) { return rt_mkclo(&pyNpScale_c1, 0); }\n")
+	}
+	if usesForeign(p, "pyNpMatVec") {
+		b.WriteString("static Value pyNpMatVec_c4(Value v, Value* env) { Value A = env[0]; long m = IS_INT(env[1]) ? INT_VAL(env[1]) : (long)big_to_double(env[1]); long k = IS_INT(env[2]) ? INT_VAL(env[2]) : (long)big_to_double(env[2]); int an = fl_len(A), vn = fl_len(v); double* AA = (double*)malloc(sizeof(double) * (an > 0 ? an : 1)); fl_fill(A, AA); double* VV = (double*)malloc(sizeof(double) * (vn > 0 ? vn : 1)); fl_fill(v, VV); rune_py_ensure(); PyObject* pa = PyList_New(an); for (int i = 0; i < an; i++) PyList_SetItem(pa, i, PyFloat_FromDouble(AA[i])); PyObject* pv = PyList_New(vn); for (int i = 0; i < vn; i++) PyList_SetItem(pv, i, PyFloat_FromDouble(VV[i])); free(AA); free(VV); PyObject* mm = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(mm); PyObject* np = PyImport_ImportModule(\"numpy\"); Value res = rt_mkcon(0, \"fnil\", 0); if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"A\", pa); PyDict_SetItemString(g, \"v\", pv); char buf[120]; snprintf(buf, sizeof buf, \"(np.array(A).reshape(%ld,%ld) @ np.array(v)).tolist()\", m, k); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); if (r) { int rn = (int)PyList_Size(r); Value acc = rt_mkcon(0, \"fnil\", 0); for (int i = rn - 1; i >= 0; i--) { double d = PyFloat_AsDouble(PyList_GetItem(r, i)); Value c = rt_mkcon(1, \"fcons\", 2); rt_con_set(c, 0, mkfloat(d)); rt_con_set(c, 1, acc); acc = c; } res = acc; Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(pa); Py_XDECREF(pv); return res; }\n")
+		b.WriteString("static Value pyNpMatVec_c3(Value k, Value* env) { Value c = rt_mkclo(&pyNpMatVec_c4, 3); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, env[1]); rt_clo_set(c, 2, k); return c; }\n")
+		b.WriteString("static Value pyNpMatVec_c2(Value m, Value* env) { Value c = rt_mkclo(&pyNpMatVec_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, m); return c; }\n")
+		b.WriteString("static Value pyNpMatVec_c1(Value A, Value* env) { (void)env; Value c = rt_mkclo(&pyNpMatVec_c2, 1); rt_clo_set(c, 0, A); return c; }\n")
+		b.WriteString("Value pyNpMatVec(void) { return rt_mkclo(&pyNpMatVec_c1, 0); }\n")
 	}
 }
 

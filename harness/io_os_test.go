@@ -541,6 +541,67 @@ func TestD4CPythonNumpy(t *testing.T) {
 	}
 }
 
+// TestD4CPythonNumpyLL runs the numpy embed (ch463) on the LLVM backend too — the same FList
+// marshalling + numpy reduction/array-return, baked into the LL runtime with rt_-prefixed
+// mkcon/con_set. Prints 10, 30, 56 identical to C. Completes the embed's cross-backend parity.
+func TestD4CPythonNumpyLL(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not in PATH")
+	}
+	pyCfg, err := exec.LookPath("python3-config")
+	if err != nil {
+		t.Skip("python3-config not in PATH")
+	}
+	if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+		t.Skip("numpy not importable")
+	}
+	incOut, err := exec.Command(pyCfg, "--includes").Output()
+	if err != nil {
+		t.Skipf("python3-config --includes failed: %v", err)
+	}
+	ldOut, err := exec.Command(pyCfg, "--ldflags", "--embed").Output()
+	if err != nil {
+		ldOut, err = exec.Command(pyCfg, "--ldflags").Output()
+		if err != nil {
+			t.Skipf("python3-config --ldflags failed: %v", err)
+		}
+	}
+	s := loadListing(t, "ch463_cpython_numpy.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ll, err := codegen.LL{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := codegen.LL{}.EmitRuntimeFor(p)
+	dir := t.TempDir()
+	lf := filepath.Join(dir, "main.ll")
+	rtf := filepath.Join(dir, "runtime.c")
+	bin := filepath.Join(dir, "main.bin")
+	if err := os.WriteFile(lf, []byte(ll), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rtf, []byte(rt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{lf, rtf}
+	args = append(args, strings.Fields(string(incOut))...)
+	args = append(args, "-o", bin)
+	args = append(args, strings.Fields(string(ldOut))...)
+	if out, err := exec.Command("clang", args...).CombinedOutput(); err != nil {
+		t.Skipf("[ll] compile with libpython failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("[ll] run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "10\n30\n56") {
+		t.Errorf("[ll] CPython-numpy gave %q, want it to start 10\\n30\\n56", got)
+	}
+}
+
 func TestD4PlottingPy(t *testing.T) {
 	py, err := exec.LookPath("python3")
 	if err != nil {
