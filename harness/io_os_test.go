@@ -651,6 +651,72 @@ func TestE3MaxRegister(t *testing.T) {
 	}
 }
 
+// TestNewProofListingsNative confirms the 2026-06-21 proven-tier listings (the D4 LA shape
+// theorems + the E3 adequacy lemmas) RUN on the native backends too — C (self-contained)
+// and LLVM-IR (emit + EmitRuntimeFor runtime, clang) — each printing its witness value,
+// identical to the source backends. Pure Nat, no -lm/-lopenblas. So the new proofs' runnable
+// witnesses execute across source AND native (the Lambert cross-backend bar, batched).
+func TestNewProofListingsNative(t *testing.T) {
+	cases := []struct{ file, want string }{
+		{"ch448_matmul_rows.rune", "2"},
+		{"ch450_matvec_len.rune", "2"},
+		{"ch452_visiblerun_prefix.rune", "1"},
+		{"ch455_max_register_inflationary.rune", "1"},
+		{"ch456_visiblerun_lenbound.rune", "1"},
+	}
+	for _, c := range cases {
+		c := c
+		s := loadListing(t, c.file)
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatalf("%s: %v", c.file, err)
+		}
+		t.Run(c.file+"/c", func(t *testing.T) {
+			if _, err := exec.LookPath("cc"); err != nil {
+				t.Skip("cc not in PATH")
+			}
+			dir := t.TempDir()
+			src, _ := codegen.C{}.Emit(p)
+			f := filepath.Join(dir, "main.c")
+			bin := filepath.Join(dir, "main.bin")
+			os.WriteFile(f, []byte(src), 0o644)
+			if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+				t.Fatalf("[c] compile: %v\n%s", err, out)
+			}
+			out, err := exec.Command(bin).Output()
+			if err != nil {
+				t.Fatalf("[c] run: %v", err)
+			}
+			if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != c.want {
+				t.Errorf("[c] %s = %q, want first line %s", c.file, strings.TrimSpace(string(out)), c.want)
+			}
+		})
+		t.Run(c.file+"/ll", func(t *testing.T) {
+			if _, err := exec.LookPath("clang"); err != nil {
+				t.Skip("clang not in PATH")
+			}
+			dir := t.TempDir()
+			ll, _ := codegen.LL{}.Emit(p)
+			rt := codegen.LL{}.EmitRuntimeFor(p)
+			f := filepath.Join(dir, "main.ll")
+			rtf := filepath.Join(dir, "runtime.c")
+			bin := filepath.Join(dir, "main.bin")
+			os.WriteFile(f, []byte(ll), 0o644)
+			os.WriteFile(rtf, []byte(rt), 0o644)
+			if out, err := exec.Command("clang", f, rtf, "-o", bin).CombinedOutput(); err != nil {
+				t.Fatalf("[ll] compile: %v\n%s", err, out)
+			}
+			out, err := exec.Command(bin).Output()
+			if err != nil {
+				t.Fatalf("[ll] run: %v", err)
+			}
+			if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != c.want {
+				t.Errorf("[ll] %s = %q, want first line %s", c.file, strings.TrimSpace(string(out)), c.want)
+			}
+		})
+	}
+}
+
 // TestE3MaxRegisterNative carries ch453's max-register CvRDT to the NATIVE backends: the
 // same proven-convergent register RUNS on C (self-contained emit) and LLVM-IR (emit +
 // EmitRuntimeFor runtime, clang), converging {3,7}->7 both orders identically to the source
