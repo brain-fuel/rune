@@ -82,8 +82,19 @@ RUNS unaided via `rune run` / `rune deploy --target <b>` — not just emits conf
   are FIFO; absent reads return code 0 (the `leW code 1` empty sentinel). Rust parked
   (needs `OnceLock`+`Mutex`, like the fileenv prims).
 - `TestDataPlaneRunsCrossBackend`: kv get-after-put = 42, object = 99, queue FIFO, on
-  every present backend. The managed-Redis / SQS / S3 client bindings are ports of this
-  shape; a live Podman/broker round-trip is the remaining tie.
+  every present backend.
+
+## The data plane is LIVE (a real broker, v3.327.x)
+
+Beyond the in-process binding, the kv + queue abstractions now talk to a REAL broker:
+`kvSetLive`/`kvGetLive` (SET/GET) and `enqueueLive`/`dequeueLive` (LPUSH/RPOP = FIFO)
+speak the Redis/Valkey wire protocol (RESP) over a raw TCP socket to `$WAVELET_KV_URL`
+— hand-rolled, NO third-party dependency. Implemented on **Go** (stdlib `net`) and the
+**JVM** (`java.net.Socket`); both block, so RESP is synchronous (a JS binding would need
+the async path). ch444 (kv → "world") and ch445 (queue → "first") round-trip through a
+live Valkey from `rune deploy`, gated by `TestLiveKVRoundTrip` (docker-up → run on Go
+AND JVM → down). Object is the same SET/GET protocol as kv. So the wavelet data plane is
+proven → deployed → in-process-run → LIVE on a real broker.
 
 ## `rune deploy` (two modes)
 
