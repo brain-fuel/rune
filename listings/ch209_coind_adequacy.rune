@@ -327,3 +327,80 @@ sysAdequate :
     (preflF (fib (Option Label)) (some Label lfail))
     (preflF (Str (fib (Option Label))) (behaviour halt))
 end
+
+-- ===== EVENTUALLY over an UNBOUNDED behaviour stream (D5 liveness) =====
+--
+-- ch206's `eventuallyRestarted` is a Σ-of-step-count over the FUEL stepper `runN`.
+-- Here we state the same liveness over a genuinely INFINITE (coinductive) stream —
+-- the behaviour stream the supervised system emits — with no fuel bound and no
+-- coinductive PREDICATE. The key: "eventually" is an INDUCTIVE (finite-reach)
+-- property, so it is a plain outer Σ over a `drop` that COMPUTES on the stream; the
+-- dfix wall (which blocks only the GREATEST-fixpoint "always-eventually"/infinitely-
+-- often fairness property) never appears.
+
+-- depth counter for the finite-reach Σ (ch209's calculus was numeral-free).
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+-- drop k = iterate `tail` k times — total (NatElim), and it COMPUTES (out-ι fires
+-- through the unfold at each step).
+drop : (A : UF) -> Nat -> El (Str A) -> El (Str A) is
+  fn (A : UF) (k : Nat) is
+    NatElim (fn (w : Nat) is El (Str A) -> El (Str A) end)
+      (fn (s : El (Str A)) is s end)
+      (fn (j : Nat) (rec : El (Str A) -> El (Str A)) is
+         fn (s : El (Str A)) is tail A (rec s) end end)
+      k
+  end
+end
+
+-- the element observed at depth k of an infinite stream.
+streamAt : (A : UF) -> Nat -> El (Str A) -> El A is
+  fn (A : UF) (k : Nat) (s : El (Str A)) is head A (drop A k s) end
+end
+
+-- EVENTUALLY P s : P holds at SOME finite depth of the (infinite) stream s. A plain
+-- outer Σ (C1) — least-fixpoint reachability, NOT a coinductive predicate.
+Eventually : (A : UF) -> (El A -> U) -> El (Str A) -> U is
+  fn (A : UF) (P : El A -> U) (s : El (Str A)) is
+    Sig Nat (fn (k : Nat) is P (streamAt A k s) end)
+  end
+end
+
+-- the STATE stream of a process under the (fault-aware) scheduler: at each step the
+-- DETECT-or-step `nextStateF` advances, so the supervised system's state stream is
+-- `par crash (mon halt), halt, halt, …` — the recovery, then a stuck fixed point.
+stateCoalg : El (fib Proc) -> El (sigmaF (fib Proc) (fn (w : El (fib Proc)) is fib Proc end)) is
+  fn (p : El (fib Proc)) is
+    pairF (fib Proc) (fn (w : El (fib Proc)) is fib Proc end) p (nextStateF p)
+  end
+end
+stateStream : Proc -> El (Str (fib Proc)) is
+  fn (p : Proc) is traceOf (fib Proc) (fib Proc) stateCoalg p end
+end
+
+-- the system's first observation IS the detected fault: EVENTUALLY (at depth 0) the
+-- behaviour stream shows `some lfail`. The fault is observed over the unbounded run.
+eventuallyFaultObserved :
+    Eventually (fib (Option Label))
+      (fn (o : El (fib (Option Label))) is Eq (Option Label) o (some Label lfail) end)
+      (behaviour sysA) is
+  Pair Nat
+    (fn (k : Nat) is
+       Eq (Option Label) (streamAt (fib (Option Label)) k (behaviour sysA)) (some Label lfail) end)
+    zero
+    (refl (some Label lfail))
+end
+
+-- THE LIVENESS THEOREM: the supervised system EVENTUALLY reaches the recovered
+-- state `halt`, over the unbounded behaviour stream — witness k = 1 (one DETECT
+-- step), `streamAt 1 (stateStream sysA) ≡ halt` by refl (the stream observation
+-- computes through the coalgebra at depth 1). This is ch206's bounded liveness
+-- lifted to a genuinely infinite stream with no fuel parameter.
+eventuallyRecovered :
+    Eventually (fib Proc) (fn (p : El (fib Proc)) is Eq Proc p halt end) (stateStream sysA) is
+  Pair Nat
+    (fn (k : Nat) is Eq Proc (streamAt (fib Proc) k (stateStream sysA)) halt end)
+    (succ zero)
+    (refl halt)
+end

@@ -217,6 +217,16 @@ func TestListingsRun(t *testing.T) {
 				`(fn (y : El B) is refl end) (fn (y : El B) is refl end))) x end`,
 			"fn (B : U) (x : U) is x end")
 	})
+	t.Run("ch209", func(t *testing.T) {
+		s := loadListing(t, "ch209_coind_adequacy.rune")
+		// D5 liveness over an UNBOUNDED behaviour stream: the finite-reach observation
+		// `streamAt k` computes through the coinductive stream (drop = iterated tail).
+		// The supervised system reaches the recovered state `halt` at depth 1, and the
+		// detected fault `some lfail` is observed at depth 0 — the witnesses behind the
+		// `Eventually` (= Σ k. P (streamAt k s)) theorems, no fuel bound, no dfix wall.
+		normalizesTo(t, s, `streamAt (fib Proc) (succ zero) (stateStream sysA)`, "halt")
+		normalizesTo(t, s, `streamAt (fib (Option Label)) zero (behaviour sysA)`, "some Label lfail")
+	})
 	t.Run("ch206", func(t *testing.T) {
 		s := loadListing(t, "ch206_fault_lts.rune")
 		// Unbounded restart-liveness: the restarted child is a fixed point of the
