@@ -497,6 +497,42 @@ func TestListingsOTPLiveGo(t *testing.T) {
 	}
 }
 
+// TestListingsOTPFaultLiveGo is the D5 fault-tier gate OFF the BEAM: the same ch214
+// crash-detect-restart runs on the Go shim's fault prims. primExit marks the process
+// DOWN (a per-proc done channel) and self-exits (runtime.Goexit); primMonitor blocks
+// on that DOWN — so a worker that crashes ITSELF is detected by the supervisor, which
+// restarts a fresh worker that takes one bump and replies. Same `succ zero` the BEAM
+// produces — fail-stop fault recovery without the BEAM.
+func TestListingsOTPFaultLiveGo(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch214_otp_fault_live.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("go run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ zero"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("live OTP fault recovery on the Go shim printed %q, want %q", got, want)
+	}
+}
+
 // TestListingsReplicatedActorsBeam is the E4 live-actor projection gate (built on D5):
 // the verified replicated counter runs as TWO genuine BEAM processes that hold replica
 // state, gossip it, and merge. ch433 spawns replicas A and B, ticks each replica's own

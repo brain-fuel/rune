@@ -537,13 +537,18 @@ func bindIO_d() any { return func(_A any) any { return func(_B any) any { return
 //	primSend    M p x ~> p <- x   (async, buffered; FIFO per sender)
 //	primReceive M     ~> <- own mailbox (blocks until a message arrives)
 const goOTPRuntime = `func Pid() any { return func(_M any) any { return nil } } // foreign type, erased
-var __mb sync.Map // goid -> chan any (the process mailbox registry)
+type __proc struct { mb chan any; done chan struct{}; once sync.Once } // a live process
+var __mb sync.Map    // goid -> chan any (the running goroutine's own mailbox)
+var __procs sync.Map // pid (chan any) -> *__proc (mailbox + a DOWN signal)
 func __goid() int64 { b := make([]byte, 64); b = b[:runtime.Stack(b, false)]; b = bytes.TrimPrefix(b, []byte("goroutine ")); i := bytes.IndexByte(b, ' '); n, _ := strconv.ParseInt(string(b[:i]), 10, 64); return n }
 func __self() chan any { id := __goid(); if v, ok := __mb.Load(id); ok { return v.(chan any) }; c := make(chan any, 1024); __mb.Store(id, c); return c }
+func __mark(p any) { if v, ok := __procs.Load(p); ok { pr := v.(*__proc); pr.once.Do(func() { close(pr.done) }) } } // deliver DOWN once
 func primSelf() any { return func(_M any) any { return func(_u any) any { return __self() } } }
-func primSpawn() any { return func(_M any) any { return func(b any) any { return func(_u any) any { c := make(chan any, 1024); go func() { __mb.Store(__goid(), c); ap(ap(b, c), nil) }(); return c } } } }
+func primSpawn() any { return func(_M any) any { return func(b any) any { return func(_u any) any { c := make(chan any, 1024); pr := &__proc{mb: c, done: make(chan struct{})}; __procs.Store(c, pr); go func() { __mb.Store(__goid(), c); defer __mark(c); ap(ap(b, c), nil) }(); return c } } } }
 func primSend() any { return func(_M any) any { return func(p any) any { return func(x any) any { return func(_u any) any { p.(chan any) <- x; return nil } } } } }
 func primReceive() any { return func(_M any) any { return func(_u any) any { return <-__self() } } }
+func primExit() any { return func(_M any) any { return func(p any) any { return func(_u any) any { __mark(p); if c, ok := p.(chan any); ok && c == __self() { runtime.Goexit() }; return nil } } } } // fail-stop: mark DOWN, self-exit
+func primMonitor() any { return func(_M any) any { return func(p any) any { return func(_u any) any { if v, ok := __procs.Load(p); ok { <-v.(*__proc).done }; return nil } } } } // DETECT: block until p's DOWN
 `
 
 const goQuotRuntime = `func qin_d() any { return func(a any) any { return func(r any) any { return func(x any) any { return x } } } }
