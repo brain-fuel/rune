@@ -4,8 +4,9 @@
 -- joined here by a LIVE one: `kvSetLive`/`kvGetLive` speak the Redis/Valkey wire
 -- protocol (RESP) over a raw TCP socket to $WAVELET_KV_URL — so a wavelet `kv`
 -- reads and writes a REAL broker (the FOSS Valkey backend from `rune deploy`, or a
--- managed Redis), not a map. Hand-rolled RESP in the Go runtime, NO third-party
--- dependency (stdlib net only). This is E4's "deeper data-plane foreign-op binding".
+-- managed Redis), not a map. Hand-rolled RESP in each backend's runtime — Go/JVM/JS
+-- AND Rust (std::net::TcpStream), NO third-party dependency (stdlib net only). This
+-- is E4's "deeper data-plane foreign-op binding", now live on all four source backends.
 
 data Unit : U is unit : Unit end
 data Nat : U is zero : Nat | succ : Nat -> Nat end

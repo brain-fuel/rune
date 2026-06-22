@@ -2,7 +2,8 @@
 --
 -- The same live-broker binding as ch444's kv, for the queue abstraction: enqueue/
 -- dequeue map to a Valkey LIST (LPUSH at the head, RPOP at the tail = FIFO), spoken
--- as RESP over a raw socket to $WAVELET_KV_URL. Hand-rolled, no third-party dep. So a
+-- as RESP over a raw socket to $WAVELET_KV_URL. Hand-rolled on all four source backends
+-- (Go/JVM/JS/Rust), no third-party dep. So a
 -- wavelet `queue` is backed by a real broker (RabbitMQ/NATS in production; Valkey here).
 
 data Unit : U is unit : Unit end

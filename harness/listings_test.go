@@ -154,6 +154,49 @@ func TestLiveKVRoundTrip(t *testing.T) {
 			f2.Run()
 		}
 	}
+	// And on Rust (std::net::TcpStream, blocking RESP like Go/JVM) — the FOURTH source
+	// backend with a live binding, closing the cross-backend live data plane. rustc with
+	// no crates: the wire is hand-rolled over the standard library.
+	if rustc, err := exec.LookPath("rustc"); err == nil {
+		flush3 := exec.Command("docker", "compose", "exec", "-T", "valkey", "valkey-cli", "FLUSHALL")
+		flush3.Dir = cdir
+		flush3.Run()
+		for _, c := range []struct{ file, want string }{
+			{"ch444_live_kv.rune", "world"},
+			{"ch445_live_queue.rune", "first"},
+		} {
+			s := loadListing(t, c.file)
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			src, err := codegen.Rust{}.Emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rdir := t.TempDir()
+			rf := filepath.Join(rdir, "main.rs")
+			if err := os.WriteFile(rf, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			bin := filepath.Join(rdir, "main")
+			if out, err := exec.Command(rustc, "--edition", "2021", rf, "-o", bin).CombinedOutput(); err != nil {
+				t.Fatalf("[rust %s] rustc: %v\n%s", c.file, err, out)
+			}
+			run := exec.Command(bin)
+			run.Env = append(os.Environ(), "WAVELET_KV_URL=redis://localhost:6399")
+			out, err := run.Output()
+			if err != nil {
+				t.Fatalf("[rust %s] run: %v", c.file, err)
+			}
+			if !strings.Contains(string(out), c.want) {
+				t.Errorf("[rust %s] live data-plane gave %q, want %q", c.file, strings.TrimSpace(string(out)), c.want)
+			}
+			f3 := exec.Command("docker", "compose", "exec", "-T", "valkey", "valkey-cli", "FLUSHALL")
+			f3.Dir = cdir
+			f3.Run()
+		}
+	}
 }
 
 // The v1.0.0 freeze criterion (ref_docs/rune-v1-design.md): every listing in

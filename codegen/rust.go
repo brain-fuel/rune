@@ -123,6 +123,32 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "npMatSum") {
 		b.WriteString("fn npMatSum() -> Rc<V> { vfun(|m: Rc<V>| vfun(move |k: Rc<V>| { let m = m.clone(); vfun(move |n: Rc<V>| { let m = m.clone(); let k = k.clone(); vfun(move |a: Rc<V>| { let m = m.clone(); let k = k.clone(); let n = n.clone(); vfun(move |bm: Rc<V>| { let mm: usize = _big_to_string(_nat(&m)).parse().unwrap(); let kk: usize = _big_to_string(_nat(&k)).parse().unwrap(); let nn: usize = _big_to_string(_nat(&n)).parse().unwrap(); let av = _flvec(a.clone()); let bv = _flvec(bm.clone()); let mut s = 0.0; for i in 0..mm { for j in 0..nn { for l in 0..kk { s += av[i * kk + l] * bv[l * nn + j]; } } } Rc::new(V::Float(s)) }) }) }) })) }\n")
 	}
+	// E4 / R-INFRA: the LIVE data-plane binding. The same RESP-over-a-raw-socket wire
+	// the Go/JVM/JS backends speak, now on Rust (std::net, dep-free) — kv = SET/GET,
+	// queue = Valkey LIST LPUSH/RPOP (FIFO). A packed-string V::Nat is marshalled to/from
+	// host bytes by _s2h/_h2s (the same base-256 packing the other backends use). This is
+	// the fourth source backend's live body, closing the cross-backend live data plane.
+	if usesLiveKV(p) || usesForeign(p, "printStrCode") {
+		b.WriteString(rustStrMarshal)
+	}
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("fn printStrCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { println!(\"{}\", String::from_utf8_lossy(&_s2h(&c))); c.clone() }) }) }\n")
+	}
+	if usesLiveKV(p) {
+		b.WriteString(rustRespRuntime)
+	}
+	if usesForeign(p, "kvSetLive") {
+		b.WriteString("fn kvSetLive() -> Rc<V> { vfun(|k: Rc<V>| vfun(move |v: Rc<V>| { let k = k.clone(); vfun(move |_u: Rc<V>| { _resp(&[b\"SET\".to_vec(), _s2h(&k), _s2h(&v)]); v.clone() }) })) }\n")
+	}
+	if usesForeign(p, "kvGetLive") {
+		b.WriteString("fn kvGetLive() -> Rc<V> { vfun(|k: Rc<V>| vfun(move |_u: Rc<V>| _h2s(&_resp(&[b\"GET\".to_vec(), _s2h(&k)])))) }\n")
+	}
+	if usesForeign(p, "enqueueLive") {
+		b.WriteString("fn enqueueLive() -> Rc<V> { vfun(|q: Rc<V>| vfun(move |m: Rc<V>| { let q = q.clone(); vfun(move |_u: Rc<V>| { _resp(&[b\"LPUSH\".to_vec(), _s2h(&q), _s2h(&m)]); m.clone() }) })) }\n")
+	}
+	if usesForeign(p, "dequeueLive") {
+		b.WriteString("fn dequeueLive() -> Rc<V> { vfun(|q: Rc<V>| vfun(move |_u: Rc<V>| _h2s(&_resp(&[b\"RPOP\".to_vec(), _s2h(&q)])))) }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatRust(&b, *p.Nat)
@@ -564,6 +590,82 @@ fn _show(v: &Rc<V>) -> String {
             }
             s
         }
+    }
+}
+`
+
+// rustStrMarshal is the packed-string <-> host-bytes marshalling shared by the live
+// data-plane ops and printStrCode: _s2h decodes a base-256 V::Nat to bytes by repeated
+// divmod-by-256; _h2s folds bytes back — both byte-identical to the Go/JVM/JS backends.
+var rustStrMarshal = `fn _big_divmod_small(l: &Vec<u32>, d: u64) -> (Vec<u32>, u64) {
+    let base: u64 = 1_000_000_000;
+    let mut rem: u64 = 0;
+    let mut out = vec![0u32; l.len()];
+    for i in (0..l.len()).rev() {
+        let cur = rem * base + l[i] as u64;
+        out[i] = (cur / d) as u32;
+        rem = cur % d;
+    }
+    (_big_norm(out), rem)
+}
+fn _s2h(v: &Rc<V>) -> Vec<u8> {
+    let mut b = _nat(v).clone();
+    let one = _big_from_u64(1);
+    let mut bytes: Vec<u8> = Vec::new();
+    while _big_cmp(&b, &one) > 0 {
+        let (q, r) = _big_divmod_small(&b, 256);
+        bytes.push(r as u8);
+        b = q;
+    }
+    bytes
+}
+fn _h2s(s: &[u8]) -> Rc<V> {
+    let mut n = _big_from_u64(1);
+    let m = _big_from_u64(256);
+    for i in (0..s.len()).rev() {
+        n = _big_add(&_big_mul(&n, &m), &_big_from_u64(s[i] as u64));
+    }
+    Rc::new(V::Nat(n))
+}
+`
+
+// rustRespRuntime is the live-broker plumbing: address resolution + a RESP request/reply
+// over a raw TCP socket (no third-party crate — std::net only). Emitted only when a live
+// kv/queue op is referenced. Reuses rustStrMarshal's _s2h/_h2s for the payloads.
+var rustRespRuntime = `fn _kv_addr() -> String {
+    let mut u = std::env::var("WAVELET_KV_URL").unwrap_or_default();
+    if let Some(rest) = u.strip_prefix("redis://") { u = rest.to_string(); }
+    if u.is_empty() { u = "localhost:6379".to_string(); }
+    u
+}
+fn _resp(args: &[Vec<u8>]) -> Vec<u8> {
+    use std::io::{Write, Read, BufRead};
+    let mut c = match std::net::TcpStream::connect(_kv_addr()) { Ok(c) => c, Err(_) => return Vec::new() };
+    let mut req: Vec<u8> = Vec::new();
+    req.extend_from_slice(format!("*{}\r\n", args.len()).as_bytes());
+    for a in args {
+        req.extend_from_slice(format!("${}\r\n", a.len()).as_bytes());
+        req.extend_from_slice(a);
+        req.extend_from_slice(b"\r\n");
+    }
+    if c.write_all(&req).is_err() { return Vec::new(); }
+    let mut r = std::io::BufReader::new(c);
+    let mut line = String::new();
+    if r.read_line(&mut line).is_err() { return Vec::new(); }
+    let line = line.trim_end_matches(|ch| ch == '\r' || ch == '\n').to_string();
+    if line.is_empty() { return Vec::new(); }
+    let lb = line.as_bytes();
+    match lb[0] {
+        b'+' => line[1..].as_bytes().to_vec(),
+        b'$' => {
+            let n: i64 = line[1..].parse().unwrap_or(-1);
+            if n < 0 { return Vec::new(); }
+            let mut buf = vec![0u8; (n as usize) + 2];
+            if r.read_exact(&mut buf).is_err() { return Vec::new(); }
+            buf.truncate(n as usize);
+            buf
+        }
+        _ => Vec::new(),
     }
 }
 `

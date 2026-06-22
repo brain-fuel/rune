@@ -131,17 +131,19 @@ type-checks (data-plane), the protocol block accepts/rejects correctly, and `run
 The in-process data-plane ops now point at a REAL broker. `kvSetLive`/`kvGetLive` (ch444)
 and `enqueue`/`dequeue` (ch445) speak RESP over a raw socket (stdlib `net`, dep-free) to
 `$WAVELET_KV_URL`: kv = SET/GET, queue = Valkey LIST LPUSH/RPOP (FIFO), object = the same
-SET/GET as kv. LANDED on Go+JVM+JS (Go/JVM block on the socket, JS awaits `node:net`);
-`TestLiveKVRoundTrip` round-trips all three against one real Valkey through docker → "world".
+SET/GET as kv. LANDED on ALL FOUR source backends Go+JVM+JS+Rust (Go/JVM block on the
+socket, JS awaits `node:net`, Rust over `std::net::TcpStream` with hand-rolled RESP, no
+crate — v3.328.3); `TestLiveKVRoundTrip` round-trips all four against one real Valkey
+through docker → "world". The packed-string V::Nat is marshalled to/from host bytes by
+the same base-256 `_s2h`/`_h2s` pair on every backend.
 The live Valkey round-trip itself is `TestKVLiveRoundTripDocker` (emit spec → docker compose
 up → PONG → down, skip-if-no-docker).
 
 ## Remaining (roadmap)
 
-- **Rust live data-plane body:** the one source backend still config-only for the live ops
-  (the other three speak RESP to a real broker).
 - **Managed-cloud clients:** beyond the self-hosted RESP broker — managed Redis / SQS / S3
-  clients over the wire (needs accounts, the cloud-apply milestone).
+  clients over the wire (needs accounts, the cloud-apply milestone). The four source
+  backends (Go/JVM/JS/Rust) all speak RESP to a self-hosted broker today.
 - **Matrix breadth (remaining):** Storage breadth (archival),
   Database breadth (warehouse), Compute breadth (serverless), DevOps (CI/CD), AI/ML.
   (22 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/
@@ -160,6 +162,7 @@ v3.304.0 (file) · v3.305.0 (stream) · v3.306.0 (iam) · v3.307.0 (manifest mod
 v3.308.0 (String data plane) · v3.309.0 (k8s) · v3.310.0 (app-level equivalence) ·
 v3.311.0 (network) · v3.312.0 (firewall) · v3.313.0 (logs) · v3.314.0 (registry) · … · v3.323.1 (live Valkey docker round-trip) ·
 v3.327.0 (LIVE kv data-plane binding, ch444) · v3.327.1 (LIVE queue binding, ch445) ·
-v3.327.x (JVM + JS live bindings) · v3.327.4 (WALKTHROUGH.md end-to-end).
+v3.327.x (JVM + JS live bindings) · v3.327.4 (WALKTHROUGH.md end-to-end) · v3.328.3
+(Rust live binding — all four source backends round-trip a real Valkey).
 22 matrix rows; the data plane runs cross-backend AND binds LIVE to a real broker on
 Go+JVM+JS; `rune deploy` does infra / workload / manifest modes.

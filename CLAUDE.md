@@ -871,10 +871,11 @@ first and forces only on mismatch, so the fast path logs nothing.
         20→22 matrix rows + 15 FOSS backends earlier.
       • **E4 LIVE data-plane binding** (ch444 kv, ch445 queue) — `kvSetLive`/`kvGetLive` and
         `enqueue`/`dequeue` speak RESP over a raw socket to `$WAVELET_KV_URL` (kv = SET/GET,
-        queue = LPUSH/RPOP FIFO, object = same as kv), dep-free (stdlib net). LANDED on
-        Go+JVM+JS (Go/JVM block on the socket, JS awaits node:net); TestLiveKVRoundTrip
-        round-trips all three vs one real Valkey through docker → "world". The data plane is
-        LIVE, not just config/in-process — the non-Go live-binding item is CLOSED.
+        queue = LPUSH/RPOP FIFO, object = same as kv), dep-free (stdlib net). LANDED on ALL
+        FOUR source backends Go+JVM+JS+Rust (Go/JVM block on the socket, JS awaits node:net,
+        Rust over std::net::TcpStream; v3.328.3); TestLiveKVRoundTrip round-trips all four vs
+        one real Valkey through docker → "world". The data plane is LIVE, not just
+        config/in-process — the cross-backend live-binding item is CLOSED.
       • **D4 shape-checked matrix×vector** (ch446, v3.328.0/.1) — `safeMatVec` requires a typed
         `Eq Nat (cols M)(len v)`, so a dimension mismatch is a COMPILE error (erased proof,
         no runtime check); [[1,2],[3,4]]·[5,6] = [17,39] in exact Nat. The in-language half of
@@ -884,10 +885,11 @@ first and forces only on mismatch, so the fast path logs nothing.
         prove→simulate→deploy→RUN→LIVE "better than Winglang" pipeline from one source.
     - **Frontier (genuinely-hard tail; all tractable items above are done):** D5 live-procs-⊨-models
       bisimulation (E2/E3 research); D4 CPython embed + the FOREIGN `Array dt sh` handle (CArray
-      CRepr, design-heavy — the in-language shape safety is done, ch446); E4 the Rust live
-      data-plane body + the dependency-heavy matrix tail + real cloud apply (accounts); D7's
-      `primUpgrade` sugar (ch443 shows it unnecessary). A10 + the always-eventually fairness
-      (dfix wall) parked. See the DAG for deps + implications.
+      CRepr, design-heavy — the in-language shape safety is done, ch446); E4 the dependency-heavy
+      matrix tail + real cloud apply (accounts) — the live data plane is now closed on all four
+      source backends (Rust added v3.328.3); D7's `primUpgrade` sugar (ch443 shows it
+      unnecessary). A10 + the always-eventually fairness (dfix wall) parked. See the DAG for
+      deps + implications.
 
 ## Standing rules
 
