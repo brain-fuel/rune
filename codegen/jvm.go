@@ -41,6 +41,48 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesIO(p) {
 		b.WriteString(jvmIORuntime())
 	}
+	// D6/D3: standard host bodies baked as `static V <name>()` methods (the foreign
+	// accessor mechanism), gated by reference — the JVM counterparts of the js/py/go/
+	// rust host bodies, so the f64 element type + a printing IO program run on Java 25.
+	if usesForeign(p, "printNat") {
+		b.WriteString("  static V printNat() { return fun(n -> fun(u -> { System.out.println(_nat(n)); return n; })); }\n")
+	}
+	if usesForeign(p, "Float") {
+		b.WriteString("  static V Float() { return UNIT; }\n") // foreign type, erased
+	}
+	if usesForeign(p, "fromNat") {
+		b.WriteString("  static V fromNat() { return fun(n -> new VFloat(_nat(n).doubleValue())); }\n")
+	}
+	if usesForeign(p, "fadd") {
+		b.WriteString("  static V fadd() { return fun(a -> fun(b -> new VFloat(_float(a) + _float(b)))); }\n")
+	}
+	if usesForeign(p, "fsub") {
+		b.WriteString("  static V fsub() { return fun(a -> fun(b -> new VFloat(_float(a) - _float(b)))); }\n")
+	}
+	if usesForeign(p, "fmul") {
+		b.WriteString("  static V fmul() { return fun(a -> fun(b -> new VFloat(_float(a) * _float(b)))); }\n")
+	}
+	if usesForeign(p, "fdiv") {
+		b.WriteString("  static V fdiv() { return fun(a -> fun(b -> new VFloat(_float(a) / _float(b)))); }\n")
+	}
+	if usesForeign(p, "fabsP") {
+		b.WriteString("  static V fabsP() { return fun(x -> new VFloat(Math.abs(_float(x)))); }\n")
+	}
+	if usesForeign(p, "fsqrt") {
+		b.WriteString("  static V fsqrt() { return fun(x -> new VFloat(Math.sqrt(_float(x)))); }\n")
+	}
+	if usesForeign(p, "fpow") {
+		b.WriteString("  static V fpow() { return fun(a -> fun(e -> new VFloat(Math.pow(_float(a), _float(e))))); }\n")
+	}
+	if usesForeign(p, "floatToNat") {
+		b.WriteString("  static V floatToNat() { return fun(x -> new VNat(java.math.BigInteger.valueOf((long) _float(x)))); }\n")
+	}
+	if usesForeign(p, "fleqN") {
+		b.WriteString("  static V fleqN() { return fun(a -> fun(b -> new VNat(_float(a) <= _float(b) ? java.math.BigInteger.ONE : java.math.BigInteger.ZERO))); }\n")
+	}
+	if usesForeign(p, "dot2") {
+		b.WriteString("  static V dot2() { return fun(a0 -> fun(a1 -> fun(b0 -> fun(b1 -> new VFloat(_float(a0)*_float(b0) + _float(a1)*_float(b1)))))); }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatJVM(&b, *p.Nat)
@@ -292,10 +334,11 @@ var jvmReserved = map[string]bool{
 
 // jvmRuntime is the sealed value interface and its record variants (Java 25).
 const jvmRuntime = `import java.util.function.Function;
-sealed interface V permits VUnit, VInt, VNat, VStr, VPtr, VFun, VCtor, VPair {}
+sealed interface V permits VUnit, VInt, VNat, VFloat, VStr, VPtr, VFun, VCtor, VPair {}
 record VUnit() implements V {}
 record VInt(long n) implements V {}            // host machine int (FFI LitInt)
 record VNat(java.math.BigInteger n) implements V {} // builtin-nat: arbitrary precision
+record VFloat(double d) implements V {}        // D3 machine float (IEEE-754 f64)
 record VStr(String s) implements V {}
 record VPtr(long h) implements V {} // opaque host pointer (B4): never shown structurally
 record VFun(Function<V,V> f) implements V {}
@@ -320,6 +363,9 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
   }
   static java.math.BigInteger _nat(V v) {
     return switch (v) { case VNat i -> i.n(); default -> throw new RuntimeException("rune: expected a nat"); };
+  }
+  static double _float(V v) {
+    return switch (v) { case VFloat f -> f.d(); default -> throw new RuntimeException("rune: expected a float"); };
   }
   static V _fst(V p) {
     return switch (p) { case VPair pr -> pr.a(); default -> throw new RuntimeException("rune: fst of a non-pair"); };
@@ -357,6 +403,7 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
       case VUnit u -> "()";
       case VInt i -> Long.toString(i.n());
       case VNat i -> i.n().toString();
+      case VFloat f -> Double.toString(f.d());
       case VStr s -> s.s();
       case VPtr p -> "<ptr>";
       case VFun f -> "<function>";

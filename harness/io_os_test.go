@@ -270,6 +270,42 @@ func TestIOArgvExitConformance(t *testing.T) {
 // violation. Rust is now INCLUDED — its value domain gained a V::Float(f64) variant
 // and the float kernels are baked (fromNat/fadd/.../floatToNat/fleqN/dot2), so the
 // f64 element type is byte-identical across all five source backends.
+// TestD3FloatJVM closes the float backend matrix: the f64 element type + the BLAS
+// kernel now run on Java 25 too (the JVM `V` gained a VFloat variant + the float
+// host bodies fromNat/fadd/.../floatToNat/fleqN/dot2 + printNat as `static V`
+// methods). ch217 prints the SAME 11/13/11/0/unit the source backends do — float
+// parity across all of js/py/go/erl/rust/C/LLVM/JVM.
+func TestD3FloatJVM(t *testing.T) {
+	javac25, java25, ok := findJava25()
+	if !ok {
+		t.Skip("no JDK 25 (asdf temurin-25) — the JVM backend targets Java 25")
+	}
+	s := loadListing(t, "ch217_float_blas.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.JVM{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "main.java")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(javac25, "--release", "25", "-d", dir, f).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s\n--- emitted ---\n%s", err, out, src)
+	}
+	out, err := exec.Command(java25, "-cp", dir, "main").Output()
+	if err != nil {
+		t.Fatalf("java run: %v", err)
+	}
+	if want := "11\n13\n11\n0\nunit"; strings.TrimSpace(string(out)) != want {
+		t.Errorf("JVM float/BLAS run gave %q, want %q", strings.TrimSpace(string(out)), want)
+	}
+}
+
 func TestIOFloatBlasConformance(t *testing.T) {
 	const want = "11\n13\n11\n0\nunit"
 	floatBackends := append(append([]ioBackend{}, ioCLIBackends...), ioOSBackends[3]) // + rust
