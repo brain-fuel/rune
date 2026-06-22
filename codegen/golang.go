@@ -530,7 +530,8 @@ func bindIO_d() any { return func(_A any) any { return func(_B any) any { return
 // mailbox; goroutine-local identity (which mailbox is "mine" for primSelf/primReceive)
 // is resolved by a registry keyed on the parsed goroutine id. The actor blocks on a
 // real channel receive, so no CPS/continuation surgery is needed (unlike the JS
-// microtask shim). Fail-stop faults (primExit/primMonitor) are the next layer.
+// microtask shim). Fail-stop faults: primExit marks a per-proc DOWN signal + self-exits
+// (runtime.Goexit); primMonitor blocks on it — crash/detect/restart runs off-BEAM.
 //
 //	primSelf    M     ~> the current goroutine's mailbox (its pid)
 //	primSpawn   M b   ~> a goroutine running `b pid unit` with a fresh mailbox; returns pid
