@@ -238,20 +238,42 @@ parQuietNeutral : (p : Proc) -> Eq Bool (isCrash p) false -> Eq (Option Trans) (
   end
 end
 
+-- THE PAYOFF: a supervised tower whose units monitor a NON-TRIVIAL quiet worker (par halt
+-- halt), not just halt — adequate by the same induction as ch459, but the inert residue each
+-- detected unit leaves is `par halt halt`, which parHaltNeutral could not strip and
+-- parQuietNeutral can (its quiescence + non-crash hypotheses are refl, both computing).
+phh : Proc is par halt halt end
+unitQ : Proc is par crash (mon phh) end
+towerQ : Nat -> Proc is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Proc end) halt (fn (k : Nat) (t : Proc) is par unitQ t end) n end
+end
+towerQAdequacy : (n : Nat) -> Eq (List Label) (visibleRun n (towerQ n)) (project (towerQ n)) is
+  fn (n : Nat) is
+    NatElim (fn (m : Nat) is Eq (List Label) (visibleRun m (towerQ m)) (project (towerQ m)) end)
+      refl
+      (fn (m : Nat) (ih : Eq (List Label) (visibleRun m (towerQ m)) (project (towerQ m))) is
+         cong (List Label) (List Label) (fn (r : List Label) is cons Label lfail r end)
+           (visibleRun m (par phh (towerQ m))) (project (towerQ m))
+           (transEq (List Label)
+              (visibleRun m (par phh (towerQ m))) (visibleRun m (towerQ m)) (project (towerQ m))
+              (parQuietNeutral phh refl refl m (towerQ m)) ih) end)
+      n
+  end
+end
+
 data Unit : U is unit0 : Unit end
 foreign printNat : Nat -> IO Nat end
 boolToNat : Bool -> Nat is fn (b : Bool) is BoolElim (fn (w : Bool) is Nat end) (succ zero) zero b end end
 
--- witness: p = par halt halt is quiescent (okStep = none) and non-crash; prepending it to a
--- supervised crash leaves the one detected failure unchanged. isCrash/okStep of par halt halt
--- compute, so the hypotheses are refl. visibleRun 2 (par (par halt halt) (par crash (mon halt)))
--- has the same length (1) as visibleRun 2 (par crash (mon halt)); print that length, 1.
-phh : Proc is par halt halt end
-sup : Proc is par crash (mon halt) end
 lenL : List Label -> Nat is
   fn (xs : List Label) is ListElim Label (fn (w : List Label) is Nat end) zero (fn (h : Label) (t : List Label) (ih : Nat) is succ ih end) xs end
 end
 
+-- witness: par-halt-halt peer beside a supervised crash keeps the 1-failure trace; and the
+-- quiet-worker tower of height 3 runs to a 3-failure trace. Print 1 then 3.
+sup : Proc is par crash (mon halt) end
 main : IO Unit is
-  bindIO Nat Unit (printNat (lenL (visibleRun (succ (succ zero)) (par phh sup)))) (fn (u : Nat) is pureIO Unit unit0 end)
+  bindIO Nat Unit (printNat (lenL (visibleRun (succ (succ zero)) (par phh sup)))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (lenL (visibleRun (succ (succ (succ zero))) (towerQ (succ (succ (succ zero))))))) (fn (u2 : Nat) is pureIO Unit unit0 end)
+  end)
 end

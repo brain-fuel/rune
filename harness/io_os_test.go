@@ -1191,8 +1191,8 @@ func TestE3QuietNeutral(t *testing.T) {
 	if err != nil {
 		t.Fatalf("go run: %v", err)
 	}
-	if first, _, _ := strings.Cut(strings.TrimSpace(string(out)), "\n"); first != "1" {
-		t.Errorf("quiet-neutral witness = %q, want first line 1", strings.TrimSpace(string(out)))
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "1\n3") {
+		t.Errorf("quiet-neutral witnesses = %q, want it to start 1\\n3 (neutral peer + quiet-worker tower)", got)
 	}
 }
 
