@@ -43,35 +43,40 @@ func TestLiveKVRoundTrip(t *testing.T) {
 		down.Dir = cdir
 		down.Run()
 	}()
-	// emit ch444 on the Go backend.
-	s := loadListing(t, "ch444_live_kv.rune")
-	p, err := s.EmitProgram("main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	src, err := codegen.Go{}.Emit(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gdir := t.TempDir()
-	f := filepath.Join(gdir, "main.go")
-	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// retry the run for a few seconds while the broker finishes starting.
-	var got string
-	for i := 0; i < 40; i++ {
-		cmd := exec.Command("go", "run", f)
-		cmd.Dir = gdir
-		cmd.Env = append(os.Environ(), "WAVELET_KV_URL=redis://localhost:6399")
-		out, _ := cmd.Output()
-		if got = strings.TrimSpace(string(out)); strings.Contains(got, "world") {
-			break
+	// the kv and queue data-plane abstractions both round-trip through the live broker.
+	for _, c := range []struct{ file, want string }{
+		{"ch444_live_kv.rune", "world"},    // SET/GET
+		{"ch445_live_queue.rune", "first"}, // LPUSH/RPOP, FIFO
+	} {
+		s := loadListing(t, c.file)
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatal(err)
 		}
-		time.Sleep(250 * time.Millisecond)
-	}
-	if !strings.Contains(got, "world") {
-		t.Fatalf("live kv round-trip gave %q, want it to contain \"world\"", got)
+		src, err := codegen.Go{}.Emit(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gdir := t.TempDir()
+		f := filepath.Join(gdir, "main.go")
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// retry the run for a few seconds while the broker finishes starting.
+		var got string
+		for i := 0; i < 40; i++ {
+			cmd := exec.Command("go", "run", f)
+			cmd.Dir = gdir
+			cmd.Env = append(os.Environ(), "WAVELET_KV_URL=redis://localhost:6399")
+			out, _ := cmd.Output()
+			if got = strings.TrimSpace(string(out)); strings.Contains(got, c.want) {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		if !strings.Contains(got, c.want) {
+			t.Fatalf("live data-plane %s gave %q, want it to contain %q", c.file, got, c.want)
+		}
 	}
 }
 

@@ -1,0 +1,45 @@
+-- Chapter 445 — the wavelet QUEUE talks to a LIVE broker (E4).
+--
+-- The same live-broker binding as ch444's kv, for the queue abstraction: enqueue/
+-- dequeue map to a Valkey LIST (LPUSH at the head, RPOP at the tail = FIFO), spoken
+-- as RESP over a raw socket to $WAVELET_KV_URL. Hand-rolled, no third-party dep. So a
+-- wavelet `queue` is backed by a real broker (RabbitMQ/NATS in production; Valkey here).
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign enqueueLive  : Nat -> Nat -> IO Nat end
+foreign dequeueLive  : Nat -> IO Nat end
+foreign printStrCode : Nat -> IO Nat end
+
+enqueue : String -> String -> IO Unit is
+  fn (q : String) (m : String) is
+    bindIO Nat Unit (enqueueLive (codeOf q) (codeOf m)) (fn (n : Nat) is pureIO Unit unit end)
+  end
+end
+dequeue : String -> IO String is
+  fn (q : String) is
+    bindIO Nat String (dequeueLive (codeOf q)) (fn (code : Nat) is pureIO String (bytes code) end)
+  end
+end
+printStr : String -> IO Unit is
+  fn (s : String) is
+    bindIO Nat Unit (printStrCode (codeOf s)) (fn (n : Nat) is pureIO Unit unit end)
+  end
+end
+
+-- enqueue "first" then "second"; dequeue once -> "first" (FIFO).
+main : IO Unit is
+  bindIO Unit Unit (enqueue "wavequeue" "first") (fn (u1 : Unit) is
+    bindIO Unit Unit (enqueue "wavequeue" "second") (fn (u2 : Unit) is
+      bindIO String Unit (dequeue "wavequeue") (fn (got : String) is
+        printStr got
+      end)
+    end)
+  end)
+end

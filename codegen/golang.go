@@ -8,10 +8,11 @@ import (
 	"goforge.dev/rune/v3/core"
 )
 
-// usesLiveKV reports whether the program references the E4 live-broker data-plane ops
-// (kvSetLive / kvGetLive — RESP over a raw socket to a real Redis/Valkey).
+// usesLiveKV reports whether the program references any E4 live-broker data-plane op
+// (kv SET/GET or queue LPUSH/RPOP — RESP over a raw socket to a real Redis/Valkey).
 func usesLiveKV(p Program) bool {
-	return usesForeign(p, "kvSetLive") || usesForeign(p, "kvGetLive")
+	return usesForeign(p, "kvSetLive") || usesForeign(p, "kvGetLive") ||
+		usesForeign(p, "enqueueLive") || usesForeign(p, "dequeueLive")
 }
 
 // Go is a third backend (B-track / multi-backend): plain Go over the SAME erased
@@ -109,6 +110,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		b.WriteString("func __resp(args ...string) string { c, err := net.Dial(\"tcp\", __kvAddr()); if err != nil { return \"\" }; defer c.Close(); var sb strings.Builder; fmt.Fprintf(&sb, \"*%d\\r\\n\", len(args)); for _, a := range args { fmt.Fprintf(&sb, \"$%d\\r\\n%s\\r\\n\", len(a), a) }; c.Write([]byte(sb.String())); r := bufio.NewReader(c); line, _ := r.ReadString('\\n'); line = strings.TrimRight(line, \"\\r\\n\"); if line == \"\" { return \"\" }; switch line[0] { case '+': return line[1:]; case '$': n, _ := strconv.Atoi(line[1:]); if n < 0 { return \"\" }; buf := make([]byte, n+2); io.ReadFull(r, buf); return string(buf[:n]); default: return \"\" } }\n")
 		b.WriteString("func kvSetLive() any { return func(k any) any { return func(v any) any { return func(_u any) any { __resp(\"SET\", __s2h(k), __s2h(v)); return v } } } }\n")
 		b.WriteString("func kvGetLive() any { return func(k any) any { return func(_u any) any { return __h2s(__resp(\"GET\", __s2h(k))) } } }\n")
+		// queue over a Valkey LIST: enqueue = LPUSH (head), dequeue = RPOP (tail) -> FIFO.
+		b.WriteString("func enqueueLive() any { return func(q any) any { return func(m any) any { return func(_u any) any { __resp(\"LPUSH\", __s2h(q), __s2h(m)); return m } } } }\n")
+		b.WriteString("func dequeueLive() any { return func(q any) any { return func(_u any) any { return __h2s(__resp(\"RPOP\", __s2h(q))) } } }\n")
 	}
 	if usesForeign(p, "getEnvCode") {
 		b.WriteString("func getEnvCode() any { return func(c any) any { return func(_u any) any { return __h2s(os.Getenv(__s2h(c))) } } }\n")
