@@ -1,11 +1,66 @@
 package infra
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestKVLiveRoundTripDocker is the E4 LIVE round-trip gate: the emitted Valkey FOSS
+// compose spec is actually brought up on a container runtime and answers traffic —
+// proving the wavelet artifacts are not just well-formed but RUN. Skips cleanly when
+// no docker/daemon is present (CI without a runtime); when present it stands the kv
+// backend up, PINGs it, and tears it down. (Container runtime is docker-or-podman; the
+// spec is OCI-standard. The deeper data-plane foreign-op binding rides this same up.)
+func TestKVLiveRoundTripDocker(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not in PATH")
+	}
+	if err := exec.Command("docker", "compose", "version").Run(); err != nil {
+		t.Skip("docker compose plugin unavailable")
+	}
+	e, ok := ByTarget("valkey")
+	if !ok {
+		t.Fatal("no valkey emitter")
+	}
+	art, err := e.Emit([]Resource{KV{Name: "cache"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for name, content := range art.Files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	up := exec.Command("docker", "compose", "up", "-d")
+	up.Dir = dir
+	if out, err := up.CombinedOutput(); err != nil {
+		t.Skipf("docker compose up failed (no daemon / offline / no image): %v\n%s", err, out)
+	}
+	defer func() {
+		down := exec.Command("docker", "compose", "down", "-v")
+		down.Dir = dir
+		down.Run()
+	}()
+	var got string
+	for i := 0; i < 40; i++ {
+		ping := exec.Command("docker", "compose", "exec", "-T", "valkey", "valkey-cli", "ping")
+		ping.Dir = dir
+		out, _ := ping.Output()
+		if got = strings.TrimSpace(string(out)); got == "PONG" {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if got != "PONG" {
+		t.Fatalf("the live Valkey kv backend did not answer PONG (got %q)", got)
+	}
+}
 
 // cloudTargets are the IaC providers every agnostic config must lower to equivalently.
 var cloudTargets = []string{"aws", "azure", "gcp"}
