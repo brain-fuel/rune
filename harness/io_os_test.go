@@ -772,6 +772,36 @@ func TestE3MaxRegisterNative(t *testing.T) {
 	})
 }
 
+// TestE3MinRegister gates ch457: the min-register CvRDT, the MEET dual of ch453's max-
+// register — merge = natMin, proven commutative/idempotent/associative by lifting ch369–373's
+// lattice laws via cong mreg. The proofs type-check under TestListingsElaborateAndCheck; the
+// witness merges replicas {3,7} both orders and prints 3 twice — convergence to the min.
+func TestE3MinRegister(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch457_min_register_crdt.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "3\n3") {
+		t.Errorf("min-register convergence = %q, want it to start 3\\n3", got)
+	}
+}
+
 // TestE3MaxRegisterInflation gates ch455: the monotonicity half of CvRDT correctness for
 // the max-register — mergeInflationary, leb(val x)(val(merge x y)) = true, a replica's
 // value never decreases under merge (state climbs the lattice). Rests on the structural
