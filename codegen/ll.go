@@ -336,6 +336,30 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value npMatSum_c1(Value m, Value* env) { (void)env; Value c = rt_mkclo(&npMatSum_c2, 1); rt_clo_set(c, 0, m); return c; }\n")
 		b.WriteString("Value npMatSum(void) { return rt_mkclo(&npMatSum_c1, 0); }\n")
 	}
+	// D4 / R-INTEROP: the CPython EMBED on the LLVM native backend too — the scalar prims
+	// (pow / sqrt / factorial), mirroring codegen/c.go but with the LLVM runtime's rt_-prefixed
+	// closure/bignum helpers and EXTERNAL-linkage thunks the .ll calls. Cross-backend parity:
+	// the embed runs on BOTH native backends (C and LLVM). Link: python3-config --embed.
+	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") {
+		b.WriteString("#include <Python.h>\n")
+		b.WriteString("static int rune_py_inited = 0;\n")
+		b.WriteString("static void rune_py_ensure(void) { if (!rune_py_inited) { Py_Initialize(); rune_py_inited = 1; } }\n")
+	}
+	if usesForeign(p, "pyPow") {
+		b.WriteString("static Value pyPow_c2(Value bb, Value* env) { Value aa = env[0]; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); long b = IS_INT(bb) ? INT_VAL(bb) : (long)big_to_double(bb); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"pow(%ld,%ld)\", a, b); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); long res = 0; if (r) { res = PyLong_AsLong(r); Py_XDECREF(r); } else { PyErr_Clear(); } return rt_big_from_long(res); }\n")
+		b.WriteString("static Value pyPow_c1(Value a, Value* env) { (void)env; Value c = rt_mkclo(&pyPow_c2, 1); rt_clo_set(c, 0, a); return c; }\n")
+		b.WriteString("Value pyPow(void) { return rt_mkclo(&pyPow_c1, 0); }\n")
+	}
+	if usesForeign(p, "pySqrt") {
+		b.WriteString("static Value pySqrt_c(Value aa, Value* env) { (void)env; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"__import__('math').sqrt(%ld)\", a); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); double d = 0.0; if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } return mkfloat(d); }\n")
+		b.WriteString("Value pySqrt(void) { return rt_mkclo(&pySqrt_c, 0); }\n")
+	}
+	if usesForeign(p, "pyFactorial") {
+		b.WriteString("static void big_to_decstr(Value v, char* out, int outsz) { int n = big_nlimbs(v); if (n == 0) { snprintf(out, outsz, \"0\"); return; } int off = snprintf(out, outsz, \"%ld\", big_limb(v, n - 1)); for (int i = n - 2; i >= 0 && off < outsz; i--) off += snprintf(out + off, outsz - off, \"%09ld\", big_limb(v, i)); }\n")
+		b.WriteString("static Value big_from_decstr(const char* s) { Value n = mkbig(0); Value ten = rt_big_from_long(10); for (; *s; s++) { if (*s < '0' || *s > '9') continue; n = big_add(big_mul(n, ten), rt_big_from_long(*s - '0')); } return n; }\n")
+		b.WriteString("static Value pyFactorial_c(Value aa, Value* env) { (void)env; char inbuf[512]; if (IS_INT(aa)) snprintf(inbuf, sizeof inbuf, \"%ld\", INT_VAL(aa)); else big_to_decstr(aa, inbuf, sizeof inbuf); rune_py_ensure(); char buf[600]; snprintf(buf, sizeof buf, \"str(__import__('math').factorial(%s))\", inbuf); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); Value res = rt_big_from_long(0); if (r) { const char* s = PyUnicode_AsUTF8(r); if (s) res = big_from_decstr(s); Py_XDECREF(r); } else { PyErr_Clear(); } return res; }\n")
+		b.WriteString("Value pyFactorial(void) { return rt_mkclo(&pyFactorial_c, 0); }\n")
+	}
 }
 
 // llEmitter renders CIr terms to LLVM IR. Like cEmitter it knows the nat

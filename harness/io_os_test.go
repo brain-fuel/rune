@@ -422,6 +422,66 @@ func TestD4CPythonEmbed(t *testing.T) {
 	}
 }
 
+// TestD4CPythonEmbedLL is the cross-backend parity gate: the SAME scalar CPython embed runs on
+// the LLVM native backend too (the .ll calls the embed thunks; their bodies live in the linked
+// runtime.c from LL{}.EmitRuntimeFor, with the runtime's rt_-prefixed helpers). ch462 prints
+// 1024, 81, 4, 9, factorial(25) — identical to the C backend. Compiled clang main.ll runtime.c
+// + python3-config --embed.
+func TestD4CPythonEmbedLL(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not in PATH")
+	}
+	pyCfg, err := exec.LookPath("python3-config")
+	if err != nil {
+		t.Skip("python3-config not in PATH")
+	}
+	incOut, err := exec.Command(pyCfg, "--includes").Output()
+	if err != nil {
+		t.Skipf("python3-config --includes failed: %v", err)
+	}
+	ldOut, err := exec.Command(pyCfg, "--ldflags", "--embed").Output()
+	if err != nil {
+		ldOut, err = exec.Command(pyCfg, "--ldflags").Output()
+		if err != nil {
+			t.Skipf("python3-config --ldflags failed: %v", err)
+		}
+	}
+	s := loadListing(t, "ch462_cpython_embed.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ll, err := codegen.LL{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := codegen.LL{}.EmitRuntimeFor(p)
+	dir := t.TempDir()
+	lf := filepath.Join(dir, "main.ll")
+	rtf := filepath.Join(dir, "runtime.c")
+	bin := filepath.Join(dir, "main.bin")
+	if err := os.WriteFile(lf, []byte(ll), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rtf, []byte(rt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{lf, rtf}
+	args = append(args, strings.Fields(string(incOut))...)
+	args = append(args, "-o", bin)
+	args = append(args, strings.Fields(string(ldOut))...)
+	if out, err := exec.Command("clang", args...).CombinedOutput(); err != nil {
+		t.Skipf("[ll] compile with libpython failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("[ll] run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "1024\n81\n4\n9\n15511210043330985984000000") {
+		t.Errorf("[ll] CPython-embed gave %q, want it to start 1024\\n81\\n4\\n9\\n15511210043330985984000000", got)
+	}
+}
+
 // TestD4CPythonNumpy is the structured-value rung of the CPython embed: the native C binary
 // marshals a Rune FList into a Python list and runs REAL numpy in the embedded interpreter —
 // ch463's pyNpSum [1,2,3,4] = 10, and pyNpScale returns an ARRAY back as a Rune FList
