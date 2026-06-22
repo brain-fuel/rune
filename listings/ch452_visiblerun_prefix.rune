@@ -1,0 +1,271 @@
+-- Chapter 452 — the runtime observation GROWS MONOTONICALLY with fuel (E3 adequacy).
+--
+-- ch207/ch409/ch421 settled the adequacy alphabet (the runtime emits only {ltau, lfail},
+-- visible drops ltau, the observation is all-failures). This proves a structural property
+-- of the finite-fuel runs themselves, the bridge between the BOUNDED results (ch207) and
+-- the COINDUCTIVE infinite stream (ch209): more fuel only EXTENDS the trace, never rewrites
+-- it. Concretely, the k-step observation is a PREFIX of the (k+1)-step observation:
+--
+--   prefixMono : (k : Nat) (p : Proc) -> isPrefix (visibleRun k p) (visibleRun (succ k) p) = true
+--
+-- so the finite runs form an ω-chain whose limit is the coinductive observation - the
+-- monotonicity an adequacy refinement takes the sup over. Proof: induction on the fuel.
+-- Base k=0: visibleRun 0 = nil, a prefix of anything. Step: both runs take the SAME first
+-- okStep (same emitted label), and the deeper recursion is a prefix by the IH; prepending
+-- the same `consVis l` preserves the prefix (consVisPrefix, cased per label since consVis
+-- branches on `visible l`). Proof-only, over the real four-label calculus of ch409/ch421.
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+
+data Label : U is ltau : Label | lsend : Label | lrecv : Label | lfail : Label end
+
+data Proc : U is
+  halt : Proc | out : Proc -> Proc | inp : Proc -> Proc | mon : Proc -> Proc
+| par : Proc -> Proc -> Proc | crash : Proc
+end
+
+data Trans : U is tr : Label -> Proc -> Trans end
+
+labelOf : Trans -> Label is
+  fn (t : Trans) is TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t end
+end
+procOf : Trans -> Proc is
+  fn (t : Trans) is TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) b false a end
+end
+
+-- ===== the ok-fault step, verbatim from ch409/ch421 =====
+outCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+inpCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is none Proc end)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+commT : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+      (interleaveT iha ihb a b)
+      (fn (pa : Proc) is
+         OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+           (interleaveT iha ihb a b)
+           (fn (qb : Proc) is some Trans (tr ltau (par pa qb)) end)
+           (inpCont b)
+       end)
+      (outCont a)
+  end
+end
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (commT a b iha ihb)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (commT a b iha ihb)
+      (isCrash a)
+  end
+end
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+-- ===== the observable trace =====
+visible : Label -> Bool is
+  fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false true true true l end
+end
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is
+    BoolElim (fn (w : Bool) is List Label end) (cons Label l rest) rest (visible l)
+  end
+end
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (okStep p)
+         end
+       end)
+      n
+  end
+end
+
+-- ===== the prefix order on label traces =====
+-- structural label-matching prefix: nil is a prefix of anything; a cons is a prefix of a
+-- cons iff the heads are equal and the tail is a prefix; a cons is never a prefix of nil.
+eqLabel : Label -> Label -> Bool is
+  fn (a : Label) is
+    LabelElim (fn (w : Label) is Label -> Bool end)
+      (fn (b : Label) is LabelElim (fn (w : Label) is Bool end) true  false false false b end)
+      (fn (b : Label) is LabelElim (fn (w : Label) is Bool end) false true  false false b end)
+      (fn (b : Label) is LabelElim (fn (w : Label) is Bool end) false false true  false b end)
+      (fn (b : Label) is LabelElim (fn (w : Label) is Bool end) false false false true  b end)
+      a
+  end
+end
+isPrefix : List Label -> List Label -> Bool is
+  fn (xs : List Label) is
+    ListElim Label (fn (w : List Label) is List Label -> Bool end)
+      (fn (ys : List Label) is true end)
+      (fn (x : Label) (xr : List Label) (ih : List Label -> Bool) is
+         fn (ys : List Label) is
+           ListElim Label (fn (w : List Label) is Bool end)
+             false
+             (fn (y : Label) (yr : List Label) (ih2 : Bool) is andB (eqLabel x y) (ih yr) end)
+             ys
+         end end)
+      xs
+  end
+end
+
+-- a label equals itself: eqLabel l l = true, by cases on l (each reduces definitionally).
+eqLabelRefl : (l : Label) -> Eq Bool (eqLabel l l) true is
+  fn (l : Label) is LabelElim (fn (w : Label) is Eq Bool (eqLabel w w) true end) refl refl refl refl l end
+end
+
+-- (lemma) prepending the SAME consVis l to two traces preserves the prefix relation.
+-- Cases on l: when visible l = false (ltau) consVis is identity, so the hypothesis carries;
+-- when visible l = true (lsend/lrecv/lfail) both gain `cons l`, and isPrefix (cons l a)
+-- (cons l b) = andB (eqLabel l l) (isPrefix a b) = andB true true.
+consVisPrefix : (l : Label) -> (a : List Label) -> (b : List Label) ->
+    Eq Bool (isPrefix a b) true -> Eq Bool (isPrefix (consVis l a) (consVis l b)) true is
+  fn (l : Label) is
+    LabelElim
+      (fn (w : Label) is
+         (a : List Label) -> (b : List Label) -> Eq Bool (isPrefix a b) true ->
+         Eq Bool (isPrefix (consVis w a) (consVis w b)) true end)
+      (fn (a : List Label) (b : List Label) (h : Eq Bool (isPrefix a b) true) is h end)
+      (fn (a : List Label) (b : List Label) (h : Eq Bool (isPrefix a b) true) is
+         subst Bool (eqLabel lsend lsend) true (eqLabelRefl lsend)
+           (fn (z : Bool) is Eq Bool (andB z (isPrefix a b)) true end) h end)
+      (fn (a : List Label) (b : List Label) (h : Eq Bool (isPrefix a b) true) is
+         subst Bool (eqLabel lrecv lrecv) true (eqLabelRefl lrecv)
+           (fn (z : Bool) is Eq Bool (andB z (isPrefix a b)) true end) h end)
+      (fn (a : List Label) (b : List Label) (h : Eq Bool (isPrefix a b) true) is
+         subst Bool (eqLabel lfail lfail) true (eqLabelRefl lfail)
+           (fn (z : Bool) is Eq Bool (andB z (isPrefix a b)) true end) h end)
+      l
+  end
+end
+
+-- THE MONOTONICITY THEOREM: the k-step observation is a prefix of the (k+1)-step one, for
+-- all fuel and all processes. Induction on the fuel k; the step cases on okStep p (none ->
+-- both nil, refl; some t -> consVisPrefix on the IH at procOf t).
+prefixMono : (k : Nat) -> (p : Proc) ->
+    Eq Bool (isPrefix (visibleRun k p) (visibleRun (succ k) p)) true is
+  fn (k : Nat) is
+    NatElim (fn (n : Nat) is (p : Proc) ->
+        Eq Bool (isPrefix (visibleRun n p) (visibleRun (succ n) p)) true end)
+      (fn (p : Proc) is refl end)
+      (fn (k0 : Nat) (ih : (p : Proc) ->
+           Eq Bool (isPrefix (visibleRun k0 p) (visibleRun (succ k0) p)) true) is
+         fn (p : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq Bool
+                  (isPrefix
+                     (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                        (nil Label)
+                        (fn (t : Trans) is consVis (labelOf t) (visibleRun k0 (procOf t)) end)
+                        o)
+                     (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                        (nil Label)
+                        (fn (t : Trans) is consVis (labelOf t) (visibleRun (succ k0) (procOf t)) end)
+                        o))
+                  true end)
+             refl
+             (fn (t : Trans) is
+                consVisPrefix (labelOf t) (visibleRun k0 (procOf t))
+                  (visibleRun (succ k0) (procOf t)) (ih (procOf t)) end)
+             (okStep p)
+         end
+       end)
+      k
+  end
+end
+
+data Unit : U is unit : Unit end
+foreign printNat : Nat -> IO Nat end
+
+-- a concrete witness so the chapter also RUNS: isPrefix (visibleRun 1 (par crash (mon halt)))
+-- (visibleRun 2 ...) computes to `true` = 1; the supervised crash emits lfail then halts, so
+-- the 1-run [lfail] is a prefix of the 2-run [lfail]. Print 1.
+boolToNat : Bool -> Nat is fn (b : Bool) is BoolElim (fn (w : Bool) is Nat end) (succ zero) zero b end end
+witness : Nat is boolToNat (isPrefix (visibleRun (succ zero) (par crash (mon halt))) (visibleRun (succ (succ zero)) (par crash (mon halt)))) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat witness) (fn (u1 : Nat) is pureIO Unit unit end)
+end

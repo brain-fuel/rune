@@ -813,8 +813,13 @@ first and forces only on mismatch, so the fast path logs nothing.
       contract-guarded + 7-backend identical; a capstone mean→center→norm pipeline (ch228);
       SHAPES-PROVEN safeDot (a ragged call is a compile error, ch233). Remaining: plotting
       (matplotlib absent), the `Array dt sh` handle + CPython embed.
-    - **E3/E4 distributed** — the big one. General all-P adequacy CLOSED (soundness ch409 +
-      completeness ch421 over the full four-label calculus); a VERIFIED CRDT corpus over two
+    - **E3/E4 distributed** — the big one. General all-P adequacy: SOUNDNESS ch409 +
+      COMPLETENESS ch421 over the full four-label calculus closed; the all-P REFINEMENT stays
+      open (blocked on par-interleave fuel-threading, documented). A first building block
+      toward it landed (ch452, v3.328.10): `prefixMono` — the k-step runtime observation is a
+      PREFIX of the (k+1)-step one for ALL fuel + ALL processes (the monotonicity bridging
+      bounded runs ch207 to the coinductive stream ch209; does NOT close the par-interleave
+      wall). Plus: a VERIFIED CRDT corpus over two
       lattices carrying convergence+safety+stability (G-Counter/G-Set/PN-Counter
       ch410–419), refutations matching the simulator's law linter (ch416/417); the
       `internal/sim` + `rune simulate` better-than-Winglang SIMULATOR (v3.230–v3.248,

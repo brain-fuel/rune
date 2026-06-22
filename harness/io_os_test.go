@@ -532,6 +532,39 @@ func TestD4MatVecLen(t *testing.T) {
 	}
 }
 
+// TestE3VisibleRunPrefix gates ch452: the machine-checked adequacy lemma prefixMono —
+// the k-step runtime observation is a PREFIX of the (k+1)-step one, for all fuel and all
+// processes (induction on fuel; consVisPrefix preserves the prefix under the shared first
+// step). It is the monotonicity bridging the bounded runs (ch207) to the coinductive
+// stream (ch209). The proof type-checks under TestListingsElaborateAndCheck; the witness
+// (a supervised crash) computes isPrefix(run 1, run 2) = true and prints 1.
+func TestE3VisibleRunPrefix(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch452_visiblerun_prefix.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	got := strings.TrimSpace(string(out))
+	if first, _, _ := strings.Cut(got, "\n"); first != "1" {
+		t.Errorf("isPrefix(visibleRun 1, visibleRun 2) witness = %q, want first line 1", got)
+	}
+}
+
 func TestD3FloatJVM(t *testing.T) {
 	javac25, java25, ok := findJava25()
 	if !ok {
