@@ -217,6 +217,13 @@ func TestListingsRun(t *testing.T) {
 				`(fn (y : El B) is refl end) (fn (y : El B) is refl end))) x end`,
 			"fn (B : U) (x : U) is x end")
 	})
+	t.Run("ch442", func(t *testing.T) {
+		s := loadListing(t, "ch442_hot_reload.rune")
+		// D7 proven tier: code_change as univalence transport. The migration COMPUTES
+		// (the state is transported along the equivalence) and is reversible.
+		normalizesTo(t, s, `migrated`, "false") // true, upgraded along the flip equivalence
+		normalizesTo(t, s, `restored`, "true")  // reversible: upgrade-then-rollback = id
+	})
 	t.Run("ch209", func(t *testing.T) {
 		s := loadListing(t, "ch209_coind_adequacy.rune")
 		// D5 liveness over an UNBOUNDED behaviour stream: the finite-reach observation
