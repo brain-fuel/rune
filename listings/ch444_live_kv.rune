@@ -1,0 +1,49 @@
+-- Chapter 444 — the wavelet data plane talks to a LIVE broker (E4).
+--
+-- The kv abstraction's in-process binding (a module-global map, ch's kv_demo) is
+-- joined here by a LIVE one: `kvSetLive`/`kvGetLive` speak the Redis/Valkey wire
+-- protocol (RESP) over a raw TCP socket to $WAVELET_KV_URL — so a wavelet `kv`
+-- reads and writes a REAL broker (the FOSS Valkey backend from `rune deploy`, or a
+-- managed Redis), not a map. Hand-rolled RESP in the Go runtime, NO third-party
+-- dependency (stdlib net only). This is E4's "deeper data-plane foreign-op binding".
+
+data Unit : U is unit : Unit end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+-- the packed String (ch215): a String IS one bignum of UTF-8 bytes; `bytes` must be
+-- in scope for the `"…"` literal sugar (it desugars to `bytes <packed-numeral>`).
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+-- the live primitives (host bodies baked per backend; bare String codes).
+foreign kvSetLive    : Nat -> Nat -> IO Nat end
+foreign kvGetLive    : Nat -> IO Nat end
+foreign printStrCode : Nat -> IO Nat end
+
+-- String-level wrappers (the codeOf/bytes pattern of ch215).
+kvSet : String -> String -> IO Unit is
+  fn (k : String) (v : String) is
+    bindIO Nat Unit (kvSetLive (codeOf k) (codeOf v)) (fn (n : Nat) is pureIO Unit unit end)
+  end
+end
+kvGet : String -> IO String is
+  fn (k : String) is
+    bindIO Nat String (kvGetLive (codeOf k)) (fn (code : Nat) is pureIO String (bytes code) end)
+  end
+end
+printStr : String -> IO Unit is
+  fn (s : String) is
+    bindIO Nat Unit (printStrCode (codeOf s)) (fn (n : Nat) is pureIO Unit unit end)
+  end
+end
+
+-- write "world" at key "wavekey" to the live broker, read it back, print it.
+main : IO Unit is
+  bindIO Unit Unit (kvSet "wavekey" "world") (fn (u1 : Unit) is
+    bindIO String Unit (kvGet "wavekey") (fn (got : String) is
+      printStr got
+    end)
+  end)
+end

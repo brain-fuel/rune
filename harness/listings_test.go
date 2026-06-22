@@ -6,11 +6,74 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"goforge.dev/rune/v3/codegen"
 	"goforge.dev/rune/v3/internal/session"
 	"goforge.dev/rune/v3/surface"
 )
+
+// TestLiveKVRoundTrip is the E4 deepest data-plane gate: the wavelet kv abstraction
+// reads/writes a REAL broker. It stands up Valkey on docker, then runs ch444 (Go
+// backend) — which speaks RESP over a raw socket (kvSetLive/kvGetLive, no third-party
+// dep) — against it: SET wavekey=world, GET it back, print "world". Skips cleanly with
+// no docker/go/daemon. Proves the data plane is live, not just config or in-process.
+func TestLiveKVRoundTrip(t *testing.T) {
+	if _, err := exec.LookPath("docker"); err != nil {
+		t.Skip("docker not in PATH")
+	}
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	if err := exec.Command("docker", "compose", "version").Run(); err != nil {
+		t.Skip("docker compose unavailable")
+	}
+	cdir := t.TempDir()
+	compose := "services:\n  valkey:\n    image: docker.io/valkey/valkey:8\n    ports:\n      - \"6399:6379\"\n"
+	if err := os.WriteFile(filepath.Join(cdir, "compose.yaml"), []byte(compose), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	up := exec.Command("docker", "compose", "up", "-d")
+	up.Dir = cdir
+	if out, err := up.CombinedOutput(); err != nil {
+		t.Skipf("docker compose up failed (no daemon / offline / no image): %v\n%s", err, out)
+	}
+	defer func() {
+		down := exec.Command("docker", "compose", "down", "-v")
+		down.Dir = cdir
+		down.Run()
+	}()
+	// emit ch444 on the Go backend.
+	s := loadListing(t, "ch444_live_kv.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gdir := t.TempDir()
+	f := filepath.Join(gdir, "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// retry the run for a few seconds while the broker finishes starting.
+	var got string
+	for i := 0; i < 40; i++ {
+		cmd := exec.Command("go", "run", f)
+		cmd.Dir = gdir
+		cmd.Env = append(os.Environ(), "WAVELET_KV_URL=redis://localhost:6399")
+		out, _ := cmd.Output()
+		if got = strings.TrimSpace(string(out)); strings.Contains(got, "world") {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	if !strings.Contains(got, "world") {
+		t.Fatalf("live kv round-trip gave %q, want it to contain \"world\"", got)
+	}
+}
 
 // The v1.0.0 freeze criterion (ref_docs/rune-v1-design.md): every listing in
 // the book ELABORATES, CHECKS, and RUNS against this core. listings/ holds the
