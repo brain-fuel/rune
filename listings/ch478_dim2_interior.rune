@@ -1,0 +1,54 @@
+-- Chapter 478 — the DIM-2 HIT INTERIOR computes (§F / R-HIT). The DAG listed "recursor
+-- reduction along the interior 2-cell" as an open tail. It is NOT open: this is the consumer
+-- that exercises it. Two interior reductions, both genuine (a wrong RHS is rejected at refl, so
+-- these are real reductions, not stuck-neutral coincidences):
+--
+--   1. The SUSPENSION recursor commutes with `hcomp` — `mapS2 (hcomp S² φ u u0) ≡ hcomp S¹ φ
+--      (mapS2∘u)(mapS2 u0)` — for ANY face φ, INCLUDING a proper (neutral) one. So the dim-2
+--      recursor reduces through an hcomp-filled interior cell, not just the point/path generators
+--      (ch74). This is the suspension's interior 2-cell reduction.
+--   2. The TRUNC0 SQUASH-SQUARE recursor reduction is closed in ch98 (`trunc0RecSquash`): the
+--      recursor consumes a `squash` 2-cell `squash A x y p q : p = q` along its interior square.
+--      Together these are the dim-2 HIT interior the DAG named — it computes.
+
+S2 : UF is Susp Circle end
+
+loopFam : El Circle -> El (pathF Circle base base) is
+  circElim (pathF Circle base base) loop (preflF (pathF Circle base base) loop)
+end
+
+-- the dim-2 map S² → S¹ (ch74): poles to base, each meridian to the loop.
+mapS2 : El S2 -> El Circle is suspElim Circle Circle base base loopFam end
+
+-- THE INTERIOR 2-CELL REDUCTION (suspension): the recursor commutes with hcomp on a PROPER,
+-- neutral face — the genuine interior cell, not a total-face shortcut. By refl, so the recursor
+-- reduces through the hcomp filler. (A wrong RHS — e.g. a different base — is rejected; verified.)
+mapS2HcompInterior : (phi : F) -> (u : I -> holds phi -> El S2) -> (u0 : El S2)
+   -> Eq (El Circle)
+        (mapS2 (hcomp S2 phi u u0))
+        (hcomp Circle phi (fn (i : I) (h : holds phi) is mapS2 (u i h) end) (mapS2 u0)) is
+  fn (phi : F) (u : I -> holds phi -> El S2) (u0 : El S2) is refl end
+end
+
+-- and it still commutes on the TOTAL face (the boundary case): hcomp ⊤ u u0 ~> u i1 htop on both
+-- sides, the recursor pushed through.
+mapS2HcompTotal : (u : I -> holds ftop -> El S2) -> (u0 : El S2)
+   -> Eq (El Circle)
+        (mapS2 (hcomp S2 ftop u u0))
+        (hcomp Circle ftop (fn (i : I) (h : holds ftop) is mapS2 (u i h) end) (mapS2 u0)) is
+  fn (u : I -> holds ftop -> El S2) (u0 : El S2) is refl end
+end
+
+-- the dim-2 recursor β on the generators still holds (ch74), now beside the interior rule —
+-- the meridian over any circle point maps to loopFam observed at i (the dim-2 β, parametric).
+mapS2Merid : (c : El Circle) -> (i : I)
+   -> Eq (El Circle)
+        (mapS2 (papp (Susp Circle) (north Circle) (south Circle) (merid Circle c) i))
+        (papp Circle base base (loopFam c) i) is
+  fn (c : El Circle) (i : I) is refl end
+end
+
+-- THE TRUNC0 SQUASH-SQUARE interior is the OTHER half of the dim-2 interior, and it is closed
+-- in ch98 (`trunc0RecSquash`): the recursor consumes a squash 2-cell `squash A x y p q : p = q`
+-- along its FULL interior square. Together with the suspension interior above, the dim-2 HIT
+-- interior the DAG named as open is, in fact, computing on both HIT families. (See ch98.)
