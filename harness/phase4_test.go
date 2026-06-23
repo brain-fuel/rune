@@ -25,3 +25,24 @@ func TestRegexp(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch502_regexp.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch502_regexp.rune", want) })
 }
+
+// TestLog is the Phase-4 log/slog gate: a structured logfmt logger over Bin
+// (ch503), pure-wootz, byte-identical on all 8 backends. It formats two records
+// to `level=info msg=started count=3` and `level=warn msg=retrying attempt=2 max=5`.
+func TestLog(t *testing.T) {
+	const want = "\"level=info msg=started count=3\"\n" +
+		"\"level=warn msg=retrying attempt=2 max=5\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch503_log.rune", "main", ""); got != want {
+				t.Fatalf("[%s] log gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch503_log.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch503_log.rune", want) })
+}

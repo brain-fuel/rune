@@ -1,0 +1,145 @@
+-- Chapter 503 — log / log/slog: structured logfmt over Bin (Phase 4).
+--
+-- A logger is a pure function from a level + message + structured key/value
+-- fields to a Bin log line, logfmt-style: `level=info msg=started count=3`.
+-- This is Go's log/slog reduced to its essence — a Handler that formats a
+-- record. Pure wootz over Bin (binApp concat + showNat), no FFI beyond
+-- printBin, so it runs byte-identically on all 8 backends.
+--
+-- main prints two log lines. Observable:
+--   "level=info msg=started count=3"
+--   "level=warn msg=retrying attempt=2 max=5"
+--   unit
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natDiv divN
+builtin natMod modN
+
+-- binApp: concatenate two byte strings (fuel = length of the first).
+appGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (xs : Bin) (ys : Bin) (i : Nat) is ys end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is
+           case leb (binLen xs) i of
+           | true  -> ys
+           | false -> binCons (binAt xs i) (ih xs ys (succ i))
+           end
+         end
+      end)
+      fuel
+  end
+end
+binApp : Bin -> Bin -> Bin is fn (xs : Bin) (ys : Bin) is appGo (binLen xs) xs ys 0 end end
+
+-- showNat: a decimal rendering of a Nat (fuel covers the digit count). The
+-- recursive ih sits in exactly one arm.
+digitByte : Nat -> Bin is fn (d : Nat) is binCons (addN 48 d) binEmpty end end
+showGo : Nat -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bin end) (fn (n : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Nat -> Bin) is
+         fn (n : Nat) is
+           case leb n 9 of
+           | true  -> digitByte n
+           | false -> binApp (ih (divN n 10)) (digitByte (modN n 10))
+           end
+         end
+      end)
+      fuel
+  end
+end
+showNat : Nat -> Bin is fn (n : Nat) is showGo 30 n end end
+
+-- severity levels and their logfmt tags.
+data Level : U is
+  lvDebug : Level
+| lvInfo  : Level
+| lvWarn  : Level
+| lvError : Level
+end
+levelTag : Level -> Bin is
+  LevelElim (fn (x : Level) is Bin end) b"debug" b"info" b"warn" b"error"
+end
+
+-- a structured field (slog's key=value) and a list of them.
+data Field : U is
+  mkField : Bin -> Nat -> Field
+end
+data Fields : U is
+  fnil  : Fields
+| fcons : Field -> Fields -> Fields
+end
+
+renderField : Field -> Bin is
+  FieldElim (fn (x : Field) is Bin end)
+    (fn (k : Bin) (v : Nat) is binApp b" " (binApp k (binApp b"=" (showNat v))) end)
+end
+renderFields : Fields -> Bin is
+  FieldsElim (fn (x : Fields) is Bin end)
+    binEmpty
+    (fn (hd : Field) (tl : Fields) (ih : Bin) is binApp (renderField hd) ih end)
+end
+
+logLine : Level -> Bin -> Fields -> Bin is
+  fn (lvl : Level) (msg : Bin) (fs : Fields) is
+    binApp b"level=" (binApp (levelTag lvl) (binApp b" msg=" (binApp msg (renderFields fs))))
+  end
+end
+
+line1 : Bin is logLine lvInfo b"started" (fcons (mkField b"count" 3) fnil) end
+line2 : Bin is logLine lvWarn b"retrying" (fcons (mkField b"attempt" 2) (fcons (mkField b"max" 5) fnil)) end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin line1) (fn (a : Unit) is
+    bindIO Unit Unit (printBin line2) (fn (b : Unit) is
+      pureIO Unit unit
+    end)
+  end)
+end
