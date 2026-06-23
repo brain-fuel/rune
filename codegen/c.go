@@ -582,7 +582,7 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// D4 item: the native runtime can call real CPython. Nats marshal via long (the host
 	// model's full Array-dt-sh handle is the heavier remaining design). Link: python3-config
 	// --includes --ldflags --embed.
-	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") {
+	if usesForeign(p, "pyPow") || usesForeign(p, "pySqrt") || usesForeign(p, "pyFactorial") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") || usesForeign(p, "npAlloc") || usesForeign(p, "npSumH") || usesForeign(p, "npScaleH") {
 		b.WriteString("#include <Python.h>\n")
 		b.WriteString("static int rune_py_inited = 0;\n")
 		b.WriteString("static void rune_py_ensure(void) { if (!rune_py_inited) { Py_Initialize(); rune_py_inited = 1; } }\n")
@@ -659,11 +659,41 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	}
 	// shared FList marshaller: walk a Rune FList (fcons tag 1, head slot 0, tail slot 1)
 	// into a C double[]. Used by dotList/npDot (vectors) and gemmSum/npMatSum (matrices).
-	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") {
+	if usesForeign(p, "dotList") || usesForeign(p, "gemmSum") || usesForeign(p, "npDot") || usesForeign(p, "npMatSum") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") || usesForeign(p, "npAlloc") {
 		b.WriteString("static void fl_fill(Value lst, double* a) { int i = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { a[i++] = float_val(obj(lst)->slots[0]); lst = obj(lst)->slots[1]; } }\n")
 	}
-	if usesForeign(p, "dotList") || usesForeign(p, "npDot") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") {
+	if usesForeign(p, "dotList") || usesForeign(p, "npDot") || usesForeign(p, "pyNpSum") || usesForeign(p, "pyNpScale") || usesForeign(p, "pyNpMatVec") || usesForeign(p, "npAlloc") {
 		b.WriteString("static int fl_len(Value lst) { int n = 0; while (!IS_INT(lst) && obj(lst)->kind == K_CON && obj(lst)->tag == 1) { n++; lst = obj(lst)->slots[1]; } return n; }\n")
+	}
+	// ZERO-COPY ARRAY HANDLE (D4 rung 4): the opaque `Array dt sh` handle realized as a key
+	// into a numpy-side registry. npAlloc marshals a Rune FList into a numpy array ONCE and
+	// stores it in the embedded interpreter's `_arrs` dict, returning an integer HANDLE (a Nat).
+	// npSumH / npScaleH then operate on the handle WITHOUT re-walking the FList — the array data
+	// lives in numpy, only the O(1) handle crosses the boundary (the zero-copy the FList-walking
+	// pyNp* ops cannot do). The handle is the in-language `Array` index; dtype/shape ride the
+	// Rune type as before (TypedArr). A large-array pipeline allocs once, then runs many ops O(1).
+	if usesForeign(p, "npAlloc") || usesForeign(p, "npScaleH") {
+		b.WriteString("static long rune_np_ak = 0;\n")
+	}
+	if usesForeign(p, "npAlloc") {
+		// npAlloc : FList -> IO Nat — the only O(n) FList walk; the array then lives in numpy.
+		b.WriteString("static Value npAlloc_c2(Value w, Value* env) { (void)w; Value xs = env[0]; int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); long key = rune_np_ak++; if (np) { PyDict_SetItemString(g, \"np\", np); PyObject* ir = PyRun_String(\"globals().setdefault('_arrs', {})\", Py_eval_input, g, g); Py_XDECREF(ir); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); PyDict_SetItemString(g, \"_tmp\", lst); char buf[64]; snprintf(buf, sizeof buf, \"_arrs.__setitem__(%ld, np.array(_tmp))\", key); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); Py_XDECREF(r); Py_XDECREF(lst); Py_XDECREF(np); } free(X); return big_from_long(key); }\n")
+		b.WriteString("static Value npAlloc_c1(Value xs, Value* env) { (void)env; Value c = mkclo(&npAlloc_c2, 1); clo_set(c, 0, xs); return c; }\n")
+		b.WriteString("static Value npAlloc(void) { return mkclo(&npAlloc_c1, 0); }\n")
+	}
+	if usesForeign(p, "npSumH") {
+		// npSumH : Nat -> IO Float — sum the handle's array; O(1) handle pass, no FList walk.
+		b.WriteString("static Value npSumH_c2(Value w, Value* env) { (void)w; Value h = env[0]; long key = IS_INT(h) ? INT_VAL(h) : (long)big_to_double(h); rune_py_ensure(); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); double d = 0.0; char buf[64]; snprintf(buf, sizeof buf, \"float(_arrs[%ld].sum())\", key); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } return mkfloat(d); }\n")
+		b.WriteString("static Value npSumH_c1(Value h, Value* env) { (void)env; Value c = mkclo(&npSumH_c2, 1); clo_set(c, 0, h); return c; }\n")
+		b.WriteString("static Value npSumH(void) { return mkclo(&npSumH_c1, 0); }\n")
+	}
+	if usesForeign(p, "npScaleH") {
+		// npScaleH : Nat -> Nat -> IO Nat — scale the handle's array, return a NEW handle. The
+		// data stays in numpy (np array * scalar); only the O(1) handle crosses — zero-copy.
+		b.WriteString("static Value npScaleH_c3(Value w, Value* env) { (void)w; long key = IS_INT(env[0]) ? INT_VAL(env[0]) : (long)big_to_double(env[0]); long s = IS_INT(env[1]) ? INT_VAL(env[1]) : (long)big_to_double(env[1]); rune_py_ensure(); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); long nk = rune_np_ak++; char buf[80]; snprintf(buf, sizeof buf, \"_arrs.__setitem__(%ld, _arrs[%ld] * %ld)\", nk, key, s); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); Py_XDECREF(r); return big_from_long(nk); }\n")
+		b.WriteString("static Value npScaleH_c2(Value ss, Value* env) { Value c = mkclo(&npScaleH_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, ss); return c; }\n")
+		b.WriteString("static Value npScaleH_c1(Value h, Value* env) { (void)env; Value c = mkclo(&npScaleH_c2, 1); clo_set(c, 0, h); return c; }\n")
+		b.WriteString("static Value npScaleH(void) { return mkclo(&npScaleH_c1, 0); }\n")
 	}
 	// pyNpSum xs = numpy.array(xs).sum() in the EMBEDDED interpreter — the structured-value
 	// reach of the host model: a Rune FList marshals to a Python list (PyList of PyFloats), real

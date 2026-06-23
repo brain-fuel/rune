@@ -1,0 +1,53 @@
+-- Chapter 475 — the ZERO-COPY ARRAY HANDLE (D4 rung 4), driven by a LARGE-array consumer.
+-- The flat-FList numpy ops (ch463 pyNpSum etc.) re-walk the whole list across the FFI boundary
+-- on EVERY call — O(n) marshalling per op. For a large array hit by several ops that is the
+-- bottleneck rung 4 removes: an OPAQUE handle whose data lives in numpy, so only an O(1) key
+-- crosses. `npAlloc` marshals the FList into a numpy array ONCE (the sole O(n) step) and returns
+-- a handle (a Nat key into the embedded interpreter's `_arrs` registry); `npSumH`/`npScaleH`
+-- then operate on the handle without ever re-walking the list — `npScaleH` even produces a new
+-- array (a*scalar) that never leaves numpy. This is the consumer that makes rung 4 needful: a
+-- 1000-element array, allocated once, summed + scaled + summed again, three numpy ops over ONE
+-- marshalling. Runs on the C embed backend (libpython + numpy). Observable: "2000\n6000".
+--
+-- The dtype/shape indices ride the Rune type exactly as the ch472 TypedArr does (omitted here
+-- to keep the handle mechanics in focus); rung 4 is the REPR — the opaque key — under that type.
+
+data Unit : U is unit : Unit end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign Float      : U end
+data FList : U is fnil : FList | fcons : Float -> FList -> FList end
+
+foreign fromNat    : Nat -> Float end
+foreign floatToNat : Float -> Nat end
+foreign printNat   : Nat -> IO Nat end
+foreign npAlloc    : FList -> IO Nat end          -- marshal ONCE -> a numpy-side handle (Nat key)
+foreign npSumH     : Nat -> IO Float end          -- sum the handle's array (O(1), no FList walk)
+foreign npScaleH   : Nat -> Nat -> IO Nat end     -- array*scalar -> a NEW handle (stays in numpy)
+
+-- build a large flat array: n copies of v (NatElim). replicate 1000 2.0 = [2,2,...,2] (1000).
+replicate : Nat -> Float -> FList is
+  fn (n : Nat) (v : Float) is
+    NatElim (fn (w : Nat) is FList end) fnil (fn (k : Nat) (ih : FList) is fcons v ih end) n
+  end
+end
+
+bigArr : FList is replicate 1000 (fromNat 2) end   -- 1000 elements, each 2.0; sum = 2000
+
+-- allocate the array ONCE (the only O(n) marshalling), then run THREE numpy ops on the handle:
+-- sum (2000), scale by 3 -> a new handle (the *3 array stays in numpy), sum again (6000). The
+-- 1000 floats cross the boundary once; the three ops pass only the O(1) handle.
+main : IO Unit is
+  bindIO Nat Unit (npAlloc bigArr) (fn (h : Nat) is
+    bindIO Float Unit (npSumH h) (fn (s1 : Float) is
+      bindIO Nat Unit (printNat (floatToNat s1)) (fn (a : Nat) is
+        bindIO Nat Unit (npScaleH h 3) (fn (h2 : Nat) is
+          bindIO Float Unit (npSumH h2) (fn (s2 : Float) is
+            bindIO Nat Unit (printNat (floatToNat s2)) (fn (b : Nat) is pureIO Unit unit end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end
