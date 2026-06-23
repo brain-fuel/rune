@@ -174,6 +174,12 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "plotSave") {
 		b.WriteString("def plotSave():\n    def _p(xs):\n        import matplotlib; matplotlib.use(\"Agg\")\n        import matplotlib.pyplot as plt\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        plt.figure(); plt.plot(a); plt.savefig(\"wavelet_plot.png\"); plt.close()\n        return len(a)\n    return lambda xs: lambda _u: _p(xs)\n")
 	}
+	// D4 ML pipeline (ch473): scatterLine scatters (xs,ys) and overlays a fit line (xs,yhat)
+	// via REAL matplotlib, writes wavelet_fit.png, returns the point count. The plot reach of
+	// the fit.rune pipeline (py-specific, like plotSave); the IO Nat count is the observable.
+	if usesForeign(p, "scatterLine") {
+		b.WriteString("def scatterLine():\n    def _fl(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return a\n    def _s(xs, ys, yh):\n        import matplotlib; matplotlib.use(\"Agg\")\n        import matplotlib.pyplot as plt\n        ax = _fl(xs); ay = _fl(ys); af = _fl(yh)\n        plt.figure(); plt.scatter(ax, ay); plt.plot(ax, af); plt.savefig(\"wavelet_fit.png\"); plt.close()\n        return len(ax)\n    return lambda xs: lambda ys: lambda yh: lambda _u: _s(xs, ys, yh)\n")
+	}
 	// D4 interop: npNorm binds REAL numpy.linalg.norm on the py backend (Euclidean L2).
 	if usesForeign(p, "npNorm") {
 		b.WriteString("def npNorm():\n    import numpy as np\n    def _n(xs):\n        a = []; t = xs\n        while t[\"tag\"] == 1: a.append(t[\"args\"][0]); t = t[\"args\"][1]\n        return float(np.linalg.norm(np.array(a, dtype=float))) if a else 0.0\n    return lambda xs: _n(xs)\n")

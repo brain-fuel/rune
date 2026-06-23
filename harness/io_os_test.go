@@ -876,6 +876,50 @@ func TestD4PlottingPy(t *testing.T) {
 	}
 }
 
+// TestD4FitPipeline is the M6 ML-PIPELINE parity gate (D4 / R-INTEROP): ch473 runs the
+// fit.rune artifact end-to-end on py — standardize (npVar) -> closed-form least-squares
+// (npMean/npVar/npDot) -> plot (matplotlib scatter + fit line). For y = 2x+1 over
+// xs=[1..5] it recovers slope 2, intercept 1, confirms the standardized data has unit
+// variance (1), and writes wavelet_fit.png with 5 points: observable "2\n1\n1\n5". The
+// numeric ops are the contract-guarded numpy bindings of ch221-224; the plot is the py reach.
+func TestD4FitPipeline(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not in PATH")
+	}
+	if err := exec.Command(py, "-c", "import numpy, matplotlib").Run(); err != nil {
+		t.Skip("numpy/matplotlib not installed (run bin/setup.sh)")
+	}
+	s := loadListing(t, "ch473_fit_pipeline.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Py{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "main.py")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(py, f)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("python run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "2\n1\n1\n5") {
+		t.Errorf("fit pipeline = %q, want it to start \"2\\n1\\n1\\n5\" (slope/intercept/var/points)", got)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, "wavelet_fit.png")); err != nil {
+		t.Fatalf("no fit plot written: %v", err)
+	} else if fi.Size() == 0 {
+		t.Errorf("wavelet_fit.png is empty")
+	}
+}
+
 // TestD4ShapeMatVec is the D4 2-D shape-safety gate: the shape-checked matrix×vector
 // (ch446) elaborates — the dimension contract `Eq Nat (cols M) (len v)` type-checks —
 // and computes the product. [[1,2],[3,4]]·[5,6] = [17,39]; main prints the head, 17.

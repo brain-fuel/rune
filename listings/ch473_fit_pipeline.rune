@@ -1,0 +1,115 @@
+-- Chapter 473 — `fit.rune`: the ML PIPELINE (D4 / R-INTEROP, M6 parity gate). The telos-3
+-- clause "parity with Python's numeric/ML/plotting reach (via interop)" demands a worked
+-- numeric/ML pipeline that BUILDS and RUNS. This is it — the artifact R-INTEROP.md specifies:
+-- standardize -> least-squares LINE fit -> plot, every numeric step on the EXISTING contract-
+-- guarded numpy ops (npMean/npVar/npDot, ch221-224) and the ch472 typed-array handle, the fit
+-- in CLOSED FORM (no new foreign solver), the plot via REAL matplotlib (scatter + fit line).
+--
+-- Data: xs = [1,2,3,4,5], ys = [3,5,7,9,11] (the line y = 2x + 1). The pipeline recovers it:
+--   slope     = cov(x,y) / var(x)        = 4 / 2 = 2
+--   intercept = mean(y) - slope*mean(x)  = 7 - 2*3 = 1
+--   standardize property: var(standardize xs) = 1   (unit variance, by construction)
+-- Observable on py: "2\n1\n1\n5" — slope 2, intercept 1, standardized variance 1 (var(zx)
+-- ≈ 0.99999998 since float sqrt(2)² = 2.0000000000000004, ROUNDED via +0.5-then-truncate),
+-- 5 points plotted to wavelet_fit.png. The numeric ops are the same cross-backend contract-
+-- guarded ones proven in ch221-224; the plot (a PNG side effect) is the py reach, like ch441.
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign Float      : U end
+data FList : U is fnil : FList | fcons : Float -> FList -> FList end
+data Shape : U is shnil : Shape | shcons : Nat -> Shape -> Shape end
+data DType : U is f64 : DType | f32 : DType | i64 : DType | i32 : DType | bool_ : DType end
+
+foreign fromNat    : Nat -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fadd       : Float -> Float -> Float end
+foreign fsub       : Float -> Float -> Float end
+foreign fmul       : Float -> Float -> Float end
+foreign fdiv       : Float -> Float -> Float end
+foreign fsqrt      : Float -> Float end
+foreign npMean     : FList -> Float end           -- REAL numpy.mean on py
+foreign npVar      : FList -> Float end           -- REAL numpy.var on py
+foreign npDot      : FList -> FList -> Float end   -- REAL numpy.dot on py
+foreign printNat   : Nat -> IO Nat end
+foreign scatterLine : FList -> FList -> FList -> IO Nat end  -- matplotlib scatter + fit line
+
+-- flat length + the product flatLen (the ch470/472 shape machinery, for the typed handle).
+flen : FList -> Nat is
+  fn (xs : FList) is
+    FListElim (fn (w : FList) is Nat end) zero
+      (fn (h : Float) (t : FList) (ih : Nat) is succ ih end) xs
+  end
+end
+natAddH : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAddH b ih end) a
+  end
+end
+flatLen : Shape -> Nat is
+  fn (sh : Shape) is
+    ShapeElim (fn (w : Shape) is Nat end) (succ zero)
+      (fn (d : Nat) (ds : Shape) (ih : Nat) is natMul d ih end) sh
+  end
+end
+
+-- the ch472 typed array handle: the pipeline's input rides a well-shaped TypedArr.
+data TypedArr : U is
+  | mkArr : (dt : DType) -> (sh : Shape) -> (buf : FList) -> Eq Nat (flen buf) (flatLen sh) -> TypedArr
+end
+arrBuf : TypedArr -> FList is fn (a : TypedArr) is case a of | mkArr dt sh buf pf -> buf end end end
+
+xsBuf : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) (fcons (fromNat 5) fnil)))) end
+ysBuf : FList is fcons (fromNat 3) (fcons (fromNat 5) (fcons (fromNat 7) (fcons (fromNat 9) (fcons (fromNat 11) fnil)))) end
+-- xs enters the pipeline as a typed (1-D, length-5) f64 array — well-shaped by construction.
+xsArr : TypedArr is mkArr f64 (shcons 5 shnil) xsBuf refl end
+xs : FList is arrBuf xsArr end
+ys : FList is ysBuf end
+
+-- elementwise maps (in-language FListElim): standardize (x-mx)/sd, and the fit line slope*x+b.
+mapStd : Float -> Float -> FList -> FList is
+  fn (mx : Float) (sd : Float) (zs : FList) is
+    FListElim (fn (w : FList) is FList end) fnil
+      (fn (h : Float) (t : FList) (ih : FList) is fcons (fdiv (fsub h mx) sd) ih end) zs
+  end
+end
+mapAffine : Float -> Float -> FList -> FList is
+  fn (m : Float) (b : Float) (zs : FList) is
+    FListElim (fn (w : FList) is FList end) fnil
+      (fn (h : Float) (t : FList) (ih : FList) is fcons (fadd (fmul m h) b) ih end) zs
+  end
+end
+
+-- THE PIPELINE (closed-form least squares, all on existing contract-guarded numpy ops):
+mx : Float is npMean xs end                                   -- 3
+my : Float is npMean ys end                                   -- 7
+vx : Float is npVar xs end                                    -- 2
+meanXY : Float is fdiv (npDot xs ys) (fromNat 5) end          -- 125/5 = 25
+cov : Float is fsub meanXY (fmul mx my) end                   -- 25 - 21 = 4
+slope : Float is fdiv cov vx end                              -- 4/2 = 2
+intercept : Float is fsub my (fmul slope mx) end              -- 7 - 6 = 1
+
+-- standardize xs and confirm the defining property (unit variance) — the preprocessing step.
+zx : FList is mapStd mx (fsqrt vx) xs end
+vzx : Float is npVar zx end                                   -- 1.0 by construction
+
+-- the fitted line's y values, for the plot overlay.
+yhat : FList is mapAffine slope intercept xs end              -- [3,5,7,9,11]
+
+-- run it: print slope (2), intercept (1), standardized variance (1), then scatter the points
+-- with the fit line overlaid -> wavelet_fit.png (5 points), printing the count.
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat slope)) (fn (a : Nat) is
+  bindIO Nat Unit (printNat (floatToNat intercept)) (fn (b : Nat) is
+  bindIO Nat Unit (printNat (floatToNat (fadd vzx (fdiv (fromNat 1) (fromNat 2))))) (fn (c : Nat) is
+  bindIO Nat Unit (scatterLine xs ys yhat) (fn (n : Nat) is
+  bindIO Nat Unit (printNat n) (fn (d : Nat) is pureIO Unit unit end) end) end) end) end)
+end
