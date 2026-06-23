@@ -1,0 +1,61 @@
+-- Chapter 490 — os/fs: the expanded OS layer over Bin (Phase 1).
+--
+-- D6 shipped a packed-String file vocabulary; Phase 1 adds the Bin-native OS surface
+-- (Go's os/io-fs, subsuming the raw syscall layer), carrying arbitrary bytes:
+--   fsWrite  path content : Bin -> Bin -> IO Nat   (bytes written)
+--   fsRead   path         : Bin -> IO Bin          (content; empty if missing)
+--   fsExists path         : Bin -> IO Nat          (1/0)
+--   fsRemove path         : Bin -> IO Nat          (1/0)
+--   fsMkdir  path         : Bin -> IO Nat          (1/0, mkdir -p)
+--
+-- main writes 8 bytes (incl a NUL) to a temp file, confirms it exists (1), reads it
+-- back ("hi\x00bytes"), removes it (1), confirms it is gone (0). The harness runs it
+-- in a temp cwd. Observable "8\n1\n\"hi\x00bytes\"\n1\n0\nunit", all source backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign printBin : Bin -> IO Unit end
+
+foreign fsWrite  : Bin -> Bin -> IO Nat end
+foreign fsRead   : Bin -> IO Bin end
+foreign fsExists : Bin -> IO Nat end
+foreign fsRemove : Bin -> IO Nat end
+
+path    : Bin is b"wootz_fs.tmp" end
+content : Bin is b"hi\x00bytes" end
+
+main : IO Unit is
+  bindIO Nat Unit (fsWrite path content) (fn (w : Nat) is
+    bindIO Nat Unit (printNat w) (fn (a : Nat) is
+      bindIO Nat Unit (fsExists path) (fn (e1 : Nat) is
+        bindIO Nat Unit (printNat e1) (fn (b : Nat) is
+          bindIO Bin Unit (fsRead path) (fn (r : Bin) is
+            bindIO Unit Unit (printBin r) (fn (c : Unit) is
+              bindIO Nat Unit (fsRemove path) (fn (rm : Nat) is
+                bindIO Nat Unit (printNat rm) (fn (d : Nat) is
+                  bindIO Nat Unit (fsExists path) (fn (e2 : Nat) is
+                    bindIO Nat Unit (printNat e2) (fn (e : Nat) is
+                      pureIO Unit unit
+                    end)
+                  end)
+                end)
+              end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

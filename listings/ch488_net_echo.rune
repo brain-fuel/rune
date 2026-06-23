@@ -1,0 +1,53 @@
+-- Chapter 488 — net: a TCP echo client over the uniform socket FFI (Phase 1).
+--
+-- `net` was parked: raw sockets had no uniform sequential-IO shape across backends.
+-- Phase 1 unparks it with a minimal synchronous, blocking TCP vocabulary, handles as
+-- the opaque `Ptr` foreign type, payloads as Bin:
+--   sockConnect host port : Bin -> Nat -> IO Ptr
+--   sockWrite   conn data : Ptr -> Bin -> IO Nat   (bytes written)
+--   sockRead    conn n    : Ptr -> Nat -> IO Bin   (up to n bytes; empty = EOF)
+--   sockClose   conn      : Ptr -> IO Unit
+-- The blocking surface is honest on every backend (JS satisfies it asynchronously
+-- under ioRuntimeAsync; the rest block natively).
+--
+-- This client reads the server port from stdin (the harness starts a loopback echo
+-- server on an ephemeral port and feeds it), connects, writes "ping", reads 4 bytes,
+-- prints them, and closes. Observable "ping"\nunit, byte-identical across backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign getNat   : IO Nat end
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign printBin : Bin -> IO Unit end
+
+foreign Ptr         : U end
+foreign sockConnect : Bin -> Nat -> IO Ptr end
+foreign sockWrite   : Ptr -> Bin -> IO Nat end
+foreign sockRead    : Ptr -> Nat -> IO Bin end
+foreign sockClose   : Ptr -> IO Unit end
+
+main : IO Unit is
+  bindIO Nat Unit getNat (fn (port : Nat) is
+    bindIO Ptr Unit (sockConnect b"127.0.0.1" port) (fn (conn : Ptr) is
+      bindIO Nat Unit (sockWrite conn b"ping") (fn (n : Nat) is
+        bindIO Bin Unit (sockRead conn 4) (fn (r : Bin) is
+          bindIO Unit Unit (printBin r) (fn (u : Unit) is
+            bindIO Unit Unit (sockClose conn) (fn (u2 : Unit) is
+              pureIO Unit unit
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

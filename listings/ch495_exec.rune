@@ -1,0 +1,31 @@
+-- Chapter 495 — os/exec over Bin (Phase 1): run a subprocess, capture stdout.
+--
+-- procRun program arg : Bin -> Bin -> IO Bin runs `program arg` and returns the
+-- child's stdout bytes. (program is PATH-resolved; one argument keeps the surface
+-- minimal.) Running `echo hi` yields "hi\n", shown by printBin as "hi\x0a" (the
+-- trailing newline is a control byte). Byte-identical wherever a shell/exec is
+-- available.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign printBin : Bin -> IO Unit end
+foreign procRun  : Bin -> Bin -> IO Bin end
+
+main : IO Unit is
+  bindIO Bin Unit (procRun b"echo" b"hi") (fn (r : Bin) is
+    bindIO Unit Unit (printBin r) (fn (u : Unit) is
+      pureIO Unit unit
+    end)
+  end)
+end

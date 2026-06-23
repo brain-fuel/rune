@@ -1,0 +1,53 @@
+-- Chapter 489 — net: a TCP echo SERVER over the uniform socket FFI (Phase 1).
+--
+-- The server half of the unparked `net`: sockListen + sockAccept complete the
+-- vocabulary (a wootz program can now BE a server, the basis for net/http servers).
+--   sockListen port : Nat -> IO Ptr   bind+listen on 127.0.0.1:port -> listener
+--   sockAccept lis  : Ptr -> IO Ptr   block until a client connects -> connection
+--
+-- This server reads its port from stdin (the harness feeds a free port), listens,
+-- accepts one client, reads 4 bytes ("ping"), replies "pong", prints what it read,
+-- and closes both the connection and the listener. Observable "ping"\nunit.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign getNat   : IO Nat end
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign printBin : Bin -> IO Unit end
+
+foreign Ptr        : U end
+foreign sockListen : Nat -> IO Ptr end
+foreign sockAccept : Ptr -> IO Ptr end
+foreign sockWrite  : Ptr -> Bin -> IO Nat end
+foreign sockRead   : Ptr -> Nat -> IO Bin end
+foreign sockClose  : Ptr -> IO Unit end
+
+main : IO Unit is
+  bindIO Nat Unit getNat (fn (port : Nat) is
+    bindIO Ptr Unit (sockListen port) (fn (lis : Ptr) is
+      bindIO Ptr Unit (sockAccept lis) (fn (conn : Ptr) is
+        bindIO Bin Unit (sockRead conn 4) (fn (r : Bin) is
+          bindIO Nat Unit (sockWrite conn b"pong") (fn (n : Nat) is
+            bindIO Unit Unit (printBin r) (fn (u0 : Unit) is
+              bindIO Unit Unit (sockClose conn) (fn (u1 : Unit) is
+                bindIO Unit Unit (sockClose lis) (fn (u2 : Unit) is
+                  pureIO Unit unit
+                end)
+              end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

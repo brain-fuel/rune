@@ -1,0 +1,73 @@
+-- Chapter 496 — context as a PURE cancellation token (Phase 1).
+--
+-- Go's context.Context is effectful (another goroutine cancels). In a total language
+-- the honest model is a VALUE: a context tree carrying cancellation + key/value
+-- bindings, threaded explicitly (the plan's "cancellation token, no goroutine
+-- internals"). ctxErr propagates cancellation from any ancestor; ctxValue walks the
+-- chain. No FFI — works on all 8 backends by construction.
+--
+-- main: a value ctx (key 7 -> 42), then its cancelled child. ctxErr 0/1; the value 42
+-- is visible through the cancel; an absent key reads 0. Observable "0\n1\n42\n42\n0".
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+
+-- a context tree: the root, a cancelled child, or a key/value binding over a parent.
+data Ctx : U is
+  background : Ctx
+| cancel     : Ctx -> Ctx
+| withValue  : Nat -> Nat -> Ctx -> Ctx
+end
+
+-- ctxErr: 0 while live, 1 once any ancestor is cancelled.
+ctxErr : Ctx -> Nat is
+  CtxElim (fn (x : Ctx) is Nat end)
+    0
+    (fn (p : Ctx) (ih : Nat) is 1 end)
+    (fn (k : Nat) (v : Nat) (p : Ctx) (ih : Nat) is ih end)
+end
+
+-- ctxValue: the nearest binding for key, walking parents; 0 if unbound.
+ctxValue : Ctx -> Nat -> Nat is
+  CtxElim (fn (x : Ctx) is Nat -> Nat end)
+    (fn (key : Nat) is 0 end)
+    (fn (p : Ctx) (ih : Nat -> Nat) is fn (key : Nat) is ih key end end)
+    (fn (k : Nat) (v : Nat) (p : Ctx) (ih : Nat -> Nat) is
+       fn (key : Nat) is case eqNat k key of | true -> v | false -> ih key end end
+    end)
+end
+
+c0 : Ctx is withValue 7 42 background end
+c1 : Ctx is cancel c0 end
+
+main : IO Nat is
+  bindIO Nat Nat (printNat (ctxErr c0)) (fn (a : Nat) is
+    bindIO Nat Nat (printNat (ctxErr c1)) (fn (b : Nat) is
+      bindIO Nat Nat (printNat (ctxValue c0 7)) (fn (c : Nat) is
+        bindIO Nat Nat (printNat (ctxValue c1 7)) (fn (d : Nat) is
+          printNat (ctxValue c0 9)
+        end)
+      end)
+    end)
+  end)
+end
