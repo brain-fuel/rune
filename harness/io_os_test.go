@@ -2994,6 +2994,25 @@ func TestStringDeployConformance(t *testing.T) {
 	}
 }
 
+// TestElemTyMixedDtype deploys ch476 — `elemTy : DType -> U` (a LARGE elimination, the dtype→
+// scalar-type map) + heterogeneous-dtype cells. An f64 cell (3.0), an i64 cell (2), a bool_ cell
+// (true), each typed by elemTy dt, each rendered by a dependent cellToNat: "3\n2\n1\nunit" on
+// every source backend. Exercises the U1-motive eliminator that enables large elimination.
+func TestElemTyMixedDtype(t *testing.T) {
+	const want = "3\n2\n1\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch476_elemty_mixed_dtype.rune", "main", ""); got != want {
+				t.Errorf("[%s] elemTy mixed-dtype printed %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}
+
 // TestDTypeKitConformance deploys the DType kit (ch471, D4 rung 3): the dtype enum's typestr
 // `dtypeStr f64` is "<f8", the __array_interface__ tag a boundary dtype-guard compares a numpy
 // buffer against (the guard accept/reject and typestr proofs hold by refl at check time). It

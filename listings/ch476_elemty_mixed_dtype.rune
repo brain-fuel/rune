@@ -1,0 +1,63 @@
+-- Chapter 476 — `elemTy : DType -> U` and MIXED-DTYPE cells (D4). The dtype kit (ch471) gave
+-- the typestr; the missing half was the design's `elemTy` — the Rune scalar TYPE a single cell
+-- of a given dtype crosses as (f64 ↦ Float, i64 ↦ Nat, bool_ ↦ Bool). That is a LARGE
+-- ELIMINATION: a motive into `U` itself. The generated data eliminator now supports it (its
+-- motive lands at U1, so a type-valued motive `DType -> U` type-checks; elaborate/data.go). This
+-- is the consumer that makes large elim needful — a HETEROGENEOUS-dtype array whose cells have
+-- genuinely DIFFERENT Rune types (a Float for f64, a Nat for i64, a Bool for bool_), each typed
+-- by `elemTy dt`, and a dependent `cellToNat` that processes a cell AT its dtype's type.
+-- Observable: "3\n2\n1" — an f64 cell 3.0, an i64 cell 2, a bool_ cell true, each handled
+-- correctly by type. Pure Rune, cross-backend; the core enhancement (U1 motive) is what enables it.
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign Float      : U end
+foreign fromNat    : Nat -> Float end
+foreign floatToNat : Float -> Nat end
+foreign printNat   : Nat -> IO Nat end
+
+data DType : U is f64 : DType | f32 : DType | i64 : DType | i32 : DType | bool_ : DType end
+
+-- THE LARGE ELIMINATION: a dtype's cell crosses as this Rune scalar TYPE. Motive into U.
+elemTy : DType -> U is
+  fn (dt : DType) is
+    DTypeElim (fn (w : DType) is U end) Float Float Nat Nat Bool dt
+  end
+end
+
+-- elemTy COMPUTES: a value can be typed AT a dtype's element type because elemTy reduces.
+elemF64IsFloat : Eq U (elemTy f64) Float is refl end
+elemI64IsNat   : Eq U (elemTy i64) Nat   is refl end
+elemBoolIsBool : Eq U (elemTy bool_) Bool is refl end
+
+-- three cells of DIFFERENT dtypes, each typed by elemTy — a Float, a Nat, a Bool.
+cF : elemTy f64   is fromNat 3 end
+cI : elemTy i64   is succ (succ zero) end
+cB : elemTy bool_ is true end
+
+boolToNat : Bool -> Nat is fn (b : Bool) is BoolElim (fn (w : Bool) is Nat end) (succ zero) zero b end end
+
+-- a DEPENDENT processor: cellToNat dt takes a cell AT its dtype's type and renders it as a Nat.
+-- The motive `elemTy w -> Nat` reduces per branch (Float->Nat | Nat->Nat | Bool->Nat), so each
+-- arm is the right converter — floatToNat for floats, identity for ints, boolToNat for bool.
+cellToNat : (dt : DType) -> elemTy dt -> Nat is
+  fn (dt : DType) is
+    DTypeElim (fn (w : DType) is elemTy w -> Nat end)
+      floatToNat
+      floatToNat
+      (fn (x : Nat) is x end)
+      (fn (x : Nat) is x end)
+      boolToNat
+      dt
+  end
+end
+
+-- render each heterogeneous cell at its own type: 3.0 -> 3, 2 -> 2, true -> 1.
+main : IO Unit is
+  bindIO Nat Unit (printNat (cellToNat f64 cF)) (fn (a : Nat) is
+  bindIO Nat Unit (printNat (cellToNat i64 cI)) (fn (b : Nat) is
+  bindIO Nat Unit (printNat (cellToNat bool_ cB)) (fn (c : Nat) is pureIO Unit unit end) end) end)
+end

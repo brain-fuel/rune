@@ -250,9 +250,14 @@ func elimType(d store.DataDecl, ph core.Hash) core.Tm {
 		body = core.Pi{Dom: caseTy, Cod: core.Scope{Name: "c" + d.CtorNames[i], Body: body}}
 	}
 
-	// The motive: (m : D p* -> U).
+	// The motive: (m : D p* -> U1). The motive lands at U1 (not U0) so the eliminator supports
+	// LARGE elimination — a type-valued motive `D -> U` (U : U1) — as well as ordinary small
+	// motives (a U0-valued motive fits by cumulativity U0 <: U1). This is what lets
+	// `elemTy : DType -> U` (a dtype→scalar-type map, ch476) type-check. Bumping the motive level
+	// rehashes every datatype's eliminator (a one-time cache event; no hash-FORMAT bump — no new
+	// core constructor); Prop-valued motives still ride Prop <: U.
 	motive := core.Pi{
-		Dom: core.Pi{Dom: selfApplied(ph, k, 0), Cod: core.Scope{Name: "x", Body: core.Univ{}}},
+		Dom: core.Pi{Dom: selfApplied(ph, k, 0), Cod: core.Scope{Name: "x", Body: core.Univ{Lvl: 1}}},
 		Cod: core.Scope{Name: "m", Body: body},
 	}
 
