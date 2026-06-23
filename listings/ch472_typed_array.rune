@@ -1,0 +1,100 @@
+-- Chapter 472 — the TYPED ARRAY HANDLE: dtype + shape + buffer + discharge, in ONE value
+-- (D4, the in-language `Array dt sh` surface). ch470 discharges an array's SHAPE; ch471 adds
+-- the DTYPE machinery. This bundles them into a single `TypedArr` value — a flat buffer
+-- carrying its dtype, its shape, AND the proof that its flat length is the shape's product —
+-- so a numeric op takes ONE typed-array argument, not (shape, buffer, proof) threaded
+-- separately. The constructor `mkArr` CANNOT be called without the discharge proof, so every
+-- TypedArr is well-shaped BY CONSTRUCTION; `arrDType`/`arrShape`/`arrBuf` project the fields.
+-- A typed `arrMatVec` discharges the inner-dimension agreement (matrix cols = vector len) from
+-- the bundled shapes and runs REAL numpy via the embed → 56. This is the fixed-shape handle the
+-- opaque `Array dt sh` (rung 4) makes zero-copy: rung 4 swaps the flat FList payload for an
+-- __array_interface__ CRepr, the dtype/shape indices + discharge semantics unchanged. Pure
+-- library: no core, no hash bump, no cloud.
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign Float      : U end
+data FList : U is fnil : FList | fcons : Float -> FList -> FList end
+data Shape : U is shnil : Shape | shcons : Nat -> Shape -> Shape end
+data DType : U is f64 : DType | f32 : DType | i64 : DType | i32 : DType | bool_ : DType end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fadd       : Float -> Float -> Float end
+foreign pyNpMatVec : FList -> Nat -> Nat -> FList -> FList end
+
+flen : FList -> Nat is
+  fn (xs : FList) is
+    FListElim (fn (w : FList) is Nat end) zero
+      (fn (h : Float) (t : FList) (ih : Nat) is succ ih end) xs
+  end
+end
+natAddH : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAddH b ih end) a
+  end
+end
+flatLen : Shape -> Nat is
+  fn (sh : Shape) is
+    ShapeElim (fn (w : Shape) is Nat end) (succ zero)
+      (fn (d : Nat) (ds : Shape) (ih : Nat) is natMul d ih end) sh
+  end
+end
+
+-- THE TYPED ARRAY HANDLE. A TypedArr bundles the dtype, the shape, the flat buffer, AND the
+-- discharge proof `flen buf = flatLen sh`. The proof is a FIELD of the constructor, so an
+-- ill-shaped buffer cannot be packaged — `mkArr` rejects it at `refl`. (The opaque rung-4
+-- `Array dt sh` replaces `buf : FList` with an __array_interface__ handle; everything else
+-- here is unchanged — the dtype/shape indices and the by-construction discharge survive.)
+data TypedArr : U is
+  | mkArr : (dt : DType) -> (sh : Shape) -> (buf : FList) -> Eq Nat (flen buf) (flatLen sh) -> TypedArr
+end
+arrDType : TypedArr -> DType is fn (a : TypedArr) is case a of | mkArr dt sh buf pf -> dt end end end
+arrShape : TypedArr -> Shape is fn (a : TypedArr) is case a of | mkArr dt sh buf pf -> sh end end end
+arrBuf   : TypedArr -> FList is fn (a : TypedArr) is case a of | mkArr dt sh buf pf -> buf end end end
+
+-- a (2x2) f64 matrix and a length-2 f64 vector, each PACKAGED with its shape proof. The
+-- matrix's flat length (4) IS flatLen [2,2] (4), the vector's (2) IS flatLen [2] (2) — refl.
+matBuf : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+vecBuf : FList is fcons (fromNat 5) (fcons (fromNat 6) fnil) end
+matArr : TypedArr is mkArr f64 (shcons 2 (shcons 2 shnil)) matBuf refl end
+vecArr : TypedArr is mkArr f64 (shcons 2 shnil) vecBuf refl end
+
+-- shape accessors over a 2-D / 1-D TypedArr: rows/cols of a matrix, length of a vector.
+rowsOf : Shape -> Nat is fn (sh : Shape) is case sh of | shnil -> zero | shcons m rest -> m end end end
+colsOf : Shape -> Nat is fn (sh : Shape) is case sh of | shnil -> zero | shcons m rest -> rowsOf rest end end end
+lenOf  : Shape -> Nat is fn (sh : Shape) is case sh of | shnil -> zero | shcons n rest -> n end end end
+
+-- THE TYPED OP: matrix·vector over two TypedArrs, the inner-dimension agreement (matrix cols =
+-- vector length) discharged by a typed proof from the BUNDLED shapes — a non-conformable pair
+-- cannot be applied. Runs real numpy on the projected buffers (the dtype/shape rode in the
+-- handle; rung 4 makes this a zero-copy __array_interface__ pass instead of an FList walk).
+arrMatVec : (M : TypedArr) -> (v : TypedArr) -> Eq Nat (colsOf (arrShape M)) (lenOf (arrShape v)) -> FList is
+  fn (M : TypedArr) (v : TypedArr) (conf : Eq Nat (colsOf (arrShape M)) (lenOf (arrShape v))) is
+    pyNpMatVec (arrBuf M) (rowsOf (arrShape M)) (colsOf (arrShape M)) (arrBuf v)
+  end
+end
+prodAv : FList is arrMatVec matArr vecArr refl end
+
+sumFList : FList -> Float is
+  fn (ys : FList) is
+    FListElim (fn (w : FList) is Float end) (fromNat 0)
+      (fn (h : Float) (r : FList) (ih : Float) is fadd h ih end) ys
+  end
+end
+
+-- witness: [[1,2],[3,4]]·[5,6] = [17,39], sum 56 — numpy via the embed, every shape discharged
+-- by construction from the typed-array handles (matArr/vecArr carry their proofs; arrMatVec's
+-- conformance proof ties cols(M)=len(v)).
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (sumFList prodAv))) (fn (u1 : Nat) is pureIO Unit unit end)
+end

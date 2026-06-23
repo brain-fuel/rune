@@ -128,6 +128,15 @@ consumer), so it folds into rung 4 where the CArray CRepr knows each dtype's ele
 codegen (PARKING-LOT.md). Only rung 4 touches codegen. The design below is the rung-4 target;
 ch467/ch470/ch471 prove the shape-discharge + dtype semantics it will inherit.
 
+The IN-LANGUAGE typed handle is now CONSOLIDATED (ch472, v3.328.45): a `TypedArr` bundles dtype +
+shape + flat buffer + the discharge proof (`flen buf ≡ flatLen sh`) in ONE value, so every array
+is well-shaped BY CONSTRUCTION (mkArr rejects an ill-shaped buffer at refl) and a typed `arrMatVec`
+discharges the inner-dimension agreement from the bundled shapes — runs real numpy via the embed →
+56 (TestD4TypedArray). This IS the fixed-shape `Array dt sh` surface the status line below calls
+separately ready-to-build; rung 4 now reduces to a REPR SWAP — replace `TypedArr`'s `buf : FList`
+field with an opaque __array_interface__ CRepr handle, the dtype/shape indices + by-construction
+discharge unchanged.
+
 ## Problem (what's stuck/absent today, with file:line)
 
 R-FFI (B4) makes a *scalar* foreign call typed and contract-guarded: `c_sqrt :

@@ -660,6 +660,65 @@ func TestD4ShapeFlatLen(t *testing.T) {
 	}
 }
 
+// TestD4TypedArray runs ch472 — the TYPED ARRAY HANDLE (D4): a TypedArr bundles dtype + shape +
+// flat buffer + the discharge proof in ONE value, so every array is well-shaped by construction
+// (mkArr rejects an ill-shaped buffer at refl) and a typed arrMatVec discharges the inner-
+// dimension agreement from the bundled shapes. The well-shaped call runs real numpy via the
+// embed: [[1,2],[3,4]]·[5,6] = [17,39], summed to 56. The in-language `Array dt sh` surface the
+// opaque rung-4 CRepr makes zero-copy (the dtype/shape indices + discharge semantics unchanged).
+func TestD4TypedArray(t *testing.T) {
+	if _, err := exec.LookPath("cc"); err != nil {
+		t.Skip("cc not in PATH")
+	}
+	pyCfg, err := exec.LookPath("python3-config")
+	if err != nil {
+		t.Skip("python3-config not in PATH")
+	}
+	if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+		t.Skip("numpy not importable")
+	}
+	incOut, err := exec.Command(pyCfg, "--includes").Output()
+	if err != nil {
+		t.Skipf("python3-config --includes failed: %v", err)
+	}
+	ldOut, err := exec.Command(pyCfg, "--ldflags", "--embed").Output()
+	if err != nil {
+		ldOut, err = exec.Command(pyCfg, "--ldflags").Output()
+		if err != nil {
+			t.Skipf("python3-config --ldflags failed: %v", err)
+		}
+	}
+	s := loadListing(t, "ch472_typed_array.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.C{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cf := filepath.Join(dir, "main.c")
+	bin := filepath.Join(dir, "main.bin")
+	if err := os.WriteFile(cf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{cf}
+	args = append(args, strings.Fields(string(incOut))...)
+	args = append(args, "-o", bin)
+	args = append(args, strings.Fields(string(ldOut))...)
+	if out, err := exec.Command("cc", args...).CombinedOutput(); err != nil {
+		t.Skipf("[c] compile with libpython failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("[c] run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "56") {
+		t.Errorf("typed-array matvec gave %q, want it to start 56", got)
+	}
+}
+
 // TestD4CPythonNumpyLL runs the numpy embed (ch463) on the LLVM backend too — the same FList
 // marshalling + numpy reduction/array-return, baked into the LL runtime with rt_-prefixed
 // mkcon/con_set. Prints 10, 30, 56 identical to C. Completes the embed's cross-backend parity.
