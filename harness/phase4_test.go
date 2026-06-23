@@ -46,3 +46,25 @@ func TestLog(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch503_log.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch503_log.rune", want) })
 }
+
+// TestTemplate is the Phase-4 text/template gate: a template as a Node sum
+// (literal | substitution) rendered against an Env of key=value data (ch504),
+// pure-wootz, byte-identical on all 8 backends. One template renders against two
+// bindings: "Hello, Ada! You have 3 messages." / "Hello, Bob! You have 7 messages.".
+func TestTemplate(t *testing.T) {
+	const want = "\"Hello, Ada! You have 3 messages.\"\n" +
+		"\"Hello, Bob! You have 7 messages.\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch504_template.rune", "main", ""); got != want {
+				t.Fatalf("[%s] template gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch504_template.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch504_template.rune", want) })
+}
