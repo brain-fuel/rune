@@ -1,0 +1,26 @@
+-- Chapter 482 — the transp-over-Glue GENERAL ARM, exercised directly (§F / R-GLUE / G1).
+-- castU-over-`ua` (ch10/ch58) runs this arm through the derived-univalence prelude; this pins
+-- it on a USER-built Glue line, outside that machinery. The arm (transpGlueEndpointTotal in
+-- core/eval.go) accepts a NEUTRAL input over a Glue line whose face is TOTAL at both endpoints
+-- and recovers the result from the equivalence — for the IDENTITY equivalence it is the
+-- identity transport. R-BOX (hcomp) + R-FILL (transp/transpFill) + the ∀i.φ cofibration — all
+-- now built — are what this arm consumes; the residue (a face that stays PROPER at an endpoint)
+-- is the no-consumer §7 face-restricted-eval tail.
+--
+-- `idEquivF : (B : UF) -> El (Equiv B B)` is ambient (the ua prelude). The Glue line
+-- `λi. Glue B ((i=0)∨(i=1)) (λ_. B) (λ_. idEquivF B)` is the `ua`-shape line at the identity:
+-- φ = (i=0)∨(i=1) is ⊤ at i0 and i1 (so El at each endpoint IS B, and a neutral x : El B is a
+-- valid input/output), the base B is constant, the equiv is identity. So transport of x is x.
+
+transpGlueId : (B : UF) -> (x : El B)
+   -> Eq (El B)
+        (transp
+           (fn (i : I) is
+              Glue B (for (ieq0 i) (ieq1 i))
+                (fn (h : holds (for (ieq0 i) (ieq1 i))) is B end)
+                (fn (h : holds (for (ieq0 i) (ieq1 i))) is idEquivF B end)
+            end)
+           x)
+        x is
+  fn (B : UF) (x : El B) is refl x end
+end
