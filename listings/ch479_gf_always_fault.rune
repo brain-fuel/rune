@@ -1,0 +1,162 @@
+-- Chapter 479 — GREATEST-FIXPOINT "always a fault" fairness (E3/D5, the dfix-wall research).
+-- ch477 proved the INDUCTIVE infinitely-often property (`faultAt`: at every depth k there is a
+-- fault). The greatest-fixpoint version — "ALWAYS a fault" as a single COINDUCTIVE PREDICATE on
+-- the unbounded stream — was the genuine dfix wall. This closes it for the perpetual stream,
+-- using the ch69 guarded machinery (`gfixF`/`laterApp`/`dfix`):
+--
+--   AlwaysFault s  :=  νR. (head s = some lfail) × ▹κ (R (tail s))
+--
+-- the guarded coinductive predicate (gfixF over the stream family, gRelStep shape), and a
+-- PRODUCTIVE witness that `behaviour looping` satisfies it — built by `dfix` (the recursive
+-- obligation sits under `next`, so corecursion is productive; the dfix wall is about OBSERVING
+-- a dfix, not CONSTRUCTING a guarded witness, exactly as ch69 built gBisim).
+
+data Bool : U is true : Bool | false : Bool end
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data Label : U is ltau : Label | lfail : Label end
+data Sup : U is crashL : Sup | crashR : Sup | looping : Sup end
+
+-- minimal Str (coinductive stream) — head/tail/traceOf (ch208/ch209 library).
+Str : UF -> UF is
+  fn (A : UF) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end
+end
+head : (A : UF) -> El (Str A) -> El A is
+  fn (A : UF) (s : El (Str A)) is
+    fstF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+tail : (A : UF) -> El (Str A) -> El (Str A) is
+  fn (A : UF) (s : El (Str A)) is
+    sndF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+traceOf : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> El S -> El (Str A) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end))) (s : El S) is
+    unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c s
+  end
+end
+
+-- the perpetual coalgebra (ch477): every state faults, every state steps to `looping`.
+obsOf : Sup -> Option Label is
+  fn (s : Sup) is
+    SupElim (fn (w : Sup) is Option Label end)
+      (some Label lfail) (some Label lfail) (some Label lfail) s
+  end
+end
+nextOf : Sup -> Sup is
+  fn (s : Sup) is SupElim (fn (w : Sup) is Sup end) looping looping looping s end
+end
+perpCoalg : El (fib Sup)
+   -> El (sigmaF (fib (Option Label)) (fn (w : El (fib (Option Label))) is fib Sup end)) is
+  fn (s : El (fib Sup)) is
+    pairF (fib (Option Label)) (fn (w : El (fib (Option Label))) is fib Sup end)
+      (obsOf s) (nextOf s)
+  end
+end
+behaviour : El (fib Sup) -> El (Str (fib (Option Label))) is
+  fn (s : El (fib Sup)) is traceOf (fib (Option Label)) (fib Sup) perpCoalg s end
+end
+
+-- A := the observation alphabet; D := the stream code the predicate recurses over.
+A : UF is fib (Option Label) end
+D : UF is Str A end
+
+-- the ch69 guarded laws used below, refl-provable from the guard builtins (convGfixF / the
+-- laterApp ι-rule): gfixF unfolds one step, and laterApp on a `next` reduces.
+gfixFUnfold : (k : Clock) -> (D : UF) -> (Phi : (El D -> UF) -> (El D -> UF)) -> (d : El D)
+   -> Eq UF (gfixF k D Phi d) (Phi (gfixF k D Phi) d) is
+  fn (k : Clock) (D : UF) (Phi : (El D -> UF) -> (El D -> UF)) (d : El D) is refl end
+end
+laterAppNext : (k : Clock) -> (A : UF) -> (f : El A -> UF) -> (x : El A)
+   -> Eq UF (laterApp k A f (next k A x)) (Later k (f x)) is
+  fn (k : Clock) (A : UF) (f : El A -> UF) (x : El A) is refl end
+end
+symEqUF : (x : UF) -> (y : UF) -> Eq UF x y -> Eq UF y x is
+  fn (x : UF) (y : UF) (p : Eq UF x y) is
+    subst UF x y p (fn (w : UF) is Eq UF w x end) (refl x)
+  end
+end
+
+-- the head condition: the stream's head is `some lfail` (an inner path type, a UF).
+headIsFault : El D -> UF is
+  fn (s : El D) is pathF A (head A s) (some Label lfail) end
+end
+
+-- the step: delay the tail by ▹κ on the fixed clock k0 — `gRelStep`'s `step : El D -> ▹κ D`.
+stepTail : El D -> El (Later k0 D) is fn (s : El D) is next k0 D (tail A s) end end
+
+-- THE GREATEST-FIXPOINT PREDICATE: AlwaysFault s = νR. (head s = lfail) × ▹κ (R (tail s)).
+-- Built by gfixF (the ch69 Bisim former) in the gRelStep shape — the recursive occurrence R
+-- sits under ▹κ via laterApp, so it is a guarded (productive) coinductive definition.
+AlwaysFault : El D -> UF is
+  gfixF k0 D
+    (fn (R : El D -> UF) is
+       fn (e : El D) is
+         sigmaF (headIsFault e) (fn (_w : El (headIsFault e)) is laterApp k0 D R (stepTail e) end)
+       end
+     end)
+end
+
+-- its coinductive UNFOLDING (gfixFUnfold + laterAppNext): AlwaysFault s computes to the pair of
+-- the head condition and the DELAYED predicate on the tail.
+alwaysUnfold : (s : El D)
+   -> Eq UF (AlwaysFault s)
+        (sigmaF (headIsFault s) (fn (_w : El (headIsFault s)) is laterApp k0 D AlwaysFault (stepTail s) end)) is
+  fn (s : El D) is
+    gfixFUnfold k0 D
+      (fn (R : El D -> UF) is
+         fn (e : El D) is
+           sigmaF (headIsFault e) (fn (_w : El (headIsFault e)) is laterApp k0 D R (stepTail e) end)
+         end
+       end) s
+  end
+end
+
+-- the perpetual stream's head IS a fault, and its tail IS itself (ch477), both by refl.
+loopHead : El (headIsFault (behaviour looping)) is preflF A (some Label lfail) end
+loopTailId : Eq (El D) (tail A (behaviour looping)) (behaviour looping) is refl (behaviour looping) end
+
+-- laterApp on a `next` reduces (ch69 laterAppNext): laterApp k0 D R (next k0 D x) ~> Later k0 (R x).
+-- So the delayed slot of AlwaysFault (behaviour looping) is `Later k0 (AlwaysFault (tail …))`,
+-- and by loopTailId that is `Later k0 (AlwaysFault (behaviour looping))` — the self-reference.
+delayedSlot : UF is laterApp k0 D AlwaysFault (stepTail (behaviour looping)) end
+delayedIsSelf : Eq UF delayedSlot (Later k0 (AlwaysFault (behaviour looping))) is
+  laterAppNext k0 D AlwaysFault (tail A (behaviour looping))
+end
+
+-- THE PRODUCTIVE WITNESS: behaviour looping satisfies AlwaysFault. By dfix at the (self-
+-- referential) goal type: the body pairs the head proof (loopHead) with the delayed self —
+-- the recursive obligation `self : ▹κ (AlwaysFault (behaviour looping))` IS the delayed slot
+-- (delayedIsSelf), guarded by ▹κ, so corecursion is productive. The pair inhabits the unfolded
+-- AlwaysFault (alwaysUnfold transported).
+alwaysLoopBody : El (Later k0 (AlwaysFault (behaviour looping)))
+   -> El (sigmaF (headIsFault (behaviour looping))
+            (fn (_w : El (headIsFault (behaviour looping))) is delayedSlot end)) is
+  fn (self : El (Later k0 (AlwaysFault (behaviour looping)))) is
+    pairF (headIsFault (behaviour looping))
+      (fn (_w : El (headIsFault (behaviour looping))) is delayedSlot end)
+      loopHead
+      (subst UF (Later k0 (AlwaysFault (behaviour looping))) delayedSlot
+        (symEqUF delayedSlot (Later k0 (AlwaysFault (behaviour looping))) delayedIsSelf)
+        (fn (w : UF) is El w end)
+        self)
+  end
+end
+
+-- assemble: transport the pair (in the unfolded type) back to AlwaysFault (behaviour looping).
+alwaysLoop : El (AlwaysFault (behaviour looping)) is
+  subst UF
+    (sigmaF (headIsFault (behaviour looping))
+       (fn (_w : El (headIsFault (behaviour looping))) is delayedSlot end))
+    (AlwaysFault (behaviour looping))
+    (symEqUF (AlwaysFault (behaviour looping))
+       (sigmaF (headIsFault (behaviour looping))
+          (fn (_w : El (headIsFault (behaviour looping))) is delayedSlot end))
+       (alwaysUnfold (behaviour looping)))
+    (fn (w : UF) is El w end)
+    (dfix k0 (AlwaysFault (behaviour looping)) alwaysLoopBody)
+end

@@ -255,3 +255,23 @@ What stays open: the FULLY-GENERAL all-P non-settling refinement (arbitrary non-
 the mirror-to-common-perpetual-state class) and the GREATEST-fixpoint Always-Eventually fairness
 as a coinductive PREDICATE (the genuine dfix wall) — both still no consumer beyond this. ch477
 closes the perpetual-mirror class, the shape the ch474 service exhibits.
+
+## Greatest-fixpoint "always a fault" fairness CLOSED for the perpetual stream (ch479)
+
+The other half of the parked fairness research — the GREATEST-fixpoint "ALWAYS a fault" as a
+single coinductive PREDICATE (distinct from ch477's inductive ∀k `faultAt`) — is now closed for
+the perpetual stream, dissolving the dfix wall for this class:
+- **The predicate.** `AlwaysFault s := νR. (head s = some lfail) × ▹κ (R (tail s))`, built by the
+  ch69 `gfixF` (the indexed guarded fixpoint, gRelStep shape): the recursive occurrence R sits
+  under ▹κ via `laterApp`, so it is a guarded coinductive definition. `gfixFUnfold` + `laterAppNext`
+  (both refl) give its one-step unfolding `(head=lfail) × ▹κ (AlwaysFault (tail s))`.
+- **The witness.** `alwaysLoop : El (AlwaysFault (behaviour looping))` is built by `dfix`: the body
+  pairs the real head-fault proof (`loopHead`, the fault path) with the DELAYED self — the
+  recursive obligation `▹κ (AlwaysFault (behaviour looping))` IS the delayed slot (by `laterAppNext`
+  + `loopTailId`), guarded by ▹κ, so corecursion is productive. The dfix wall was about OBSERVING a
+  dfix; CONSTRUCTING a guarded witness is productive (exactly how ch69 built `gBisim`).
+
+So for the perpetual stream the greatest-fixpoint fairness holds, computing — not just the
+inductive infinitely-often (ch477). What remains genuinely open: the fully-general all-P
+adequacy/fairness over ARBITRARY non-settling P (the mirror/perpetual classes are closed; the
+general refinement is the residual research, no consumer).
