@@ -290,6 +290,17 @@ func (PaaS) isResource()           {}
 func (PaaS) Kind() string          { return "paas" }
 func (p PaaS) LogicalName() string { return p.Name }
 
+// Warehouse is a managed analytical data warehouse (AWS Redshift Serverless / Azure
+// Data Explorer (Kusto) / GCP BigQuery) — columnar OLAP storage + query, distinct from
+// Database's transactional (OLTP) engine. ClickHouse is the self-hosted FOSS backend.
+type Warehouse struct {
+	Name string
+}
+
+func (Warehouse) isResource()           {}
+func (Warehouse) Kind() string          { return "warehouse" }
+func (w Warehouse) LogicalName() string { return w.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20
@@ -333,7 +344,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{}, Prometheus{}, K3s{}, NFS{}, VaultKMS{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{}, Prometheus{}, K3s{}, NFS{}, VaultKMS{}, ClickHouse{},
 	}
 }
 
@@ -368,7 +379,7 @@ func Kinds() []string {
 	return []string{
 		"queue", "kv", "object", "compute", "database", "secret", "nosql", "dns",
 		"disk", "kms", "file", "stream", "cdn", "lb", "metrics", "iam", "k8s",
-		"network", "firewall", "logs", "registry", "paas",
+		"network", "firewall", "logs", "registry", "paas", "warehouse",
 	}
 }
 

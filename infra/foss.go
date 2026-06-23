@@ -643,3 +643,41 @@ func (LocalRegistry) Emit(rs []Resource) (Artifact, error) {
 		Logical: logicalSet(rs),
 	}, nil
 }
+
+// ClickHouse is the self-hosted analytical-warehouse backend (the ClickHouse OLAP
+// engine, Apache-2.0) — a columnar SQL warehouse that backs the "warehouse"
+// abstraction with NO cloud account, the self-hosted form of Redshift/Kusto/BigQuery.
+// HTTP on 8123, native protocol on 9000.
+type ClickHouse struct{}
+
+func (ClickHouse) Target() string { return "clickhouse" }
+func (ClickHouse) Cloud() bool    { return false }
+
+func (ClickHouse) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("clickhouse", "warehouse", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - ClickHouse backend for the wavelet \"warehouse\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (HTTP localhost:8123, native localhost:9000)\n" +
+		"services:\n" +
+		"  clickhouse:\n" +
+		"    image: docker.io/clickhouse/clickhouse-server:latest\n" +
+		"    environment:\n" +
+		"      - CLICKHOUSE_USER=wavelet\n" +
+		"      - CLICKHOUSE_PASSWORD=wavelet\n" +
+		"    ports:\n" +
+		"      - \"8123:8123\"\n" +
+		"      - \"9000:9000\"\n"
+	env := map[string]string{
+		"WAVELET_WAREHOUSE_BACKEND": "clickhouse",
+		"WAVELET_WAREHOUSE_URL":     "http://wavelet:wavelet@localhost:8123",
+	}
+	for _, n := range names {
+		env["WAVELET_WAREHOUSE_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}

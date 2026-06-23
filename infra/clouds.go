@@ -242,6 +242,10 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"aws_elastic_beanstalk_application\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
 			h.close()
+		case Warehouse:
+			h.open("resource \"aws_redshiftserverless_namespace\" %s", str(v.Name))
+			h.attr("namespace_name", str(v.Name))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -568,6 +572,16 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("os_type", str("Linux"))
 			h.attr("sku_name", str("B1"))
 			h.close()
+		case Warehouse:
+			h.open("resource \"azurerm_kusto_cluster\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.open("sku")
+			h.attr("name", str("Dev(No SLA)_Standard_D11_v2"))
+			h.attr("capacity", "1")
+			h.close()
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -778,6 +792,11 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_app_engine_application\" %s", str(v.Name))
 			h.attr("project", "var.gcp_project")
 			h.attr("location_id", str("us-central"))
+			h.close()
+		case Warehouse:
+			h.open("resource \"google_bigquery_dataset\" %s", str(v.Name))
+			h.attr("dataset_id", str(v.Name))
+			h.attr("location", str("US"))
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)
