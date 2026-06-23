@@ -371,3 +371,19 @@ into rung 4 (the CArray CRepr already knows each dtype's element representation 
 the marshaller lives). Parked per Standing Rule 1 until rung 4 (or another large-elim consumer)
 forces the question. The typestr — not elemTy — is the boundary's actual dtype mechanism: the
 guard compares a foreign buffer's reported typestr to `dtypeStr dt`.
+
+## D4 rung 4: the opaque Array dt sh CRepr (zero-copy handle) — no consumer
+The in-language typed array handle is CLOSED on the flat substrate (ch470 shape discharge, ch471
+dtype kit, ch472 the bundled TypedArr) — shape-discharged, dtype-tagged numpy interop that RUNS
+real numpy via the embed (→ 56) across the C/LLVM native backends. Rung 4 (R-INTEROP.md §A/C) would
+replace TypedArr's flat `FList` payload with an opaque `Array dt sh` handle whose runtime repr
+mirrors numpy's __array_interface__ (data ptr + dtype + shape + strides), so an array crosses the
+FFI boundary as O(1) handle passing instead of an element-wise FList walk. That is a PERFORMANCE
+optimization (O(1) vs O(n) marshalling), NOT a correctness or capability gap — ch472 already
+computes the right answer. It requires a new Value kind (an opaque array handle, like the existing
+K_FLOAT box) threaded through the erase pipeline AND every backend runtime (c.go/ll.go + the source
+emitters), plus a `store/foreign.go` abstract-axiom entry — a multi-backend runtime change. NO
+current consumer demands zero-copy (no shipped pipeline pushes arrays large enough for the FList
+walk to bottleneck). Parked per Standing Rule 1 until such a consumer exists; ch472 makes the swap
+mechanical when it does (replace the `buf : FList` field, indices + by-construction discharge
+unchanged). Sibling of the parked int64 fast-lane / native bignum / raw-sockets no-consumer tails.
