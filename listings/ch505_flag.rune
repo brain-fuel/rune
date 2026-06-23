@@ -1,0 +1,141 @@
+-- Chapter 505 — flag: command-line flag parsing over an arg list (Phase 4).
+--
+-- Go's flag package parses `-name value` pairs out of os.Args into typed flag
+-- values. The parsing LOGIC is the package; here the command line is a list of
+-- Bin args (what Phase-1's argv would feed in), and `parse` walks it into an Env
+-- of name=value bindings: a `-flag` consumes the next arg as its value, a bare
+-- token is positional and skipped. Pure wootz over Bin, no FFI beyond printBin,
+-- byte-identical on all 8 backends. Uses ListElim's PRECOMPUTED ih, so referring
+-- to it in both case arms is free (no inline self-recursion, no eager-arm blow-up).
+--
+-- main parses [-name Ada -count 7 file.txt] and looks up three flags. Observable:
+--   "Ada"
+--   "7"
+--   ""
+--   unit
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+
+-- eqBin: byte-string equality (lengths, then bytewise; ih in one arm).
+eqGo : Nat -> Bin -> Bin -> Nat -> Bool is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bool end) (fn (xs : Bin) (ys : Bin) (i : Nat) is true end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bool) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is
+           case leb (binLen xs) i of
+           | true  -> true
+           | false -> case eqNat (binAt xs i) (binAt ys i) of | true -> ih xs ys (succ i) | false -> false end
+           end
+         end
+      end)
+      fuel
+  end
+end
+eqBin : Bin -> Bin -> Bool is
+  fn (xs : Bin) (ys : Bin) is
+    case eqNat (binLen xs) (binLen ys) of | true -> eqGo (binLen xs) xs ys 0 | false -> false end
+  end
+end
+
+-- subBin a i: the suffix of a from index i (used to strip the leading '-').
+subGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (a : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (a : Bin) (i : Nat) is
+           case leb (binLen a) i of
+           | true  -> binEmpty
+           | false -> binCons (binAt a i) (ih a (succ i))
+           end
+         end
+      end)
+      fuel
+  end
+end
+stripDash : Bin -> Bin is fn (a : Bin) is subGo (binLen a) a 1 end end
+
+-- a token is a flag iff it starts with '-' (byte 45).
+isDash : Bin -> Bool is
+  fn (a : Bin) is case binLen a of | zero -> false | succ k -> eqNat (binAt a 0) 45 end end
+end
+
+-- the command line and the parsed data.
+data Args : U is
+  anil  : Args
+| acons : Bin -> Args -> Args
+end
+data Env : U is
+  enil  : Env
+| econs : Bin -> Bin -> Env -> Env
+end
+
+-- headOr: the first arg, or a default for an empty list (the flag's value).
+headOr : Args -> Bin -> Bin is
+  fn (xs : Args) (def : Bin) is
+    case xs of | anil -> def | acons v rest -> v end
+  end
+end
+
+-- parse: walk the args; a `-flag` binds name -> next token, a bare token is
+-- positional and skipped. ih is ListElim's precomputed parse-of-the-tail.
+parse : Args -> Env is
+  ArgsElim (fn (x : Args) is Env end)
+    enil
+    (fn (a : Bin) (rest : Args) (ih : Env) is
+       case isDash a of
+       | true  -> econs (stripDash a) (headOr rest binEmpty) ih
+       | false -> ih
+       end end)
+end
+
+lookup : Env -> Bin -> Bin is
+  EnvElim (fn (x : Env) is Bin -> Bin end)
+    (fn (key : Bin) is binEmpty end)
+    (fn (k : Bin) (v : Bin) (rest : Env) (ih : Bin -> Bin) is
+       fn (key : Bin) is case eqBin k key of | true -> v | false -> ih key end end end)
+end
+
+cmdline : Args is
+  acons b"-name" (acons b"Ada" (acons b"-count" (acons b"7" (acons b"file.txt" anil))))
+end
+parsed : Env is parse cmdline end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin (lookup parsed b"name")) (fn (a : Unit) is
+    bindIO Unit Unit (printBin (lookup parsed b"count")) (fn (b : Unit) is
+      bindIO Unit Unit (printBin (lookup parsed b"missing")) (fn (c : Unit) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

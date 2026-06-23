@@ -68,3 +68,24 @@ func TestTemplate(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch504_template.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch504_template.rune", want) })
 }
+
+// TestFlag is the Phase-4 flag gate: command-line flag parsing over an arg list
+// (ch505) — `-name value` pairs walked into an Env, bare tokens positional.
+// Pure-wootz, byte-identical on all 8 backends. Parses [-name Ada -count 7
+// file.txt] and looks up name/count/missing -> "Ada"/"7"/"".
+func TestFlag(t *testing.T) {
+	const want = "\"Ada\"\n\"7\"\n\"\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch505_flag.rune", "main", ""); got != want {
+				t.Fatalf("[%s] flag gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch505_flag.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch505_flag.rune", want) })
+}
