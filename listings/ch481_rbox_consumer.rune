@@ -1,0 +1,50 @@
+-- Chapter 481 — R-BOX exercised: the proper-face open-box filler on pathF COMPUTES its
+-- reduction, not just its endpoints. R-BOX (homogeneous hcomp by recursion on the head former)
+-- is built in tryHcomp; ch46 proved the filled path keeps endpoints a/b. This consumer pins the
+-- ACTUAL reduction — the lid applied at a generic interior point j IS the recursive `hcomp` over
+-- the SMALLER carrier former A (the recursion R-BOX is named for) — plus the face boundary (on a
+-- total face the lid is the wall, so composition lands on it). Together these witness R-BOX
+-- genuinely filling the box, not merely preserving the rim. Single-atom/homogeneous slice (the
+-- multi-disjunct genuine-composition case is C-OVERLAP-gated; ch46/this cover what computes).
+
+-- THE FACE BOUNDARY: on the total face the path-lid IS the wall at i1 — composition lands on the
+-- supplied wall (the boundary obligation R-BOX must meet), by refl (the total-system rule fires
+-- before the structural pathF rule, so it holds at the path former too).
+pathFillFaceBoundary : (A : UF) -> (a : El A) -> (b : El A)
+   -> (u : I -> holds ftop -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El (pathF A a b)) (hcomp (pathF A a b) ftop u u0) (u i1 htop) is
+  fn (A : UF) (a : El A) (b : El A)
+     (u : I -> holds ftop -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl (u i1 htop)
+  end
+end
+
+-- THE FLOOR / EMPTY FACE: on the empty face the lid is the floor — hcomp over pathF on ⊥ is u0,
+-- so the open box with no walls is just its floor path (the ⊥-degenerate R-BOX case).
+pathFillFloor : (A : UF) -> (a : El A) -> (b : El A)
+   -> (u : I -> holds fbot -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El (pathF A a b)) (hcomp (pathF A a b) fbot u u0) u0 is
+  fn (A : UF) (a : El A) (b : El A)
+     (u : I -> holds fbot -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl u0
+  end
+end
+
+-- ENDPOINTS still pinned (ch46), tying the rim back to a/b for ANY face — so the lid inhabits
+-- pathF A a b on the nose even with a proper interior.
+pathFillLeft : (A : UF) -> (a : El A) -> (b : El A) -> (phi : F)
+   -> (u : I -> holds phi -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El A) (papp A a b (hcomp (pathF A a b) phi u u0) i0) a is
+  fn (A : UF) (a : El A) (b : El A) (phi : F)
+     (u : I -> holds phi -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl a
+  end
+end
+pathFillRight : (A : UF) -> (a : El A) -> (b : El A) -> (phi : F)
+   -> (u : I -> holds phi -> El (pathF A a b)) -> (u0 : El (pathF A a b))
+   -> Eq (El A) (papp A a b (hcomp (pathF A a b) phi u u0) i1) b is
+  fn (A : UF) (a : El A) (b : El A) (phi : F)
+     (u : I -> holds phi -> El (pathF A a b)) (u0 : El (pathF A a b)) is
+    refl b
+  end
+end
