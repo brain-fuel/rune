@@ -1,0 +1,131 @@
+-- Chapter 491 — encoding/hex + encoding/base64 over Bin (Phase 2).
+--
+-- Codecs are pure wootz over the Bin carrier (div/mod kernel-accelerated). hex emits
+-- two lowercase nibble chars per byte; base64 packs 3 bytes into 4 six-bit chars with
+-- '=' padding for the tail. Verified against known vectors: hex "hi" = "6869";
+-- base64 "foo" = "Zm9v", "hi" = "aGk=", "f" = "Zg==". Byte-identical on all backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natDiv divN
+builtin natMod modN
+
+-- encoding/hex
+hexDigit : Nat -> Nat is fn (d : Nat) is case leb d 9 of | true -> addN 48 d | false -> addN 87 d end end end
+
+hexGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           binCons (hexDigit (divN (binAt s i) 16)) (binCons (hexDigit (modN (binAt s i) 16)) (ih s (succ i)))
+         end
+      end)
+      fuel
+  end
+end
+hexEncode : Bin -> Bin is fn (s : Bin) is hexGo (binLen s) s 0 end end
+
+-- encoding/base64
+b64char : Nat -> Nat is
+  fn (n : Nat) is
+    case leb n 25 of
+    | true  -> addN 65 n
+    | false -> case leb n 51 of
+               | true  -> addN 71 n
+               | false -> case leb n 61 of
+                          | true  -> monus n 4
+                          | false -> case eqNat n 62 of | true -> 43 | false -> 47 end
+                          end
+               end
+    end
+  end
+end
+
+b64Go : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false ->
+               let b0 : Nat = binAt s i in
+               let b1 : Nat = binAt s (succ i) in
+               let b2 : Nat = binAt s (succ (succ i)) in
+               let rem : Nat = monus (binLen s) i in
+               let c0 : Nat = b64char (divN b0 4) in
+               let c1 : Nat = b64char (addN (mulN (modN b0 4) 16) (divN b1 16)) in
+               let c2 : Nat = case leb rem 1 of | true -> 61 | false -> b64char (addN (mulN (modN b1 16) 4) (divN b2 64)) end in
+               let c3 : Nat = case leb rem 2 of | true -> 61 | false -> b64char (modN b2 64) end in
+               binCons c0 (binCons c1 (binCons c2 (binCons c3 (ih s (addN i 3)))))
+           end
+         end
+      end)
+      fuel
+  end
+end
+base64 : Bin -> Bin is fn (s : Bin) is b64Go (binLen s) s 0 end end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin (hexEncode b"hi")) (fn (a : Unit) is
+    bindIO Unit Unit (printBin (base64 b"foo")) (fn (b : Unit) is
+      bindIO Unit Unit (printBin (base64 b"hi")) (fn (c : Unit) is
+        bindIO Unit Unit (printBin (base64 b"f")) (fn (d : Unit) is
+          pureIO Unit unit
+        end)
+      end)
+    end)
+  end)
+end

@@ -1,0 +1,103 @@
+-- Chapter 492 — hash/fnv (FNV-1a, 32-bit) over Bin (Phase 2).
+--
+-- FNV-1a: h = 2166136261; for each byte b: h = (h XOR b) * 16777619 mod 2^32. The
+-- byte-wise XOR is built from div/mod (no native bit ops): xor8 folds 8 bits. div/mod
+-- are kernel-accelerated, so the per-byte step is cheap. Verified against the standard
+-- vectors: "" -> 2166136261, "a" -> 3826002220, "foobar" -> 3214735720.
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+-- Accelerate ALL the arithmetic the FNV step uses: without native +/*/monus, the
+-- multiply by 16777619 on a ~2^32 hash would run that many succ steps (hang).
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
+builtin natDiv divN
+builtin natMod modN
+
+-- byte-wise XOR via an 8-bit fold (acc + xor-bit * place-value).
+xor8Go : Nat -> Nat -> Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (z : Nat) is Nat -> Nat -> Nat -> Nat -> Nat end)
+      (fn (x : Nat) (y : Nat) (acc : Nat) (bit : Nat) is acc end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat -> Nat -> Nat) is
+         fn (x : Nat) (y : Nat) (acc : Nat) (bit : Nat) is
+           ih (divN x 2) (divN y 2) (addN acc (mulN (modN (addN (modN x 2) (modN y 2)) 2) bit)) (mulN bit 2)
+         end
+      end)
+      fuel
+  end
+end
+xor8 : Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) is xor8Go 8 x y 0 1 end end
+
+fnvStep : Nat -> Nat -> Nat is
+  fn (h : Nat) (b : Nat) is
+    modN (mulN (addN (monus h (modN h 256)) (xor8 (modN h 256) b)) 16777619) 4294967296
+  end
+end
+
+fnvGo : Nat -> Bin -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (z : Nat) is Bin -> Nat -> Nat -> Nat end)
+      (fn (s : Bin) (i : Nat) (h : Nat) is h end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) (h : Nat) is ih s (succ i) (fnvStep h (binAt s i)) end
+      end)
+      fuel
+  end
+end
+fnv1a : Bin -> Nat is fn (s : Bin) is fnvGo (binLen s) s 0 2166136261 end end
+
+main : IO Nat is
+  bindIO Nat Nat (printNat (fnv1a b"")) (fn (a : Nat) is
+    bindIO Nat Nat (printNat (fnv1a b"a")) (fn (b : Nat) is
+      printNat (fnv1a b"foobar")
+    end)
+  end)
+end

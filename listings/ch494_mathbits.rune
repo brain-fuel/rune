@@ -1,0 +1,105 @@
+-- Chapter 494 — math/bits over Nat (Phase 2): popcount + bitwise and/or/xor.
+--
+-- Bit operations built from div/mod by 2 (no native bit ops needed): popcount sums
+-- the low bits while halving; the binary ops fold 8 bits combining a pair. Verified:
+-- popcount 11 = 3, popcount 255 = 8; and 12 10 = 8, or 12 10 = 14, xor 12 10 = 6.
+-- Small operands, so all 8 backends run it (div/mod accel where available).
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+isZeroN : Nat -> Bool is fn (n : Nat) is case n of | zero -> true | succ k -> false end end end
+
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
+builtin natDiv divN
+builtin natMod modN
+
+-- popcount: sum the low bit while halving, for a generous fixed bit budget.
+popGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end)
+      (fn (n : Nat) (acc : Nat) is acc end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (n : Nat) (acc : Nat) is
+           case isZeroN n of
+           | true  -> acc
+           | false -> ih (divN n 2) (addN acc (modN n 2))
+           end
+         end
+      end)
+      fuel
+  end
+end
+popcount : Nat -> Nat is fn (n : Nat) is popGo 64 n 0 end end
+
+-- a binary op on 8 bits: combine corresponding bits with `f`, weight by place value.
+bitsGo : (Nat -> Nat -> Nat) -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat is
+  fn (f : Nat -> Nat -> Nat) (fuel : Nat) is
+    NatElim (fn (z : Nat) is Nat -> Nat -> Nat -> Nat -> Nat end)
+      (fn (x : Nat) (y : Nat) (acc : Nat) (bit : Nat) is acc end)
+      (fn (g : Nat) (ih : Nat -> Nat -> Nat -> Nat -> Nat) is
+         fn (x : Nat) (y : Nat) (acc : Nat) (bit : Nat) is
+           ih (divN x 2) (divN y 2) (addN acc (mulN (f (modN x 2) (modN y 2)) bit)) (mulN bit 2)
+         end
+      end)
+      fuel
+  end
+end
+
+andBit : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is mulN a b end end
+orBit  : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case leb 1 (addN a b) of | true -> 1 | false -> 0 end end end
+xorBit : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is modN (addN a b) 2 end end
+
+and8 : Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) is bitsGo andBit 8 x y 0 1 end end
+or8  : Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) is bitsGo orBit 8 x y 0 1 end end
+xor8 : Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) is bitsGo xorBit 8 x y 0 1 end end
+
+main : IO Nat is
+  bindIO Nat Nat (printNat (popcount 11)) (fn (a : Nat) is
+    bindIO Nat Nat (printNat (popcount 255)) (fn (b : Nat) is
+      bindIO Nat Nat (printNat (and8 12 10)) (fn (c : Nat) is
+        bindIO Nat Nat (printNat (or8 12 10)) (fn (d : Nat) is
+          printNat (xor8 12 10)
+        end)
+      end)
+    end)
+  end)
+end
