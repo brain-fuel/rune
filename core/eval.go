@@ -44,6 +44,9 @@ type Machine struct {
 	// ι-rules (v3): El decodes, pathJ computes on preflF, castU computes on
 	// ureflU and through ua.
 	Fib FibInfo
+	// U, when non-nil, supplies fibrant-universe-hierarchy roles (R-UFH): El1
+	// decodes a UF1-code (El1 codeUF ~> UF; El1 (liftF a) ~> El a).
+	U UFHInfo
 	// Iv, when non-nil, supplies interval-builtin roles for the De Morgan
 	// ι-rules (§F phase 1): ineg/imin/imax compute on the endpoints i0/i1.
 	Iv IntervalInfo
@@ -280,6 +283,31 @@ type FibInfo interface {
 	// FibHash is the reverse lookup: the hash of the member with the given role,
 	// for the structural Kan rules to CONSTRUCT fibrant sub-terms (El, piF, …).
 	FibHash(FibRole) (Hash, bool)
+}
+
+// UFHRole classifies a stored hash's role in the FIBRANT-UNIVERSE-HIERARCHY group
+// (R-UFH): a second fibrant universe `UF1 : U2` whose codes decode to U1 types, so the
+// universe of small fibrant codes (`UF` itself) is itself fibrant. See store/ufh.go.
+type UFHRole byte
+
+const (
+	// URoleNoneUFH: not a UFH builtin.
+	URoleNoneUFH UFHRole = iota
+	// URoleUF1 is the second fibrant universe UF1 : U2.
+	URoleUF1
+	// URoleEl1 decodes a UF1-code to its U1 type: El1 : UF1 -> U1. It computes by ι.
+	URoleEl1
+	// URoleLiftF lifts a small fibrant code into the bigger universe: liftF : UF -> UF1.
+	URoleLiftF
+	// URoleCodeUF is the code FOR the universe UF: codeUF : UF1, El1 codeUF ~> UF.
+	URoleCodeUF
+)
+
+// UFHInfo gives the evaluator the fibrant-universe-hierarchy roles (R-UFH). store.Store
+// implements it. Nil means the hierarchy is absent.
+type UFHInfo interface {
+	UFHRoleOf(Hash) UFHRole
+	UFHHash(UFHRole) (Hash, bool)
 }
 
 // IntervalRole classifies a stored hash's role in the interval builtin group
@@ -1584,6 +1612,12 @@ func (m *Machine) tryRules(spine Neutral) (Val, bool) {
 		if role := m.Fib.FibRoleOf(ref.Hash); role == FRoleEl || role == FRoleJ || role == FRoleCastU {
 			_, args := spineParts(spine)
 			return m.tryFibIota(role, ref.Hash, args)
+		}
+	}
+	if m.U != nil {
+		if role := m.U.UFHRoleOf(ref.Hash); role == URoleEl1 {
+			_, args := spineParts(spine)
+			return m.tryUFHIota(args)
 		}
 	}
 	if m.Iv != nil {
@@ -3142,6 +3176,40 @@ func (m *Machine) tryQuotIota(role QuotRole, args []Val) (Val, bool) {
 // univalence, the §F frontier. El (pathF …) stays neutral: the inner path
 // type is abstract. Scrutinees are forced — logged, as always — so the
 // proof-cache seam is the same one ι-reduction has always used.
+// tryUFHIota fires the El1 decode ι-rules (R-UFH): El1 codeUF ~> UF (the universe of small
+// fibrant codes is itself a fibrant code) and El1 (liftF a) ~> El a (a lifted small code
+// decodes to its small type). Mirrors tryFibIota's El case, one universe level up.
+func (m *Machine) tryUFHIota(args []Val) (Val, bool) {
+	if len(args) != 1 || m.Fib == nil {
+		return nil, false
+	}
+	code := m.Force(args[0])
+	cneu, ok := code.(VNeu)
+	if !ok {
+		return nil, false
+	}
+	chead, cargs := spineParts(cneu.Spine)
+	cref, ok := chead.(NRef)
+	if !ok {
+		return nil, false
+	}
+	switch m.U.UFHRoleOf(cref.Hash) {
+	case URoleCodeUF:
+		if len(cargs) == 0 {
+			if uf, ok := m.Fib.FibHash(FRoleUF); ok {
+				return m.refVal(uf), true
+			}
+		}
+	case URoleLiftF:
+		if len(cargs) == 1 {
+			if el, ok := m.Fib.FibHash(FRoleEl); ok {
+				return m.Apply(m.refVal(el), cargs[0]), true
+			}
+		}
+	}
+	return nil, false
+}
+
 func (m *Machine) tryFibIota(role FibRole, h Hash, args []Val) (Val, bool) {
 	switch role {
 	case FRoleEl:

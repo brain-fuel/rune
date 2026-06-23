@@ -51,6 +51,8 @@ type Store struct {
 	quot *quotEntry
 	// The fibrant builtin group (fib.go), once registered.
 	fib *fibEntry
+	// The fibrant-universe-hierarchy group (ufh.go, R-UFH), once registered.
+	uh *ufhEntry
 	// The interval builtin group (interval.go, §F phase 1), once registered.
 	iv *intervalEntry
 	// The cubical path builtin group (path.go, §F phase 2), once registered.

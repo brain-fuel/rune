@@ -138,6 +138,11 @@ func (s *Session) resetBuiltins() {
 		s.refs[n] = fhs[i]
 		s.refNames[fhs[i]] = n
 	}
+	uhs := s.st.AddUFH(fhs)
+	for i, n := range store.UFHNames() {
+		s.refs[n] = uhs[i]
+		s.refNames[uhs[i]] = n
+	}
 	ihs := s.st.AddInterval()
 	for i, n := range store.IntervalNames() {
 		s.refs[n] = ihs[i]
@@ -729,6 +734,7 @@ func (s *Session) elaborator() *elaborate.Elaborator {
 	el.M.Data = s.st
 	el.M.Quot = s.st
 	el.M.Fib = s.st
+	el.M.U = s.st
 	el.M.Iv = s.st
 	el.M.Pa = s.st
 	el.M.Fc = s.st
@@ -837,6 +843,7 @@ func (s *Session) newNormalizer(accel bool) *core.Machine {
 	m.Data = s.st
 	m.Quot = s.st
 	m.Fib = s.st
+	m.U = s.st
 	m.Iv = s.st
 	m.Pa = s.st
 	m.Fc = s.st

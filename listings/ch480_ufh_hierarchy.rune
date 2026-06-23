@@ -1,0 +1,30 @@
+-- Chapter 480 — the FIBRANT UNIVERSE HIERARCHY (R-UFH). The base cubical stratum has one
+-- fibrant universe `UF : U1` (codes for U0 types). The DAG parked R-UFH ("if stdlib math needs
+-- codes-for-UF") because a single UF carries every HIT/ua. This builds the next rung anyway: a
+-- SECOND fibrant universe `UF1 : U2` (codes for U1 types), so the universe of small fibrant
+-- codes — UF itself — is ITSELF a fibrant code, `codeUF : UF1`, with `El1 codeUF` decoding to
+-- `UF`. The consumer R-UFH wanted: a fibrant type whose ELEMENTS are fibrant codes.
+--
+-- Four members (store/ufh.go, own hash space, the fib group untouched): UF1, El1 (decodes by
+-- ι), liftF (lift a small code), codeUF (the code for UF). El1 codeUF ~> UF and
+-- El1 (liftF a) ~> El a both COMPUTE (tryUFHIota), so the facts below hold by refl.
+
+data Unit : U is unit : Unit end
+
+-- the code for the universe of small fibrant codes, a genuine UF1 inhabitant.
+ufCode : UF1 is codeUF end
+
+-- El1 DECODES it to UF (by ι): the first rung of the hierarchy, computing.
+decodesToUF : Eq U1 (El1 codeUF) UF is refl end
+
+-- so a UF-code INHABITS `El1 codeUF` — the universe of codes is fibrant, its elements are
+-- fibrant codes (`fib Unit : UF = El1 codeUF`). This is exactly the codes-for-UF R-UFH names.
+aFibrantCode : El1 codeUF is fib Unit end
+
+-- liftF embeds a small fibrant code into the bigger universe; El1 (liftF a) decodes to El a,
+-- so `El1 (liftF (fib Unit))` computes to `El (fib Unit)` = Unit.
+liftedCode : UF1 is liftF (fib Unit) end
+liftDecodes : Eq U1 (El1 (liftF (fib Unit))) Unit is refl end
+
+-- a value at the lifted code's decode (= Unit), confirming the lift round-trips.
+liftedVal : El1 (liftF (fib Unit)) is unit end
