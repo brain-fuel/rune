@@ -2832,3 +2832,25 @@ func TestStringDeployConformance(t *testing.T) {
 		})
 	}
 }
+
+// TestDTypeKitConformance deploys the DType kit (ch471, D4 rung 3): the dtype enum's typestr
+// `dtypeStr f64` is "<f8", the __array_interface__ tag a boundary dtype-guard compares a numpy
+// buffer against (the guard accept/reject and typestr proofs hold by refl at check time). It
+// prints "<f8" on every source backend — the dtype machinery deploys, not just type-checks.
+func TestDTypeKitConformance(t *testing.T) {
+	const want = "<f8\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		if bk.name == "rs" { // rust packed-String host body parked (like ch439)
+			continue
+		}
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch471_dtype_kit.rune", "main", ""); got != want {
+				t.Errorf("[%s] dtype kit printed %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}

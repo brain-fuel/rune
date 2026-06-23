@@ -117,10 +117,16 @@ kernel fixed (Thompson):
    The bidirectional marshalling (ch463) and the shape-discharge (ch467) become its `peek`/
    `poke`/`reshape` operations, now O(1) handle passing instead of element-wise FList walks.
 
-Rung 1 landed (ch467); rung 2 COMPLETE (ch470 — arbitrary-rank `Shape`/`flatLen`); 3 is a pure
-library; only rung 4 touches codegen. The design below is the rung-4 target; ch467/ch470 prove
-the shape-discharge semantics it will inherit. NEXT: rung 3, the `DType` kit (a closed enum +
-`elemTy`/`dtypeStr`), also a pure library — no core, no cloud.
+Rung 1 landed (ch467); rung 2 COMPLETE (ch470 — arbitrary-rank `Shape`/`flatLen`); rung 3's
+VALUE-level half landed (ch471, v3.328.43 — the closed `DType` enum, `dtypeStr : DType -> String`
+the __array_interface__ typestr, and `dtypeMatch : DType -> String -> Bool` the guard-tier dtype
+check; `dtypeStr i64 ≡ "<i8"` + the guard accept/reject hold by refl, prints "<f8" on every source
+backend; TestDTypeKitConformance). PARKED within rung 3: `elemTy : DType -> U` is a LARGE
+elimination (a motive into `U`) and the generated eliminator fixes its motive at U0
+(elaborate/data.go:254) — it needs a universe-polymorphic eliminator (core change, single
+consumer), so it folds into rung 4 where the CArray CRepr knows each dtype's element repr at
+codegen (PARKING-LOT.md). Only rung 4 touches codegen. The design below is the rung-4 target;
+ch467/ch470/ch471 prove the shape-discharge + dtype semantics it will inherit.
 
 ## Problem (what's stuck/absent today, with file:line)
 

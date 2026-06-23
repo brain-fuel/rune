@@ -357,3 +357,17 @@ or a later-phase feature with no current consumer.
   1000` instant). Gated by harness/nat_dispatch_test.go (n=64, perf + correctness, both backends);
   full `go test ./...` green. Telos-2 "same observable on every backend" now holds at scale for
   this pattern.
+
+## elemTy : DType -> U (D4 rung 3) — needs a universe-polymorphic eliminator
+The DType kit (ch471) ships `dtypeStr : DType -> String` (the __array_interface__ typestr) and
+`dtypeMatch` (the guard-tier dtype check) — both SMALL eliminations the fixed kernel handles. The
+design's third piece, `elemTy : DType -> U` (the Rune scalar a cell crosses as — f64↦Float,
+i64↦Nat, bool_↦Bool), is a LARGE elimination: a motive into `U`. The generated data eliminator
+hardcodes its motive at U0 (`elaborate/data.go:254`, `m : D p* -> U0`), so a type-VALUED motive
+(`fn w is U end : DType -> U1`) fails with a universe-level mismatch. Supporting it requires a
+universe-POLYMORPHIC eliminator generator — a core change to EVERY datatype's eliminator preimage
+(hash bump + cache nuke), Thompson-sensitive. The ONLY consumer is elemTy, and it folds naturally
+into rung 4 (the CArray CRepr already knows each dtype's element representation at codegen, where
+the marshaller lives). Parked per Standing Rule 1 until rung 4 (or another large-elim consumer)
+forces the question. The typestr — not elemTy — is the boundary's actual dtype mechanism: the
+guard compares a foreign buffer's reported typestr to `dtypeStr dt`.

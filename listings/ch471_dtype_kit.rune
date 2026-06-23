@@ -1,0 +1,78 @@
+-- Chapter 471 — the DType KIT: a closed dtype enum + the boundary typestr + the dtype-match
+-- GUARD (D4 rung 3). ch467/ch470 discharge an array's SHAPE; the other index of the `Array dt
+-- sh` handle is the element type `dt`. This rung ships the VALUE-level dtype machinery the
+-- fixed kernel supports: a closed `DType` enum, `dtypeStr : DType -> String` (the
+-- `__array_interface__` typestr a boundary marshaller reads), and `dtypeMatch : DType ->
+-- String -> Bool` — the GUARD-TIER check the design names ("dtype match: buffer typestr ==
+-- dtypeStr dt, guard", R-INTEROP.md §E). `dtypeStr i64 ≡ "<i8"` computes (refl), the guard
+-- accepts a matching typestr and rejects a mismatch, and an `ArrDesc = DType × Shape`
+-- descriptor pairs the dtype with rung-2's shape. Pure library: no core, no hash bump, no cloud.
+--
+-- PARKED (Standing Rule 1 / Thompson): the design's `elemTy : DType -> U` (a cell's Rune scalar
+-- type) is a LARGE elimination — a motive into `U` — and the generated data eliminator fixes
+-- its motive at `U0` (elaborate/data.go:254, `m : D p* -> U0`), so a type-VALUED motive does
+-- not type-check. Supporting it needs a universe-POLYMORPHIC eliminator (a core change to every
+-- datatype's eliminator preimage + a cache nuke), and the only consumer is elemTy itself; it
+-- folds naturally into rung 4 (the CArray CRepr knows each dtype's element representation at
+-- codegen). Parked with rationale in PARKING-LOT.md. The typestr IS the boundary's dtype
+-- mechanism — the guard compares the foreign buffer's reported typestr to `dtypeStr dt`.
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+pred   : Nat -> Nat  is fn (n : Nat) is case n of | zero -> zero | succ k -> k end end end
+isZero : Nat -> Bool is fn (n : Nat) is case n of | zero -> true | succ k -> false end end end
+subW   : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end end
+builtin natMonus subW
+and    : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end end
+
+-- THE DTYPE ENUM (closed; f16/bf16 deferred until a consumer needs them, Standing Rule 1).
+data DType : U is f64 : DType | f32 : DType | i64 : DType | i32 : DType | bool_ : DType end
+
+-- the packed String (B4): one bignum of UTF-8 bytes; equal strings ⟺ equal codes.
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf  : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+eqNat   : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is and (isZero (subW a b)) (isZero (subW b a)) end end
+strEq   : String -> String -> Bool is fn (s : String) (t : String) is eqNat (codeOf s) (codeOf t) end end
+
+-- dtypeStr: the __array_interface__ typestr the guard tier compares a foreign buffer against
+-- (little-endian: "<f8"=float64, "<f4"=float32, "<i8"=int64, "<i4"=int32, "|b1"=bool). A SMALL
+-- elimination (motive String), so the fixed kernel handles it directly.
+dtypeStr : DType -> String is
+  fn (dt : DType) is
+    DTypeElim (fn (w : DType) is String end) "<f8" "<f4" "<i8" "<i4" "|b1" dt
+  end
+end
+
+-- THE GUARD (R-INTEROP §E, dtype-match tier): a foreign buffer arriving with typestr `ts` is
+-- accepted for dtype `dt` iff `ts == dtypeStr dt`, else blame. Decidable String equality.
+dtypeMatch : DType -> String -> Bool is fn (dt : DType) (ts : String) is strEq ts (dtypeStr dt) end end
+
+-- dtypeStr COMPUTES to the real typestr literal (refl checks against the literal the guard
+-- compares to). The guard ACCEPTS a matching buffer typestr and REJECTS a mismatch.
+typestrF64 : Eq String (dtypeStr f64) "<f8" is refl end
+typestrI64 : Eq String (dtypeStr i64) "<i8" is refl end
+guardAccepts : Eq Bool (dtypeMatch f64 "<f8") true  is refl end
+guardRejects : Eq Bool (dtypeMatch f64 "<i8") false is refl end
+
+-- the array DESCRIPTOR pairs a dtype with a shape (rung 2's Shape) — the typed surface the
+-- opaque `Array dt sh` handle (rung 4) will carry, here as plain data.
+data Shape : U is shnil : Shape | shcons : Nat -> Shape -> Shape end
+data ArrDesc : U is arrDesc : DType -> Shape -> ArrDesc end
+descDType : ArrDesc -> DType is fn (a : ArrDesc) is case a of | arrDesc d s -> d end end end
+descShape : ArrDesc -> Shape is fn (a : ArrDesc) is case a of | arrDesc d s -> s end end end
+-- a (2x2) f64 matrix descriptor; its typestr is "<f8", so a numpy buffer must report "<f8".
+matDesc : ArrDesc is arrDesc f64 (shcons 2 (shcons 2 shnil)) end
+descTypestrF64 : Eq String (dtypeStr (descDType matDesc)) "<f8" is refl end
+
+-- D6 host primitive, so the program DEPLOYS and RUNS (Lambert): it prints f64's typestr.
+foreign printStrCode : Nat -> IO Nat end
+printStr : String -> IO Unit is
+  fn (s : String) is bindIO Nat Unit (printStrCode (codeOf s)) (fn (n : Nat) is pureIO Unit unit end) end
+end
+
+-- witness: print "<f8", the numpy typestr of the f64 dtype, on a real backend.
+main : IO Unit is printStr (dtypeStr f64) end
