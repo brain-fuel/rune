@@ -1,0 +1,76 @@
+-- Chapter 510 — container/heap: a min-priority queue (Phase 2 tail).
+--
+-- Go's container/heap is a priority queue: Push adds, Pop removes the minimum.
+-- The pure essence is that contract over a Nat list — `push` prepends, `findMin`
+-- selects the least element, `deleteOne` removes it — so repeated pops extract in
+-- sorted order. Pure wootz, no FFI beyond printNat, byte-identical on all 8.
+--
+-- main builds a heap from [5,3,8,1,4] and pops the three smallest.
+-- Observable "1\n3\n4\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+
+data List : U is
+  lnil  : List
+| lcons : Nat -> List -> List
+end
+
+empty : List is lnil end
+push  : List -> Nat -> List is fn (h : List) (x : Nat) is lcons x h end end
+
+-- the least element (a large sentinel for the empty heap).
+findMin : List -> Nat is
+  ListElim (fn (x : List) is Nat end)
+    999
+    (fn (hd : Nat) (tl : List) (ih : Nat) is case leb hd ih of | true -> hd | false -> ih end end)
+end
+
+-- remove the first occurrence of v; ih in one arm.
+deleteOne : List -> Nat -> List is
+  ListElim (fn (x : List) is Nat -> List end)
+    (fn (v : Nat) is lnil end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> List) is
+       fn (v : Nat) is case eqNat hd v of | true -> tl | false -> lcons hd (ih v) end end end)
+end
+
+heap0 : List is push (push (push (push (push empty 5) 3) 8) 1) 4 end
+min1 : Nat is findMin heap0 end
+heap1 : List is deleteOne heap0 min1 end
+min2 : Nat is findMin heap1 end
+heap2 : List is deleteOne heap1 min2 end
+min3 : Nat is findMin heap2 end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat min1) (fn (a : Nat) is
+    bindIO Nat Unit (printNat min2) (fn (b : Nat) is
+      bindIO Nat Unit (printNat min3) (fn (c : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

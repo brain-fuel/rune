@@ -42,3 +42,22 @@ func TestCSV(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch509_csv.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch509_csv.rune", want) })
 }
+
+// TestHeap is a Phase-2 tail gate: a min-priority queue (ch510) — push/findMin/
+// deleteOne over a Nat list so pops extract in sorted order. Byte-identical all 8.
+func TestHeap(t *testing.T) {
+	const want = "1\n3\n4\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch510_heap.rune", "main", ""); got != want {
+				t.Fatalf("[%s] heap gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch510_heap.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch510_heap.rune", want) })
+}
