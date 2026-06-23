@@ -103,8 +103,8 @@ func TestHTTP(t *testing.T) {
 
 // TestTLS is the Phase-3 TLS gate: a wootz HTTPS client (ch500, tlsGet) GETs from a
 // harness self-signed TLS server returning "secure", via the host TLS stack. Covered
-// on go/py/js (cert verification skipped); jvm/erl addable, Rust + native C/LLVM
-// excluded (no TLS lib, same gap as crypto).
+// on go/py/js/erl/jvm (cert verification skipped); Rust + native C/LLVM excluded
+// (no TLS lib, same gap as crypto). erl uses inets httpc, jvm HttpsURLConnection.
 func TestTLS(t *testing.T) {
 	const want = "\"secure\"\nunit"
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,8 +117,8 @@ func TestTLS(t *testing.T) {
 	}
 	for _, bk := range ioOSBackends {
 		bk := bk
-		if bk.name != "go" && bk.name != "py" && bk.name != "js" {
-			continue // tls host body only on go/py/js so far
+		if bk.name == "rs" {
+			continue // no TLS library on rust (same gap as crypto)
 		}
 		t.Run(bk.name, func(t *testing.T) {
 			if _, err := exec.LookPath(bk.bin); err != nil {
@@ -129,4 +129,14 @@ func TestTLS(t *testing.T) {
 			}
 		})
 	}
+	t.Run("jvm", func(t *testing.T) {
+		javac25, java25, ok := findJava25()
+		if !ok {
+			t.Skip("no JDK 25 (asdf temurin-25)")
+		}
+		dir := compileJVM(t, "ch500_tls.rune", javac25)
+		if got := runCmdStdin(t, exec.Command(java25, "-cp", dir, "main"), port+"\n"); got != want {
+			t.Fatalf("[jvm] tls gave %q, want %q", got, want)
+		}
+	})
 }

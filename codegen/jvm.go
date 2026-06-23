@@ -94,6 +94,12 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 		b.WriteString("  static byte[] _cryptobytes(V v) { int[] a = ((VBytes) v).b(); byte[] o = new byte[a.length]; for (int i = 0; i < a.length; i++) o[i] = (byte) a[i]; return o; }\n")
 		b.WriteString("  static V sha256() { return fun(data -> { try { byte[] h = java.security.MessageDigest.getInstance(\"SHA-256\").digest(_cryptobytes(data)); int[] o = new int[h.length]; for (int i = 0; i < h.length; i++) o[i] = h[i] & 255; return new VBytes(o); } catch (Exception e) { return new VBytes(new int[0]); } }); }\n")
 	}
+	// Phase 3 — TLS: HTTPS GET via HttpsURLConnection with a trust-all context
+	// (self-signed). Self-contained (no _binbytes dependency on usesNet).
+	if usesTLS(p) {
+		b.WriteString("  static String _tlsstr(V v) { int[] a = ((VBytes) v).b(); byte[] o = new byte[a.length]; for (int i = 0; i < a.length; i++) o[i] = (byte) a[i]; return new String(o, java.nio.charset.StandardCharsets.ISO_8859_1); }\n")
+		b.WriteString("  static V tlsGet() { return fun(host -> fun(port -> fun(path -> fun(u -> { try { var h = _tlsstr(host); var pa = _tlsstr(path); var tm = new javax.net.ssl.TrustManager[]{ new javax.net.ssl.X509TrustManager() { public void checkClientTrusted(java.security.cert.X509Certificate[] c, String s) {} public void checkServerTrusted(java.security.cert.X509Certificate[] c, String s) {} public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[0]; } } }; var sc = javax.net.ssl.SSLContext.getInstance(\"TLS\"); sc.init(null, tm, new java.security.SecureRandom()); var url = new java.net.URL(\"https://\" + h + \":\" + _nat(port).intValue() + pa); var c = (javax.net.ssl.HttpsURLConnection) url.openConnection(); c.setSSLSocketFactory(sc.getSocketFactory()); c.setHostnameVerifier((hn, se) -> true); byte[] bb = c.getInputStream().readAllBytes(); int[] o = new int[bb.length]; for (int i = 0; i < bb.length; i++) o[i] = bb[i] & 255; return new VBytes(o); } catch (Exception e) { return new VBytes(new int[0]); } })))); }\n")
+	}
 	if usesForeign(p, "Float") {
 		b.WriteString("  static V Float() { return UNIT; }\n") // foreign type, erased
 	}

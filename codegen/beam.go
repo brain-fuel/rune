@@ -92,6 +92,11 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	if usesCrypto(p) {
 		b.WriteString("ff_sha256() -> fun(Data) -> binary_to_list(crypto:hash(sha256, list_to_binary(Data))) end.\n")
 	}
+	// Phase 3 — TLS: HTTPS GET via inets httpc over the host ssl stack (verify off
+	// for self-signed). Host/Path are Bin (lists of byte ints = erlang strings).
+	if usesTLS(p) {
+		b.WriteString("ff_tlsGet() -> fun(Host) -> fun(Port) -> fun(Path) -> fun(_U) -> begin application:ensure_all_started(ssl), application:ensure_all_started(inets), URL = lists:flatten(io_lib:format(\"https://~s:~w~s\", [Host, Port, Path])), case httpc:request(get, {URL, []}, [{ssl, [{verify, verify_none}]}], [{body_format, binary}]) of {ok, {_St, _Hd, Body}} -> binary_to_list(Body); _ -> [] end end end end end end.\n")
+	}
 	if usesForeign(p, "getNat") {
 		b.WriteString("ff_getNat() -> fun(_U) -> list_to_integer(string:trim(io:get_line(\"\"))) end.\n")
 	}
