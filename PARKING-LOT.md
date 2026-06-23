@@ -408,3 +408,18 @@ building those would be MANUFACTURING need (a Standing Rule 1 violation), so the
 - **R-UFH / R-GLUE G1 / C-REG / cubical-coind / dim-2 HIT interior** ← each consumer is a
   HoTT/cubical research result (universe-poly stdlib math; a transp-over-Glue with neutral input;
   the X2 canonicity stress suite; the optional isEquiv-glue bridge; a dim-2 HIT computation).
+
+## SECOND-WAVE UN-PARKINGS (2026-06-23 — the `/goal consumers for…` push)
+The would-be consumers recorded above were BUILT, un-parking these nodes (each now has a genuine
+consumer, no longer parked):
+- **rung-4 zero-copy CRepr → BUILT (ch475):** opaque numpy-registry handle; consumer = a 1000-elem
+  array, npAlloc once + O(1) ops. NO LONGER PARKED.
+- **`elemTy:DType->U` → BUILT (ch476) + the eliminator motive bumped to U1 (large elim LIFTED,
+  elaborate/data.go):** consumer = mixed i64/f64/bool_ cells. The "no large elimination into U"
+  limit is RETIRED. NO LONGER PARKED.
+- **E4 serverless/devops → BUILT (Fn/Woodpecker):** consumer = serving.wav; matrix complete (27).
+- **non-settling adequacy → BUILT for the perpetual-mirror class (ch477):** consumer = ch474.
+- **dim-2 HIT interior → was ALREADY CLOSED (ch98 + ch478 consumer):** the parking was stale.
+Still genuinely parked (capability provided otherwise / research): R-UFH (single UF suffices),
+R-GLUE G1 (derived-ua computes), cubical-coind (nuCons closed E2), the greatest-fixpoint
+Always-Eventually fairness + fully-general non-settling adequacy (the dfix wall, research).
