@@ -119,9 +119,40 @@ per step. That is exactly the data an order-theoretic limit argument needs.
    measure that both decomposes over `par` and bounds the run is itself the hard part the
    fuel was standing in for.
 
-**Recommendation.** Pursue (1): restate the general refinement as trace-equality of the
-LIMIT streams via `traceBisim`, using `prefixMono`/`lenBound` as the finite-approximation
-bridge. This keeps the proof coinductive (where `par` interleaving is already solved in
-`ch208`/`ch209`) and the outer kernel fixed (Thompson). This is a scoping note, not a
-proof — the open item remains open — but the attack is now concrete and leverages landed
+**LEFT-BIAS active-step lemma LANDED (`ch466`, 2026-06-22).** The decisive structural fact
+this fault fragment hands us: `par` is **LEFT-BIASED**. `okStep (par a b)` runs `a` first
+(`interleaveT` does `OptionElim` on `a`'s step before `b`'s), so `b` steps only once `a` is
+quiescent. The fuel therefore DOES decompose over `par` after all — not as an arithmetic
+split, but as a SEQUENCING: `a` runs to quiescence emitting its trace, then the quiescent
+residue lets `b` run (`parQuietNeutral`, `ch464`). `ch466` lands the missing piece of that
+sequencing:
+- `okStepActive` — when `a` is non-crash and ACTIVE (`okStep a = some ta`), `okStep (par a
+  b) = some (tr (labelOf ta) (par (procOf ta) b))`: `a`'s step verbatim, `b` frozen on the
+  right (the active-left dual of `ch464`'s `okStepParQuiet`). Proved by `subst` on the two
+  hypotheses into `parOk`.
+- `parActiveStep` — its `visibleRun` form: `visibleRun (succ k) (par a b) = consVis (labelOf
+  ta) (visibleRun k (par (procOf ta) b))`. One fuelled step emits `a`'s label and recurses
+  on the residue — the par threading made definitional.
+- `closureSup` — closure under prepending an ACTIVE supervised unit `sup = par crash (mon
+  halt)` to ANY adequate `b`, proved THROUGH the new machinery (`parActiveStep` emits `lfail`
+  and leaves `par halt b`, `parHaltNeutral` strips the `halt`, the hypothesis closes `b`).
+- `nestedLAdequate` — `par (par sup sup) halt` (a LEFT-NESTED tree) is adequate by `refl`.
+  This is the headline: `ch459`'s tower induction recurses on the RIGHT and cannot reach a
+  left-nested par-tree; the active-step decomposition does. Adequacy is no longer confined to
+  the right spine.
+
+**What stays open.** The fully-general arbitrary-`par` case — two SIMULTANEOUSLY-active
+non-trivial branches where `a`'s quiescence TIMING (how many steps before `b` gets to run)
+must be threaded through the fuel — is not closed; `parActiveStep` gives the per-step rule
+but composing it to "a runs for exactly `j` steps then b runs" still needs a running-length
+lemma. `ch466` is the structural bridge toward that, not the closure of it.
+
+**Recommendation (still open at the limit).** Pursue (1): restate the general refinement as
+trace-equality of the LIMIT streams via `traceBisim`, using `prefixMono`/`lenBound` as the
+finite-approximation bridge and `ch466`'s active-step rule as the per-step transition law.
+This keeps the proof coinductive (where `par` interleaving is already solved in
+`ch208`/`ch209`) and the outer kernel fixed (Thompson). The open item remains open, but
+`ch466` converts it from "the fuel does not decompose over par" to "the fuel decomposes as a
+left-biased SEQUENCING; thread the running length" — a narrower, more concrete gap. This
+leverages landed
 machinery rather than waiting on a fuel-decomposition lemma that does not exist.

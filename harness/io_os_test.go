@@ -541,6 +541,65 @@ func TestD4CPythonNumpy(t *testing.T) {
 	}
 }
 
+// TestD4ShapeDischargedArray runs ch467 — a SHAPE-DISCHARGED foreign array (D4). safeNpMatVec
+// requires typed proofs that a flat FList's length matches its declared (m,k)/k shape, so a
+// malformed numpy call is a COMPILE error (the elaborate sweep gates that, and a wrong-shape
+// witness is rejected at refl). Here the WELL-shaped call runs real numpy through the embed:
+// [[1,2],[3,4]]·[5,6] = [17,39], summed in-language to 56. The first rung of the general
+// Array-dt-sh handle: shapes discharged by dependent types across the FFI boundary.
+func TestD4ShapeDischargedArray(t *testing.T) {
+	if _, err := exec.LookPath("cc"); err != nil {
+		t.Skip("cc not in PATH")
+	}
+	pyCfg, err := exec.LookPath("python3-config")
+	if err != nil {
+		t.Skip("python3-config not in PATH")
+	}
+	if err := exec.Command("python3", "-c", "import numpy").Run(); err != nil {
+		t.Skip("numpy not importable")
+	}
+	incOut, err := exec.Command(pyCfg, "--includes").Output()
+	if err != nil {
+		t.Skipf("python3-config --includes failed: %v", err)
+	}
+	ldOut, err := exec.Command(pyCfg, "--ldflags", "--embed").Output()
+	if err != nil {
+		ldOut, err = exec.Command(pyCfg, "--ldflags").Output()
+		if err != nil {
+			t.Skipf("python3-config --ldflags failed: %v", err)
+		}
+	}
+	s := loadListing(t, "ch467_shape_discharged_array.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.C{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cf := filepath.Join(dir, "main.c")
+	bin := filepath.Join(dir, "main.bin")
+	if err := os.WriteFile(cf, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{cf}
+	args = append(args, strings.Fields(string(incOut))...)
+	args = append(args, "-o", bin)
+	args = append(args, strings.Fields(string(ldOut))...)
+	if out, err := exec.Command("cc", args...).CombinedOutput(); err != nil {
+		t.Skipf("[c] compile with libpython failed: %v\n%s", err, out)
+	}
+	out, err := exec.Command(bin).Output()
+	if err != nil {
+		t.Fatalf("[c] run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "56") {
+		t.Errorf("shape-discharged matvec gave %q, want it to start 56", got)
+	}
+}
+
 // TestD4CPythonNumpyLL runs the numpy embed (ch463) on the LLVM backend too — the same FList
 // marshalling + numpy reduction/array-return, baked into the LL runtime with rt_-prefixed
 // mkcon/con_set. Prints 10, 30, 56 identical to C. Completes the embed's cross-backend parity.

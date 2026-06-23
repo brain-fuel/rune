@@ -56,6 +56,67 @@ interop is the emitted-source calling `import numpy` in-process; native is the C
 proves is that the **contract-and-blame spine** is sound and teachable on the current
 substrate; the `Array` machinery is the next, heavier increment.
 
+## Build status UPDATE — the embed host model + the FIRST shape-DISCHARGED rung (2026-06-21/22)
+
+Two of the divergences above are now partly closed:
+
+- **Embedded CPython host model LANDED (ch462/ch463, v3.328.25–.32).** The native C and
+  LLVM backends link `libpython` and call REAL CPython through the C-API: scalars
+  (`pyPow`/`pySqrt`), arbitrary-precision bignum via decimal-string marshalling
+  (`pyFactorial`), and — the structured rung — `pyNpSum`/`pyNpScale`/`pyNpMatVec` run real
+  **numpy** in the embedded interpreter, BIDIRECTIONALLY: a Rune `FList` marshals to a
+  Python list, numpy reduces/reshapes, and an array result walks BACK into a Rune `FList`
+  (`mkcon` `fcons`/`fnil`, tail-first). So "embed-vs-port CPython hosting" is no longer
+  absent — the EMBED is built, cross-backend (C+LLVM), and the Rune↔numpy bridge round-trips
+  1-D and 2-D. Still flat `FList` + `Nat` dims, not the opaque `Array` handle.
+
+- **The first SHAPE-DISCHARGED foreign call LANDED (ch467, v3.328.39).** The headline of
+  this design — *shapes discharged by dependent types, not guarded at runtime* — is now
+  realized across the FFI boundary, on the flat substrate, BEFORE the opaque handle.
+  `safeNpMatVec` wraps the embed's `pyNpMatVec` with TYPED preconditions tying the flat
+  array's length to its declared shape:
+
+  ```
+  safeNpMatVec : (m k : Nat) -> (A : FList) -> (v : FList)
+     -> Eq Nat (flen A) (natMul m k)   -- the (m×k) matrix's flat length IS m*k
+     -> Eq Nat (flen v) k              -- the vector's length IS k
+     -> FList
+  ```
+
+  A caller with a mismatched flat array CANNOT supply `refl` (verified: a `k=3` witness is
+  rejected with "refl does not prove the equation"), so a malformed numpy call is a COMPILE
+  error, not a runtime shape check. The proofs erase; the foreign body is the unchanged
+  `pyNpMatVec`. The well-shaped witness runs real numpy through the embed:
+  `[[1,2],[3,4]]·[5,6] = [17,39]`, summed to 56 (`TestD4ShapeDischargedArray`, native C). This
+  reuses ch446/ch447's in-language `Eq Nat` shape-contract idiom but points it at a FOREIGN
+  call — exactly the "shape conformance discharged from the typed shapes" the Chosen-approach
+  section specifies, with `flen`/`natMul` standing in for the not-yet-built `Shape` kit.
+
+### The staged path to the general `Array dt sh` handle
+
+ch467 is rung 1 of a staged climb that keeps each step shippable (Standing Rule 1) and the
+kernel fixed (Thompson):
+
+1. **Guarded flat arrays** (ch221–228) — flat `FList` + `Nat` dims, shapes recomputed and
+   compared at the boundary. DONE.
+2. **Shape-DISCHARGED flat arrays** (ch467) — the same flat `FList`, but the dim↔length
+   conformance is a TYPED precondition (`Eq Nat (flen A) (natMul m k)`), so a malformed array
+   is a compile error. DONE (1-D vector + 2-D matvec). NEXT within this rung: a `Shape =
+   List Nat` value + `flatLen : Shape -> Nat` (product) so the precondition reads
+   `Eq Nat (flen A) (flatLen sh)` for ARBITRARY rank, not hand-written `natMul m k`.
+3. **A `DType` kit** — a closed `data DType is f64 | f32 | i64 | ... end` + `elemTy : DType ->
+   U` + `dtypeStr : DType -> String`, so the element type is a value the boundary marshaller
+   reads (today everything is `Float`/f64). Rune library, no core.
+4. **The opaque `Array dt sh` handle + `CArray` CRepr** — replace the flat `FList` with a
+   bodiless rigid `Array : DType -> Shape -> U` whose CRepr mirrors numpy's
+   `__array_interface__` (data ptr, dtype, ndim, shape, strides). This is the one piece that
+   needs a codegen CRepr extension (beyond scalar/String/Ptr) and a `store/foreign.go` entry.
+   The bidirectional marshalling (ch463) and the shape-discharge (ch467) become its `peek`/
+   `poke`/`reshape` operations, now O(1) handle passing instead of element-wise FList walks.
+
+Rungs 1–2 are landed; 3 is a pure library; only rung 4 touches codegen. The design below is
+the rung-4 target; ch467 proves the shape-discharge semantics it will inherit.
+
 ## Problem (what's stuck/absent today, with file:line)
 
 R-FFI (B4) makes a *scalar* foreign call typed and contract-guarded: `c_sqrt :

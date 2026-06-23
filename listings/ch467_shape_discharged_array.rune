@@ -1,0 +1,80 @@
+-- Chapter 467 — a SHAPE-DISCHARGED foreign array: the first rung of `Array dt sh` (D4).
+--
+-- Two halves existed separately: in-language shape SAFETY (ch446 safeMatVec — a typed
+-- `Eq Nat (cols M)(len v)` precondition makes a dimension mismatch a COMPILE error, exact
+-- Nat) and FOREIGN numpy (ch463 pyNpMatVec — a flat FList + Nat dims marshalled into the
+-- embedded CPython, shapes GUARDED at most). This unites them: `safeNpMatVec` calls REAL
+-- numpy (pyNpMatVec) but requires PROOFS that the flat array's length matches its declared
+-- shape — `Eq Nat (flen A)(natMul m k)` for the (m×k) matrix and `Eq Nat (flen v) k` for the
+-- vector. So a malformed foreign array (wrong flat length for its dims) CANNOT be written —
+-- it is rejected at `refl`, not caught by a runtime guard. This is the design's headline
+-- ("shapes DISCHARGED by dependent types, not guarded") realized across the FFI boundary: the
+-- first rung of the general `Array dt sh` handle. The proofs are erased; the foreign call is
+-- unchanged. R-INTEROP.md records the staged path from here to the opaque CArray/DType handle.
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign Float      : U end
+data FList : U is fnil : FList | fcons : Float -> FList -> FList end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fadd       : Float -> Float -> Float end
+foreign pyNpMatVec : FList -> Nat -> Nat -> FList -> FList end
+
+-- flat-array length (the run-time extent the shape must account for) and Nat multiply (the
+-- declared extent m*k). natMul recurses on its first argument via NatElim.
+flen : FList -> Nat is
+  fn (xs : FList) is
+    FListElim (fn (w : FList) is Nat end) zero
+      (fn (h : Float) (t : FList) (ih : Nat) is succ ih end) xs
+  end
+end
+natAddH : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAddH b ih end) a
+  end
+end
+
+-- THE SHAPE-DISCHARGED FOREIGN CALL. The two proofs are the typed shape contract for a flat
+-- ndarray: the matrix's flat length IS its declared m*k, the vector's length IS k. A caller
+-- with a mismatched flat array cannot supply `refl`, so the malformed call is a COMPILE
+-- error (not a runtime shape check). The proofs erase; the body is the real numpy matvec.
+safeNpMatVec : (m : Nat) -> (k : Nat) -> (A : FList) -> (v : FList) ->
+    Eq Nat (flen A) (natMul m k) -> Eq Nat (flen v) k -> FList is
+  fn (m : Nat) (k : Nat) (A : FList) (v : FList)
+     (pfA : Eq Nat (flen A) (natMul m k)) (pfv : Eq Nat (flen v) k) is
+    pyNpMatVec A m k v
+  end
+end
+
+-- a 2x2 matrix [[1,2],[3,4]] flat row-major (flen = 4 = 2*2) and a vector [5,6] (flen = 2 = k).
+matA : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+vecB : FList is fcons (fromNat 5) (fcons (fromNat 6) fnil) end
+
+-- The shape proofs CHECK: flen matA reduces to 4, natMul 2 2 reduces to 4 (defeq); flen vecB
+-- to 2, k = 2. A length-3 matA, or k=3, would FAIL here at `refl` — the malformed foreign
+-- array is unrepresentable. (See R-INTEROP.md for the staged path to the opaque handle.)
+prodAv : FList is safeNpMatVec 2 2 matA vecB refl refl end
+
+-- in-language fold proving the numpy-returned FList is a real, usable Rune value.
+sumFList : FList -> Float is
+  fn (ys : FList) is
+    FListElim (fn (w : FList) is Float end) (fromNat 0)
+      (fn (h : Float) (r : FList) (ih : Float) is fadd h ih end) ys
+  end
+end
+
+-- witness (numpy via the embed / py): [[1,2],[3,4]] · [5,6] = [17,39], sum 56.
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (sumFList prodAv))) (fn (u1 : Nat) is pureIO Unit unit end)
+end
