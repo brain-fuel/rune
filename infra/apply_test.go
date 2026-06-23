@@ -45,20 +45,27 @@ func TestConnectionURL(t *testing.T) {
 	}
 }
 
-// TestApplyLocalStackNonAWS: --localstack against a non-aws cloud target is a clear
-// error, not a silent misfire (only the AWS provider has the endpoint override).
-func TestApplyLocalStackNonAWS(t *testing.T) {
+// TestApplyEmulatorDispatch: the --localstack emulator override dispatches by cloud.
+// Azure has no terraform control-plane emulator, so it is a clear, specific error (not a
+// silent misfire); GCP redirects the google provider's storage endpoint at fake-gcs-server.
+func TestApplyEmulatorDispatch(t *testing.T) {
 	if _, err := exec.LookPath("terraform"); err != nil {
 		t.Skip("terraform not in PATH")
 	}
-	art, err := (Azure{}).Emit([]Resource{Bucket{Name: "b"}})
+	// Azure: a clear "no emulator endpoint" error (azurerm is ARM control-plane only).
+	azArt, err := (Azure{}).Emit([]Resource{Bucket{Name: "b"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := t.TempDir()
-	_, err = Apply(Azure{}, art, ApplyOptions{WorkDir: dir, LocalStack: "http://localhost:4566"})
-	if err == nil || !strings.Contains(err.Error(), "aws target only") {
-		t.Fatalf("want an aws-target-only error, got %v", err)
+	_, err = Apply(Azure{}, azArt, ApplyOptions{WorkDir: t.TempDir(), LocalStack: "http://localhost:4566"})
+	if err == nil || !strings.Contains(err.Error(), "no terraform emulator endpoint") {
+		t.Fatalf("azure: want a no-emulator-endpoint error, got %v", err)
+	}
+	// GCP: the override is generated (storage_custom_endpoint at the fake-gcs address). The
+	// override-file content is the contract; a real apply needs fake-gcs-server (gated elsewhere).
+	ovr := gcpEmulatorOverrideTF("http://localhost:4443/storage/v1/")
+	if !strings.Contains(ovr, "provider \"google\"") || !strings.Contains(ovr, "storage_custom_endpoint") {
+		t.Errorf("gcp emulator override missing the storage endpoint redirect:\n%s", ovr)
 	}
 }
 

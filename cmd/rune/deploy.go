@@ -27,8 +27,13 @@ const defaultLocalStackEndpoint = "http://localhost:4566"
 //
 // With --apply the artifact is not just written but STOOD UP (infra.Apply): docker
 // compose for a FOSS backend, or terraform for a cloud backend. --localstack[=URL]
-// redirects a cloud apply at LocalStack so it needs no account and no bill; --destroy
-// tears the deployment down right after (the apply-then-destroy lifecycle).
+// redirects a cloud apply at a LOCAL EMULATOR so it needs no account and no bill —
+// AWS via LocalStack (full service set), GCP via fake-gcs-server (storage). Azure has
+// no terraform control-plane emulator (use the FOSS backends for no-account azure).
+// WITHOUT --localstack, `--apply` is a REAL-ACCOUNT apply: plain `terraform apply`
+// against the ambient cloud credentials (AWS_PROFILE / GOOGLE_CREDENTIALS / ARM_*) — the
+// path is account-ready, the billed call simply needs the account. --destroy tears the
+// deployment down right after (the apply-then-destroy lifecycle).
 //
 // Slice 1 drives the resource from flags (--resource/--name); declaring resources
 // in-language (an `infra`/`protocol` block in FILE) is the next step.
