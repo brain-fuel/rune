@@ -59,11 +59,13 @@ resources + plumbing (`harness`/`infra` tests assert it, mirroring backend confo
 | lb      | ELBv2 | Load Balancer | Forwarding rule | — | — |
 | metrics | CloudWatch dashboard | Monitor workspace | Monitoring dashboard | Prometheus | — |
 | warehouse | Redshift Serverless | Data Explorer (Kusto) | BigQuery | ClickHouse | — |
+| inference | SageMaker | ML online endpoint | Vertex AI endpoint | Ollama | — |
+| archive | Glacier | Storage (Cool tier) | GCS ARCHIVE class | MinIO | — |
 
 Shared Azure scaffolding is emitted once per graph: the resource group (always), the
 Service Bus namespace (queue), Event Hub namespace (stream), storage account
 (object+file, `needsStorageAccount`), Key Vault (secret+kms, `needsKeyVault`),
-vnet+subnet (compute). 23 rows total. A whole multi-resource graph lowers to the same
+vnet+subnet (compute). 25 rows total. A whole multi-resource graph lowers to the same
 logical set on every cloud (`TestMultiResourceEquivalence`); `rune deploy --manifest`
 emits one app's graph at once.
 
@@ -162,14 +164,15 @@ up → PONG → down, skip-if-no-docker).
 - **Managed-cloud clients:** beyond the self-hosted RESP broker — managed Redis / SQS / S3
   clients over the wire (needs accounts, the cloud-apply milestone). The four source
   backends (Go/JVM/JS/Rust) all speak RESP to a self-hosted broker today.
-- **Matrix breadth (remaining):** Storage breadth (archival),
-  Compute breadth (serverless), DevOps (CI/CD), AI/ML.
-  (23 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/
-  stream/cdn/lb/metrics/iam/k8s/network/firewall/logs/registry/paas/warehouse — the
-  warehouse row added AWS Redshift Serverless / Azure Data Explorer (Kusto) / GCP
-  BigQuery + a self-hosted ClickHouse FOSS backend, all offline-emittable, no account.)
-  The remaining categories mostly have one dependency-heavy provider (CloudFront origins,
-  LB target groups, Lambda packaging); add them when a consumer needs them (Standing Rule 1).
+- **Matrix breadth (remaining):** Compute breadth (serverless), DevOps (CI/CD).
+  (25 rows landed: queue/kv/object/compute/database/secret/nosql/dns/disk/kms/file/
+  stream/cdn/lb/metrics/iam/k8s/network/firewall/logs/registry/paas/warehouse/inference/archive — the
+  warehouse/inference/archive rows added: Redshift/Kusto/BigQuery + ClickHouse,
+  SageMaker/Azure-ML/Vertex + Ollama, Glacier/Azure-Cool/GCS-ARCHIVE + MinIO — all
+  offline-emittable, no account.)
+  The two remaining categories (serverless, devops) need a NEW resource shape (handler
+  code + packaging; pipeline + repo relationship) beyond the current model — deferred until
+  a consumer needs them (Standing Rule 1).
 - **Cloud apply:** the apply LIFECYCLE is LANDED and gated live against LocalStack with no
   account (`--apply --localstack`, see Apply mode above). What REMAINS is real-account
   apply against billed AWS/Azure/GCP: the same `--apply` path with the LocalStack override
@@ -187,5 +190,5 @@ v3.311.0 (network) · v3.312.0 (firewall) · v3.313.0 (logs) · v3.314.0 (regist
 v3.327.0 (LIVE kv data-plane binding, ch444) · v3.327.1 (LIVE queue binding, ch445) ·
 v3.327.x (JVM + JS live bindings) · v3.327.4 (WALKTHROUGH.md end-to-end) · v3.328.3
 (Rust live binding — all four source backends round-trip a real Valkey).
-23 matrix rows; the data plane runs cross-backend AND binds LIVE to a real broker on
+25 matrix rows; the data plane runs cross-backend AND binds LIVE to a real broker on
 Go+JVM+JS; `rune deploy` does infra / workload / manifest modes.

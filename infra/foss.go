@@ -681,3 +681,74 @@ func (ClickHouse) Emit(rs []Resource) (Artifact, error) {
 		Logical: logicalSet(rs),
 	}, nil
 }
+
+// Ollama is the self-hosted inference backend (Ollama, MIT) — a single container that
+// serves local models over an OpenAI-compatible HTTP API on port 11434, the self-hosted
+// form of SageMaker/Azure-ML/Vertex endpoints with NO cloud account and no GPU service.
+type Ollama struct{}
+
+func (Ollama) Target() string { return "ollama" }
+func (Ollama) Cloud() bool    { return false }
+
+func (Ollama) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("ollama", "inference", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Ollama backend for the wavelet \"inference\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (OpenAI-compatible API on localhost:11434)\n" +
+		"services:\n" +
+		"  ollama:\n" +
+		"    image: docker.io/ollama/ollama:latest\n" +
+		"    ports:\n" +
+		"      - \"11434:11434\"\n"
+	env := map[string]string{
+		"WAVELET_INFERENCE_BACKEND": "ollama",
+		"WAVELET_INFERENCE_URL":     "http://localhost:11434",
+	}
+	for _, n := range names {
+		env["WAVELET_INFERENCE_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
+// MinIO is the self-hosted archival/object backend (MinIO, AGPL-3) — an S3-API server in
+// a single container, the self-hosted form of Glacier / Azure Archive / GCS ARCHIVE. The
+// same S3 client serves the cloud cold tiers and this local server, NO cloud account.
+type MinIO struct{}
+
+func (MinIO) Target() string { return "minio" }
+func (MinIO) Cloud() bool    { return false }
+
+func (MinIO) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("minio", "archive", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - MinIO backend for the wavelet \"archive\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (S3 API on localhost:9000, console on 9001)\n" +
+		"services:\n" +
+		"  minio:\n" +
+		"    image: docker.io/minio/minio:latest\n" +
+		"    command: server /data --console-address \":9001\"\n" +
+		"    environment:\n" +
+		"      - MINIO_ROOT_USER=wavelet\n" +
+		"      - MINIO_ROOT_PASSWORD=wavelet123\n" +
+		"    ports:\n" +
+		"      - \"9000:9000\"\n" +
+		"      - \"9001:9001\"\n"
+	env := map[string]string{
+		"WAVELET_ARCHIVE_BACKEND": "minio",
+		"WAVELET_ARCHIVE_URL":     "http://wavelet:wavelet123@localhost:9000",
+	}
+	for _, n := range names {
+		env["WAVELET_ARCHIVE_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}

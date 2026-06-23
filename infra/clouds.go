@@ -246,6 +246,18 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"aws_redshiftserverless_namespace\" %s", str(v.Name))
 			h.attr("namespace_name", str(v.Name))
 			h.close()
+		case Inference:
+			h.open("resource \"aws_sagemaker_model\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("execution_role_arn", "var.aws_sagemaker_role_arn")
+			h.open("primary_container")
+			h.attr("image", "var.aws_sagemaker_image")
+			h.close()
+			h.close()
+		case Archive:
+			h.open("resource \"aws_glacier_vault\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.close()
 		default:
 			return Artifact{}, unsupported("aws", r)
 		}
@@ -582,6 +594,27 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("capacity", "1")
 			h.close()
 			h.close()
+		case Inference:
+			h.open("resource \"azurerm_machine_learning_workspace\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("application_insights_id", "var.azure_app_insights_id")
+			h.attr("key_vault_id", "var.azure_key_vault_id")
+			h.attr("storage_account_id", "var.azure_storage_account_id")
+			h.open("identity")
+			h.attr("type", str("SystemAssigned"))
+			h.close()
+			h.close()
+		case Archive:
+			h.open("resource \"azurerm_storage_account\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
+			h.attr("location", "azurerm_resource_group.wavelet.location")
+			h.attr("account_tier", str("Standard"))
+			h.attr("account_replication_type", str("LRS"))
+			h.attr("access_tier", str("Cool"))
+			h.close()
 		default:
 			return Artifact{}, unsupported("azure", r)
 		}
@@ -797,6 +830,18 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.open("resource \"google_bigquery_dataset\" %s", str(v.Name))
 			h.attr("dataset_id", str(v.Name))
 			h.attr("location", str("US"))
+			h.close()
+		case Inference:
+			h.open("resource \"google_vertex_ai_endpoint\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("display_name", str(v.Name))
+			h.attr("location", "var.gcp_zone")
+			h.close()
+		case Archive:
+			h.open("resource \"google_storage_bucket\" %s", str(v.Name))
+			h.attr("name", str(v.Name))
+			h.attr("location", str("US"))
+			h.attr("storage_class", str("ARCHIVE"))
 			h.close()
 		default:
 			return Artifact{}, unsupported("gcp", r)

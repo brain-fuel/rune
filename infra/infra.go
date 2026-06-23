@@ -301,6 +301,28 @@ func (Warehouse) isResource()           {}
 func (Warehouse) Kind() string          { return "warehouse" }
 func (w Warehouse) LogicalName() string { return w.Name }
 
+// Inference is a managed model-inference endpoint (AWS SageMaker / Azure ML online
+// endpoint / GCP Vertex AI endpoint) — a hosted model served over HTTP. Ollama is the
+// self-hosted FOSS backend (a single container exposing an OpenAI-compatible API).
+type Inference struct {
+	Name string
+}
+
+func (Inference) isResource()           {}
+func (Inference) Kind() string          { return "inference" }
+func (i Inference) LogicalName() string { return i.Name }
+
+// Archive is a managed cold/archival object store (AWS Glacier / Azure Archive tier /
+// GCP Cloud Storage ARCHIVE class) — cheap long-term storage, distinct from Bucket's hot
+// object store. MinIO (S3 API) is the self-hosted FOSS backend.
+type Archive struct {
+	Name string
+}
+
+func (Archive) isResource()           {}
+func (Archive) Kind() string          { return "archive" }
+func (a Archive) LogicalName() string { return a.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20
@@ -344,7 +366,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{}, Prometheus{}, K3s{}, NFS{}, VaultKMS{}, ClickHouse{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{}, Prometheus{}, K3s{}, NFS{}, VaultKMS{}, ClickHouse{}, Ollama{}, MinIO{},
 	}
 }
 
@@ -380,6 +402,7 @@ func Kinds() []string {
 		"queue", "kv", "object", "compute", "database", "secret", "nosql", "dns",
 		"disk", "kms", "file", "stream", "cdn", "lb", "metrics", "iam", "k8s",
 		"network", "firewall", "logs", "registry", "paas", "warehouse",
+		"inference", "archive",
 	}
 }
 
