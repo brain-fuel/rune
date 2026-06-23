@@ -41,6 +41,53 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("def printNat():\n    return lambda n: lambda _u: (print(n), n)[1]\n")
 	}
+	// Phase 0 — real byte strings (Bin): a Python list of byte ints; nats are ints.
+	if usesBin(p) {
+		b.WriteString("def binEmpty():\n    return []\n")
+		b.WriteString("def binCons():\n    return lambda c: lambda b: [c & 255] + b\n")
+		b.WriteString("def binLen():\n    return lambda b: len(b)\n")
+		b.WriteString("def binAt():\n    return lambda b: lambda i: (b[i] if 0 <= i < len(b) else 0)\n")
+		b.WriteString("def __binshow(b):\n    s = '\"'\n    for x in b:\n        if 0x20 <= x < 0x7f and x != 0x22 and x != 0x5c:\n            s += chr(x)\n        else:\n            s += '\\\\x%02x' % x\n    return s + '\"'\n")
+		b.WriteString("def printBin():\n    return lambda b: lambda _u: (print(__binshow(b)), _unit)[1]\n")
+	}
+	// Phase 1 — uniform socket FFI: handles are Python socket objects; payloads are
+	// Bin (list of byte ints). Blocking (Python sockets are synchronous).
+	if usesNet(p) {
+		b.WriteString("def _sockConnect(host, port):\n    import socket\n    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n    s.connect((bytes(host).decode('latin1'), port))\n    return s\n")
+		b.WriteString("def sockConnect():\n    return lambda host: lambda port: lambda _u: _sockConnect(host, port)\n")
+		b.WriteString("def sockWrite():\n    return lambda c: lambda data: lambda _u: c.send(bytes(data))\n")
+		b.WriteString("def sockRead():\n    return lambda c: lambda n: lambda _u: list(c.recv(n))\n")
+		b.WriteString("def sockClose():\n    return lambda c: lambda _u: (c.close(), _unit)[1]\n")
+		b.WriteString("def _sockListen(port):\n    import socket\n    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)\n    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)\n    s.bind(('127.0.0.1', port))\n    s.listen(1)\n    return s\n")
+		b.WriteString("def sockListen():\n    return lambda port: lambda _u: _sockListen(port)\n")
+		b.WriteString("def sockAccept():\n    return lambda l: lambda _u: l.accept()[0]\n")
+	}
+	// Phase 1 — expanded OS/filesystem layer (Bin-native paths + content).
+	if usesFS(p) {
+		b.WriteString("def _fsWrite(path, content):\n    try:\n        f = open(bytes(path).decode('latin1'), 'wb'); f.write(bytes(content)); f.close(); return len(content)\n    except Exception:\n        return 0\n")
+		b.WriteString("def fsWrite():\n    return lambda path: lambda content: lambda _u: _fsWrite(path, content)\n")
+		b.WriteString("def _fsRead(path):\n    try:\n        f = open(bytes(path).decode('latin1'), 'rb'); d = f.read(); f.close(); return list(d)\n    except Exception:\n        return []\n")
+		b.WriteString("def fsRead():\n    return lambda path: lambda _u: _fsRead(path)\n")
+		b.WriteString("def fsExists():\n    import os\n    return lambda path: lambda _u: (1 if os.path.exists(bytes(path).decode('latin1')) else 0)\n")
+		b.WriteString("def _fsRemove(path):\n    import os\n    try:\n        os.remove(bytes(path).decode('latin1')); return 1\n    except Exception:\n        return 0\n")
+		b.WriteString("def fsRemove():\n    return lambda path: lambda _u: _fsRemove(path)\n")
+		b.WriteString("def _fsMkdir(path):\n    import os\n    try:\n        os.makedirs(bytes(path).decode('latin1'), exist_ok=True); return 1\n    except Exception:\n        return 0\n")
+		b.WriteString("def fsMkdir():\n    return lambda path: lambda _u: _fsMkdir(path)\n")
+	}
+	// Phase 1 — os/exec: run program with one arg, capture stdout.
+	if usesProc(p) {
+		b.WriteString("def _procRun(prog, arg):\n    import subprocess\n    try:\n        r = subprocess.run([bytes(prog).decode('latin1'), bytes(arg).decode('latin1')], capture_output=True)\n        return list(r.stdout)\n    except Exception:\n        return []\n")
+		b.WriteString("def procRun():\n    return lambda prog: lambda arg: lambda _u: _procRun(prog, arg)\n")
+	}
+	// Phase 3 — crypto: host sha256 (pure).
+	if usesCrypto(p) {
+		b.WriteString("def sha256():\n    import hashlib\n    return lambda data: list(hashlib.sha256(bytes(data)).digest())\n")
+	}
+	// Phase 3 — TLS: HTTPS GET, return response body (cert verification skipped).
+	if usesTLS(p) {
+		b.WriteString("def _tlsGet(host, port, path):\n    import ssl, http.client\n    try:\n        ctx = ssl._create_unverified_context()\n        c = http.client.HTTPSConnection(bytes(host).decode('latin1'), port, context=ctx)\n        c.request('GET', bytes(path).decode('latin1'))\n        r = c.getresponse(); d = r.read(); c.close(); return list(d)\n    except Exception:\n        return []\n")
+		b.WriteString("def tlsGet():\n    return lambda host: lambda port: lambda path: lambda _u: _tlsGet(host, port, path)\n")
+	}
 	if usesForeign(p, "getNat") {
 		b.WriteString("def getNat():\n    import sys\n    return lambda _u: int(sys.stdin.readline())\n")
 	}

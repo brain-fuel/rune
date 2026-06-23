@@ -51,6 +51,47 @@ func (Beam) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("ff_printNat() -> fun(N) -> fun(_U) -> begin io:format(\"~w~n\", [N]), N end end end.\n")
 	}
+	// Phase 0 — real byte strings (Bin): an Erlang list of byte ints; nats are ints.
+	if usesBin(p) {
+		b.WriteString(`ff_binEmpty() -> [].
+ff_binCons() -> fun(C) -> fun(B) -> [ (C rem 256) | B ] end end.
+ff_binLen() -> fun(B) -> length(B) end.
+ff_binAt() -> fun(B) -> fun(I) -> case (I >= 0) andalso (I < length(B)) of true -> lists:nth(I + 1, B); false -> 0 end end end.
+ff_printBin() -> fun(B) -> fun(_U) -> begin io:format("~s~n", [binshow(B)]), unit end end end.
+binshow(B) -> [$" | binshow1(B)].
+binshow1([]) -> [$"];
+binshow1([X | T]) -> case (X >= 16#20) andalso (X < 16#7f) andalso (X =/= 16#22) andalso (X =/= 16#5c) of true -> [X | binshow1(T)]; false -> binesc(X) ++ binshow1(T) end.
+binesc(X) -> lists:flatten(io_lib:format("\\x~2.16.0b", [X])).
+` + "\n")
+	}
+	// Phase 1 — uniform socket FFI: handles are gen_tcp sockets ({active,false} so
+	// recv is blocking and controlled); payloads are Bin (lists of byte ints).
+	if usesNet(p) {
+		b.WriteString(`ff_sockConnect() -> fun(Host) -> fun(Port) -> fun(_U) -> begin {ok, S} = gen_tcp:connect(Host, Port, [binary, {active, false}]), S end end end end.
+ff_sockWrite() -> fun(S) -> fun(Data) -> fun(_U) -> begin gen_tcp:send(S, list_to_binary(Data)), length(Data) end end end end.
+ff_sockRead() -> fun(S) -> fun(N) -> fun(_U) -> case gen_tcp:recv(S, 0) of {ok, B} -> lists:sublist(binary_to_list(B), N); {error, _} -> [] end end end end.
+ff_sockClose() -> fun(S) -> fun(_U) -> begin gen_tcp:close(S), unit end end end.
+ff_sockListen() -> fun(Port) -> fun(_U) -> begin {ok, L} = gen_tcp:listen(Port, [binary, {active, false}, {reuseaddr, true}, {ip, {127,0,0,1}}]), L end end end.
+ff_sockAccept() -> fun(L) -> fun(_U) -> begin {ok, S} = gen_tcp:accept(L), S end end end.
+` + "\n")
+	}
+	// Phase 1 — expanded OS/filesystem layer (Bin-native paths + content).
+	if usesFS(p) {
+		b.WriteString(`ff_fsWrite() -> fun(Path) -> fun(Content) -> fun(_U) -> case file:write_file(Path, list_to_binary(Content)) of ok -> length(Content); _ -> 0 end end end end.
+ff_fsRead() -> fun(Path) -> fun(_U) -> case file:read_file(Path) of {ok, B} -> binary_to_list(B); _ -> [] end end end.
+ff_fsExists() -> fun(Path) -> fun(_U) -> case filelib:is_regular(Path) of true -> 1; false -> 0 end end end.
+ff_fsRemove() -> fun(Path) -> fun(_U) -> case file:delete(Path) of ok -> 1; _ -> 0 end end end.
+ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of ok -> 1; _ -> 0 end end end.
+` + "\n")
+	}
+	// Phase 1 — os/exec via os:cmd (shell). Prog/Arg are char-list Bins.
+	if usesProc(p) {
+		b.WriteString("ff_procRun() -> fun(Prog) -> fun(Arg) -> fun(_U) -> os:cmd(Prog ++ \" \" ++ Arg) end end end.\n")
+	}
+	// Phase 3 — crypto: host sha256 (pure).
+	if usesCrypto(p) {
+		b.WriteString("ff_sha256() -> fun(Data) -> binary_to_list(crypto:hash(sha256, list_to_binary(Data))) end.\n")
+	}
 	if usesForeign(p, "getNat") {
 		b.WriteString("ff_getNat() -> fun(_U) -> list_to_integer(string:trim(io:get_line(\"\"))) end.\n")
 	}

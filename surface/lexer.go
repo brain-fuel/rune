@@ -46,6 +46,7 @@ const (
 	tNum     // a numeral: digit run; "0"/"1" in binder position is a usage annotation
 	tDec     // a decimal literal: digits "." digits, optionally "{" digits "}" (a repetend); e.g. 1.3, 1.{3}, 0.1{6}
 	tStr     // a string literal: "..." with \n \t \r \\ \" escapes; the text is the DECODED content (packed-String sugar, GRAMMAR §2)
+	tBytes   // a byte-string literal: b"..." with \xNN \n \t \r \\ \" \0 escapes; the text is the DECODED raw bytes (Phase-0 Bin sugar)
 	tOp      // an infix operator: + - * / % (a symbolic identifier; GRAMMAR §5.4)
 	tBuiltin // builtin (a builtin-binding declaration: builtin nat Nat zero succ)
 	tCase    // case (a case expression; GRAMMAR §5.6)
@@ -121,6 +122,8 @@ func (k tokKind) String() string {
 		return "decimal literal"
 	case tStr:
 		return "string literal"
+	case tBytes:
+		return "byte-string literal"
 	case tOp:
 		return "operator"
 	case tBuiltin:
@@ -241,6 +244,15 @@ func lex(src string) ([]token, error) {
 			// cases above have declined it; a bare '/' only after '//'.
 			toks = append(toks, token{tOp, string(r), i})
 			i++
+		case r == 'b' && i+1 < len(rs) && rs[i+1] == '"':
+			// A byte-string literal b"…" (Phase-0 Bin sugar). Lexed BEFORE the
+			// identifier case so the `b` prefix is not swallowed as an identifier.
+			tok, end, err := scanBytesLit(rs, i)
+			if err != nil {
+				return nil, err
+			}
+			toks = append(toks, tok)
+			i = end
 		case r == '"':
 			stoks, end, err := scanStringToks(rs, i)
 			if err != nil {
@@ -451,6 +463,76 @@ func scanStringToks(rs []rune, at int) ([]token, int, error) {
 		}
 	}
 	return nil, at, fmt.Errorf("unterminated string literal at offset %d (end of input)", at)
+}
+
+// scanBytesLit reads a byte-string literal b"…" starting at rs[at] (the 'b'; the
+// opening '"' is at at+1) and returns a single tBytes token whose text is the
+// DECODED raw bytes, plus the offset just past the closing '"'. Escapes: \xNN (two
+// hex digits — an arbitrary byte), \n \t \r \\ \" \0. No interpolation. A bare
+// source rune contributes its UTF-8 bytes (so multibyte text is real bytes). A
+// newline or EOF before the closing quote, or a malformed \x, is an error.
+func scanBytesLit(rs []rune, at int) (token, int, error) {
+	var out []byte
+	i := at + 2 // past b"
+	for i < len(rs) {
+		c := rs[i]
+		switch {
+		case c == '"':
+			return token{tBytes, string(out), at}, i + 1, nil
+		case c == '\n':
+			return token{}, i, fmt.Errorf("unterminated byte-string literal at offset %d (newline before closing quote)", at)
+		case c == '\\':
+			if i+1 >= len(rs) {
+				return token{}, i, fmt.Errorf("unterminated escape in byte-string literal at offset %d", i)
+			}
+			switch rs[i+1] {
+			case 'n':
+				out = append(out, '\n')
+			case 't':
+				out = append(out, '\t')
+			case 'r':
+				out = append(out, '\r')
+			case '\\':
+				out = append(out, '\\')
+			case '"':
+				out = append(out, '"')
+			case '0':
+				out = append(out, 0)
+			case 'x':
+				if i+3 >= len(rs) {
+					return token{}, i, fmt.Errorf("unterminated \\x escape in byte-string literal at offset %d", i)
+				}
+				hi, ok1 := hexVal(rs[i+2])
+				lo, ok2 := hexVal(rs[i+3])
+				if !ok1 || !ok2 {
+					return token{}, i, fmt.Errorf("malformed \\xNN escape in byte-string literal at offset %d", i)
+				}
+				out = append(out, byte(hi*16+lo))
+				i += 4
+				continue
+			default:
+				return token{}, i, fmt.Errorf("unknown escape %q in byte-string literal at offset %d", string(rs[i+1]), i)
+			}
+			i += 2
+		default:
+			out = append(out, []byte(string(c))...)
+			i++
+		}
+	}
+	return token{}, at, fmt.Errorf("unterminated byte-string literal at offset %d (end of input)", at)
+}
+
+// hexVal decodes a single hex digit (for \xNN byte-string escapes).
+func hexVal(r rune) (int, bool) {
+	switch {
+	case r >= '0' && r <= '9':
+		return int(r - '0'), true
+	case r >= 'a' && r <= 'f':
+		return int(r-'a') + 10, true
+	case r >= 'A' && r <= 'F':
+		return int(r-'A') + 10, true
+	}
+	return 0, false
 }
 
 // strSeg is a scanned string segment: a literal chunk (decoded) or an embedded

@@ -210,8 +210,114 @@ func (LL) EmitRuntimeFor(p Program) string {
 	b.WriteString(llRuntimeQuot)
 	b.WriteString(llRuntimeIO)
 	emitFloatPrimsLL(&b, p)
+	emitBinPrimsLL(&b, p)
+	emitNetPrimsLL(&b, p)
+	emitFSPrimsLL(&b, p)
+	emitProcPrimsLL(&b, p)
 	b.WriteString(llRuntimeMain)
 	return b.String()
+}
+
+// emitNetPrimsLL bakes the Phase-1 POSIX socket host bodies into the linked LLVM
+// runtime — the LL twin of emitNetPrimsC. Accessors are EXTERNAL (the .ll calls
+// @sockConnect/…); handles are the fd in a builtin-nat; payloads are K_BYTES.
+func emitNetPrimsLL(b *strings.Builder, p Program) {
+	if !usesNet(p) {
+		return
+	}
+	b.WriteString(`#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+static char* _bin_cstr(Value b) { int n = bytes_len(b); char* s = (char*)malloc(n + 1); for (int i = 0; i < n; i++) s[i] = (char) bytes_at(b, i); s[n] = 0; return s; }
+static int _ptr_fd(Value c) { return (int)(big_nlimbs(c) == 0 ? 0 : big_limb(c, 0)); }
+static Value sockConnect_c3(Value u, Value* env) { (void)u; char* h = _bin_cstr(env[0]); long p = (big_nlimbs(env[1]) == 0 ? 0 : big_limb(env[1], 0)); int fd = socket(AF_INET, SOCK_STREAM, 0); struct sockaddr_in a; memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons((unsigned short) p); a.sin_addr.s_addr = inet_addr(h); free(h); if (connect(fd, (struct sockaddr*)&a, sizeof a) < 0) { close(fd); return rt_big_from_long(0); } return rt_big_from_long(fd); }
+static Value sockConnect_c2(Value port, Value* env) { Value c = rt_mkclo(&sockConnect_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, port); return c; }
+static Value sockConnect_c1(Value host, Value* env) { (void)env; Value c = rt_mkclo(&sockConnect_c2, 1); rt_clo_set(c, 0, host); return c; }
+Value sockConnect(void) { return rt_mkclo(&sockConnect_c1, 0); }
+static Value sockWrite_c3(Value u, Value* env) { (void)u; int fd = _ptr_fd(env[0]); Value data = env[1]; int n = bytes_len(data); char* buf = (char*)malloc(n > 0 ? n : 1); for (int i = 0; i < n; i++) buf[i] = (char) bytes_at(data, i); long w = write(fd, buf, n); free(buf); return rt_big_from_long(w < 0 ? 0 : w); }
+static Value sockWrite_c2(Value data, Value* env) { Value c = rt_mkclo(&sockWrite_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, data); return c; }
+static Value sockWrite_c1(Value conn, Value* env) { (void)env; Value c = rt_mkclo(&sockWrite_c2, 1); rt_clo_set(c, 0, conn); return c; }
+Value sockWrite(void) { return rt_mkclo(&sockWrite_c1, 0); }
+static Value sockRead_c3(Value u, Value* env) { (void)u; int fd = _ptr_fd(env[0]); long k = (big_nlimbs(env[1]) == 0 ? 0 : big_limb(env[1], 0)); char* buf = (char*)malloc(k > 0 ? k : 1); long m = read(fd, buf, k); if (m < 0) m = 0; Value r = mkbytes((int) m); for (int i = 0; i < m; i++) bytes_set(r, i, (unsigned char) buf[i]); free(buf); return r; }
+static Value sockRead_c2(Value n, Value* env) { Value c = rt_mkclo(&sockRead_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, n); return c; }
+static Value sockRead_c1(Value conn, Value* env) { (void)env; Value c = rt_mkclo(&sockRead_c2, 1); rt_clo_set(c, 0, conn); return c; }
+Value sockRead(void) { return rt_mkclo(&sockRead_c1, 0); }
+static Value sockClose_c2(Value u, Value* env) { (void)u; close(_ptr_fd(env[0])); return mkunit(); }
+static Value sockClose_c1(Value conn, Value* env) { (void)env; Value c = rt_mkclo(&sockClose_c2, 1); rt_clo_set(c, 0, conn); return c; }
+Value sockClose(void) { return rt_mkclo(&sockClose_c1, 0); }
+static Value sockListen_c2(Value u, Value* env) { (void)u; long p = (big_nlimbs(env[0]) == 0 ? 0 : big_limb(env[0], 0)); int fd = socket(AF_INET, SOCK_STREAM, 0); int one = 1; setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one); struct sockaddr_in a; memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons((unsigned short) p); a.sin_addr.s_addr = inet_addr("127.0.0.1"); if (bind(fd, (struct sockaddr*)&a, sizeof a) < 0 || listen(fd, 16) < 0) { close(fd); return rt_big_from_long(0); } return rt_big_from_long(fd); }
+static Value sockListen_c1(Value port, Value* env) { (void)env; Value c = rt_mkclo(&sockListen_c2, 1); rt_clo_set(c, 0, port); return c; }
+Value sockListen(void) { return rt_mkclo(&sockListen_c1, 0); }
+static Value sockAccept_c2(Value u, Value* env) { (void)u; int cf = accept(_ptr_fd(env[0]), 0, 0); return rt_big_from_long(cf < 0 ? 0 : cf); }
+static Value sockAccept_c1(Value lis, Value* env) { (void)env; Value c = rt_mkclo(&sockAccept_c2, 1); rt_clo_set(c, 0, lis); return c; }
+Value sockAccept(void) { return rt_mkclo(&sockAccept_c1, 0); }
+`)
+}
+
+// emitProcPrimsLL bakes Phase-1 os/exec on the LLVM backend (the LL twin of
+// emitProcPrimsC): popen `program arg`, slurp stdout into a K_BYTES.
+func emitProcPrimsLL(b *strings.Builder, p Program) {
+	if !usesProc(p) {
+		return
+	}
+	b.WriteString(`static char* _proc_cstr(Value b) { int n = bytes_len(b); char* s = (char*)malloc(n + 1); for (int i = 0; i < n; i++) s[i] = (char) bytes_at(b, i); s[n] = 0; return s; }
+static Value procRun_c3(Value u, Value* env) { (void)u; char* prog = _proc_cstr(env[0]); char* arg = _proc_cstr(env[1]); size_t cl = strlen(prog) + strlen(arg) + 2; char* cmd = (char*)malloc(cl); snprintf(cmd, cl, "%s %s", prog, arg); FILE* f = popen(cmd, "r"); free(prog); free(arg); free(cmd); if (!f) return mkbytes(0); size_t cap = 256, len = 0; unsigned char* buf = (unsigned char*)malloc(cap); int ch; while ((ch = fgetc(f)) != EOF) { if (len == cap) { cap *= 2; buf = (unsigned char*)realloc(buf, cap); } buf[len++] = (unsigned char) ch; } pclose(f); Value r = mkbytes((int) len); for (size_t i = 0; i < len; i++) bytes_set(r, (int) i, buf[i]); free(buf); return r; }
+static Value procRun_c2(Value arg, Value* env) { Value c = rt_mkclo(&procRun_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, arg); return c; }
+static Value procRun_c1(Value prog, Value* env) { (void)env; Value c = rt_mkclo(&procRun_c2, 1); rt_clo_set(c, 0, prog); return c; }
+Value procRun(void) { return rt_mkclo(&procRun_c1, 0); }
+`)
+}
+
+// emitFSPrimsLL bakes the Phase-1 OS/filesystem host bodies on the LLVM backend (the
+// LL twin of emitFSPrimsC), external accessors over POSIX stdio + stat.
+func emitFSPrimsLL(b *strings.Builder, p Program) {
+	if !usesFS(p) {
+		return
+	}
+	b.WriteString(`#include <sys/stat.h>
+#include <unistd.h>
+static char* _fs_cstr(Value b) { int n = bytes_len(b); char* s = (char*)malloc(n + 1); for (int i = 0; i < n; i++) s[i] = (char) bytes_at(b, i); s[n] = 0; return s; }
+static Value fsWrite_c3(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); Value data = env[1]; int n = bytes_len(data); FILE* f = fopen(path, "wb"); free(path); if (!f) return rt_big_from_long(0); for (int i = 0; i < n; i++) { unsigned char c = (unsigned char) bytes_at(data, i); fwrite(&c, 1, 1, f); } fclose(f); return rt_big_from_long(n); }
+static Value fsWrite_c2(Value data, Value* env) { Value c = rt_mkclo(&fsWrite_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, data); return c; }
+static Value fsWrite_c1(Value path, Value* env) { (void)env; Value c = rt_mkclo(&fsWrite_c2, 1); rt_clo_set(c, 0, path); return c; }
+Value fsWrite(void) { return rt_mkclo(&fsWrite_c1, 0); }
+static Value fsRead_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); FILE* f = fopen(path, "rb"); free(path); if (!f) return mkbytes(0); fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET); if (sz < 0) sz = 0; Value r = mkbytes((int) sz); for (long i = 0; i < sz; i++) { int ch = fgetc(f); bytes_set(r, (int) i, ch < 0 ? 0 : ch); } fclose(f); return r; }
+static Value fsRead_c1(Value path, Value* env) { (void)env; Value c = rt_mkclo(&fsRead_c2, 1); rt_clo_set(c, 0, path); return c; }
+Value fsRead(void) { return rt_mkclo(&fsRead_c1, 0); }
+static Value fsExists_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); int ok = access(path, F_OK) == 0; free(path); return rt_big_from_long(ok ? 1 : 0); }
+static Value fsExists_c1(Value path, Value* env) { (void)env; Value c = rt_mkclo(&fsExists_c2, 1); rt_clo_set(c, 0, path); return c; }
+Value fsExists(void) { return rt_mkclo(&fsExists_c1, 0); }
+static Value fsRemove_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); int ok = remove(path) == 0; free(path); return rt_big_from_long(ok ? 1 : 0); }
+static Value fsRemove_c1(Value path, Value* env) { (void)env; Value c = rt_mkclo(&fsRemove_c2, 1); rt_clo_set(c, 0, path); return c; }
+Value fsRemove(void) { return rt_mkclo(&fsRemove_c1, 0); }
+static Value fsMkdir_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); int ok = mkdir(path, 0755) == 0; free(path); return rt_big_from_long(ok ? 1 : 0); }
+static Value fsMkdir_c1(Value path, Value* env) { (void)env; Value c = rt_mkclo(&fsMkdir_c2, 1); rt_clo_set(c, 0, path); return c; }
+Value fsMkdir(void) { return rt_mkclo(&fsMkdir_c1, 0); }
+`)
+}
+
+// emitBinPrimsLL bakes the Phase-0 real-byte-string (Bin) host bodies into the
+// linked LLVM runtime — the LL twin of emitBinPrimsC. Accessors are EXTERNAL (the
+// .ll calls @binEmpty/@binCons/… which foreignNames auto-declares); the closure
+// code blocks are static internals over the runtime's rt_*/bytes_*/big_* helpers.
+func emitBinPrimsLL(b *strings.Builder, p Program) {
+	if !usesBin(p) {
+		return
+	}
+	b.WriteString("Value binEmpty(void) { return mkbytes(0); }\n")
+	b.WriteString(`static Value binCons_c2(Value bb, Value* env) { Value c = env[0]; int bv = (big_nlimbs(c) == 0 ? 0 : (int)big_limb(c, 0)) & 255; int n = bytes_len(bb); Value r = mkbytes(n + 1); bytes_set(r, 0, bv); for (int i = 0; i < n; i++) bytes_set(r, i + 1, bytes_at(bb, i)); return r; }
+static Value binCons_c1(Value c, Value* env) { (void)env; Value k = rt_mkclo(&binCons_c2, 1); rt_clo_set(k, 0, c); return k; }
+Value binCons(void) { return rt_mkclo(&binCons_c1, 0); }
+static Value binLen_c1(Value bb, Value* env) { (void)env; return rt_big_from_long(bytes_len(bb)); }
+Value binLen(void) { return rt_mkclo(&binLen_c1, 0); }
+static Value binAt_c2(Value i, Value* env) { Value bb = env[0]; long k = (big_nlimbs(i) == 0 ? 0 : big_limb(i, 0)); int n = bytes_len(bb); if (k >= 0 && k < n) return rt_big_from_long(bytes_at(bb, (int)k)); return rt_big_from_long(0); }
+static Value binAt_c1(Value bb, Value* env) { (void)env; Value k = rt_mkclo(&binAt_c2, 1); rt_clo_set(k, 0, bb); return k; }
+Value binAt(void) { return rt_mkclo(&binAt_c1, 0); }
+static Value printBin_c2(Value w, Value* env) { (void)w; Value bb = env[0]; int n = bytes_len(bb); putchar('"'); for (int i = 0; i < n; i++) { int x = bytes_at(bb, i); if (x >= 0x20 && x < 0x7f && x != 0x22 && x != 0x5c) putchar(x); else printf("\\x%02x", x); } putchar('"'); putchar('\n'); return mkunit(); }
+static Value printBin_c1(Value bb, Value* env) { (void)env; Value c = rt_mkclo(&printBin_c2, 1); rt_clo_set(c, 0, bb); return c; }
+Value printBin(void) { return rt_mkclo(&printBin_c1, 0); }
+`)
 }
 
 // emitFloatPrimsLL bakes the float/BLAS host bodies into the LINKED LLVM runtime,
@@ -223,6 +329,10 @@ func emitFloatPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value printNat_c2(Value w, Value* env) { (void)w; Value n = env[0]; if (IS_INT(n)) printf(\"%ld\\n\", INT_VAL(n)); else { big_print(n); putchar('\\n'); } return n; }\n")
 		b.WriteString("static Value printNat_c1(Value n, Value* env) { (void)env; Value c = rt_mkclo(&printNat_c2, 1); rt_clo_set(c, 0, n); return c; }\n")
 		b.WriteString("Value printNat(void) { return rt_mkclo(&printNat_c1, 0); }\n")
+	}
+	if usesForeign(p, "getNat") {
+		b.WriteString("static Value getNat_c1(Value u, Value* env) { (void)u; (void)env; long x = 0; if (scanf(\"%ld\", &x) != 1) x = 0; return rt_big_from_long(x); }\n")
+		b.WriteString("Value getNat(void) { return rt_mkclo(&getNat_c1, 0); }\n")
 	}
 	if usesForeign(p, "Float") {
 		b.WriteString("Value Float(void) { return UNIT; }\n")
@@ -855,6 +965,12 @@ func (f *llFunc) accelDispatch(b *strings.Builder, app AppClosure, locals []stri
 		return r, true
 	case core.NatOpMonus:
 		fmt.Fprintf(b, "  %s = call i64 @rt_nat_monus(i64 %s, i64 %s)\n", r, ea, eb)
+		return r, true
+	case core.NatOpDiv:
+		fmt.Fprintf(b, "  %s = call i64 @rt_nat_div(i64 %s, i64 %s)\n", r, ea, eb)
+		return r, true
+	case core.NatOpMod:
+		fmt.Fprintf(b, "  %s = call i64 @rt_nat_mod(i64 %s, i64 %s)\n", r, ea, eb)
 		return r, true
 	}
 	return "", false

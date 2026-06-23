@@ -1054,6 +1054,19 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 		if _, _, _, ok := s.st.DataDeclOf(h); ok {
 			typeRefs[h] = true
 		}
+		// A `foreign` axiom whose TYPE is a universe is a foreign TYPE former (e.g.
+		// `foreign Bin : U`, `foreign Float : U`): it denotes a type at runtime and
+		// erases to the unit token, exactly like a datatype former. Without this, a
+		// bare reference to it in an erased position (an eliminator motive, an
+		// explicit type argument) would leak as a bodiless IForeign accessor —
+		// undefined on the backends that require every accessor to be defined.
+		if s.st.IsAssumed(h) {
+			if d, ok := s.byHash[h]; ok {
+				if _, isU := d.Ty.(core.Univ); isU {
+					typeRefs[h] = true
+				}
+			}
+		}
 	}
 	if hs, ok := s.st.QuotHashes(); ok {
 		typeRefs[hs[0]] = true

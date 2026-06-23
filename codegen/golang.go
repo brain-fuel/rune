@@ -62,6 +62,26 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		// E4: the live-broker data-plane binding speaks RESP over a raw TCP socket.
 		addImp("net", "bufio", "io", "os", "strconv")
 	}
+	if usesNet(p) {
+		// Phase 1: the uniform socket FFI dials/reads/writes raw TCP.
+		addImp("net")
+	}
+	if usesFS(p) {
+		// Phase 1: the expanded OS/filesystem layer (Bin-native).
+		addImp("os")
+	}
+	if usesProc(p) {
+		// Phase 1: os/exec (run a subprocess, capture stdout).
+		addImp("os/exec")
+	}
+	if usesCrypto(p) {
+		// Phase 3: crypto hashes (host sha256).
+		addImp("crypto/sha256")
+	}
+	if usesTLS(p) {
+		// Phase 3: TLS (HTTPS client).
+		addImp("net/http", "crypto/tls", "io")
+	}
 	impPaths := make([]string, 0, len(impSet))
 	for pk := range impSet {
 		impPaths = append(impPaths, pk)
@@ -69,6 +89,12 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	sort.Strings(impPaths)
 	var imports strings.Builder
 	for _, pk := range impPaths {
+		if pk == "crypto/sha256" {
+			// Alias: the foreign accessor func is named `sha256`, which would clash
+			// with the package's default name.
+			fmt.Fprintf(&imports, "\tsha256pkg %q\n", pk)
+			continue
+		}
 		fmt.Fprintf(&imports, "\t%q\n", pk)
 	}
 	b.WriteString("package main\n\nimport (\n" + imports.String() + ")\n\n")
@@ -86,8 +112,52 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("func printNat() any { return func(n any) any { return func(_u any) any { fmt.Println(n); return n } } }\n")
 	}
+	// Phase 0 — real byte strings (Bin): a Go []int of bytes; nats are *big.Int.
+	if usesBin(p) {
+		b.WriteString("func binEmpty() any { return []int{} }\n")
+		b.WriteString("func binCons() any { return func(c any) any { return func(b any) any { return append([]int{int(c.(*big.Int).Int64()) & 255}, b.([]int)...) } } }\n")
+		b.WriteString("func binLen() any { return func(b any) any { return big.NewInt(int64(len(b.([]int)))) } }\n")
+		b.WriteString("func binAt() any { return func(b any) any { return func(i any) any { bs := b.([]int); k := int(i.(*big.Int).Int64()); if k >= 0 && k < len(bs) { return big.NewInt(int64(bs[k])) }; return big.NewInt(0) } } }\n")
+		b.WriteString(`func _binShow(b []int) string { s := "\""; for _, x := range b { if x >= 0x20 && x < 0x7f && x != 0x22 && x != 0x5c { s += string(rune(x)) } else { s += fmt.Sprintf("\\x%02x", x) } }; return s + "\"" }` + "\n")
+		b.WriteString("func printBin() any { return func(b any) any { return func(_u any) any { fmt.Println(_binShow(b.([]int))); return nil } } }\n")
+	}
 	if usesForeign(p, "getNat") {
 		b.WriteString("func getNat() any { return func(_u any) any { var x int64; fmt.Scan(&x); return big.NewInt(x) } }\n")
+	}
+	// Phase 1 — uniform socket FFI: handles are net.Conn boxed in `any`; payloads are
+	// Bin ([]int). The 4 client ops block natively (Go's net is synchronous).
+	// Phase 1/3 — Bin <-> []byte marshalling shared by socket FFI, OS layer, crypto, tls.
+	if usesNet(p) || usesFS(p) || usesProc(p) || usesCrypto(p) || usesTLS(p) {
+		b.WriteString("func _binToGoBytes(b any) []byte { bs := b.([]int); out := make([]byte, len(bs)); for i, x := range bs { out[i] = byte(x) }; return out }\n")
+		b.WriteString("func _goBytesToBin(p []byte) any { out := make([]int, len(p)); for i, x := range p { out[i] = int(x) }; return out }\n")
+	}
+	// Phase 1 — os/exec: run program with one arg, return its stdout bytes.
+	if usesProc(p) {
+		b.WriteString("func procRun() any { return func(prog any) any { return func(arg any) any { return func(_u any) any { out, _ := exec.Command(string(_binToGoBytes(prog)), string(_binToGoBytes(arg))).Output(); return _goBytesToBin(out) } } } }\n")
+	}
+	// Phase 3 — crypto: sha256 digest (host crypto, pure body).
+	if usesCrypto(p) {
+		b.WriteString("func sha256() any { return func(data any) any { h := sha256pkg.Sum256(_binToGoBytes(data)); return _goBytesToBin(h[:]) } }\n")
+	}
+	// Phase 3 — TLS: HTTPS GET, return the response body (cert verification skipped).
+	if usesTLS(p) {
+		b.WriteString("func tlsGet() any { return func(host any) any { return func(port any) any { return func(path any) any { return func(_u any) any { url := fmt.Sprintf(\"https://%s:%d%s\", string(_binToGoBytes(host)), port.(*big.Int).Int64(), string(_binToGoBytes(path))); cl := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}; resp, err := cl.Get(url); if err != nil { return []int{} }; body, _ := io.ReadAll(resp.Body); resp.Body.Close(); return _goBytesToBin(body) } } } } }\n")
+	}
+	// Phase 1 — expanded OS/filesystem layer (Bin-native paths + content).
+	if usesFS(p) {
+		b.WriteString("func fsWrite() any { return func(path any) any { return func(content any) any { return func(_u any) any { if os.WriteFile(string(_binToGoBytes(path)), _binToGoBytes(content), 0o644) != nil { return big.NewInt(0) }; return big.NewInt(int64(len(content.([]int)))) } } } }\n")
+		b.WriteString("func fsRead() any { return func(path any) any { return func(_u any) any { d, err := os.ReadFile(string(_binToGoBytes(path))); if err != nil { return []int{} }; return _goBytesToBin(d) } } }\n")
+		b.WriteString("func fsExists() any { return func(path any) any { return func(_u any) any { if _, err := os.Stat(string(_binToGoBytes(path))); err == nil { return big.NewInt(1) }; return big.NewInt(0) } } }\n")
+		b.WriteString("func fsRemove() any { return func(path any) any { return func(_u any) any { if os.Remove(string(_binToGoBytes(path))) == nil { return big.NewInt(1) }; return big.NewInt(0) } } }\n")
+		b.WriteString("func fsMkdir() any { return func(path any) any { return func(_u any) any { if os.MkdirAll(string(_binToGoBytes(path)), 0o755) == nil { return big.NewInt(1) }; return big.NewInt(0) } } }\n")
+	}
+	if usesNet(p) {
+		b.WriteString("func sockConnect() any { return func(host any) any { return func(port any) any { return func(_u any) any { h := string(_binToGoBytes(host)); pt := port.(*big.Int).Int64(); c, err := net.Dial(\"tcp\", fmt.Sprintf(\"%s:%d\", h, pt)); if err != nil { return nil }; return any(c) } } } }\n")
+		b.WriteString("func sockWrite() any { return func(c any) any { return func(data any) any { return func(_u any) any { n, _ := c.(net.Conn).Write(_binToGoBytes(data)); return big.NewInt(int64(n)) } } } }\n")
+		b.WriteString("func sockRead() any { return func(c any) any { return func(n any) any { return func(_u any) any { k := int(n.(*big.Int).Int64()); buf := make([]byte, k); m, _ := c.(net.Conn).Read(buf); return _goBytesToBin(buf[:m]) } } } }\n")
+		b.WriteString("func sockClose() any { return func(c any) any { return func(_u any) any { c.(interface{ Close() error }).Close(); return nil } } }\n")
+		b.WriteString("func sockListen() any { return func(port any) any { return func(_u any) any { pt := port.(*big.Int).Int64(); ln, err := net.Listen(\"tcp\", fmt.Sprintf(\"127.0.0.1:%d\", pt)); if err != nil { return nil }; return any(ln) } } }\n")
+		b.WriteString("func sockAccept() any { return func(l any) any { return func(_u any) any { c, err := l.(net.Listener).Accept(); if err != nil { return nil }; return any(c) } } }\n")
 	}
 	if usesForeign(p, "timeNanos") {
 		b.WriteString("func timeNanos() any { return func(_u any) any { return big.NewInt(time.Now().UnixNano()) } }\n")

@@ -47,6 +47,53 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("  static V printNat() { return fun(n -> fun(u -> { System.out.println(_nat(n)); return n; })); }\n")
 	}
+	if usesForeign(p, "getNat") {
+		b.WriteString("  static java.io.BufferedReader __stdin = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));\n")
+		b.WriteString("  static V getNat() { return fun(u -> { try { return new VNat(new java.math.BigInteger(__stdin.readLine().trim())); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } }); }\n")
+	}
+	// Phase 0 — real byte strings (Bin): the value domain gained a VBytes(int[])
+	// record (in jvmRuntime); these are its host ops. Nats are VNat BigIntegers.
+	if usesBin(p) {
+		b.WriteString("  static V binEmpty() { return new VBytes(new int[0]); }\n")
+		b.WriteString("  static V binCons() { return fun(c -> fun(b -> { int[] o = ((VBytes) b).b(); int[] nv = new int[o.length + 1]; nv[0] = _nat(c).intValue() & 255; System.arraycopy(o, 0, nv, 1, o.length); return new VBytes(nv); })); }\n")
+		b.WriteString("  static V binLen() { return fun(b -> new VNat(java.math.BigInteger.valueOf(((VBytes) b).b().length))); }\n")
+		b.WriteString("  static V binAt() { return fun(b -> fun(i -> { int[] bs = ((VBytes) b).b(); int k = _nat(i).intValue(); return new VNat(java.math.BigInteger.valueOf((k >= 0 && k < bs.length) ? bs[k] : 0)); })); }\n")
+		b.WriteString("  static V printBin() { return fun(b -> fun(u -> { System.out.println(_binShow(((VBytes) b).b())); return UNIT; })); }\n")
+	}
+	// Phase 1 — uniform socket FFI: V cannot box a Socket, so handles are long tokens
+	// (VNat) into a static table; payloads are Bin (VBytes). Blocking (virtual thread).
+	if usesNet(p) {
+		b.WriteString("  static java.util.concurrent.ConcurrentHashMap<Long, java.net.Socket> __socks = new java.util.concurrent.ConcurrentHashMap<>();\n")
+		b.WriteString("  static long __sockId = 0;\n")
+		b.WriteString("  static byte[] _binbytes(V v) { int[] a = ((VBytes) v).b(); byte[] o = new byte[a.length]; for (int i = 0; i < a.length; i++) o[i] = (byte) a[i]; return o; }\n")
+		b.WriteString("  static V sockConnect() { return fun(host -> fun(port -> fun(u -> { try { var h = new String(_binbytes(host), java.nio.charset.StandardCharsets.ISO_8859_1); var s = new java.net.Socket(h, _nat(port).intValue()); long id = ++__sockId; __socks.put(id, s); return new VNat(java.math.BigInteger.valueOf(id)); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } }))); }\n")
+		b.WriteString("  static V sockWrite() { return fun(c -> fun(data -> fun(u -> { try { var s = __socks.get(_nat(c).longValue()); var b = _binbytes(data); var o = s.getOutputStream(); o.write(b); o.flush(); return new VNat(java.math.BigInteger.valueOf(b.length)); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } }))); }\n")
+		b.WriteString("  static V sockRead() { return fun(c -> fun(n -> fun(u -> { try { var s = __socks.get(_nat(c).longValue()); int k = _nat(n).intValue(); byte[] buf = new byte[k]; int m = s.getInputStream().read(buf); if (m < 0) m = 0; int[] out = new int[m]; for (int i = 0; i < m; i++) out[i] = buf[i] & 255; return new VBytes(out); } catch (Exception e) { return new VBytes(new int[0]); } }))); }\n")
+		b.WriteString("  static java.util.concurrent.ConcurrentHashMap<Long, java.net.ServerSocket> __servers = new java.util.concurrent.ConcurrentHashMap<>();\n")
+		b.WriteString("  static V sockClose() { return fun(c -> fun(u -> { try { long id = _nat(c).longValue(); var s = __socks.remove(id); if (s != null) s.close(); var srv = __servers.remove(id); if (srv != null) srv.close(); } catch (Exception e) {} return UNIT; })); }\n")
+		b.WriteString("  static V sockListen() { return fun(port -> fun(u -> { try { var srv = new java.net.ServerSocket(); srv.setReuseAddress(true); srv.bind(new java.net.InetSocketAddress(\"127.0.0.1\", _nat(port).intValue())); long id = ++__sockId; __servers.put(id, srv); return new VNat(java.math.BigInteger.valueOf(id)); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } })); }\n")
+		b.WriteString("  static V sockAccept() { return fun(c -> fun(u -> { try { var srv = __servers.get(_nat(c).longValue()); var s = srv.accept(); long id = ++__sockId; __socks.put(id, s); return new VNat(java.math.BigInteger.valueOf(id)); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } })); }\n")
+	}
+	// Phase 1 — expanded OS/filesystem layer (Bin = VBytes via java.nio.file).
+	if usesFS(p) {
+		b.WriteString("  static byte[] _fsbytes(V v) { int[] a = ((VBytes) v).b(); byte[] o = new byte[a.length]; for (int i = 0; i < a.length; i++) o[i] = (byte) a[i]; return o; }\n")
+		b.WriteString("  static String _fspath(V v) { return new String(_fsbytes(v), java.nio.charset.StandardCharsets.ISO_8859_1); }\n")
+		b.WriteString("  static V fsWrite() { return fun(path -> fun(content -> fun(u -> { try { byte[] b = _fsbytes(content); java.nio.file.Files.write(java.nio.file.Path.of(_fspath(path)), b); return new VNat(java.math.BigInteger.valueOf(b.length)); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } }))); }\n")
+		b.WriteString("  static V fsRead() { return fun(path -> fun(u -> { try { byte[] b = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(_fspath(path))); int[] o = new int[b.length]; for (int i = 0; i < b.length; i++) o[i] = b[i] & 255; return new VBytes(o); } catch (Exception e) { return new VBytes(new int[0]); } })); }\n")
+		b.WriteString("  static V fsExists() { return fun(path -> fun(u -> new VNat(java.nio.file.Files.exists(java.nio.file.Path.of(_fspath(path))) ? java.math.BigInteger.ONE : java.math.BigInteger.ZERO))); }\n")
+		b.WriteString("  static V fsRemove() { return fun(path -> fun(u -> { try { return new VNat(java.nio.file.Files.deleteIfExists(java.nio.file.Path.of(_fspath(path))) ? java.math.BigInteger.ONE : java.math.BigInteger.ZERO); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } })); }\n")
+		b.WriteString("  static V fsMkdir() { return fun(path -> fun(u -> { try { java.nio.file.Files.createDirectories(java.nio.file.Path.of(_fspath(path))); return new VNat(java.math.BigInteger.ONE); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } })); }\n")
+	}
+	// Phase 1 — os/exec: run program with one arg, capture stdout.
+	if usesProc(p) {
+		b.WriteString("  static String _procstr(V v) { int[] a = ((VBytes) v).b(); byte[] o = new byte[a.length]; for (int i = 0; i < a.length; i++) o[i] = (byte) a[i]; return new String(o, java.nio.charset.StandardCharsets.ISO_8859_1); }\n")
+		b.WriteString("  static V procRun() { return fun(prog -> fun(arg -> fun(u -> { try { var p = new ProcessBuilder(_procstr(prog), _procstr(arg)).start(); byte[] b = p.getInputStream().readAllBytes(); p.waitFor(); int[] o = new int[b.length]; for (int i = 0; i < b.length; i++) o[i] = b[i] & 255; return new VBytes(o); } catch (Exception e) { return new VBytes(new int[0]); } }))); }\n")
+	}
+	// Phase 3 — crypto: host sha256 (pure).
+	if usesCrypto(p) {
+		b.WriteString("  static byte[] _cryptobytes(V v) { int[] a = ((VBytes) v).b(); byte[] o = new byte[a.length]; for (int i = 0; i < a.length; i++) o[i] = (byte) a[i]; return o; }\n")
+		b.WriteString("  static V sha256() { return fun(data -> { try { byte[] h = java.security.MessageDigest.getInstance(\"SHA-256\").digest(_cryptobytes(data)); int[] o = new int[h.length]; for (int i = 0; i < h.length; i++) o[i] = h[i] & 255; return new VBytes(o); } catch (Exception e) { return new VBytes(new int[0]); } }); }\n")
+	}
 	if usesForeign(p, "Float") {
 		b.WriteString("  static V Float() { return UNIT; }\n") // foreign type, erased
 	}
@@ -263,6 +310,10 @@ func (em *jvmEmitter) accelDispatch(app IApp, env []string) (string, bool) {
 		return fmt.Sprintf("_nat_mul(%s, %s)", ea, eb), true
 	case core.NatOpMonus:
 		return fmt.Sprintf("_nat_monus(%s, %s)", ea, eb), true
+	case core.NatOpDiv:
+		return fmt.Sprintf("_nat_div(%s, %s)", ea, eb), true
+	case core.NatOpMod:
+		return fmt.Sprintf("_nat_mod(%s, %s)", ea, eb), true
 	}
 	return "", false
 }
@@ -366,8 +417,9 @@ var jvmReserved = map[string]bool{
 // jvmRuntime is the sealed value interface and its record variants (Java 25).
 const jvmRuntime = `import java.util.function.Function;
 import java.util.concurrent.*;
-sealed interface V permits VUnit, VInt, VNat, VFloat, VStr, VPtr, VFun, VCtor, VPair, VProc {}
+sealed interface V permits VUnit, VInt, VNat, VFloat, VStr, VBytes, VPtr, VFun, VCtor, VPair, VProc {}
 record VUnit() implements V {}
+record VBytes(int[] b) implements V {} // Phase 0 real byte string (Bin): arbitrary bytes
 record VInt(long n) implements V {}            // host machine int (FFI LitInt)
 record VNat(java.math.BigInteger n) implements V {} // builtin-nat: arbitrary precision
 record VFloat(double d) implements V {}        // D3 machine float (IEEE-754 f64)
@@ -431,6 +483,14 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
     java.math.BigInteger x = _nat(a), y = _nat(b);
     return new VNat(x.compareTo(y) > 0 ? x.subtract(y) : java.math.BigInteger.ZERO);
   }
+  static V _nat_div(V a, V b) {
+    java.math.BigInteger y = _nat(b);
+    return new VNat(y.signum() == 0 ? java.math.BigInteger.ZERO : _nat(a).divide(y));
+  }
+  static V _nat_mod(V a, V b) {
+    java.math.BigInteger x = _nat(a), y = _nat(b);
+    return new VNat(y.signum() == 0 ? x : x.mod(y));
+  }
   static String _show(V v) {
     return switch (v) {
       case VUnit u -> "()";
@@ -439,6 +499,7 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
       case VFloat f -> Double.toString(f.d());
       case VProc p -> "<proc>";
       case VStr s -> s.s();
+      case VBytes bb -> _binShow(bb.b());
       case VPtr p -> "<ptr>";
       case VFun f -> "<function>";
       case VPair p -> "(" + _show(p.a()) + ", " + _show(p.b()) + ")";
@@ -453,6 +514,15 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
         yield sb.toString();
       }
     };
+  }
+  static String _binShow(int[] b) {
+    StringBuilder s = new StringBuilder("\"");
+    for (int x : b) {
+      if (x >= 0x20 && x < 0x7f && x != 0x22 && x != 0x5c) s.append((char) x);
+      else s.append(String.format("\\x%02x", x));
+    }
+    s.append("\"");
+    return s.toString();
   }
 `
 

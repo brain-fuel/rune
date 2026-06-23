@@ -30,17 +30,21 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesQuot(p) {
 		b.WriteString(quotRuntime)
 	}
-	if usesOTP(p) || usesLiveKV(p) {
-		// An OTP program (primReceive blocks) or a live-broker program (socket I/O is
-		// async on Node) needs the ASYNC IO monad (bindIO awaits). Contained to these
-		// programs: ordinary IO keeps the synchronous runtime, so all other js
-		// conformance is untouched.
+	if usesOTP(p) || usesLiveKV(p) || usesNet(p) || usesTLS(p) {
+		// An OTP program (primReceive blocks), a live-broker program, a Phase-1
+		// socket program, or a TLS program (Node TCP/TLS is async) needs the ASYNC IO
+		// monad (bindIO awaits).
+		// Contained to these programs: ordinary IO keeps the synchronous runtime, so
+		// all other js conformance is untouched.
 		b.WriteString(ioRuntimeAsync)
 		if usesOTP(p) {
 			b.WriteString(jsOTPRuntime)
 		}
 		if usesLiveKV(p) {
 			b.WriteString(jsLiveKVRuntime)
+		}
+		if usesNet(p) {
+			b.WriteString(jsNetRuntime)
 		}
 	} else if usesIO(p) {
 		b.WriteString(ioRuntime)
@@ -49,8 +53,65 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("const printNat = () => n => () => { console.log(n.toString()); return n; };\n")
 	}
+	// Phase 0 — real byte strings (Bin). A Bin is a JS Array of byte Numbers (NOT a
+	// JS string, whose UTF-16 reindexes astral codepoints); nats cross as BigInt.
+	if usesBin(p) {
+		b.WriteString("const binEmpty = () => [];\n")
+		b.WriteString("const binCons = () => c => b => [Number(c) & 255].concat(b);\n")
+		b.WriteString("const binLen = () => b => BigInt(b.length);\n")
+		b.WriteString("const binAt = () => b => i => { const k = Number(i); return (k >= 0 && k < b.length) ? BigInt(b[k]) : 0n; };\n")
+		b.WriteString("const __binShow = b => { let s = '\"'; for (const x of b) { if (x >= 0x20 && x < 0x7f && x !== 0x22 && x !== 0x5c) { s += globalThis.String.fromCharCode(x); } else { s += '\\\\x' + x.toString(16).padStart(2, '0'); } } return s + '\"'; };\n")
+		b.WriteString("const printBin = () => b => () => { console.log(__binShow(b)); return $unit; };\n")
+	}
+	// Phase 1 — expanded OS/filesystem layer (Bin-native). Like getNat, fs access uses
+	// dynamic import when the file is an ES module (an `import` present => async IO).
+	if usesFS(p) {
+		if usesOTP(p) || usesLiveKV(p) || usesNet(p) || usesTLS(p) {
+			b.WriteString("const fsWrite = () => path => content => async () => { const fs = await import('node:fs'); try { fs.writeFileSync(Buffer.from(path).toString('latin1'), Buffer.from(content)); return BigInt(content.length); } catch (e) { return 0n; } };\n")
+			b.WriteString("const fsRead = () => path => async () => { const fs = await import('node:fs'); try { return Array.from(fs.readFileSync(Buffer.from(path).toString('latin1'))); } catch (e) { return []; } };\n")
+			b.WriteString("const fsExists = () => path => async () => { const fs = await import('node:fs'); return fs.existsSync(Buffer.from(path).toString('latin1')) ? 1n : 0n; };\n")
+			b.WriteString("const fsRemove = () => path => async () => { const fs = await import('node:fs'); try { fs.unlinkSync(Buffer.from(path).toString('latin1')); return 1n; } catch (e) { return 0n; } };\n")
+			b.WriteString("const fsMkdir = () => path => async () => { const fs = await import('node:fs'); try { fs.mkdirSync(Buffer.from(path).toString('latin1'), { recursive: true }); return 1n; } catch (e) { return 0n; } };\n")
+		} else {
+			b.WriteString("const fsWrite = () => path => content => () => { const fs = require('fs'); try { fs.writeFileSync(Buffer.from(path).toString('latin1'), Buffer.from(content)); return BigInt(content.length); } catch (e) { return 0n; } };\n")
+			b.WriteString("const fsRead = () => path => () => { const fs = require('fs'); try { return Array.from(fs.readFileSync(Buffer.from(path).toString('latin1'))); } catch (e) { return []; } };\n")
+			b.WriteString("const fsExists = () => path => () => { const fs = require('fs'); return fs.existsSync(Buffer.from(path).toString('latin1')) ? 1n : 0n; };\n")
+			b.WriteString("const fsRemove = () => path => () => { const fs = require('fs'); try { fs.unlinkSync(Buffer.from(path).toString('latin1')); return 1n; } catch (e) { return 0n; } };\n")
+			b.WriteString("const fsMkdir = () => path => () => { const fs = require('fs'); try { fs.mkdirSync(Buffer.from(path).toString('latin1'), { recursive: true }); return 1n; } catch (e) { return 0n; } };\n")
+		}
+	}
+	// Phase 1 — os/exec: run program with one arg, capture stdout (ESM-gated like fs).
+	if usesProc(p) {
+		if usesOTP(p) || usesLiveKV(p) || usesNet(p) || usesTLS(p) {
+			b.WriteString("const procRun = () => prog => arg => async () => { const cp = await import('node:child_process'); try { return Array.from(cp.execFileSync(Buffer.from(prog).toString('latin1'), [Buffer.from(arg).toString('latin1')])); } catch (e) { return []; } };\n")
+		} else {
+			b.WriteString("const procRun = () => prog => arg => () => { const cp = require('child_process'); try { return Array.from(cp.execFileSync(Buffer.from(prog).toString('latin1'), [Buffer.from(arg).toString('latin1')])); } catch (e) { return []; } };\n")
+		}
+	}
+	// Phase 3 — crypto: host sha256 (pure; createHash is synchronous, so ESM uses a
+	// top-level import rather than the async pattern the IO prims use).
+	if usesCrypto(p) {
+		if usesOTP(p) || usesLiveKV(p) || usesNet(p) || usesTLS(p) {
+			b.WriteString("import * as __cryptoM from 'node:crypto';\n")
+			b.WriteString("const sha256 = () => data => Array.from(__cryptoM.createHash('sha256').update(Buffer.from(data)).digest());\n")
+		} else {
+			b.WriteString("const sha256 = () => data => Array.from(require('crypto').createHash('sha256').update(Buffer.from(data)).digest());\n")
+		}
+	}
+	// Phase 3 — TLS: HTTPS GET (async), return the response body (cert verify off).
+	if usesTLS(p) {
+		b.WriteString("import * as __httpsM from 'node:https';\n")
+		b.WriteString("const tlsGet = () => host => port => path => () => new Promise(res => { const req = __httpsM.request({ host: Buffer.from(host).toString('latin1'), port: Number(port), path: Buffer.from(path).toString('latin1'), method: 'GET', rejectUnauthorized: false }, r => { const chunks = []; r.on('data', d => chunks.push(d)); r.on('end', () => res(Array.from(Buffer.concat(chunks)))); }); req.on('error', () => res([])); req.end(); });\n")
+	}
 	if usesForeign(p, "getNat") {
-		b.WriteString("const getNat = () => () => BigInt(require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/)[0]);\n")
+		if usesOTP(p) || usesLiveKV(p) || usesNet(p) || usesTLS(p) {
+			// An `import` makes the file an ES module, where `require` is undefined; but
+			// these programs run under the async IO monad, so getNat can be async and
+			// pull fs via dynamic import (awaited by bindIO).
+			b.WriteString("const getNat = () => async () => { const fs = await import('node:fs'); return BigInt(fs.readFileSync(0, 'utf8').trim().split(/\\s+/)[0]); };\n")
+		} else {
+			b.WriteString("const getNat = () => () => BigInt(require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/)[0]);\n")
+		}
 	}
 	if usesForeign(p, "timeNanos") {
 		b.WriteString("const timeNanos = () => () => BigInt(Date.now()) * 1000000n;\n")
@@ -236,8 +297,8 @@ func (JS) Emit(p Program) (TargetSource, error) {
 			// mailbox context (so primSelf/primReceive work for main too), then await.
 			thunk := jsName(p.Main) + "()"
 			fmt.Fprintf(&b, "(async () => { console.log($show(await __als.run(__mkbox(), () => %s))); })();\n", thunk)
-		} else if p.IOMain && usesLiveKV(p) {
-			// live-kv IO is async (socket round-trips); await main before showing.
+		} else if p.IOMain && (usesLiveKV(p) || usesNet(p) || usesTLS(p)) {
+			// live-kv / socket / TLS IO is async (socket round-trips); await main before showing.
 			fmt.Fprintf(&b, "(async () => { console.log($show(await %s())); })();\n", jsName(p.Main))
 		} else {
 			fmt.Fprintf(&b, "console.log($show(%s));\n", mainExpr)
@@ -277,6 +338,27 @@ const primSend = () => _M => p => x => () => { if (p.w.length) p.w.shift()(x); e
 const primReceive = () => _M => () => new Promise(res => { const box = __self(); if (box.q.length) res(box.q.shift()); else box.w.push(res); });
 const primExit = () => _M => p => () => { __mark(p); return $unit; };
 const primMonitor = () => _M => p => () => new Promise(res => { if (p.dead) res($unit); else p.done.push(() => res($unit)); });
+`
+
+// jsNetRuntime is the Phase-1 uniform socket FFI for the JS backend. Node TCP is
+// async, so each op returns a Promise the async IO monad (ioRuntimeAsync) awaits —
+// the blocking sockConnect/Write/Read/Close surface is satisfied asynchronously,
+// the same mechanism live-KV/OTP already use. Handles are Node socket objects;
+// payloads are Bin (Arrays of byte Numbers); sockRead returns up to n bytes from one
+// data event (empty on end).
+const jsNetRuntime = `import * as __netS from 'node:net';
+const __sockConnect = (host, port) => new Promise(res => { const s = __netS.connect(port, host, () => res(s)); s.on('error', () => res(null)); });
+const __sockWrite = (s, data) => new Promise(res => { const buf = Buffer.from(data); s.write(buf, () => res(BigInt(buf.length))); });
+const __sockRead = (s, n) => new Promise(res => { const onData = d => { s.pause(); s.removeListener('data', onData); s.removeListener('end', onEnd); res(Array.from(d.subarray(0, n))); }; const onEnd = () => { s.removeListener('data', onData); res([]); }; s.on('data', onData); s.on('end', onEnd); s.resume(); });
+const __sockClose = s => new Promise(res => { if (s.close) s.close(); else s.end(); res($unit); });
+const __sockListen = port => new Promise(res => { const srv = __netS.createServer(); srv.maxConnections = 1024; srv.listen(port, '127.0.0.1', () => res(srv)); srv.on('error', () => res(null)); });
+const __sockAccept = srv => new Promise(res => { srv.once('connection', s => { s.pause(); res(s); }); });
+const sockConnect = () => host => port => () => __sockConnect(Buffer.from(host).toString('latin1'), Number(port));
+const sockWrite = () => s => data => () => __sockWrite(s, data);
+const sockRead = () => s => n => () => __sockRead(s, Number(n));
+const sockClose = () => s => () => __sockClose(s);
+const sockListen = () => port => () => __sockListen(Number(port));
+const sockAccept = () => srv => () => __sockAccept(srv);
 `
 
 // jsLiveKVRuntime is the E4 live-broker data-plane binding for the JS backend: kv +

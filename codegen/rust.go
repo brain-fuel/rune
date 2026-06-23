@@ -47,6 +47,40 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("fn printNat() -> Rc<V> { vfun(|n: Rc<V>| -> Rc<V> { let s = _show(&n); let n2 = n.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { println!(\"{}\", s); n2.clone() }) }) }\n")
 	}
+	// Phase 0 — real byte strings (Bin): the value domain gained a V::Bytes(Vec<u8>)
+	// variant (in rustRuntime); these are its host ops. Nats are V::Nat limbs.
+	if usesBin(p) {
+		b.WriteString("fn binEmpty() -> Rc<V> { Rc::new(V::Bytes(Vec::new())) }\n")
+		b.WriteString("fn binCons() -> Rc<V> { vfun(|c: Rc<V>| -> Rc<V> { let byte = _natbyte(&c); vfun(move |b: Rc<V>| -> Rc<V> { let mut v = _bytes(&b).clone(); v.insert(0, byte); Rc::new(V::Bytes(v)) }) }) }\n")
+		b.WriteString("fn binLen() -> Rc<V> { vfun(|b: Rc<V>| -> Rc<V> { _nat_of_usize(_bytes(&b).len()) }) }\n")
+		b.WriteString("fn binAt() -> Rc<V> { vfun(|b: Rc<V>| -> Rc<V> { let v = _bytes(&b).clone(); vfun(move |i: Rc<V>| -> Rc<V> { let k = _natusize(&i); if k < v.len() { _nat_of_usize(v[k] as usize) } else { _nat_of_usize(0) } }) }) }\n")
+		b.WriteString("fn printBin() -> Rc<V> { vfun(|b: Rc<V>| -> Rc<V> { let s = _binshow(_bytes(&b)); vfun(move |_u: Rc<V>| -> Rc<V> { println!(\"{}\", s); unit() }) }) }\n")
+	}
+	// Phase 1 — uniform socket FFI: V cannot box a TcpStream, so handles are i64
+	// tokens (V::Nat) into a thread-local table; payloads are Bin (V::Bytes). Blocking.
+	if usesNet(p) {
+		b.WriteString("thread_local!(static __SOCKS: std::cell::RefCell<std::collections::HashMap<i64, std::net::TcpStream>> = std::cell::RefCell::new(std::collections::HashMap::new()));\n")
+		b.WriteString("thread_local!(static __LISTS: std::cell::RefCell<std::collections::HashMap<i64, std::net::TcpListener>> = std::cell::RefCell::new(std::collections::HashMap::new()));\n")
+		b.WriteString("thread_local!(static __SOCKID: std::cell::RefCell<i64> = std::cell::RefCell::new(0));\n")
+		b.WriteString("fn sockConnect() -> Rc<V> { vfun(|host: Rc<V>| -> Rc<V> { let h = String::from_utf8_lossy(_bytes(&host)).to_string(); vfun(move |port: Rc<V>| -> Rc<V> { let p = _natusize(&port); let h = h.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { match std::net::TcpStream::connect(format!(\"{}:{}\", h, p)) { Ok(s) => { let id = __SOCKID.with(|c| { let mut c = c.borrow_mut(); *c += 1; *c }); __SOCKS.with(|m| { m.borrow_mut().insert(id, s); }); _nat_of_usize(id as usize) } Err(_) => _nat_of_usize(0) } }) }) }) }\n")
+		b.WriteString("fn sockWrite() -> Rc<V> { vfun(|c: Rc<V>| -> Rc<V> { let id = _natusize(&c) as i64; vfun(move |data: Rc<V>| -> Rc<V> { let bytes = _bytes(&data).clone(); vfun(move |_u: Rc<V>| -> Rc<V> { use std::io::Write; let n = __SOCKS.with(|m| { let mut m = m.borrow_mut(); match m.get_mut(&id) { Some(s) => s.write(&bytes).unwrap_or(0), None => 0 } }); _nat_of_usize(n) }) }) }) }\n")
+		b.WriteString("fn sockRead() -> Rc<V> { vfun(|c: Rc<V>| -> Rc<V> { let id = _natusize(&c) as i64; vfun(move |n: Rc<V>| -> Rc<V> { let k = _natusize(&n); vfun(move |_u: Rc<V>| -> Rc<V> { use std::io::Read; let mut buf = vec![0u8; k]; let got = __SOCKS.with(|m| { let mut m = m.borrow_mut(); match m.get_mut(&id) { Some(s) => s.read(&mut buf).unwrap_or(0), None => 0 } }); buf.truncate(got); Rc::new(V::Bytes(buf)) }) }) }) }\n")
+		b.WriteString("fn sockClose() -> Rc<V> { vfun(|c: Rc<V>| -> Rc<V> { let id = _natusize(&c) as i64; vfun(move |_u: Rc<V>| -> Rc<V> { __SOCKS.with(|m| { m.borrow_mut().remove(&id); }); __LISTS.with(|m| { m.borrow_mut().remove(&id); }); unit() }) }) }\n")
+		b.WriteString("fn sockListen() -> Rc<V> { vfun(|port: Rc<V>| -> Rc<V> { let p = _natusize(&port); vfun(move |_u: Rc<V>| -> Rc<V> { match std::net::TcpListener::bind(format!(\"127.0.0.1:{}\", p)) { Ok(l) => { let id = __SOCKID.with(|c| { let mut c = c.borrow_mut(); *c += 1; *c }); __LISTS.with(|m| { m.borrow_mut().insert(id, l); }); _nat_of_usize(id as usize) } Err(_) => _nat_of_usize(0) } }) }) }\n")
+		b.WriteString("fn sockAccept() -> Rc<V> { vfun(|l: Rc<V>| -> Rc<V> { let id = _natusize(&l) as i64; vfun(move |_u: Rc<V>| -> Rc<V> { let s = __LISTS.with(|m| { let m = m.borrow(); m.get(&id).and_then(|ln| ln.accept().ok().map(|(s, _)| s)) }); match s { Some(s) => { let sid = __SOCKID.with(|c| { let mut c = c.borrow_mut(); *c += 1; *c }); __SOCKS.with(|m| { m.borrow_mut().insert(sid, s); }); _nat_of_usize(sid as usize) } None => _nat_of_usize(0) } }) }) }\n")
+	}
+	// Phase 1 — expanded OS/filesystem layer (Bin = V::Bytes).
+	if usesFS(p) {
+		b.WriteString("fn fsWrite() -> Rc<V> { vfun(|path: Rc<V>| -> Rc<V> { let p = String::from_utf8_lossy(_bytes(&path)).to_string(); vfun(move |content: Rc<V>| -> Rc<V> { let c = _bytes(&content).clone(); let p = p.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { match std::fs::write(&p, &c) { Ok(_) => _nat_of_usize(c.len()), Err(_) => _nat_of_usize(0) } }) }) }) }\n")
+		b.WriteString("fn fsRead() -> Rc<V> { vfun(|path: Rc<V>| -> Rc<V> { let p = String::from_utf8_lossy(_bytes(&path)).to_string(); vfun(move |_u: Rc<V>| -> Rc<V> { match std::fs::read(&p) { Ok(d) => Rc::new(V::Bytes(d)), Err(_) => Rc::new(V::Bytes(Vec::new())) } }) }) }\n")
+		b.WriteString("fn fsExists() -> Rc<V> { vfun(|path: Rc<V>| -> Rc<V> { let p = String::from_utf8_lossy(_bytes(&path)).to_string(); vfun(move |_u: Rc<V>| -> Rc<V> { if std::path::Path::new(&p).exists() { _nat_of_usize(1) } else { _nat_of_usize(0) } }) }) }\n")
+		b.WriteString("fn fsRemove() -> Rc<V> { vfun(|path: Rc<V>| -> Rc<V> { let p = String::from_utf8_lossy(_bytes(&path)).to_string(); vfun(move |_u: Rc<V>| -> Rc<V> { if std::fs::remove_file(&p).is_ok() { _nat_of_usize(1) } else { _nat_of_usize(0) } }) }) }\n")
+		b.WriteString("fn fsMkdir() -> Rc<V> { vfun(|path: Rc<V>| -> Rc<V> { let p = String::from_utf8_lossy(_bytes(&path)).to_string(); vfun(move |_u: Rc<V>| -> Rc<V> { if std::fs::create_dir_all(&p).is_ok() { _nat_of_usize(1) } else { _nat_of_usize(0) } }) }) }\n")
+	}
+	// Phase 1 — os/exec: run program with one arg, capture stdout.
+	if usesProc(p) {
+		b.WriteString("fn procRun() -> Rc<V> { vfun(|prog: Rc<V>| -> Rc<V> { let p = String::from_utf8_lossy(_bytes(&prog)).to_string(); vfun(move |arg: Rc<V>| -> Rc<V> { let a = String::from_utf8_lossy(_bytes(&arg)).to_string(); let p = p.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { match std::process::Command::new(&p).arg(&a).output() { Ok(o) => Rc::new(V::Bytes(o.stdout)), Err(_) => Rc::new(V::Bytes(Vec::new())) } }) }) }) }\n")
+	}
 	if usesForeign(p, "getNat") {
 		b.WriteString("fn getNat() -> Rc<V> { vfun(move |_u: Rc<V>| -> Rc<V> { let mut s = String::new(); std::io::stdin().read_line(&mut s).unwrap(); Rc::new(V::Nat(_big_from_u64(s.trim().parse::<u64>().unwrap()))) }) }\n")
 	}
@@ -340,6 +374,10 @@ func (em *rustEmitter) accelDispatch(app IApp, env []string) (string, bool) {
 		return fmt.Sprintf("_nat_mul(%s, %s)", ea, eb), true
 	case core.NatOpMonus:
 		return fmt.Sprintf("_nat_monus(%s, %s)", ea, eb), true
+	case core.NatOpDiv:
+		return fmt.Sprintf("_nat_div(%s, %s)", ea, eb), true
+	case core.NatOpMod:
+		return fmt.Sprintf("_nat_mod(%s, %s)", ea, eb), true
 	}
 	return "", false
 }
@@ -446,6 +484,7 @@ enum V {
     Nat(Vec<u32>),            // builtin-nat: arbitrary-precision base-1e9 limbs (little-endian)
     Float(f64),               // D3 machine float (f64): host native double
     Str(String),
+    Bytes(Vec<u8>),           // Phase 0 real byte string (Bin): arbitrary bytes
     Ptr(i64),
     Fun(Rc<dyn Fn(Rc<V>) -> Rc<V>>),
     Ctor(i64, &'static str, Vec<Rc<V>>),
@@ -472,6 +511,27 @@ fn _field(v: Rc<V>, i: usize) -> Rc<V> {
     match &*v { V::Ctor(_, _, a) => a[i].clone(), _ => panic!("rune: field of a non-constructor") }
 }
 fn _impossible() -> Rc<V> { panic!("impossible: unmatched constructor tag") }
+// Phase 0 byte-string (Bin) helpers: a V::Bytes carries arbitrary bytes; nats
+// (small here: byte values < 256, lengths/indices < 1e9) cross via single-limb V::Nat.
+fn _bytes<'a>(v: &'a Rc<V>) -> &'a Vec<u8> {
+    match &**v { V::Bytes(b) => b, _ => panic!("rune: expected bytes") }
+}
+fn _natusize(v: &Rc<V>) -> usize {
+    let l = _nat(v); if l.is_empty() { 0 } else { l[0] as usize }
+}
+fn _natbyte(v: &Rc<V>) -> u8 { (_natusize(v) % 256) as u8 }
+fn _nat_of_usize(n: usize) -> Rc<V> {
+    if n == 0 { Rc::new(V::Nat(Vec::new())) } else { Rc::new(V::Nat(vec![n as u32])) }
+}
+fn _binshow(b: &Vec<u8>) -> String {
+    let mut s = String::from("\"");
+    for &x in b {
+        if x >= 0x20 && x < 0x7f && x != 0x22 && x != 0x5c { s.push(x as char); }
+        else { s.push_str(&format!("\\x{:02x}", x)); }
+    }
+    s.push('"');
+    s
+}
 // ---- naive arbitrary-precision nat: base-1e9 limbs (no std bignum), schoolbook
 // ops, mirroring the C/LLVM native runtimes. Empty Vec is zero. ----
 const BIG_BASE: u64 = 1_000_000_000;
@@ -590,9 +650,32 @@ fn _nat_d(c0: Rc<V>, c1: Rc<V>, x: Rc<V>) -> Rc<V> {
     let n = _nat(&x);
     if n.is_empty() { c0 } else { ap(ap(c1, Rc::new(V::Nat(_big_monus(n, &_big_from_u64(1))))), unit()) }
 }
+// schoolbook long division (base-1e9), MS-limb first with per-limb binary search.
+// Returns (quotient, remainder). Div by zero: (0, a).
+fn _big_divmod(a: &Vec<u32>, b: &Vec<u32>) -> (Vec<u32>, Vec<u32>) {
+    if b.is_empty() { return (Vec::new(), a.clone()); }
+    if _big_cmp(a, b) < 0 { return (Vec::new(), a.clone()); }
+    let n = a.len();
+    let mut q = vec![0u32; n];
+    let mut r: Vec<u32> = Vec::new();
+    let base = _big_from_u64(BIG_BASE);
+    for i in (0..n).rev() {
+        r = _big_add(&_big_mul(&r, &base), &_big_from_u64(a[i] as u64));
+        let (mut lo, mut hi, mut d): (i64, i64, i64) = (0, (BIG_BASE - 1) as i64, 0);
+        while lo <= hi {
+            let mid = lo + (hi - lo) / 2;
+            if _big_cmp(&_big_mul(b, &_big_from_u64(mid as u64)), &r) <= 0 { d = mid; lo = mid + 1; } else { hi = mid - 1; }
+        }
+        q[i] = d as u32;
+        r = _big_monus(&r, &_big_mul(b, &_big_from_u64(d as u64)));
+    }
+    (_big_norm(q), _big_norm(r))
+}
 fn _nat_add(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_add(_nat(&a), _nat(&b)))) }
 fn _nat_mul(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_mul(_nat(&a), _nat(&b)))) }
 fn _nat_monus(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_monus(_nat(&a), _nat(&b)))) }
+fn _nat_div(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_divmod(_nat(&a), _nat(&b)).0)) }
+fn _nat_mod(a: Rc<V>, b: Rc<V>) -> Rc<V> { Rc::new(V::Nat(_big_divmod(_nat(&a), _nat(&b)).1)) }
 fn _show(v: &Rc<V>) -> String {
     match &**v {
         V::Unit => "()".to_string(),
@@ -600,6 +683,7 @@ fn _show(v: &Rc<V>) -> String {
         V::Nat(l) => _big_to_string(l),
         V::Float(x) => format!("{}", x),
         V::Str(s) => s.clone(),
+        V::Bytes(b) => _binshow(b),
         V::Ptr(_) => "<ptr>".to_string(),
         V::Fun(_) => "<function>".to_string(),
         V::Pair(a, b) => format!("({}, {})", _show(a), _show(b)),

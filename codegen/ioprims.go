@@ -111,6 +111,80 @@ func usesDataPlane(p Program) bool {
 	return false
 }
 
+// binPrims are the Phase-0 real-byte-string ops (the honest counterpart to the
+// packed-Nat String): a `Bin` is a length-prefixed sequence of arbitrary bytes.
+// Each backend bakes a host body so a program using them RUNS unaided. binEmpty :
+// Bin; binCons : Nat -> Bin -> Bin (prepend the low byte of the nat); binLen :
+// Bin -> Nat; binAt : Bin -> Nat -> Nat (the byte, or 0 oob); printBin : Bin ->
+// IO Unit (write the canonical `$show` rendering, see ir.go LitBytes, + newline).
+var binPrims = []string{"binEmpty", "binCons", "binLen", "binAt", "printBin"}
+
+// usesBin reports whether the program references any Phase-0 Bin op, so a backend
+// knows to emit the byte-string host bodies (and any value-domain carrier).
+func usesBin(p Program) bool {
+	for _, n := range binPrims {
+		if usesForeign(p, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// netPrims are the Phase-1 uniform socket vocabulary (unparks `net`): a minimal
+// synchronous, blocking TCP surface. Handles cross as the host's own socket object
+// (opaque, the `Ptr` foreign type); payloads cross as Bin. sockConnect host port :
+// Bin -> Nat -> IO Ptr; sockWrite conn data : Ptr -> Bin -> IO Nat (bytes written);
+// sockRead conn n : Ptr -> Nat -> IO Bin (up to n bytes, empty = EOF/closed);
+// sockClose conn : Ptr -> IO Unit. On JS (no synchronous TCP) these ride the same
+// ioRuntimeAsync the OTP/live-KV paths use; the other backends block natively.
+var netPrims = []string{"sockConnect", "sockWrite", "sockRead", "sockClose", "sockListen", "sockAccept"}
+
+// usesNet reports whether the program references any Phase-1 socket op.
+func usesNet(p Program) bool {
+	for _, n := range netPrims {
+		if usesForeign(p, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// fsPrims are the Phase-1 expanded OS/filesystem vocabulary over the real Bin
+// carrier (Go's `os`/`io/fs` surface, subsuming the raw syscall layer): fsWrite path
+// content : Bin -> Bin -> IO Nat (bytes written); fsRead path : Bin -> IO Bin
+// (content, empty if missing); fsExists path : Bin -> IO Nat (1/0); fsRemove path :
+// Bin -> IO Nat (1/0); fsMkdir path : Bin -> IO Nat (1/0, mkdir -p). Unlike D6's
+// readFileCode/writeFileCode (packed-Nat String codes), these are Bin-native and
+// carry arbitrary bytes.
+var fsPrims = []string{"fsWrite", "fsRead", "fsExists", "fsRemove", "fsMkdir"}
+
+// usesFS reports whether the program references any Phase-1 filesystem op.
+func usesFS(p Program) bool {
+	for _, n := range fsPrims {
+		if usesForeign(p, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// usesProc reports whether the program references os/exec (procRun program arg :
+// Bin -> Bin -> IO Bin — run a program with one argument, return its stdout bytes).
+func usesProc(p Program) bool { return usesForeign(p, "procRun") }
+
+// usesCrypto reports whether the program references a crypto hash prim. sha256 data
+// : Bin -> Bin is a 32-byte digest via the host's crypto (deterministic, vector-
+// checkable). Available where the host ships sha256 (js/py/go/erl/jvm); Rust + native
+// C/LLVM lack a built-in (would need a vendored/linked lib).
+func usesCrypto(p Program) bool { return usesForeign(p, "sha256") }
+
+// usesTLS reports whether the program references TLS. tlsGet host port path : Bin ->
+// Nat -> Bin -> IO Bin does an HTTPS GET and returns the response body (host HTTPS
+// client, cert verification skipped for the harness self-signed server). Available
+// where the host ships TLS (go/py/js here; jvm/erl addable); Rust + native C/LLVM
+// lack a TLS lib (same gap as crypto).
+func usesTLS(p Program) bool { return usesForeign(p, "tlsGet") }
+
 // usesForeign reports whether any emitted definition references a `foreign` axiom
 // of the given name (erased to an IForeign accessor). Mirrors usesOTP's walk.
 func usesForeign(p Program, name string) bool {

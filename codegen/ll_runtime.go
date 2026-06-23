@@ -36,6 +36,8 @@ declare i64 @rt_apply(i64, i64)
 declare i64 @rt_nat_add(i64, i64)
 declare i64 @rt_nat_mul(i64, i64)
 declare i64 @rt_nat_monus(i64, i64)
+declare i64 @rt_nat_div(i64, i64)
+declare i64 @rt_nat_mod(i64, i64)
 declare i64 @rt_big_from_long(i64)
 declare i64 @rt_big_parse(i8*)
 declare i64 @rt_big_succ(i64)
@@ -76,7 +78,7 @@ const llRuntimeC = `/* rune llvm-backend runtime — the external-linkage twin o
 
 typedef intptr_t Value;
 
-enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7 };
+enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7, K_BYTES = 8 };
 
 typedef struct Obj {
   int kind;
@@ -141,6 +143,7 @@ static size_t gc_obj_size(Obj* o) {
     case K_CON:  extra = o->nfield > 0 ? o->nfield - 1 : 0; break;
     case K_PAIR: extra = 1; break;
     case K_BIG:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break; /* nenv = limb capacity */
+    case K_BYTES: extra = o->nenv  > 0 ? o->nenv   - 1 : 0; break; /* Phase 0 Bin: 1 byte/slot, nenv = count */
     default:     extra = 0; break;
   }
   size_t sz = base + (size_t)extra * sizeof(Value);
@@ -284,6 +287,16 @@ static Value mkbig(int nlimbs) {
 static int  big_nlimbs(Value v) { return obj(v)->nfield; }
 static long big_limb(Value v, int i) { return (long)obj(v)->slots[i]; }
 static void big_setlimb(Value v, int i, long x) { obj(v)->slots[i] = (Value)x; }
+/* Phase 0 real byte strings (Bin): K_BYTES stores one byte per Value slot,
+   nfield = nenv = the byte count (mirrors K_BIG; raw bytes are never traced). */
+static Value mkbytes(int n) {
+  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (n > 0 ? (n - 1) : 0) * sizeof(Value));
+  o->kind = K_BYTES; o->nfield = n; o->nenv = n;
+  return (Value)o;
+}
+static int  bytes_len(Value v) { return obj(v)->nfield; }
+static int  bytes_at(Value v, int i) { return (int)((long)obj(v)->slots[i] & 255); }
+static void bytes_set(Value v, int i, int x) { obj(v)->slots[i] = (Value)(long)(x & 255); }
 static Value big_norm(Value v) {
   Obj* o = obj(v);
   while (o->nfield > 0 && o->slots[o->nfield - 1] == 0) o->nfield--;
@@ -376,12 +389,39 @@ Value rt_big_parse(const char* s) {
   }
   return big_norm(v);
 }
+/* Schoolbook long division (base-1e9), MS-limb first with per-limb binary search.
+   Returns quotient; *rem receives remainder. Div by zero: q=0, r=a. */
+static Value big_divmod(Value a, Value b, Value* rem) {
+  if (big_nlimbs(b) == 0) { *rem = a; return rt_big_from_long(0); }
+  if (big_cmp(a, b) < 0) { *rem = a; return rt_big_from_long(0); }
+  int n = big_nlimbs(a);
+  Value q = mkbig(n);
+  Value r = rt_big_from_long(0);
+  Value base = rt_big_from_long(BIG_BASE);
+  for (int i = n - 1; i >= 0; i--) {
+    r = big_add(big_mul(r, base), rt_big_from_long(big_limb(a, i)));
+    long lo = 0, hi = BIG_BASE - 1, d = 0;
+    while (lo <= hi) {
+      long mid = lo + (hi - lo) / 2;
+      if (big_cmp(big_mul(b, rt_big_from_long(mid)), r) <= 0) { d = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    big_setlimb(q, i, d);
+    r = big_monus(r, big_mul(b, rt_big_from_long(d)));
+  }
+  *rem = big_norm(r);
+  return big_norm(q);
+}
+static Value big_div(Value a, Value b) { Value r; return big_divmod(a, b, &r); }
+static Value big_mod(Value a, Value b) { Value r; big_divmod(a, b, &r); return r; }
 Value rt_big_succ(Value a) { return big_add(a, rt_big_from_long(1)); }
 long  rt_big_cmp(Value a, Value b) { return big_cmp(a, b); }
 
 Value rt_nat_add(Value a, Value b) { return big_add(a, b); }
 Value rt_nat_mul(Value a, Value b) { return big_mul(a, b); }
 Value rt_nat_monus(Value a, Value b) { return big_monus(a, b); }
+Value rt_nat_div(Value a, Value b) { return big_div(a, b); }
+Value rt_nat_mod(Value a, Value b) { return big_mod(a, b); }
 
 void rt_abort(void) { fprintf(stderr, "rune-ll: impossible (unmatched constructor tag)\n"); exit(1); }
 
@@ -401,6 +441,7 @@ static void show(Value v) {
   Obj* o = obj(v);
   switch (o->kind) {
     case K_BIG: big_print(v); return;
+    case K_BYTES: { int bn = bytes_len(v); putchar('"'); for (int bi = 0; bi < bn; bi++) { int bx = bytes_at(v, bi); if (bx >= 0x20 && bx < 0x7f && bx != 0x22 && bx != 0x5c) putchar(bx); else printf("\\x%02x", bx); } putchar('"'); return; }
     case K_FLOAT: printf("%g", o->dval); return;
     case K_CLO: printf("<function>"); return;
     case K_PTR: printf("<ptr>"); return;

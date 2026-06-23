@@ -83,6 +83,14 @@ func (C) Emit(p Program) (TargetSource, error) {
 	// D3 / R-FFI: bake the machine-float (f64) host bodies + the OpenBLAS dot kernel
 	// when referenced (defined before the program code blocks that call them).
 	emitFloatPrimsC(&b, p)
+	// Phase 0: bake the real byte-string (Bin) host bodies when referenced.
+	emitBinPrimsC(&b, p)
+	// Phase 1: bake the POSIX socket host bodies when referenced.
+	emitNetPrimsC(&b, p)
+	// Phase 1: bake the expanded OS/filesystem host bodies when referenced.
+	emitFSPrimsC(&b, p)
+	// Phase 1: bake os/exec (popen) when referenced.
+	emitProcPrimsC(&b, p)
 
 	// Forward declarations: every code block and every thunk, so the bodies may
 	// reference one another (and themselves) regardless of definition order.
@@ -462,6 +470,10 @@ func (em *cEmitter) accelDispatch(app AppClosure, locals []string) (string, bool
 		return fmt.Sprintf("nat_mul(%s, %s)", ea, eb), true
 	case core.NatOpMonus:
 		return fmt.Sprintf("nat_monus(%s, %s)", ea, eb), true
+	case core.NatOpDiv:
+		return fmt.Sprintf("nat_div(%s, %s)", ea, eb), true
+	case core.NatOpMod:
+		return fmt.Sprintf("nat_mod(%s, %s)", ea, eb), true
 	}
 	return "", false
 }
@@ -561,6 +573,107 @@ func cstr(s string) string {
 	return b.String()
 }
 
+// emitBinPrimsC bakes the Phase-0 real-byte-string (Bin) host bodies as curried
+// closures over K_BYTES objects: binCons prepends a byte, binLen/binAt read, and
+// printBin writes the canonical $show (printable ASCII literal, else \xNN) + a
+// newline. Nats cross as K_BIG (byte values and lengths are small, single-limb).
+func emitBinPrimsC(b *strings.Builder, p Program) {
+	if !usesBin(p) {
+		return
+	}
+	b.WriteString("static Value binEmpty(void) { return mkbytes(0); }\n")
+	b.WriteString(`static Value binCons_c2(Value bb, Value* env) { Value c = env[0]; int bv = (big_nlimbs(c) == 0 ? 0 : (int)big_limb(c, 0)) & 255; int n = bytes_len(bb); Value r = mkbytes(n + 1); bytes_set(r, 0, bv); for (int i = 0; i < n; i++) bytes_set(r, i + 1, bytes_at(bb, i)); return r; }
+static Value binCons_c1(Value c, Value* env) { (void)env; Value k = mkclo(&binCons_c2, 1); clo_set(k, 0, c); return k; }
+static Value binCons(void) { return mkclo(&binCons_c1, 0); }
+static Value binLen_c1(Value bb, Value* env) { (void)env; return big_from_long(bytes_len(bb)); }
+static Value binLen(void) { return mkclo(&binLen_c1, 0); }
+static Value binAt_c2(Value i, Value* env) { Value bb = env[0]; long k = (big_nlimbs(i) == 0 ? 0 : big_limb(i, 0)); int n = bytes_len(bb); if (k >= 0 && k < n) return big_from_long(bytes_at(bb, (int)k)); return big_from_long(0); }
+static Value binAt_c1(Value bb, Value* env) { (void)env; Value k = mkclo(&binAt_c2, 1); clo_set(k, 0, bb); return k; }
+static Value binAt(void) { return mkclo(&binAt_c1, 0); }
+static Value printBin_c2(Value w, Value* env) { (void)w; Value bb = env[0]; int n = bytes_len(bb); putchar('"'); for (int i = 0; i < n; i++) { int x = bytes_at(bb, i); if (x >= 0x20 && x < 0x7f && x != 0x22 && x != 0x5c) putchar(x); else printf("\\x%02x", x); } putchar('"'); putchar('\n'); return mkunit(); }
+static Value printBin_c1(Value bb, Value* env) { (void)env; Value c = mkclo(&printBin_c2, 1); clo_set(c, 0, bb); return c; }
+static Value printBin(void) { return mkclo(&printBin_c1, 0); }
+`)
+}
+
+// emitNetPrimsC bakes the Phase-1 POSIX socket host bodies. Handles cross as the fd
+// wrapped in a builtin-nat (the opaque `Ptr`); payloads are K_BYTES. Blocking.
+func emitNetPrimsC(b *strings.Builder, p Program) {
+	if !usesNet(p) {
+		return
+	}
+	b.WriteString(`#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+static char* _bin_cstr(Value b) { int n = bytes_len(b); char* s = (char*)malloc(n + 1); for (int i = 0; i < n; i++) s[i] = (char) bytes_at(b, i); s[n] = 0; return s; }
+static int _ptr_fd(Value c) { return (int)(big_nlimbs(c) == 0 ? 0 : big_limb(c, 0)); }
+static Value sockConnect_c3(Value u, Value* env) { (void)u; char* h = _bin_cstr(env[0]); long p = (big_nlimbs(env[1]) == 0 ? 0 : big_limb(env[1], 0)); int fd = socket(AF_INET, SOCK_STREAM, 0); struct sockaddr_in a; memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons((unsigned short) p); a.sin_addr.s_addr = inet_addr(h); free(h); if (connect(fd, (struct sockaddr*)&a, sizeof a) < 0) { close(fd); return big_from_long(0); } return big_from_long(fd); }
+static Value sockConnect_c2(Value port, Value* env) { Value c = mkclo(&sockConnect_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, port); return c; }
+static Value sockConnect_c1(Value host, Value* env) { (void)env; Value c = mkclo(&sockConnect_c2, 1); clo_set(c, 0, host); return c; }
+static Value sockConnect(void) { return mkclo(&sockConnect_c1, 0); }
+static Value sockWrite_c3(Value u, Value* env) { (void)u; int fd = _ptr_fd(env[0]); Value data = env[1]; int n = bytes_len(data); char* buf = (char*)malloc(n > 0 ? n : 1); for (int i = 0; i < n; i++) buf[i] = (char) bytes_at(data, i); long w = write(fd, buf, n); free(buf); return big_from_long(w < 0 ? 0 : w); }
+static Value sockWrite_c2(Value data, Value* env) { Value c = mkclo(&sockWrite_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, data); return c; }
+static Value sockWrite_c1(Value conn, Value* env) { (void)env; Value c = mkclo(&sockWrite_c2, 1); clo_set(c, 0, conn); return c; }
+static Value sockWrite(void) { return mkclo(&sockWrite_c1, 0); }
+static Value sockRead_c3(Value u, Value* env) { (void)u; int fd = _ptr_fd(env[0]); long k = (big_nlimbs(env[1]) == 0 ? 0 : big_limb(env[1], 0)); char* buf = (char*)malloc(k > 0 ? k : 1); long m = read(fd, buf, k); if (m < 0) m = 0; Value r = mkbytes((int) m); for (int i = 0; i < m; i++) bytes_set(r, i, (unsigned char) buf[i]); free(buf); return r; }
+static Value sockRead_c2(Value n, Value* env) { Value c = mkclo(&sockRead_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, n); return c; }
+static Value sockRead_c1(Value conn, Value* env) { (void)env; Value c = mkclo(&sockRead_c2, 1); clo_set(c, 0, conn); return c; }
+static Value sockRead(void) { return mkclo(&sockRead_c1, 0); }
+static Value sockClose_c2(Value u, Value* env) { (void)u; close(_ptr_fd(env[0])); return mkunit(); }
+static Value sockClose_c1(Value conn, Value* env) { (void)env; Value c = mkclo(&sockClose_c2, 1); clo_set(c, 0, conn); return c; }
+static Value sockClose(void) { return mkclo(&sockClose_c1, 0); }
+static Value sockListen_c2(Value u, Value* env) { (void)u; long p = (big_nlimbs(env[0]) == 0 ? 0 : big_limb(env[0], 0)); int fd = socket(AF_INET, SOCK_STREAM, 0); int one = 1; setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one); struct sockaddr_in a; memset(&a, 0, sizeof a); a.sin_family = AF_INET; a.sin_port = htons((unsigned short) p); a.sin_addr.s_addr = inet_addr("127.0.0.1"); if (bind(fd, (struct sockaddr*)&a, sizeof a) < 0 || listen(fd, 16) < 0) { close(fd); return big_from_long(0); } return big_from_long(fd); }
+static Value sockListen_c1(Value port, Value* env) { (void)env; Value c = mkclo(&sockListen_c2, 1); clo_set(c, 0, port); return c; }
+static Value sockListen(void) { return mkclo(&sockListen_c1, 0); }
+static Value sockAccept_c2(Value u, Value* env) { (void)u; int cf = accept(_ptr_fd(env[0]), 0, 0); return big_from_long(cf < 0 ? 0 : cf); }
+static Value sockAccept_c1(Value lis, Value* env) { (void)env; Value c = mkclo(&sockAccept_c2, 1); clo_set(c, 0, lis); return c; }
+static Value sockAccept(void) { return mkclo(&sockAccept_c1, 0); }
+`)
+}
+
+// emitProcPrimsC bakes Phase-1 os/exec on the C backend: popen the shell command
+// `program arg`, slurp its stdout into a K_BYTES.
+func emitProcPrimsC(b *strings.Builder, p Program) {
+	if !usesProc(p) {
+		return
+	}
+	b.WriteString(`static char* _proc_cstr(Value b) { int n = bytes_len(b); char* s = (char*)malloc(n + 1); for (int i = 0; i < n; i++) s[i] = (char) bytes_at(b, i); s[n] = 0; return s; }
+static Value procRun_c3(Value u, Value* env) { (void)u; char* prog = _proc_cstr(env[0]); char* arg = _proc_cstr(env[1]); size_t cl = strlen(prog) + strlen(arg) + 2; char* cmd = (char*)malloc(cl); snprintf(cmd, cl, "%s %s", prog, arg); FILE* f = popen(cmd, "r"); free(prog); free(arg); free(cmd); if (!f) return mkbytes(0); size_t cap = 256, len = 0; unsigned char* buf = (unsigned char*)malloc(cap); int ch; while ((ch = fgetc(f)) != EOF) { if (len == cap) { cap *= 2; buf = (unsigned char*)realloc(buf, cap); } buf[len++] = (unsigned char) ch; } pclose(f); Value r = mkbytes((int) len); for (size_t i = 0; i < len; i++) bytes_set(r, (int) i, buf[i]); free(buf); return r; }
+static Value procRun_c2(Value arg, Value* env) { Value c = mkclo(&procRun_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, arg); return c; }
+static Value procRun_c1(Value prog, Value* env) { (void)env; Value c = mkclo(&procRun_c2, 1); clo_set(c, 0, prog); return c; }
+static Value procRun(void) { return mkclo(&procRun_c1, 0); }
+`)
+}
+
+// emitFSPrimsC bakes the Phase-1 expanded OS/filesystem host bodies (Bin-native) on
+// the C backend: write/read/exists/remove/mkdir over POSIX stdio + stat.
+func emitFSPrimsC(b *strings.Builder, p Program) {
+	if !usesFS(p) {
+		return
+	}
+	b.WriteString(`#include <sys/stat.h>
+#include <unistd.h>
+static char* _fs_cstr(Value b) { int n = bytes_len(b); char* s = (char*)malloc(n + 1); for (int i = 0; i < n; i++) s[i] = (char) bytes_at(b, i); s[n] = 0; return s; }
+static Value fsWrite_c3(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); Value data = env[1]; int n = bytes_len(data); FILE* f = fopen(path, "wb"); free(path); if (!f) return big_from_long(0); for (int i = 0; i < n; i++) { unsigned char c = (unsigned char) bytes_at(data, i); fwrite(&c, 1, 1, f); } fclose(f); return big_from_long(n); }
+static Value fsWrite_c2(Value data, Value* env) { Value c = mkclo(&fsWrite_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, data); return c; }
+static Value fsWrite_c1(Value path, Value* env) { (void)env; Value c = mkclo(&fsWrite_c2, 1); clo_set(c, 0, path); return c; }
+static Value fsWrite(void) { return mkclo(&fsWrite_c1, 0); }
+static Value fsRead_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); FILE* f = fopen(path, "rb"); free(path); if (!f) return mkbytes(0); fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET); if (sz < 0) sz = 0; Value r = mkbytes((int) sz); for (long i = 0; i < sz; i++) { int ch = fgetc(f); bytes_set(r, (int) i, ch < 0 ? 0 : ch); } fclose(f); return r; }
+static Value fsRead_c1(Value path, Value* env) { (void)env; Value c = mkclo(&fsRead_c2, 1); clo_set(c, 0, path); return c; }
+static Value fsRead(void) { return mkclo(&fsRead_c1, 0); }
+static Value fsExists_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); int ok = access(path, F_OK) == 0; free(path); return big_from_long(ok ? 1 : 0); }
+static Value fsExists_c1(Value path, Value* env) { (void)env; Value c = mkclo(&fsExists_c2, 1); clo_set(c, 0, path); return c; }
+static Value fsExists(void) { return mkclo(&fsExists_c1, 0); }
+static Value fsRemove_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); int ok = remove(path) == 0; free(path); return big_from_long(ok ? 1 : 0); }
+static Value fsRemove_c1(Value path, Value* env) { (void)env; Value c = mkclo(&fsRemove_c2, 1); clo_set(c, 0, path); return c; }
+static Value fsRemove(void) { return mkclo(&fsRemove_c1, 0); }
+static Value fsMkdir_c2(Value u, Value* env) { (void)u; char* path = _fs_cstr(env[0]); int ok = mkdir(path, 0755) == 0; free(path); return big_from_long(ok ? 1 : 0); }
+static Value fsMkdir_c1(Value path, Value* env) { (void)env; Value c = mkclo(&fsMkdir_c2, 1); clo_set(c, 0, path); return c; }
+static Value fsMkdir(void) { return mkclo(&fsMkdir_c1, 0); }
+`)
+}
+
 // emitFloatPrimsC bakes the D3 machine-float (f64) host bodies + the OpenBLAS dot
 // kernel into the C translation unit (R-FFI assume-tier accessors, gated by use).
 // Each is a curried closure over K_FLOAT boxes; a comparison returns a builtin-nat
@@ -574,6 +687,12 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value printNat_c2(Value w, Value* env) { (void)w; Value n = env[0]; if (IS_INT(n)) printf(\"%ld\\n\", INT_VAL(n)); else { big_print(n); putchar('\\n'); } return n; }\n")
 		b.WriteString("static Value printNat_c1(Value n, Value* env) { (void)env; Value c = mkclo(&printNat_c2, 1); clo_set(c, 0, n); return c; }\n")
 		b.WriteString("static Value printNat(void) { return mkclo(&printNat_c1, 0); }\n")
+	}
+	// getNat (IO Nat): read a decimal from stdin (the native backends lacked it until
+	// Phase 1's socket echo fed the port on stdin).
+	if usesForeign(p, "getNat") {
+		b.WriteString("static Value getNat_c1(Value u, Value* env) { (void)u; (void)env; long x = 0; if (scanf(\"%ld\", &x) != 1) x = 0; return big_from_long(x); }\n")
+		b.WriteString("static Value getNat(void) { return mkclo(&getNat_c1, 0); }\n")
 	}
 	// D4 / R-INTEROP: a MINIMAL CPython EMBED on the native C backend — not a subprocess
 	// or the py emitter, but libpython linked INTO the binary (Py_Initialize once, lazily).
@@ -809,7 +928,7 @@ typedef intptr_t Value;
 
 /* Object kinds. K_BIG is a naive arbitrary-precision integer (builtin-nat): see
    the bignum section. */
-enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7 };
+enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7, K_BYTES = 8 };
 
 typedef struct Obj {
   int kind;
@@ -942,6 +1061,9 @@ static size_t gc_obj_size(Obj* o) {
        limb count, which big_norm may shrink — so capacity, not nfield, bounds the
        object). The limbs are raw words, never traced (default in gc_mark_obj). */
     case K_BIG:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break;
+    /* K_BYTES (Phase 0 real byte string): one byte per Value slot, nenv = count.
+       Raw bytes, never traced (default in gc_mark_obj). */
+    case K_BYTES: extra = o->nenv  > 0 ? o->nenv   - 1 : 0; break;
     default:     extra = 0; break; /* K_STR, K_PTR, K_UNIT: just the header */
   }
   size_t sz = base + (size_t)extra * sizeof(Value);
@@ -1127,6 +1249,18 @@ static int  big_nlimbs(Value v) { return obj(v)->nfield; }
 static long big_limb(Value v, int i) { return (long)obj(v)->slots[i]; }
 static void big_setlimb(Value v, int i, long x) { obj(v)->slots[i] = (Value)x; }
 
+/* Phase 0 real byte strings (Bin): K_BYTES stores one byte per Value slot,
+   nfield = nenv = the byte count (mirrors K_BIG's inline layout; raw bytes are
+   never traced by the GC). */
+static Value mkbytes(int n) {
+  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (n > 0 ? (n - 1) : 0) * sizeof(Value));
+  o->kind = K_BYTES; o->nfield = n; o->nenv = n;
+  return (Value)o;
+}
+static int  bytes_len(Value v) { return obj(v)->nfield; }
+static int  bytes_at(Value v, int i) { return (int)((long)obj(v)->slots[i] & 255); }
+static void bytes_set(Value v, int i, int x) { obj(v)->slots[i] = (Value)(long)(x & 255); }
+
 /* canonicalize: drop leading-zero limbs (logical nfield only; capacity stays). */
 static Value big_norm(Value v) {
   Obj* o = obj(v);
@@ -1216,6 +1350,34 @@ static Value big_monus(Value a, Value b) {
 
 static Value big_succ(Value a) { return big_add(a, big_from_long(1)); }
 
+/* Schoolbook long division (base-1e9 limbs), MS-limb first with a per-limb binary
+   search for the quotient digit (using big_cmp/big_mul over existing ops). Returns
+   the quotient; *rem receives the remainder. Division by zero yields q=0, r=a (the
+   DIV-LAW-at-0 convention matching the kernel's NatOp). */
+static Value big_divmod(Value a, Value b, Value* rem) {
+  if (big_nlimbs(b) == 0) { *rem = a; return big_from_long(0); }
+  if (big_cmp(a, b) < 0) { *rem = a; return big_from_long(0); }
+  int n = big_nlimbs(a);
+  Value q = mkbig(n);
+  Value r = big_from_long(0);
+  Value base = big_from_long(BIG_BASE);
+  for (int i = n - 1; i >= 0; i--) {
+    r = big_add(big_mul(r, base), big_from_long(big_limb(a, i)));
+    long lo = 0, hi = BIG_BASE - 1, d = 0;
+    while (lo <= hi) {
+      long mid = lo + (hi - lo) / 2;
+      if (big_cmp(big_mul(b, big_from_long(mid)), r) <= 0) { d = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    big_setlimb(q, i, d);
+    r = big_monus(r, big_mul(b, big_from_long(d)));
+  }
+  *rem = big_norm(r);
+  return big_norm(q);
+}
+static Value big_div(Value a, Value b) { Value r; return big_divmod(a, b, &r); }
+static Value big_mod(Value a, Value b) { Value r; big_divmod(a, b, &r); return r; }
+
 /* print a bignum as a decimal magnitude (top limb plain, the rest 0-padded). */
 static void big_print(Value v) {
   int n = big_nlimbs(v);
@@ -1235,6 +1397,8 @@ static double big_to_double(Value v) {
 static Value nat_add(Value a, Value b) { return big_add(a, b); }
 static Value nat_mul(Value a, Value b) { return big_mul(a, b); }
 static Value nat_monus(Value a, Value b) { return big_monus(a, b); }
+static Value nat_div(Value a, Value b) { return big_div(a, b); }
+static Value nat_mod(Value a, Value b) { return big_mod(a, b); }
 
 static void rt_abort(void) { fprintf(stderr, "rune-c: impossible (unmatched constructor tag)\n"); exit(1); }
 
@@ -1258,6 +1422,7 @@ static void show(Value v) {
   Obj* o = obj(v);
   switch (o->kind) {
     case K_BIG: big_print(v); return;
+    case K_BYTES: { int bn = bytes_len(v); putchar('"'); for (int bi = 0; bi < bn; bi++) { int bx = bytes_at(v, bi); if (bx >= 0x20 && bx < 0x7f && bx != 0x22 && bx != 0x5c) putchar(bx); else printf("\\x%02x", bx); } putchar('"'); return; }
     case K_FLOAT: printf("%g", o->dval); return;
     case K_CLO: printf("<function>"); return;
     case K_PTR: printf("<ptr>"); return;

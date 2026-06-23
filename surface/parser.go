@@ -780,7 +780,7 @@ func (p *parser) parseApp() (Exp, error) {
 
 func (p *parser) atomStarts() bool {
 	switch p.peek().kind {
-	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tDec, tStr, tCase, tCalc:
+	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tDec, tStr, tBytes, tCase, tCalc:
 		return true
 	default:
 		return false
@@ -847,6 +847,9 @@ func (p *parser) parseAtom() (Exp, error) {
 	case tStr:
 		p.next()
 		return p.strLit(t)
+	case tBytes:
+		p.next()
+		return p.bytesLit(t)
 	case tFn:
 		return p.parseLam()
 	case tCase:
@@ -1027,6 +1030,21 @@ func (p *parser) strLit(t token) (Exp, error) {
 		acc.Add(acc, big.NewInt(int64(bs[i])))
 	}
 	return EApp{Fn: EVar{Name: "bytes"}, Arg: ENum{Val: acc, Pos: t.pos}}, nil
+}
+
+// bytesLit desugars a byte-string literal b"…" to a binCons chain over binEmpty
+// (Phase-0 Bin sugar): b"hi" => binCons 104 (binCons 105 binEmpty), the bytes
+// prepended head-first so the result reads in source order. `binEmpty`/`binCons`
+// must be in scope (the Bin foreign vocabulary, like `bytes` for packed strings).
+// The O(n) chain mirrors how a packed string desugars; a future O(1) literal can
+// ride the LitBytes IR node once a big-literal consumer needs it.
+func (p *parser) bytesLit(t token) (Exp, error) {
+	bs := []byte(t.text)
+	var acc Exp = EVar{Name: "binEmpty"}
+	for i := len(bs) - 1; i >= 0; i-- {
+		acc = EApp{Fn: EApp{Fn: EVar{Name: "binCons"}, Arg: ENum{Val: big.NewInt(int64(bs[i])), Pos: t.pos}}, Arg: acc}
+	}
+	return acc, nil
 }
 
 // isQtyTok reports whether a token is a usage annotation in binder position:

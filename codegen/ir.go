@@ -63,6 +63,30 @@ const (
 	// CRITICAL: LitNat must match the NatSpec representation, NOT LitInt — on JS
 	// a nat is a BigInt (`5000n`) and `x + 1n` rejects a plain `Number`.
 	LitNat
+	// LitBytes is a REAL byte string (Phase 0 / Go-stdlib parity): a
+	// length-prefixed, immutable sequence of arbitrary bytes — the honest
+	// counterpart to the packed-Nat `String` (which packs UTF-8 into a single
+	// bignum and so cannot index by byte in O(1) nor carry the full breadth of
+	// bytes/strings/encoding/crypto a real stdlib needs). The Str field carries the
+	// RAW bytes verbatim (Go `string` is a byte vector and may hold NUL and invalid
+	// UTF-8); NO encoding is assumed. The canonical wire form is exactly this byte
+	// sequence — bytes are ordered, not numeric, so there is NO endianness hazard
+	// (the bignum's little-endian byte order was the old trap, gone here). Each
+	// backend renders it to its native immutable byte container (JS Uint8Array — NOT
+	// a JS string, whose UTF-16 reindexes astral codepoints; Python `bytes`; Go
+	// `[]byte`; Rust `V::Bytes(Vec<u8>)`; BEAM binary; JVM `VBytes(byte[])`; C/LLVM
+	// a `K_BYTES` length-prefixed GC object with the payload inline in slots, since
+	// the mark-sweep has no per-kind finalizer). The canonical `$show` (the
+	// conformance gate) is PURE BYTE-LEVEL — no UTF-8 decoding, so it is trivially
+	// identical on all 8: print a double-quoted string where each byte in printable
+	// ASCII (0x20..0x7e) other than `"` (0x22) and `\` (0x5c) is emitted literally,
+	// and EVERY other byte (control, NUL, and all bytes >= 0x7f — i.e. every
+	// multibyte-UTF-8 lead/continuation byte and every invalid byte) is emitted as
+	// `\xNN` with two lowercase hex digits. One algorithm mirrored by every emitter.
+	// Indexing is BY BYTE at the
+	// Bytes level (O(1) `byteAt`, `len` = byte count); rune indexing is a derived
+	// O(n) UTF-8 view in the prelude, never the carrier's job.
+	LitBytes
 )
 
 // ILit is a NATIVE host literal — the marshalling primitive at the C-ABI / FFI
@@ -79,7 +103,9 @@ type ILit struct {
 	Kind LitKind
 	// Int is the payload when Kind == LitInt.
 	Int int64
-	// Str is the payload when Kind == LitStr.
+	// Str is the payload when Kind == LitStr, and also the RAW bytes when
+	// Kind == LitBytes (a Go string used as an arbitrary byte vector — may hold
+	// NUL and non-UTF-8 bytes).
 	Str string
 	// Nat is the canonical decimal magnitude when Kind == LitNat (a string so an
 	// arbitrary-precision numeral survives to the arbitrary-precision backends).
