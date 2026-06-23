@@ -173,11 +173,33 @@ b) → visibleRun (ra+k) (par a b) = project (par a b)`. `nestedGeneral` proves 
 sup` adequate from this ONE general lemma — not a bespoke induction. Adequacy is now a
 COMPOSITIONAL property: prove it for the pieces, get it for the `par`.
 
-**What stays open (narrowed again).** `parSeqAdequate` reduces the all-P refinement to a SINGLE
-remaining obligation: prove that every member of a structurally-defined **well-supervised class**
-SETTLES (`settlesB ra a = true` for some `ra`, e.g. by structural induction on the par-tree with
-each `unit` contributing one step). `runLen` then composes their adequacy automatically. The hard
-"fuel does not decompose over par" wall is GONE — replaced by a settling-totality lemma over a
-syntactic class, which is ordinary structural induction, not the interleaving obstacle. The
-limit-via-`traceBisim` route (`ch208`/`ch209`) remains available as an alternative for the
-unbounded/non-settling case, with `ch466`'s active-step rule as its per-step transition law.
+**SETTLING COMPOSES — the obligation discharged (`ch469`, 2026-06-22).** The single remaining
+obligation (prove the well-supervised class settles) is now closed COMPOSITIONALLY:
+
+```
+parSettles : settlesB ra a = true -> settlesB rb b = true
+          -> settlesB (natAdd ra rb) (par a b) = true
+```
+
+Settling COMPOSES over `par` (a runs its `ra` steps by left-bias, then the quiescent `a` lets `b`
+run its `rb`). Base = `settlesQuiet` (a quiescent non-crash peer preserves settling, induction on
+`rb` via `ch464`'s `okStepParQuiet`); step = the `parActive` consequences of `ch466`'s
+`okStepActive`. With `ch468`'s `parSeqAdequate` (adequacy composes), the TWO compositions give the
+all-P refinement for the WHOLE supervised-tree class with no per-shape induction. The capstone
+proves `par (par sup sup) (par sup sup)` — a BALANCED tree, neither `ch459`'s right spine nor
+`ch466`'s left-nest-to-halt — settling AND adequate purely by composing `parSettles` +
+`parSeqAdequate` over its sub-trees (runs to its certified 4-failure trace).
+
+**Status: the interleaving wall is CLOSED for the supervised-tree class.** The progression
+`ch466` (left-bias per-step) → `ch468` (running-length / `runLen` / `parSeqAdequate`) → `ch469`
+(`settlesQuiet`/`parSettles` + the balanced-tree capstone) takes the E3 all-P refinement from
+"open research, the fuel does not decompose over par" to "a proven compositional theorem: any
+finite par-tree of supervised units is adequate, by structural composition of two lemmas." Both
+compositions (settling and adequacy) and the per-step transition rule are machine-checked, the
+outer kernel untouched (Thompson).
+
+**The only residue** is the genuinely-coinductive / NON-settling tail — unbounded fault streams
+where no finite `ra` settles the process. That case does not use `runLen`; it rides
+`ch208`/`ch209`'s `traceBisim` (interleaving already solved coinductively) with `ch466`'s
+active-step rule as the per-step transition law. It is a different proof technique, not the
+interleaving obstacle, and has no current consumer (every shipped protocol settles).
