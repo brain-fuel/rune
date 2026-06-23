@@ -294,6 +294,8 @@ func TestFOSSBackendsEmit(t *testing.T) {
 		{"clickhouse", Warehouse{Name: "w"}},
 		{"ollama", Inference{Name: "model"}},
 		{"minio", Archive{Name: "cold"}},
+		{"fn", Serverless{Name: "fn1"}},
+		{"woodpecker", DevOps{Name: "ci"}},
 	}
 	for _, c := range cases {
 		e, ok := ByTarget(c.backend)

@@ -752,3 +752,71 @@ func (MinIO) Emit(rs []Resource) (Artifact, error) {
 		Logical: logicalSet(rs),
 	}, nil
 }
+
+// Fn is the self-hosted serverless backend (Fn Project, Apache-2.0) — a single-container
+// function runtime exposing an HTTP API on port 8080, the self-hosted form of Lambda /
+// Azure Functions / Cloud Functions with NO cloud account and no orchestrator.
+type Fn struct{}
+
+func (Fn) Target() string { return "fn" }
+func (Fn) Cloud() bool    { return false }
+
+func (Fn) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("fn", "serverless", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Fn Project backend for the wavelet \"serverless\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (function API on localhost:8080)\n" +
+		"services:\n" +
+		"  fnserver:\n" +
+		"    image: docker.io/fnproject/fnserver:latest\n" +
+		"    ports:\n" +
+		"      - \"8080:8080\"\n"
+	env := map[string]string{
+		"WAVELET_SERVERLESS_BACKEND": "fn",
+		"WAVELET_SERVERLESS_URL":     "http://localhost:8080",
+	}
+	for _, n := range names {
+		env["WAVELET_SERVERLESS_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}
+
+// Woodpecker is the self-hosted CI/CD backend (Woodpecker CI, Apache-2.0) — a single-
+// container pipeline server on port 8000, the self-hosted form of CodeBuild / Azure
+// Pipelines / Cloud Build with NO cloud account.
+type Woodpecker struct{}
+
+func (Woodpecker) Target() string { return "woodpecker" }
+func (Woodpecker) Cloud() bool    { return false }
+
+func (Woodpecker) Emit(rs []Resource) (Artifact, error) {
+	names, err := onlyKind("woodpecker", "devops", rs)
+	if err != nil {
+		return Artifact{}, err
+	}
+	compose := "# podman-compose spec - Woodpecker CI backend for the wavelet \"devops\" abstraction.\n" +
+		"# bring up:  podman-compose up -d   (CI server on localhost:8000)\n" +
+		"services:\n" +
+		"  woodpecker:\n" +
+		"    image: docker.io/woodpeckerci/woodpecker-server:latest\n" +
+		"    environment:\n" +
+		"      - WOODPECKER_OPEN=true\n" +
+		"    ports:\n" +
+		"      - \"8000:8000\"\n"
+	env := map[string]string{
+		"WAVELET_DEVOPS_BACKEND": "woodpecker",
+		"WAVELET_DEVOPS_URL":     "http://localhost:8000",
+	}
+	for _, n := range names {
+		env["WAVELET_DEVOPS_"+strings.ToUpper(n)] = n
+	}
+	return Artifact{
+		Files:   map[string]string{"compose.yaml": compose, "connection.env": envFile(env)},
+		Logical: logicalSet(rs),
+	}, nil
+}

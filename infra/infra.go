@@ -323,6 +323,30 @@ func (Archive) isResource()           {}
 func (Archive) Kind() string          { return "archive" }
 func (a Archive) LogicalName() string { return a.Name }
 
+// Serverless is a managed function-as-a-service endpoint (AWS Lambda / Azure Functions /
+// GCP Cloud Functions) — event-driven code with no managed server. Fn (fnproject) is the
+// self-hosted FOSS backend (a single-container function runtime). Cloud side is
+// dependency-heavy (a deployment package + execution role); emitted at representative fidelity.
+type Serverless struct {
+	Name string
+}
+
+func (Serverless) isResource()           {}
+func (Serverless) Kind() string          { return "serverless" }
+func (s Serverless) LogicalName() string { return s.Name }
+
+// DevOps is a managed CI/CD pipeline (AWS CodeBuild / Azure Container App Job / GCP Cloud
+// Build) — a build/test/deploy runner. Woodpecker CI is the self-hosted FOSS backend (a
+// single-container CI server). Cloud side binds a source repo + artifact store; emitted at
+// representative fidelity.
+type DevOps struct {
+	Name string
+}
+
+func (DevOps) isResource()           {}
+func (DevOps) Kind() string          { return "devops" }
+func (d DevOps) LogicalName() string { return d.Name }
+
 func (d Disk) sizeGB() int {
 	if d.SizeGB < 1 {
 		return 20
@@ -366,7 +390,7 @@ type Emitter interface {
 func All() []Emitter {
 	return []Emitter{
 		AWS{}, Azure{}, GCP{},
-		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{}, Prometheus{}, K3s{}, NFS{}, VaultKMS{}, ClickHouse{}, Ollama{}, MinIO{},
+		RabbitMQ{}, NATS{}, Valkey{}, Garage{}, Podman{}, Postgres{}, Dotenv{}, DynamoLocal{}, CoreDNS{}, LocalRegistry{}, Redpanda{}, Vault{}, Loki{}, Prometheus{}, K3s{}, NFS{}, VaultKMS{}, ClickHouse{}, Ollama{}, MinIO{}, Fn{}, Woodpecker{},
 	}
 }
 
@@ -402,7 +426,7 @@ func Kinds() []string {
 		"queue", "kv", "object", "compute", "database", "secret", "nosql", "dns",
 		"disk", "kms", "file", "stream", "cdn", "lb", "metrics", "iam", "k8s",
 		"network", "firewall", "logs", "registry", "paas", "warehouse",
-		"inference", "archive",
+		"inference", "archive", "serverless", "devops",
 	}
 }
 

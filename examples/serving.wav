@@ -1,10 +1,13 @@
 # examples/serving.wav
-# a model-serving app: an API in front of an inference endpoint, with a cache and a cold
-# archive for request logs. The genuine consumer for the wavelet "inference" + "archive"
-# rows — declares them alongside the existing kinds, lowers to all three clouds, and runs
-# self-hosted under Podman (Ollama + MinIO) with NO cloud account.
+# a model-serving app, end to end: an API in front of an inference endpoint, with a cache,
+# a cold archive for request logs, a serverless function for async post-processing, and a CI
+# pipeline. The genuine consumer for the wavelet inference/archive/serverless/devops rows —
+# declares them alongside the existing kinds, lowers to all three clouds, and runs self-hosted
+# under Podman (Ollama + MinIO + Fn + Woodpecker) with NO cloud account.
 compute    api        replicas=2 image=docker.io/library/erlang:slim
 inference  model
 kv         cache
 archive    logs
+serverless postproc
+devops     pipeline
 lb         ingress

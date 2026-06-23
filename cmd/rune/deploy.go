@@ -350,6 +350,10 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 		return infra.Inference{Name: name}, nil
 	case "archive":
 		return infra.Archive{Name: name}, nil
+	case "serverless":
+		return infra.Serverless{Name: name}, nil
+	case "devops":
+		return infra.DevOps{Name: name}, nil
 	default:
 		return nil, fmt.Errorf("rune deploy: unknown resource %q (run with no args for the kind list)", kind)
 	}
