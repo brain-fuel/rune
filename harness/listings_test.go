@@ -1057,6 +1057,42 @@ func TestListingsOTPFaultLiveBeam(t *testing.T) {
 	}
 }
 
+// TestListingsPerpetualServiceBeam runs ch474 — a PERPETUAL supervised service live on
+// the BEAM (D5). Unlike ch214's single crash→detect→restart (k=1, settles), the supervisor
+// spins through THREE successive crash→detect→restart cycles and only then yields a live
+// worker, which takes one bump and reports: "succ zero". The service survives the fault
+// storm and still serves — the canonical perpetual OTP shape, run live. (The full all-P
+// adequacy theorem over an UNBOUNDED fault stream stays research; this runs the shape.)
+func TestListingsPerpetualServiceBeam(t *testing.T) {
+	if _, err := exec.LookPath("escript"); err != nil {
+		t.Skip("escript not in PATH")
+	}
+	s := loadListing(t, "ch474_perpetual_service.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := codegen.Beam{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "ch474.erl")
+	if err := os.WriteFile(f, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("escript", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("escript run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, out)
+	}
+	if want := "succ zero"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("perpetual supervised service on BEAM printed %q, want %q (3 crash→detect→restart cycles, then 1)", got, want)
+	}
+}
+
 // TestCongConsGLaterGeneralizesCongConsG pins the per-clock E2-converse increment
 // (telos-4/M7): `congConsGLater` — the DELAYED-tail consG-congruence — is a strict
 // generalization of `congConsG`. The guarded recursive call yields the tail-path

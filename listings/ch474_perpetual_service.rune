@@ -1,0 +1,76 @@
+-- Chapter 474 — a PERPETUAL supervised service, LIVE on the BEAM (D5 / R-OTP). ch214 ran
+-- ONE crash→detect→restart cycle (the bounded `eventuallyRestarted`, k=1). A real deployed
+-- service does not settle after one restart — it is SUPERVISED PERPETUALLY, restarting on
+-- every fault for as long as it runs. This is that shape: a supervisor that spins through N
+-- crash→detect→restart cycles and only then yields a LIVE worker, which answers. The service
+-- survives N successive faults and still serves — the canonical OTP supervision shape, run
+-- live (not a model). BEAM-only (the fault primitives' home).
+--
+-- HONEST SCOPE (the consumer, not the theorem): this RUNS the non-settling SHAPE for a
+-- concrete N (a finite, multi-cycle instance, so the escript terminates). The general all-P
+-- adequacy theorem for an UNBOUNDED fault stream — where no finite `ra` settles the process —
+-- remains open RESEARCH (the dfix wall; ref_docs/wootz/ADEQUACY-TIE.md). The fault LTS (ch206)
+-- specifies this service's behaviour; ch207/209 adequacy covers the per-cycle refinement; what
+-- this listing adds is the LIVE perpetual artifact a deployed supervisor actually is.
+
+data Unit : U is unit : Unit end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+
+foreign Pid : U -> U end
+foreign primSelf    : (M : U) -> IO (Pid M) end
+foreign primSpawn   : (M : U) -> (Pid M -> IO Unit) -> IO (Pid M) end
+foreign primSend    : (M : U) -> Pid M -> M -> IO Unit end
+foreign primReceive : (M : U) -> IO M end
+foreign primExit    : (M : U) -> Pid M -> IO Unit end
+foreign primMonitor : (M : U) -> Pid M -> IO Unit end
+
+data Msg : U is bump : Msg | report : Pid Nat -> Msg end
+
+-- the worker's receive loop (R-PART / C4): bump the count, or answer the reporter.
+partial serve : Nat -> IO Unit is
+  fn (s : Nat) is
+    bindIO Msg Unit (primReceive Msg) (fn (m : Msg) is
+      MsgElim (fn (x : Msg) is IO Unit end)
+        (serve (succ s))
+        (fn (rp : Pid Nat) is primSend Nat rp s end)
+        m
+    end)
+  end
+end
+
+-- THE PERPETUAL SUPERVISOR. `restartLoop n` performs n crash→detect→restart cycles: each
+-- step spawns a worker that immediately crashes (`primExit self`), monitors it and blocks
+-- until the DOWN arrives (the DETECT rule), then restarts — recursing for the remaining
+-- cycles. The base (n = 0) spawns the surviving LIVE worker (`serve zero`). Structural
+-- recursion on n (NatElim), so it is TOTAL — the perpetual shape, run for a concrete bound.
+restartLoop : Nat -> IO (Pid Msg) is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is IO (Pid Msg) end)
+      (primSpawn Msg (fn (selfp : Pid Msg) is serve zero end))
+      (fn (k : Nat) (ih : IO (Pid Msg)) is
+        bindIO (Pid Msg) (Pid Msg)
+          (primSpawn Msg (fn (selfp : Pid Msg) is primExit Msg selfp end))
+          (fn (w : Pid Msg) is
+            bindIO Unit (Pid Msg) (primMonitor Msg w) (fn (down : Unit) is ih end)
+          end)
+      end)
+      n
+  end
+end
+
+-- survive THREE successive crashes, then serve. The live worker (after 3 restarts) takes one
+-- bump and reports it: the answer is `succ zero` (1) — the service is still alive after the
+-- fault storm. Recovery happened three times, on a real BEAM.
+numCrashes : Nat is succ (succ (succ zero)) end
+
+main : IO Nat is
+  bindIO (Pid Nat) Nat (primSelf Nat) (fn (me : Pid Nat) is
+    bindIO (Pid Msg) Nat (restartLoop numCrashes) (fn (w : Pid Msg) is
+      bindIO Unit Nat (primSend Msg w bump) (fn (u1 : Unit) is
+        bindIO Unit Nat (primSend Msg w (report me)) (fn (u2 : Unit) is
+          primReceive Nat
+        end)
+      end)
+    end)
+  end)
+end

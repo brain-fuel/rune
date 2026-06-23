@@ -203,3 +203,29 @@ where no finite `ra` settles the process. That case does not use `runLen`; it ri
 `ch208`/`ch209`'s `traceBisim` (interleaving already solved coinductively) with `ch466`'s
 active-step rule as the per-step transition law. It is a different proof technique, not the
 interleaving obstacle, and has no current consumer (every shipped protocol settles).
+
+## The non-settling tail now has a LIVE consumer (ch474), but the theorem stays open
+
+The "no current consumer" claim above is now half-retired. ch474 (a PERPETUAL supervised
+service: a supervisor that spins through N successive crash→detect→restart cycles and only
+then yields a live worker) is the genuine NON-SETTLING shape — a real deployed service is
+supervised perpetually, not settled after one restart. It RUNS LIVE on the BEAM (three
+crash→detect→restart cycles, then the surviving worker answers `succ zero`;
+`TestListingsPerpetualServiceBeam`) by reusing ch214's `primExit`/`primMonitor` host bodies
+with a structurally-recursive (NatElim, TOTAL) supervisor.
+
+What that consumer establishes vs what stays RESEARCH:
+- **Established (the shape + the live artifact):** the perpetual supervision pattern is
+  expressible and DEPLOYS; the fault LTS (ch206) specifies it; ch207/ch209 cover the
+  per-cycle refinement. For any CONCRETE bound N it is a finite, settling run (N cycles, then
+  quiescent), so the existing settling machinery (`runLen`/`parSettles`, ch468/469) already
+  proves its adequacy.
+- **Still RESEARCH (the theorem):** all-P adequacy over an UNBOUNDED fault stream — where no
+  finite `ra` settles the process — is NOT closed. It rides `traceBisim` (ch208/209) with
+  ch466's active-step as the per-step law, against the dfix wall (R-PART × coind unformalized).
+  ch474 demonstrates the shape and runs it; it does not discharge the coinductive theorem.
+
+So the consumer is genuine (a deployed service is the canonical OTP shape), and it un-parks
+the LIVE perpetual artifact — but the unbounded-stream adequacy proof remains the open
+research node, honestly. (The greatest-fixpoint Always-Eventually fairness — "restarts
+infinitely often" — is a further, separate dfix-wall research item, still no consumer.)
