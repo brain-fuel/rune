@@ -1,0 +1,59 @@
+-- Chapter 483 — REAL BYTE STRINGS (Bin): the honest counterpart to packed Nat.
+--
+-- The prelude's `String` packs UTF-8 into a SINGLE bignum (first byte LSB, 0x01
+-- sentinel). That is clever but cannot index by byte in O(1), cannot carry the
+-- full breadth of bytes/encoding/crypto a real stdlib needs, and conflates a
+-- string with a number. Phase 0 of Go-stdlib parity introduces `Bin`: a real,
+-- length-prefixed sequence of arbitrary bytes, deployed as each backend's native
+-- immutable byte container (JS Array of byte Numbers, Python bytes-as-list, Go
+-- []int, Rust V::Bytes, Erlang binary-as-list). Five host ops ship baked-in:
+--   binEmpty : Bin                     the empty byte string
+--   binCons  : Nat -> Bin -> Bin       prepend the low byte of a nat
+--   binLen   : Bin -> Nat              byte length (O(1))
+--   binAt    : Bin -> Nat -> Nat       the byte at an index (0 if out of range)
+--   printBin : Bin -> IO Unit          write the canonical $show + newline
+--
+-- The canonical $show is pure byte-level (no UTF-8 decoding, so it is trivially
+-- byte-identical on every backend): a double-quoted string where printable ASCII
+-- (0x20..0x7e, except `"` and `\`) prints literally and EVERY other byte — control,
+-- NUL, and all bytes >= 0x7f — prints as `\xNN` (two lowercase hex digits).
+--
+-- `demo` builds the 5 bytes h, NUL, 0xFF (an invalid UTF-8 byte), then 0xC3 0xA9
+-- ("é" in UTF-8) — exactly the NUL / invalid / multibyte cases that break a naive
+-- string carrier. The observable is `"h\x00\xff\xc3\xa9"`, then the length 5, then
+-- the byte at index 2 (255), then the IO unit result — byte-identical across
+-- js / py / go / rs / erl.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+-- The same 5 bytes, now written as a byte-string LITERAL `b"…"` (Phase-0 sugar
+-- that desugars to the binCons chain): \x escapes give the NUL and the invalid
+-- 0xFF byte, and the bare `é` contributes its real UTF-8 bytes 0xC3 0xA9.
+demo : Bin is b"h\x00\xffé" end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin demo) (fn (u0 : Unit) is
+    bindIO Nat Unit (printNat (binLen demo)) (fn (k : Nat) is
+      bindIO Nat Unit (printNat (binAt demo 2)) (fn (m : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

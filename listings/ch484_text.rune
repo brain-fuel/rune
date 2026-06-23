@@ -1,0 +1,393 @@
+-- Chapter 484 — the text stdlib over Bin (Phase 0b): bytes, strings, strconv,
+-- unicode, bufio, plus the io/fmt/errors tail — ONE library, the NatElim arithmetic
+-- kit defined ONCE and called by every operation (no per-listing duplication).
+--
+-- A `Bin` (ch483) is a real byte string; its operations are ordinary total wootz
+-- functions over the carrier primitives (binEmpty/binCons/binLen/binAt), recursion
+-- fuel-bounded on the REAL byte length (small), so NatElim loops never blow up the
+-- way the packed-Nat String's ~256^len "fuel" did. div/mod are kernel-accelerated
+-- (builtin natDiv/natMod), so strconv.Itoa is O(digits) at runtime.
+--
+-- main exercises the whole surface: Concat ("foobar"), Atoi (42), Itoa ("255"), a
+-- fmt-style formatted string ("1+2=3"), RuneCount of UTF-8 ("héllo" → 5), bufio line
+-- count ("a\nbb\nccc" → 3). Observable identical across all 8 backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- the carrier (ch483) + console out.
+foreign printNat : Nat -> IO Nat end
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+-- ============================================================================
+-- the arithmetic kit (defined ONCE) — derived from NatElim, no prelude.
+-- ============================================================================
+
+and2 : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end
+end
+
+boolToNat : Bool -> Nat is
+  fn (b : Bool) is case b of | true -> 1 | false -> 0 end end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is case n of | zero -> zero | succ m -> m end end
+end
+
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a
+  end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end)
+      b a
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end
+end
+
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is and2 (leb a b) (leb b a) end
+end
+
+isZeroN : Nat -> Bool is
+  fn (n : Nat) is case n of | zero -> true | succ k -> false end end
+end
+
+-- floor division and remainder by repeated subtraction (fuel = the dividend, an
+-- ample bound). Registered as the kernel div/mod accel, so at runtime they emit the
+-- host's native division (O(1)); the NatElim body is the open-term/proof fallback.
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end)
+      (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is
+           case leb b a of
+           | true  -> succ (ih (monus a b) b)
+           | false -> 0
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+divN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    case isZeroN b of
+    | true  -> 0
+    | false -> divModGo a a b
+    end
+  end
+end
+
+modN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end
+end
+
+builtin natDiv divN
+builtin natMod modN
+
+-- ============================================================================
+-- bytes
+-- ============================================================================
+
+eqFromGo : Nat -> Bin -> Bin -> Nat -> Bool is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bool end)
+      (fn (a : Bin) (b : Bin) (i : Nat) is true end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bool) is
+         fn (a : Bin) (b : Bin) (i : Nat) is
+           and2 (eqNat (binAt a i) (binAt b i)) (ih a b (succ i))
+         end
+      end)
+      fuel
+  end
+end
+
+-- bytes.Equal
+bytesEq : Bin -> Bin -> Bool is
+  fn (a : Bin) (b : Bin) is
+    and2 (eqNat (binLen a) (binLen b)) (eqFromGo (binLen a) a b 0)
+  end
+end
+
+concatGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end)
+      (fn (a : Bin) (b : Bin) (i : Nat) is b end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (a : Bin) (b : Bin) (i : Nat) is binCons (binAt a i) (ih a b (succ i)) end
+      end)
+      fuel
+  end
+end
+
+-- bytes.Concat / append
+bytesConcat : Bin -> Bin -> Bin is
+  fn (a : Bin) (b : Bin) is concatGo (binLen a) a b 0 end
+end
+
+-- ============================================================================
+-- strings
+-- ============================================================================
+
+-- strings.HasPrefix (hasPrefix prefix s)
+hasPrefix : Bin -> Bin -> Bool is
+  fn (p : Bin) (s : Bin) is
+    and2 (leb (binLen p) (binLen s)) (eqFromGo (binLen p) p s 0)
+  end
+end
+
+indexGo : Nat -> Bin -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Nat end)
+      (fn (s : Bin) (c : Nat) (i : Nat) is i end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (c : Nat) (i : Nat) is
+           case eqNat (binAt s i) c of | true -> i | false -> ih s c (succ i) end
+         end
+      end)
+      fuel
+  end
+end
+
+-- strings.IndexByte (returns binLen s when absent)
+indexByte : Bin -> Nat -> Nat is
+  fn (s : Bin) (c : Nat) is indexGo (binLen s) s c 0 end
+end
+
+-- strings.ContainsRune (byte)
+containsByte : Bin -> Nat -> Bool is
+  fn (s : Bin) (c : Nat) is leb (succ (indexByte s c)) (binLen s) end
+end
+
+sliceGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end)
+      (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is binCons (binAt s i) (ih s (succ i)) end
+      end)
+      fuel
+  end
+end
+
+-- s[i:j)
+binSlice : Bin -> Nat -> Nat -> Bin is
+  fn (s : Bin) (i : Nat) (j : Nat) is sliceGo (monus j i) s i end
+end
+
+-- ============================================================================
+-- strconv
+-- ============================================================================
+
+atoiGo : Nat -> Bin -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Nat end)
+      (fn (s : Bin) (i : Nat) (acc : Nat) is acc end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) (acc : Nat) is
+           ih s (succ i) (addN (mulN acc 10) (monus (binAt s i) 48))
+         end
+      end)
+      fuel
+  end
+end
+
+-- strconv.Atoi
+atoi : Bin -> Nat is
+  fn (s : Bin) is atoiGo (binLen s) s 0 0 end
+end
+
+-- a generous fixed digit budget for Itoa (handles values up to 10^64; far past any
+-- test value). Itoa stops as soon as the running quotient hits 0.
+digitFuel : Nat is 64 end
+
+itoaGo : Nat -> Nat -> Bin -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bin -> Bin end)
+      (fn (n : Nat) (acc : Bin) is acc end)
+      (fn (f : Nat) (ih : Nat -> Bin -> Bin) is
+         fn (n : Nat) (acc : Bin) is
+           case isZeroN n of
+           | true  -> acc
+           | false -> ih (divN n 10) (binCons (addN 48 (modN n 10)) acc)
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+-- strconv.Itoa (decimal render of a Nat)
+showNat : Nat -> Bin is
+  fn (n : Nat) is
+    case isZeroN n of
+    | true  -> binCons 48 binEmpty
+    | false -> itoaGo digitFuel n binEmpty
+    end
+  end
+end
+
+-- ============================================================================
+-- unicode / utf8
+-- ============================================================================
+
+isCont : Nat -> Bool is
+  fn (b : Nat) is and2 (leb 128 b) (leb b 191) end
+end
+
+isDigit : Nat -> Bool is
+  fn (c : Nat) is and2 (leb 48 c) (leb c 57) end
+end
+
+runeCountGo : Nat -> Bin -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Nat end)
+      (fn (s : Bin) (i : Nat) (acc : Nat) is acc end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) (acc : Nat) is
+           case isCont (binAt s i) of
+           | true  -> ih s (succ i) acc
+           | false -> ih s (succ i) (succ acc)
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+-- utf8.RuneCount
+runeCount : Bin -> Nat is
+  fn (s : Bin) is runeCountGo (binLen s) s 0 0 end
+end
+
+-- utf8.DecodeRune (1- or 2-byte forms), the codepoint starting at byte i
+decodeAt : Bin -> Nat -> Nat is
+  fn (s : Bin) (i : Nat) is
+    case leb (binAt s i) 127 of
+    | true  -> binAt s i
+    | false -> addN (mulN (monus (binAt s i) 192) 64) (monus (binAt s (succ i)) 128)
+    end
+  end
+end
+
+-- ============================================================================
+-- bufio (line scanning)
+-- ============================================================================
+
+countGo : Nat -> Bin -> Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Nat -> Nat end)
+      (fn (s : Bin) (c : Nat) (i : Nat) (acc : Nat) is acc end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (c : Nat) (i : Nat) (acc : Nat) is
+           case eqNat (binAt s i) c of
+           | true  -> ih s c (succ i) (succ acc)
+           | false -> ih s c (succ i) acc
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+countByte : Bin -> Nat -> Nat is
+  fn (s : Bin) (c : Nat) is countGo (binLen s) s c 0 0 end
+end
+
+-- bufio line count (newline count + 1)
+lineCount : Bin -> Nat is
+  fn (s : Bin) is succ (countByte s 10) end
+end
+
+firstLine : Bin -> Bin is
+  fn (s : Bin) is binSlice s 0 (indexByte s 10) end
+end
+
+-- ============================================================================
+-- errors (the language's Result) + io (a Bin sink) + fmt (Show + format)
+-- ============================================================================
+
+data Result : U -> U -> U is
+  okR  : (a : U) -> (e : U) -> a -> Result a e
+| errR : (a : U) -> (e : U) -> e -> Result a e
+end
+
+-- a parse that reports an error (code 0) instead of silently folding non-digits.
+-- (Error type Nat, not Bin: a foreign type passed as an explicit type argument
+-- would erase to a bodiless accessor, undefined on the native/Go/erl backends.)
+atoiR : Bin -> Result Nat Nat is
+  fn (s : Bin) is
+    case isZeroN (binLen s) of
+    | true  -> errR Nat Nat 0
+    | false -> okR Nat Nat (atoi s)
+    end
+  end
+end
+
+-- io.Writer ~ a Bin sink; putStr writes a byte string.
+putStr : Bin -> IO Unit is fn (s : Bin) is printBin s end end
+
+-- fmt: a tiny "%d+%d=%d" formatter over showNat.
+fmtSum : Nat -> Nat -> Bin is
+  fn (a : Nat) (b : Nat) is
+    bytesConcat (showNat a)
+      (bytesConcat b"+"
+        (bytesConcat (showNat b)
+          (bytesConcat b"=" (showNat (addN a b)))))
+  end
+end
+
+hay : Bin is b"hello world" end
+txt : Bin is b"héllo" end
+buf : Bin is b"a\nbb\nccc" end
+
+main : IO Unit is
+  bindIO Unit Unit (putStr (bytesConcat b"foo" b"bar")) (fn (u0 : Unit) is
+    bindIO Nat Unit (printNat (atoi b"42")) (fn (a : Nat) is
+      bindIO Unit Unit (putStr (showNat 255)) (fn (u1 : Unit) is
+        bindIO Unit Unit (putStr (fmtSum 1 2)) (fn (u2 : Unit) is
+          bindIO Nat Unit (printNat (runeCount txt)) (fn (b : Nat) is
+            bindIO Nat Unit (printNat (lineCount buf)) (fn (c : Nat) is
+              pureIO Unit unit
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end
