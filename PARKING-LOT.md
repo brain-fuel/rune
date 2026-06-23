@@ -387,3 +387,24 @@ current consumer demands zero-copy (no shipped pipeline pushes arrays large enou
 walk to bottleneck). Parked per Standing Rule 1 until such a consumer exists; ch472 makes the swap
 mechanical when it does (replace the `buf : FList` field, indices + by-construction discharge
 unchanged). Sibling of the parked int64 fast-lane / native bignum / raw-sockets no-consumer tails.
+
+## Would-be consumers for the parked frontier nodes (2026-06-23)
+Every parked node is parked for "no consumer." The 2026-06-23 sweep built the three GENUINE
+consumers (fit.rune ch473 → D4 ML-interop; serving.wav → E4 inference/archive rows; ch474
+perpetual service → live non-settling shape) and RECORDED the would-be consumer for the rest —
+building those would be MANUFACTURING need (a Standing Rule 1 violation), so they stay parked:
+- **rung-4 zero-copy `Array dt sh` CRepr** ← needs a LARGE-array workload where the O(n) FList
+  marshalling bottlenecks; fit.rune (ch473) computes correctly on the flat substrate at demo
+  scale, so no consumer demands zero-copy yet.
+- **`elemTy:DType->U`** (universe-poly eliminator) ← needs a mixed-dtype array whose cells are
+  genuinely `Int` (i64) vs `Float` (f64); every shipped array is f64.
+- **E4 `serverless` / `devops` rows** ← need a NEW resource shape the current model lacks
+  (serverless: handler code + runtime + packaging; devops: a `pipeline` kind + a `repository`
+  relationship). The FOSS forms (OpenFaaS, Woodpecker/Gitea) exist but the cloud side is
+  dependency-heavy and the abstraction is new.
+- **full non-settling coinductive adequacy / Always-Eventually fairness** ← ch474 gives the live
+  perpetual SHAPE; the all-P theorem over an unbounded fault stream (and the GF infinitely-often
+  fairness) is itself the research result, against the dfix wall (ADEQUACY-TIE.md).
+- **R-UFH / R-GLUE G1 / C-REG / cubical-coind / dim-2 HIT interior** ← each consumer is a
+  HoTT/cubical research result (universe-poly stdlib math; a transp-over-Glue with neutral input;
+  the X2 canonicity stress suite; the optional isEquiv-glue bridge; a dim-2 HIT computation).

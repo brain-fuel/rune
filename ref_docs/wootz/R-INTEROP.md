@@ -546,6 +546,18 @@ emit the dtype/contiguity guards.
 
 ## Worked micro-example (the teachable artifact)
 
+**LANDED (ch473, v3.328.46, `listings/ch473_fit_pipeline.rune`, TestD4FitPipeline).** The
+artifact below is built — adapted to the flat substrate (no `loadCSV`/rung-4 needed): points
+are embedded, the input rides a ch472 `TypedArr`, standardize + the least-squares LINE fit
+are CLOSED FORM over the existing contract-guarded `npMean`/`npVar`/`npDot` (no foreign
+solver), and the plot is a new py `scatterLine` (matplotlib scatter + fit line → wavelet_fit
+.png). For `y=2x+1` over `xs=[1..5]` it recovers slope 2, intercept 1, confirms standardized
+unit variance, and plots 5 points: observable "2\n1\n1\n5". This is M6's "numeric/ML pipeline
+via interop" parity gate. The Σ-shaped `loadCSV` + the opaque `Array` handle (rung 4) remain
+the parked tail (no consumer); the pipeline runs without them.
+
+The original design sketch (the full opaque-handle version) follows:
+
 `fit.rune` — load points, standardize, least-squares fit a line, plot scatter +
 fit. Every foreign edge carries a contract; the three tiers are visible.
 
