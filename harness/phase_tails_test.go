@@ -100,3 +100,24 @@ func TestBignum(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch512_bignum.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch512_bignum.rune", want) })
 }
+
+// TestJSON is a Phase-2 tail gate: encoding/json Marshal of a nested value
+// (ch513) — arrays/objects folded into a single recursive JVal as cons-chains,
+// serialized to canonical JSON over Bin. Byte-identical on all 8 backends.
+// (printBin escapes the quote bytes as \x22 in its display; the bytes are JSON.)
+func TestJSON(t *testing.T) {
+	const want = "\"{\\x22name\\x22:\\x22Ada\\x22,\\x22tags\\x22:[1,2,3]}\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch513_json.rune", "main", ""); got != want {
+				t.Fatalf("[%s] json gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch513_json.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch513_json.rune", want) })
+}

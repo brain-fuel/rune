@@ -1,0 +1,146 @@
+-- Chapter 513 — encoding/json: Marshal a JSON value to Bin (Phase 2 tail).
+--
+-- Go's encoding/json serializes a value tree to JSON text. rune has no mutual
+-- datatypes, so arrays and objects are folded into a SINGLE recursive JVal as
+-- cons-chains (jcons/jcnil for array elements, jpair/jpnil for object members).
+-- `serialize` walks the tree to canonical JSON over Bin. Pure wootz, no FFI
+-- beyond printBin, byte-identical on all 8 backends. (Unmarshal — a recursive-
+-- descent parser over Bin — is the documented follow-up.)
+--
+-- main marshals {"name":"Ada","tags":[1,2,3]}. Observable is that object's JSON.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natAdd addN
+builtin natMul mulN
+builtin natDiv divN
+builtin natMod modN
+
+appGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (xs : Bin) (ys : Bin) (i : Nat) is ys end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is
+           case leb (binLen xs) i of | true -> ys | false -> binCons (binAt xs i) (ih xs ys (succ i)) end
+         end
+      end)
+      fuel
+  end
+end
+binApp : Bin -> Bin -> Bin is fn (xs : Bin) (ys : Bin) is appGo (binLen xs) xs ys 0 end end
+
+digitByte : Nat -> Bin is fn (d : Nat) is binCons (addN 48 d) binEmpty end end
+showGo : Nat -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bin end) (fn (n : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Nat -> Bin) is
+         fn (n : Nat) is
+           case leb n 9 of | true -> digitByte n | false -> binApp (ih (divN n 10)) (digitByte (modN n 10)) end
+         end
+      end)
+      fuel
+  end
+end
+showNat : Nat -> Bin is fn (n : Nat) is showGo 30 n end end
+
+-- a JSON value. Arrays are a jcons/jcnil chain; objects a jpair/jpnil chain.
+data JVal : U is
+  jnull : JVal
+| jnum  : Nat -> JVal
+| jstr  : Bin -> JVal
+| jarr  : JVal -> JVal
+| jcons : JVal -> JVal -> JVal
+| jcnil : JVal
+| jobj  : JVal -> JVal
+| jpair : Bin -> JVal -> JVal -> JVal
+| jpnil : JVal
+end
+
+-- a chain terminator? (jcnil / jpnil) — controls the trailing comma.
+isEnd : JVal -> Bool is
+  JValElim (fn (x : JVal) is Bool end)
+    false
+    (fn (n : Nat) is false end)
+    (fn (s : Bin) is false end)
+    (fn (x : JVal) (ih : Bool) is false end)
+    (fn (e : JVal) (r : JVal) (ihe : Bool) (ihr : Bool) is false end)
+    true
+    (fn (x : JVal) (ih : Bool) is false end)
+    (fn (k : Bin) (v : JVal) (r : JVal) (ihv : Bool) (ihr : Bool) is false end)
+    true
+end
+
+q : Bin is b"\"" end
+quote : Bin -> Bin is fn (s : Bin) is binApp q (binApp s q) end end
+
+serialize : JVal -> Bin is
+  JValElim (fn (x : JVal) is Bin end)
+    b"null"
+    (fn (n : Nat) is showNat n end)
+    (fn (s : Bin) is quote s end)
+    (fn (x : JVal) (ihx : Bin) is binApp b"[" (binApp ihx b"]") end)
+    (fn (e : JVal) (r : JVal) (ihe : Bin) (ihr : Bin) is
+       case isEnd r of | true -> ihe | false -> binApp ihe (binApp b"," ihr) end end)
+    binEmpty
+    (fn (x : JVal) (ihx : Bin) is binApp b"{" (binApp ihx b"}") end)
+    (fn (k : Bin) (v : JVal) (r : JVal) (ihv : Bin) (ihr : Bin) is
+       binApp (binApp (quote k) (binApp b":" ihv))
+         (case isEnd r of | true -> binEmpty | false -> binApp b"," ihr end) end)
+    binEmpty
+end
+
+doc : JVal is
+  jobj (jpair b"name" (jstr b"Ada")
+    (jpair b"tags" (jarr (jcons (jnum 1) (jcons (jnum 2) (jcons (jnum 3) jcnil)))) jpnil))
+end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin (serialize doc)) (fn (a : Unit) is
+    pureIO Unit unit
+  end)
+end
