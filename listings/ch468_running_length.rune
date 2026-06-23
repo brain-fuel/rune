@@ -1,0 +1,597 @@
+-- Chapter 468 — the RUNNING-LENGTH lemma: par is sequential composition (E3).
+--
+-- ch466 found `par` is LEFT-BIASED and gave the per-step rule (parActiveStep). The piece it
+-- left open: thread the RUNNING LENGTH — once the left branch a has run its `ra` active steps
+-- to a quiescent residue, the remaining fuel is b's. THIS LISTING CLOSES THAT GAP with the
+-- general lemma:
+--   runLen : settlesB ra a = true ->
+--            visibleRun (ra + k) (par a b) = append (visibleRun ra a) (visibleRun k b)
+-- For ANY process a that settles in exactly ra active non-crash steps, running `par a b` over
+-- ra+k fuel yields a's WHOLE trace followed by b's k-step trace: par is sequential composition
+-- at the observable level, left to right. Proof by induction on ra — base = parQuietNeutral (a
+-- already quiescent), step = parActiveStep (a's one step) + the IH + consVisAppend (push the
+-- emitted label past the concatenation) + selfStep (a's own step on the right).
+--
+-- The SUBSTRATE WORKAROUND: a `settles : Nat -> Proc -> U` predicate is blocked (no large
+-- elimination — NatElim into U is a universe error), so settling is a BOOL predicate settlesB,
+-- and the per-step transition witness is recovered by total step functions (stepProc) +
+-- Boolean-algebra extraction (andTrueL/andTrueR/notTrue) + Option inversion (activeFalseNone /
+-- isActiveTrue), with exFalso into the goal type via cong over the false=true contradiction.
+--
+-- PAYOFF — parSeqAdequate: adequacy COMPOSES over par. project (par a b) = append (project a)
+-- (project b) definitionally, so runLen + the two operand adequacies give adequacy of the
+-- whole. nestedGeneral proves `par (par sup sup) sup` adequate from the ONE general lemma (the
+-- left branch settles in 2 steps, both operands adequate) — not a bespoke right-nested (ch459)
+-- or left-nested-to-halt (ch466) induction, but ANY settling left branch composed with ANY
+-- adequate right branch. The remaining all-P gap is now only: prove a structurally-defined
+-- well-supervised class SETTLES (settlesB ... = true for all its members); runLen then composes
+-- their adequacy. Proof-only + a trace witness (3 failures).
+
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+data Label : U is ltau : Label | lfail : Label end
+data Proc : U is halt : Proc | mon : Proc -> Proc | par : Proc -> Proc -> Proc | crash : Proc end
+data Trans : U is tr : Label -> Proc -> Trans end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+append : (A : U) -> List A -> List A -> List A is
+  fn (A : U) (xs : List A) (ys : List A) is
+    ListElim A (fn (w : List A) is List A end) ys (fn (h : A) (t : List A) (ih : List A) is cons A h ih end) xs
+  end
+end
+labelOf : Trans -> Label is fn (t : Trans) is TransElim (fn (w : Trans) is Label end) (fn (l : Label) (p : Proc) is l end) t end end
+procOf : Trans -> Proc is fn (t : Trans) is TransElim (fn (w : Trans) is Proc end) (fn (l : Label) (p : Proc) is p end) t end end
+
+monCont : Proc -> Option Proc is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Proc end)
+      (none Proc)
+      (fn (p : Proc) (ih : Option Proc) is some Proc p end)
+      (fn (a : Proc) (b : Proc) (iha : Option Proc) (ihb : Option Proc) is none Proc end)
+      (none Proc)
+      x
+  end
+end
+isCrash : Proc -> Bool is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Bool end)
+      false
+      (fn (p : Proc) (ih : Bool) is false end)
+      (fn (a : Proc) (b : Proc) (iha : Bool) (ihb : Bool) is false end)
+      true
+      x
+  end
+end
+
+-- the fault-fragment step: par interleaves its branches; a crashed branch beside a monitor
+-- is DETECTed (one lfail). No communication prefixes in this fragment, so the rendezvous
+-- case of ch207's commT collapses to plain interleaving.
+interleaveT : Option Trans -> Option Trans -> Proc -> Proc -> Option Trans is
+  fn (ra : Option Trans) (rb : Option Trans) (a : Proc) (b : Proc) is
+    OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+         (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par a (procOf tb))) end)
+         rb)
+      (fn (ta : Trans) is some Trans (tr (labelOf ta) (par (procOf ta) b)) end)
+      ra
+  end
+end
+parOk : Proc -> Proc -> Option Trans -> Option Trans -> Option Trans is
+  fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is
+    BoolElim (fn (w : Bool) is Option Trans end)
+      (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+         (interleaveT iha ihb a b)
+         (fn (h : Proc) is some Trans (tr lfail h) end)
+         (monCont b))
+      (interleaveT iha ihb a b)
+      (isCrash a)
+  end
+end
+okStep : Proc -> Option Trans is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is Option Trans end)
+      (none Trans)
+      (fn (p : Proc) (ih : Option Trans) is none Trans end)
+      (fn (a : Proc) (b : Proc) (iha : Option Trans) (ihb : Option Trans) is parOk a b iha ihb end)
+      (none Trans)
+      x
+  end
+end
+
+visible : Label -> Bool is fn (l : Label) is LabelElim (fn (w : Label) is Bool end) false true l end end
+consVis : Label -> List Label -> List Label is
+  fn (l : Label) (rest : List Label) is BoolElim (fn (w : Bool) is List Label end) (cons Label l rest) rest (visible l) end
+end
+visibleRun : Nat -> Proc -> List Label is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Proc -> List Label end)
+      (fn (p : Proc) is nil Label end)
+      (fn (k : Nat) (ih : Proc -> List Label) is
+         fn (p : Proc) is
+           OptionElim Trans (fn (w : Option Trans) is List Label end)
+             (nil Label)
+             (fn (t : Trans) is consVis (labelOf t) (ih (procOf t)) end)
+             (okStep p)
+         end end)
+      n
+  end
+end
+project : Proc -> List Label is
+  fn (x : Proc) is
+    ProcElim (fn (w : Proc) is List Label end)
+      (nil Label)
+      (fn (p : Proc) (ih : List Label) is ih end)
+      (fn (a : Proc) (b : Proc) (iha : List Label) (ihb : List Label) is append Label iha ihb end)
+      (cons Label lfail (nil Label))
+      x
+  end
+end
+
+-- THE KEY LEMMA: a halted left branch is observationally NEUTRAL. okStep (par halt X)
+-- re-emits exactly X's label and steps to `par halt X'`, so by induction on the fuel the
+-- whole run matches X's. Cases on okStep X (none -> both nil; some tb -> same head, the IH
+-- handles the persistent `par halt` residue on the tail).
+parHaltNeutral : (k : Nat) -> (x : Proc) -> Eq (List Label) (visibleRun k (par halt x)) (visibleRun k x) is
+  fn (k : Nat) is
+    NatElim (fn (m : Nat) is (x : Proc) -> Eq (List Label) (visibleRun m (par halt x)) (visibleRun m x) end)
+      (fn (x : Proc) is refl end)
+      (fn (m : Nat) (ih : (x : Proc) -> Eq (List Label) (visibleRun m (par halt x)) (visibleRun m x)) is
+         fn (x : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is
+                Eq (List Label)
+                  (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end)
+                     (OptionElim Trans (fn (w : Option Trans) is Option Trans end)
+                        (none Trans)
+                        (fn (tb : Trans) is some Trans (tr (labelOf tb) (par halt (procOf tb))) end)
+                        o))
+                  (OptionElim Trans (fn (w : Option Trans) is List Label end)
+                     (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end)
+                     o)
+                end)
+             refl
+             (fn (tb : Trans) is
+                cong (List Label) (List Label) (fn (r : List Label) is consVis (labelOf tb) r end)
+                  (visibleRun m (par halt (procOf tb))) (visibleRun m (procOf tb)) (ih (procOf tb)) end)
+             (okStep x)
+         end
+       end)
+      k
+  end
+end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is subst A x y p (fn (z : A) is Eq A z x end) refl end
+end
+
+-- the cleanform okStep (par p x) reduces to when p is quiescent + non-crash: x steps, the
+-- residue keeps a `par p` wrapper.
+-- okStepParQuiet rewrites okStep (par p x) to that cleanform via the two hypotheses.
+okStepParQuiet : (p : Proc) -> (x : Proc) ->
+    Eq Bool (isCrash p) false -> Eq (Option Trans) (okStep p) (none Trans) ->
+    Eq (Option Trans) (okStep (par p x))
+      (OptionElim Trans (fn (w : Option Trans) is Option Trans end) (none Trans)
+         (fn (tb : Trans) is some Trans (tr (labelOf tb) (par p (procOf tb))) end) (okStep x)) is
+  fn (p : Proc) (x : Proc) (hc : Eq Bool (isCrash p) false) (hs : Eq (Option Trans) (okStep p) (none Trans)) is
+    subst (Option Trans) (none Trans) (okStep p)
+      (symEq (Option Trans) (okStep p) (none Trans) hs)
+      (fn (o : Option Trans) is
+         Eq (Option Trans) (parOk p x o (okStep x))
+           (OptionElim Trans (fn (w : Option Trans) is Option Trans end) (none Trans)
+              (fn (tb : Trans) is some Trans (tr (labelOf tb) (par p (procOf tb))) end) (okStep x)) end)
+      (subst Bool false (isCrash p)
+         (symEq Bool (isCrash p) false hc)
+         (fn (b : Bool) is
+            Eq (Option Trans)
+              (BoolElim (fn (w : Bool) is Option Trans end)
+                 (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+                    (interleaveT (none Trans) (okStep x) p x)
+                    (fn (h : Proc) is some Trans (tr lfail h) end)
+                    (monCont x))
+                 (interleaveT (none Trans) (okStep x) p x)
+                 b)
+              (OptionElim Trans (fn (w : Option Trans) is Option Trans end) (none Trans)
+                 (fn (tb : Trans) is some Trans (tr (labelOf tb) (par p (procOf tb))) end) (okStep x)) end)
+         refl)
+  end
+end
+
+-- parQuietNeutral: prepending a quiescent non-crash peer does not change the observation.
+-- Induction on the fuel; okStepParQuiet rewrites the step, then the OptionElim on okStep x
+-- matches visibleRun k x (none -> both nil; some tb -> same head, IH on the par-p residue).
+parQuietNeutral : (p : Proc) -> Eq Bool (isCrash p) false -> Eq (Option Trans) (okStep p) (none Trans) ->
+    (k : Nat) -> (x : Proc) -> Eq (List Label) (visibleRun k (par p x)) (visibleRun k x) is
+  fn (p : Proc) (hc : Eq Bool (isCrash p) false) (hs : Eq (Option Trans) (okStep p) (none Trans)) (k : Nat) is
+    NatElim (fn (m : Nat) is (x : Proc) -> Eq (List Label) (visibleRun m (par p x)) (visibleRun m x) end)
+      (fn (x : Proc) is refl end)
+      (fn (m : Nat) (ih : (x : Proc) -> Eq (List Label) (visibleRun m (par p x)) (visibleRun m x)) is
+         fn (x : Proc) is
+           subst (Option Trans)
+             (OptionElim Trans (fn (w : Option Trans) is Option Trans end) (none Trans)
+                (fn (tb : Trans) is some Trans (tr (labelOf tb) (par p (procOf tb))) end) (okStep x))
+             (okStep (par p x))
+             (symEq (Option Trans) (okStep (par p x))
+                (OptionElim Trans (fn (w : Option Trans) is Option Trans end) (none Trans)
+                (fn (tb : Trans) is some Trans (tr (labelOf tb) (par p (procOf tb))) end) (okStep x))
+                (okStepParQuiet p x hc hs))
+             (fn (o : Option Trans) is
+                Eq (List Label)
+                  (OptionElim Trans (fn (w : Option Trans) is List Label end) (nil Label)
+                     (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end) o)
+                  (visibleRun (succ m) x) end)
+             (OptionElim Trans
+                (fn (o : Option Trans) is
+                   Eq (List Label)
+                     (OptionElim Trans (fn (w : Option Trans) is List Label end) (nil Label)
+                        (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end)
+                        (OptionElim Trans (fn (w : Option Trans) is Option Trans end) (none Trans)
+                           (fn (tb : Trans) is some Trans (tr (labelOf tb) (par p (procOf tb))) end) o))
+                     (OptionElim Trans (fn (w : Option Trans) is List Label end) (nil Label)
+                        (fn (t : Trans) is consVis (labelOf t) (visibleRun m (procOf t)) end) o) end)
+                refl
+                (fn (tb : Trans) is
+                   cong (List Label) (List Label) (fn (r : List Label) is consVis (labelOf tb) r end)
+                     (visibleRun m (par p (procOf tb))) (visibleRun m (procOf tb)) (ih (procOf tb)) end)
+                (okStep x))
+         end
+       end)
+      k
+  end
+end
+
+
+-- okStepActive: the ACTIVE-left-peer dual of okStepParQuiet (ch464). When the left branch
+-- a is non-crash and STEPS (okStep a = some ta), okStep (par a b) is exactly a's step, with
+-- the residue keeping b frozen on the right (`par (procOf ta) b`) — the left-bias rule.
+okStepActive : (a : Proc) -> (b : Proc) -> (ta : Trans) ->
+    Eq Bool (isCrash a) false -> Eq (Option Trans) (okStep a) (some Trans ta) ->
+    Eq (Option Trans) (okStep (par a b)) (some Trans (tr (labelOf ta) (par (procOf ta) b))) is
+  fn (a : Proc) (b : Proc) (ta : Trans) (hc : Eq Bool (isCrash a) false) (ha : Eq (Option Trans) (okStep a) (some Trans ta)) is
+    subst (Option Trans) (some Trans ta) (okStep a)
+      (symEq (Option Trans) (okStep a) (some Trans ta) ha)
+      (fn (o : Option Trans) is
+         Eq (Option Trans) (parOk a b o (okStep b))
+           (some Trans (tr (labelOf ta) (par (procOf ta) b))) end)
+      (subst Bool false (isCrash a)
+         (symEq Bool (isCrash a) false hc)
+         (fn (cb : Bool) is
+            Eq (Option Trans)
+              (BoolElim (fn (w : Bool) is Option Trans end)
+                 (OptionElim Proc (fn (w : Option Proc) is Option Trans end)
+                    (interleaveT (some Trans ta) (okStep b) a b)
+                    (fn (h : Proc) is some Trans (tr lfail h) end)
+                    (monCont b))
+                 (interleaveT (some Trans ta) (okStep b) a b)
+                 cb)
+              (some Trans (tr (labelOf ta) (par (procOf ta) b))) end)
+         refl)
+  end
+end
+
+-- parActiveStep: the visibleRun form. One fuelled step of `par a b` (with a non-crash and
+-- active) emits a's label and recurses on the residue `par (procOf ta) b` — exactly the
+-- left-biased threading the fuel-decomposition wall needed made definitional.
+parActiveStep : (k : Nat) -> (a : Proc) -> (b : Proc) -> (ta : Trans) ->
+    Eq Bool (isCrash a) false -> Eq (Option Trans) (okStep a) (some Trans ta) ->
+    Eq (List Label) (visibleRun (succ k) (par a b))
+      (consVis (labelOf ta) (visibleRun k (par (procOf ta) b))) is
+  fn (k : Nat) (a : Proc) (b : Proc) (ta : Trans) (hc : Eq Bool (isCrash a) false) (ha : Eq (Option Trans) (okStep a) (some Trans ta)) is
+    subst (Option Trans) (some Trans (tr (labelOf ta) (par (procOf ta) b))) (okStep (par a b))
+      (symEq (Option Trans) (okStep (par a b)) (some Trans (tr (labelOf ta) (par (procOf ta) b)))
+         (okStepActive a b ta hc ha))
+      (fn (o : Option Trans) is
+         Eq (List Label)
+           (OptionElim Trans (fn (w : Option Trans) is List Label end) (nil Label)
+              (fn (t : Trans) is consVis (labelOf t) (visibleRun k (procOf t)) end) o)
+           (consVis (labelOf ta) (visibleRun k (par (procOf ta) b))) end)
+      refl
+  end
+end
+
+-- PAYOFF 1 — closureActiveHalt: prepending an active peer `a` that steps once to a HALT
+-- (okStep a = some (tr lfail halt), non-crash) to any adequate b is adequate. The active
+-- step emits lfail and leaves `par halt b`, which parHaltNeutral strips to b — so the run
+-- is lfail :: (b's run) = lfail :: project b = project (par a b). The classic supervised
+-- unit `sup = par crash (mon halt)` is exactly such an a.
+sup : Proc is par crash (mon halt) end
+
+closureSup : (k : Nat) -> (b : Proc) ->
+    Eq (List Label) (visibleRun k b) (project b) ->
+    Eq (List Label) (visibleRun (succ k) (par sup b)) (project (par sup b)) is
+  fn (k : Nat) (b : Proc) (hb : Eq (List Label) (visibleRun k b) (project b)) is
+    transEq (List Label)
+      (visibleRun (succ k) (par sup b))
+      (consVis lfail (visibleRun k b))
+      (project (par sup b))
+      (transEq (List Label)
+         (visibleRun (succ k) (par sup b))
+         (consVis lfail (visibleRun k (par halt b)))
+         (consVis lfail (visibleRun k b))
+         (parActiveStep k sup b (tr lfail halt) refl refl)
+         (cong (List Label) (List Label) (fn (r : List Label) is consVis lfail r end)
+            (visibleRun k (par halt b)) (visibleRun k b) (parHaltNeutral k b)))
+      (cong (List Label) (List Label) (fn (r : List Label) is consVis lfail r end)
+         (visibleRun k b) (project b) hb)
+  end
+end
+
+consVisAppend : (l : Label) -> (xs : List Label) -> (ys : List Label) ->
+    Eq (List Label) (consVis l (append Label xs ys)) (append Label (consVis l xs) ys) is
+  fn (l : Label) (xs : List Label) (ys : List Label) is
+    BoolElim
+      (fn (c : Bool) is
+         Eq (List Label)
+           (BoolElim (fn (w : Bool) is List Label end)
+              (cons Label l (append Label xs ys)) (append Label xs ys) c)
+           (append Label
+              (BoolElim (fn (w : Bool) is List Label end) (cons Label l xs) xs c)
+              ys) end)
+      refl
+      refl
+      (visible l)
+  end
+end
+
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+andB : Bool -> Bool -> Bool is fn (x : Bool) (y : Bool) is BoolElim (fn (w : Bool) is Bool end) y false x end end
+notB : Bool -> Bool is fn (x : Bool) is BoolElim (fn (w : Bool) is Bool end) false true x end end
+
+-- everythingTrue / exFalso into the goal types, from a false=true witness (cong of a
+-- BoolElim that sends false->the-source, true->true/false, over the contradiction).
+everythingTrue : Eq Bool false true -> (z : Bool) -> Eq Bool z true is
+  fn (h : Eq Bool false true) (z : Bool) is
+    cong Bool Bool (fn (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true z b end) false true h
+  end
+end
+exFalsoLL : Eq Bool false true -> (X : List Label) -> (Y : List Label) -> Eq (List Label) X Y is
+  fn (h : Eq Bool false true) (X : List Label) (Y : List Label) is
+    cong Bool (List Label) (fn (b : Bool) is BoolElim (fn (w : Bool) is List Label end) Y X b end) false true h
+  end
+end
+
+-- total step functions: the residue after one okStep, and the label it emits (defaults for a
+-- quiescent state are never consumed — guarded by isActiveB in settlesB).
+stepProc : Proc -> Proc is
+  fn (a : Proc) is OptionElim Trans (fn (w : Option Trans) is Proc end) a (fn (t : Trans) is procOf t end) (okStep a) end
+end
+isActiveB : Proc -> Bool is
+  fn (a : Proc) is OptionElim Trans (fn (w : Option Trans) is Bool end) false (fn (t : Trans) is true end) (okStep a) end
+end
+
+-- Bool-algebra extraction (the substrate blocks a U-valued `settles`, so settling is a Bool
+-- predicate and the per-step facts are recovered from `andB ... = true`).
+andTrueL : (x : Bool) -> (y : Bool) -> Eq Bool (andB x y) true -> Eq Bool x true is
+  fn (x : Bool) (y : Bool) is
+    BoolElim (fn (c : Bool) is Eq Bool (andB c y) true -> Eq Bool c true end)
+      (fn (h : Eq Bool (andB true y) true) is refl end)
+      (fn (h : Eq Bool (andB false y) true) is h end) x
+  end
+end
+andTrueR : (x : Bool) -> (y : Bool) -> Eq Bool (andB x y) true -> Eq Bool y true is
+  fn (x : Bool) (y : Bool) is
+    BoolElim (fn (c : Bool) is Eq Bool (andB c y) true -> Eq Bool y true end)
+      (fn (h : Eq Bool (andB true y) true) is h end)
+      (fn (h : Eq Bool (andB false y) true) is everythingTrue h y end) x
+  end
+end
+notTrue : (x : Bool) -> Eq Bool (notB x) true -> Eq Bool x false is
+  fn (x : Bool) is
+    BoolElim (fn (c : Bool) is Eq Bool (notB c) true -> Eq Bool c false end)
+      (fn (h : Eq Bool (notB true) true) is cong Bool Bool (fn (b : Bool) is BoolElim (fn (w : Bool) is Bool end) false true b end) false true h end)
+      (fn (h : Eq Bool (notB false) true) is refl end) x
+  end
+end
+
+-- settling as a Bool predicate (NatElim into Bool — small elimination, allowed): at 0 the
+-- state is inactive (quiescent) and non-crash; at succ it is non-crash, active, and its
+-- one-step residue settles in the remaining steps.
+settlesB : Nat -> Proc -> Bool is
+  fn (ra : Nat) is
+    NatElim (fn (w : Nat) is Proc -> Bool end)
+      (fn (a : Proc) is andB (notB (isActiveB a)) (notB (isCrash a)) end)
+      (fn (m : Nat) (ih : Proc -> Bool) is
+         fn (a : Proc) is andB (notB (isCrash a)) (andB (isActiveB a) (ih (stepProc a))) end end)
+      ra
+  end
+end
+
+-- a's OWN one fuelled step, witness form: when a is active (okStep a = some t) it emits t's
+-- label and recurses on procOf t.
+selfStep : (m : Nat) -> (a : Proc) -> (t : Trans) -> Eq (Option Trans) (okStep a) (some Trans t) ->
+    Eq (List Label) (visibleRun (succ m) a) (consVis (labelOf t) (visibleRun m (procOf t))) is
+  fn (m : Nat) (a : Proc) (t : Trans) (eq : Eq (Option Trans) (okStep a) (some Trans t)) is
+    subst (Option Trans) (some Trans t) (okStep a)
+      (symEq (Option Trans) (okStep a) (some Trans t) eq)
+      (fn (o : Option Trans) is
+         Eq (List Label)
+           (OptionElim Trans (fn (w : Option Trans) is List Label end) (nil Label)
+              (fn (tt : Trans) is consVis (labelOf tt) (visibleRun m (procOf tt)) end) o)
+           (consVis (labelOf t) (visibleRun m (procOf t))) end)
+      refl
+  end
+end
+
+-- stepProc a = procOf t under okStep a = some t.
+stepProcEq : (a : Proc) -> (t : Trans) -> Eq (Option Trans) (okStep a) (some Trans t) -> Eq Proc (stepProc a) (procOf t) is
+  fn (a : Proc) (t : Trans) (eq : Eq (Option Trans) (okStep a) (some Trans t)) is
+    subst (Option Trans) (some Trans t) (okStep a)
+      (symEq (Option Trans) (okStep a) (some Trans t) eq)
+      (fn (o : Option Trans) is Eq Proc (OptionElim Trans (fn (w : Option Trans) is Proc end) a (fn (tt : Trans) is procOf tt end) o) (procOf t) end)
+      refl
+  end
+end
+-- isActiveB a = false under okStep a = none (to discharge the quiescent branch).
+isActiveNone : (a : Proc) -> Eq (Option Trans) (okStep a) (none Trans) -> Eq Bool (isActiveB a) false is
+  fn (a : Proc) (eq : Eq (Option Trans) (okStep a) (none Trans)) is
+    subst (Option Trans) (none Trans) (okStep a)
+      (symEq (Option Trans) (okStep a) (none Trans) eq)
+      (fn (o : Option Trans) is Eq Bool (OptionElim Trans (fn (w : Option Trans) is Bool end) false (fn (t : Trans) is true end) o) false end)
+      refl
+  end
+end
+
+exFalsoOpt : Eq Bool true false -> (X : Option Trans) -> (Y : Option Trans) -> Eq (Option Trans) X Y is
+  fn (h : Eq Bool true false) (X : Option Trans) (Y : Option Trans) is
+    cong Bool (Option Trans) (fn (b : Bool) is BoolElim (fn (w : Bool) is Option Trans end) X Y b end) true false h
+  end
+end
+isActiveTrue : (a : Proc) -> (t : Trans) -> Eq (Option Trans) (okStep a) (some Trans t) -> Eq Bool (isActiveB a) true is
+  fn (a : Proc) (t : Trans) (eqs : Eq (Option Trans) (okStep a) (some Trans t)) is
+    subst (Option Trans) (some Trans t) (okStep a)
+      (symEq (Option Trans) (okStep a) (some Trans t) eqs)
+      (fn (o : Option Trans) is Eq Bool (OptionElim Trans (fn (w : Option Trans) is Bool end) false (fn (tt : Trans) is true end) o) true end)
+      refl
+  end
+end
+activeFalseNone : (a : Proc) -> Eq Bool (isActiveB a) false -> Eq (Option Trans) (okStep a) (none Trans) is
+  fn (a : Proc) (h : Eq Bool (isActiveB a) false) is
+    OptionElim Trans
+      (fn (o : Option Trans) is Eq (Option Trans) (okStep a) o -> Eq (Option Trans) (okStep a) (none Trans) end)
+      (fn (eqn : Eq (Option Trans) (okStep a) (none Trans)) is eqn end)
+      (fn (t : Trans) (eqs : Eq (Option Trans) (okStep a) (some Trans t)) is
+         exFalsoOpt
+           (transEq Bool true (isActiveB a) false (symEq Bool (isActiveB a) true (isActiveTrue a t eqs)) h)
+           (okStep a) (none Trans) end)
+      (okStep a) refl
+  end
+end
+
+-- THE RUNNING-LENGTH LEMMA. If a settles in exactly ra active non-crash steps, the run of
+-- `par a b` over ra+k fuel is a's whole trace followed by b's k-step trace — par is SEQUENTIAL
+-- composition at the observable level, left to right. Induction on ra: base = parQuietNeutral
+-- (a already quiescent), step = parActiveStep (a's one step) + the IH + consVisAppend (push the
+-- emitted label past the concatenation) + selfStep (a's own step on the right).
+runLen : (ra : Nat) -> (a : Proc) -> Eq Bool (settlesB ra a) true -> (k : Nat) -> (b : Proc) ->
+    Eq (List Label) (visibleRun (natAdd ra k) (par a b)) (append Label (visibleRun ra a) (visibleRun k b)) is
+  fn (ra : Nat) is
+    NatElim (fn (m : Nat) is (a : Proc) -> Eq Bool (settlesB m a) true -> (k : Nat) -> (b : Proc) ->
+               Eq (List Label) (visibleRun (natAdd m k) (par a b)) (append Label (visibleRun m a) (visibleRun k b)) end)
+      (fn (a : Proc) (h : Eq Bool (settlesB zero a) true) (k : Nat) (b : Proc) is
+         parQuietNeutral a
+           (notTrue (isCrash a) (andTrueR (notB (isActiveB a)) (notB (isCrash a)) h))
+           (activeFalseNone a (notTrue (isActiveB a) (andTrueL (notB (isActiveB a)) (notB (isCrash a)) h)))
+           k b end)
+      (fn (m : Nat) (ih : (a : Proc) -> Eq Bool (settlesB m a) true -> (k : Nat) -> (b : Proc) ->
+             Eq (List Label) (visibleRun (natAdd m k) (par a b)) (append Label (visibleRun m a) (visibleRun k b))) is
+         fn (a : Proc) (h : Eq Bool (settlesB (succ m) a) true) (k : Nat) (b : Proc) is
+           OptionElim Trans
+             (fn (o : Option Trans) is Eq (Option Trans) (okStep a) o ->
+                Eq (List Label) (visibleRun (natAdd (succ m) k) (par a b)) (append Label (visibleRun (succ m) a) (visibleRun k b)) end)
+             (fn (eqn : Eq (Option Trans) (okStep a) (none Trans)) is
+                exFalsoLL
+                  (transEq Bool false (isActiveB a) true
+                     (symEq Bool (isActiveB a) false (isActiveNone a eqn))
+                     (andTrueL (isActiveB a) (settlesB m (stepProc a))
+                        (andTrueR (notB (isCrash a)) (andB (isActiveB a) (settlesB m (stepProc a))) h)))
+                  (visibleRun (natAdd (succ m) k) (par a b))
+                  (append Label (visibleRun (succ m) a) (visibleRun k b)) end)
+             (fn (t : Trans) (eqs : Eq (Option Trans) (okStep a) (some Trans t)) is
+                transEq (List Label)
+                  (visibleRun (succ (natAdd m k)) (par a b))
+                  (consVis (labelOf t) (visibleRun (natAdd m k) (par (procOf t) b)))
+                  (append Label (visibleRun (succ m) a) (visibleRun k b))
+                  (parActiveStep (natAdd m k) a b t
+                     (notTrue (isCrash a) (andTrueL (notB (isCrash a)) (andB (isActiveB a) (settlesB m (stepProc a))) h))
+                     eqs)
+                  (transEq (List Label)
+                     (consVis (labelOf t) (visibleRun (natAdd m k) (par (procOf t) b)))
+                     (consVis (labelOf t) (append Label (visibleRun m (procOf t)) (visibleRun k b)))
+                     (append Label (visibleRun (succ m) a) (visibleRun k b))
+                     (cong (List Label) (List Label) (fn (r : List Label) is consVis (labelOf t) r end)
+                        (visibleRun (natAdd m k) (par (procOf t) b))
+                        (append Label (visibleRun m (procOf t)) (visibleRun k b))
+                        (ih (procOf t)
+                           (subst Proc (stepProc a) (procOf t) (stepProcEq a t eqs)
+                              (fn (p : Proc) is Eq Bool (settlesB m p) true end)
+                              (andTrueR (isActiveB a) (settlesB m (stepProc a))
+                                 (andTrueR (notB (isCrash a)) (andB (isActiveB a) (settlesB m (stepProc a))) h)))
+                           k b))
+                     (transEq (List Label)
+                        (consVis (labelOf t) (append Label (visibleRun m (procOf t)) (visibleRun k b)))
+                        (append Label (consVis (labelOf t) (visibleRun m (procOf t))) (visibleRun k b))
+                        (append Label (visibleRun (succ m) a) (visibleRun k b))
+                        (consVisAppend (labelOf t) (visibleRun m (procOf t)) (visibleRun k b))
+                        (cong (List Label) (List Label) (fn (xs : List Label) is append Label xs (visibleRun k b) end)
+                           (consVis (labelOf t) (visibleRun m (procOf t)))
+                           (visibleRun (succ m) a)
+                           (symEq (List Label) (visibleRun (succ m) a) (consVis (labelOf t) (visibleRun m (procOf t)))
+                              (selfStep m a t eqs))))) end)
+             (okStep a) refl
+         end end)
+      ra
+  end
+end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) -> (x : A) -> (xx : A) -> (y : B) -> (yy : B) -> Eq A x xx -> Eq B y yy -> Eq C (f x y) (f xx yy) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C) (x : A) (xx : A) (y : B) (yy : B) (px : Eq A x xx) (py : Eq B y yy) is
+    transEq C (f x y) (f xx y) (f xx yy)
+      (cong A C (fn (z : A) is f z y end) x xx px)
+      (cong B C (fn (z : B) is f xx z end) y yy py)
+  end
+end
+
+-- THE PAYOFF: adequacy COMPOSES over par when the left branch settles. project (par a b) =
+-- append (project a)(project b) definitionally, so runLen + the two operand adequacies give
+-- adequacy of the whole. This is the general all-P step the wall blocked: not just a
+-- right-nested tower (ch459) or a left-nested halt-terminated tree (ch466), but ANY settling
+-- left branch composed with ANY adequate right branch.
+parSeqAdequate : (ra : Nat) -> (a : Proc) -> Eq Bool (settlesB ra a) true ->
+    Eq (List Label) (visibleRun ra a) (project a) ->
+    (k : Nat) -> (b : Proc) -> Eq (List Label) (visibleRun k b) (project b) ->
+    Eq (List Label) (visibleRun (natAdd ra k) (par a b)) (project (par a b)) is
+  fn (ra : Nat) (a : Proc) (hs : Eq Bool (settlesB ra a) true)
+     (ha : Eq (List Label) (visibleRun ra a) (project a))
+     (k : Nat) (b : Proc) (hb : Eq (List Label) (visibleRun k b) (project b)) is
+    transEq (List Label)
+      (visibleRun (natAdd ra k) (par a b))
+      (append Label (visibleRun ra a) (visibleRun k b))
+      (project (par a b))
+      (runLen ra a hs k b)
+      (cong2 (List Label) (List Label) (List Label)
+         (fn (p : List Label) (q : List Label) is append Label p q end)
+         (visibleRun ra a) (project a) (visibleRun k b) (project b) ha hb)
+  end
+end
+
+
+-- witnesses: `par (par sup sup) sup` adequate via the GENERAL parSeqAdequate — the left
+-- branch `par sup sup` settles in 2 steps (settlesB ... = refl) and is adequate (refl), the
+-- right branch sup is adequate (refl), so the composite is adequate at fuel 3, all from the
+-- one general lemma (no bespoke induction).
+psSettles : Eq Bool (settlesB (succ (succ zero)) (par sup sup)) true is refl end
+psAdeq : Eq (List Label) (visibleRun (succ (succ zero)) (par sup sup)) (project (par sup sup)) is refl end
+supAdeq : Eq (List Label) (visibleRun (succ zero) sup) (project sup) is refl end
+nestedGeneral : Eq (List Label)
+    (visibleRun (natAdd (succ (succ zero)) (succ zero)) (par (par sup sup) sup))
+    (project (par (par sup sup) sup)) is
+  parSeqAdequate (succ (succ zero)) (par sup sup) psSettles psAdeq (succ zero) sup supAdeq
+end
+
+data Unit : U is unit0 : Unit end
+foreign printNat : Nat -> IO Nat end
+lenL : List Label -> Nat is
+  fn (xs : List Label) is ListElim Label (fn (w : List Label) is Nat end) zero (fn (h : Label) (t : List Label) (ih : Nat) is succ ih end) xs end
+end
+main : IO Unit is
+  bindIO Nat Unit (printNat (lenL (visibleRun (natAdd (succ (succ zero)) (succ zero)) (par (par sup sup) sup)))) (fn (u1 : Nat) is pureIO Unit unit0 end)
+end

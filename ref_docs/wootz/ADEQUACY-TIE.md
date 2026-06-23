@@ -141,18 +141,43 @@ sequencing:
   left-nested par-tree; the active-step decomposition does. Adequacy is no longer confined to
   the right spine.
 
-**What stays open.** The fully-general arbitrary-`par` case — two SIMULTANEOUSLY-active
-non-trivial branches where `a`'s quiescence TIMING (how many steps before `b` gets to run)
-must be threaded through the fuel — is not closed; `parActiveStep` gives the per-step rule
-but composing it to "a runs for exactly `j` steps then b runs" still needs a running-length
-lemma. `ch466` is the structural bridge toward that, not the closure of it.
+**RUNNING-LENGTH lemma LANDED (`ch468`, 2026-06-22).** The gap `ch466` left — thread the
+running length so the per-step rule composes into "a runs for exactly `ra` steps, then b" —
+is now CLOSED, in full generality:
 
-**Recommendation (still open at the limit).** Pursue (1): restate the general refinement as
-trace-equality of the LIMIT streams via `traceBisim`, using `prefixMono`/`lenBound` as the
-finite-approximation bridge and `ch466`'s active-step rule as the per-step transition law.
-This keeps the proof coinductive (where `par` interleaving is already solved in
-`ch208`/`ch209`) and the outer kernel fixed (Thompson). The open item remains open, but
-`ch466` converts it from "the fuel does not decompose over par" to "the fuel decomposes as a
-left-biased SEQUENCING; thread the running length" — a narrower, more concrete gap. This
-leverages landed
-machinery rather than waiting on a fuel-decomposition lemma that does not exist.
+```
+runLen : settlesB ra a = true ->
+         visibleRun (natAdd ra k) (par a b) = append (visibleRun ra a) (visibleRun k b)
+```
+
+For ANY process `a` that settles in exactly `ra` active non-crash steps, running `par a b`
+over `ra + k` fuel is `a`'s WHOLE trace followed by `b`'s `k`-step trace. **`par` IS sequential
+composition at the observable level, left to right** — proven, not conjectured. Induction on
+`ra`: base = `parQuietNeutral` (a already quiescent), step = `parActiveStep` (a's one step) +
+the IH + `consVisAppend` (push the emitted label past the concatenation) + `selfStep` (a's own
+step on the right).
+
+The substrate forced a workaround worth recording: a `settles : Nat -> Proc -> U` predicate is
+BLOCKED (no large elimination — `NatElim` into `U` is a universe error, the same wall as
+`exFalso`/`ch247`). So settling is a BOOL predicate `settlesB` (`NatElim` into `Bool`, allowed),
+and the per-step transition WITNESS — which `settlesB`'s Bool loses — is recovered by total step
+functions (`stepProc`) + Boolean-algebra extraction (`andTrueL`/`andTrueR`/`notTrue`) + `Option`
+inversion (`activeFalseNone`/`isActiveTrue`), with `exFalso` into the goal type via `cong` over
+the `false = true` contradiction. This is the reusable recipe for "recursive predicate over an
+inductive type without large elimination."
+
+**PAYOFF — adequacy COMPOSES over `par` (`parSeqAdequate`).** `project (par a b) = append
+(project a) (project b)` definitionally, so `runLen` + the two operand adequacies give adequacy
+of the whole: `settlesB ra a = true → (visibleRun ra a = project a) → (visibleRun k b = project
+b) → visibleRun (ra+k) (par a b) = project (par a b)`. `nestedGeneral` proves `par (par sup sup)
+sup` adequate from this ONE general lemma — not a bespoke induction. Adequacy is now a
+COMPOSITIONAL property: prove it for the pieces, get it for the `par`.
+
+**What stays open (narrowed again).** `parSeqAdequate` reduces the all-P refinement to a SINGLE
+remaining obligation: prove that every member of a structurally-defined **well-supervised class**
+SETTLES (`settlesB ra a = true` for some `ra`, e.g. by structural induction on the par-tree with
+each `unit` contributing one step). `runLen` then composes their adequacy automatically. The hard
+"fuel does not decompose over par" wall is GONE — replaced by a settling-totality lemma over a
+syntactic class, which is ordinary structural induction, not the interleaving obstacle. The
+limit-via-`traceBisim` route (`ch208`/`ch209`) remains available as an alternative for the
+unbounded/non-settling case, with `ch466`'s active-step rule as its per-step transition law.
