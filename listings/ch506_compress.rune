@@ -1,0 +1,147 @@
+-- Chapter 506 — compress: a run-length codec over Bin with a round-trip (Phase 4).
+--
+-- Go's compress/* packages are Reader/Writer codecs whose contract is
+-- `decode (encode x) = x`. Full DEFLATE is a large LZ77+Huffman build; the
+-- reachable, faithful core is run-length encoding — `encode` collapses each run
+-- of equal bytes to a (count, value) pair, `decode` expands them back. The
+-- correctness bar is the same as Go's: the round-trip is the identity. Pure
+-- wootz over Bin, no FFI beyond printNat/printBin, byte-identical on all 8.
+--
+-- main compresses "aaaabbbcca" (10 bytes -> 8: runs 4a 3b 2c 1a) and checks the
+-- round-trip. Observable:
+--   8
+--   10
+--   1
+--   "aaaabbbcca"
+--   unit
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printNat : Nat -> IO Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+
+eqGo : Nat -> Bin -> Bin -> Nat -> Bool is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bool end) (fn (xs : Bin) (ys : Bin) (i : Nat) is true end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bool) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is
+           case leb (binLen xs) i of
+           | true  -> true
+           | false -> case eqNat (binAt xs i) (binAt ys i) of | true -> ih xs ys (succ i) | false -> false end
+           end
+         end
+      end)
+      fuel
+  end
+end
+eqBin : Bin -> Bin -> Bool is
+  fn (xs : Bin) (ys : Bin) is
+    case eqNat (binLen xs) (binLen ys) of | true -> eqGo (binLen xs) xs ys 0 | false -> false end
+  end
+end
+
+-- runLen: how many bytes equal to c run consecutively from index i.
+runLenGo : Nat -> Bin -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Nat end) (fn (s : Bin) (i : Nat) (c : Nat) is 0 end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) (c : Nat) is
+           case leb (binLen s) i of
+           | true  -> 0
+           | false -> case eqNat (binAt s i) c of | true -> succ (ih s (succ i) c) | false -> 0 end
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+-- encode: emit a (count, value) pair per run. Advances by the run length, so
+-- fuel = input length (>= the number of runs). ih appears in one arm.
+encGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false -> binCons (runLenGo (binLen s) s i (binAt s i))
+                        (binCons (binAt s i) (ih s (addN i (runLenGo (binLen s) s i (binAt s i)))))
+           end
+         end
+      end)
+      fuel
+  end
+end
+encode : Bin -> Bin is fn (s : Bin) is encGo (binLen s) s 0 end end
+
+-- repeat a byte `count` times onto a tail.
+repBytes : Nat -> Nat -> Bin -> Bin is
+  fn (count : Nat) (v : Nat) (tail : Bin) is
+    NatElim (fn (x : Nat) is Bin end) tail (fn (k : Nat) (ih : Bin) is binCons v ih end) count
+  end
+end
+
+-- decode: read (count, value) pairs and expand them. Advances by 2 per pair.
+decGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (c : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (c : Bin) (i : Nat) is
+           case leb (binLen c) i of
+           | true  -> binEmpty
+           | false -> repBytes (binAt c i) (binAt c (succ i)) (ih c (addN i 2))
+           end
+         end
+      end)
+      fuel
+  end
+end
+decode : Bin -> Bin is fn (c : Bin) is decGo (binLen c) c 0 end end
+
+orig : Bin is b"aaaabbbcca" end
+comp : Bin is encode orig end
+roundtrip : Nat is case eqBin (decode comp) orig of | true -> succ zero | false -> zero end end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (binLen comp)) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (binLen orig)) (fn (b : Nat) is
+      bindIO Nat Unit (printNat roundtrip) (fn (c : Nat) is
+        bindIO Unit Unit (printBin (decode comp)) (fn (d : Unit) is
+          pureIO Unit unit
+        end)
+      end)
+    end)
+  end)
+end

@@ -89,3 +89,24 @@ func TestFlag(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch505_flag.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch505_flag.rune", want) })
 }
+
+// TestCompress is the Phase-4 compress gate: a run-length codec over Bin (ch506)
+// whose contract is the round-trip identity decode(encode x) = x. Pure-wootz,
+// byte-identical on all 8 backends. Compresses "aaaabbbcca" (10 -> 8 bytes) and
+// confirms the round-trip (1) + the decoded string.
+func TestCompress(t *testing.T) {
+	const want = "8\n10\n1\n\"aaaabbbcca\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch506_compress.rune", "main", ""); got != want {
+				t.Fatalf("[%s] compress gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch506_compress.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch506_compress.rune", want) })
+}
