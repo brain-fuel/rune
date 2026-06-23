@@ -1,0 +1,130 @@
+-- Chapter 502 — regexp by Brzozowski DERIVATIVES (Phase 4).
+--
+-- Go's regexp is a Thompson NFA; the honest TOTAL construction here is the
+-- equivalent derivative engine. A regex is a value (Re); `nullable` asks whether
+-- it matches the empty string; `deriv re c` is the regex matching whatever re
+-- matches AFTER consuming byte c. Matching = fold `deriv` over the input bytes,
+-- then `nullable`. Pure wootz — no FFI, no backtracking, structural recursion via
+-- ReElim, so it runs byte-identically on all 8 backends. The recursive `ih` sits
+-- in exactly ONE case arm (the runGo step), so no eager-arm blow-up.
+--
+-- main prints 5 matches as 1/0. re1 = a(b|c)*d, re2 = a.c. Observable
+-- "1\n1\n0\n1\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printNat : Nat -> IO Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+or2  : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> true | false -> b end end end
+and2 : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> false | true -> b end end end
+
+-- a regular expression as a value: nothing, empty, a byte, any byte, choice,
+-- sequence, repetition.
+data Re : U is
+  rzero : Re                  -- matches nothing
+| reps  : Re                  -- matches the empty string
+| rchr  : Nat -> Re           -- matches one specific byte
+| rany  : Re                  -- matches any one byte (the . wildcard)
+| ralt  : Re -> Re -> Re      -- a | b
+| rcat  : Re -> Re -> Re      -- a then b
+| rstar : Re -> Re            -- a*
+end
+
+-- nullable: does the regex accept the empty string?
+nullable : Re -> Bool is
+  ReElim (fn (x : Re) is Bool end)
+    false
+    true
+    (fn (x : Nat) is false end)
+    false
+    (fn (a : Re) (b : Re) (iha : Bool) (ihb : Bool) is or2 iha ihb end)
+    (fn (a : Re) (b : Re) (iha : Bool) (ihb : Bool) is and2 iha ihb end)
+    (fn (a : Re) (iha : Bool) is true end)
+end
+
+-- deriv re c: the regex matching the tails of strings re matches that start with c.
+deriv : Re -> Nat -> Re is
+  ReElim (fn (x : Re) is Nat -> Re end)
+    (fn (c : Nat) is rzero end)
+    (fn (c : Nat) is rzero end)
+    (fn (x : Nat) is fn (c : Nat) is case eqNat x c of | true -> reps | false -> rzero end end end)
+    (fn (c : Nat) is reps end)
+    (fn (a : Re) (b : Re) (iha : Nat -> Re) (ihb : Nat -> Re) is
+       fn (c : Nat) is ralt (iha c) (ihb c) end end)
+    (fn (a : Re) (b : Re) (iha : Nat -> Re) (ihb : Nat -> Re) is
+       fn (c : Nat) is
+         case nullable a of
+         | true  -> ralt (rcat (iha c) b) (ihb c)
+         | false -> rcat (iha c) b
+         end
+       end end)
+    (fn (a : Re) (iha : Nat -> Re) is
+       fn (c : Nat) is rcat (iha c) (rstar a) end end)
+end
+
+-- runGo: consume the bytes of s from index i to the end, returning the residual
+-- regex. Fuel = binLen s. The recursive ih appears in exactly ONE arm.
+runGo : Nat -> Re -> Bin -> Nat -> Re is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Re -> Bin -> Nat -> Re end)
+      (fn (re : Re) (s : Bin) (i : Nat) is re end)
+      (fn (f : Nat) (ih : Re -> Bin -> Nat -> Re) is
+         fn (re : Re) (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> re
+           | false -> ih (deriv re (binAt s i)) s (succ i)
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+matchBool : Re -> Bin -> Bool is fn (re : Re) (s : Bin) is nullable (runGo (binLen s) re s 0) end end
+matchNat  : Re -> Bin -> Nat  is fn (re : Re) (s : Bin) is case matchBool re s of | true -> succ zero | false -> zero end end end
+
+-- re1 = a(b|c)*d
+re1 : Re is rcat (rchr 97) (rcat (rstar (ralt (rchr 98) (rchr 99))) (rchr 100)) end
+-- re2 = a.c
+re2 : Re is rcat (rchr 97) (rcat rany (rchr 99)) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (matchNat re1 b"abccbd")) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (matchNat re1 b"ad")) (fn (b : Nat) is
+      bindIO Nat Unit (printNat (matchNat re1 b"abx")) (fn (c : Nat) is
+        bindIO Nat Unit (printNat (matchNat re2 b"axc")) (fn (d : Nat) is
+          bindIO Nat Unit (printNat (matchNat re2 b"ac")) (fn (e : Nat) is
+            pureIO Unit unit
+          end)
+        end)
+      end)
+    end)
+  end)
+end
