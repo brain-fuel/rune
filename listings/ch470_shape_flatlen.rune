@@ -1,0 +1,102 @@
+-- Chapter 470 — ARBITRARY-RANK shape discharge: `Shape = List Nat` + `flatLen` (D4 rung 2).
+--
+-- ch467 discharged a flat foreign array's length against a HAND-WRITTEN 2-D extent
+-- (`Eq Nat (flen A)(natMul m k)`). That only states a rank-2 contract. The general
+-- `Array dt sh` handle (R-INTEROP.md) needs the shape to be a VALUE of arbitrary rank.
+-- This is the next rung: a shape is a `List Nat` (rank in the length, dims in the cells)
+-- and its flat extent is the PRODUCT `flatLen : Shape -> Nat`, so the precondition reads
+-- `Eq Nat (flen A)(flatLen sh)` for ANY rank — rank-1 vector, rank-2 matrix, rank-3 tensor,
+-- all the same contract. A malformed array (flat length ≠ the product of its dims) is still
+-- a COMPILE error at `refl`, now at arbitrary rank. The bridge theorem `flatLen [m,k] ≡
+-- natMul m k` recovers ch467's rank-2 call as the rank-2 instance, and the well-shaped one
+-- runs REAL numpy through the embed (56). Pure library: no core, no hash bump, no cloud.
+-- Rung 3 (a DType kit) and rung 4 (the opaque CArray CRepr) follow in R-INTEROP.md.
+
+data Unit : U is unit : Unit end
+data Bool : U is true : Bool | false : Bool end
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+foreign Float      : U end
+data FList : U is fnil : FList | fcons : Float -> FList -> FList end
+
+-- a shape is a list of dimension extents: [] = scalar (rank 0), [n] = vector, [m,k] = matrix.
+data Shape : U is shnil : Shape | shcons : Nat -> Shape -> Shape end
+
+foreign printNat   : Nat -> IO Nat end
+foreign fromNat    : Nat -> Float end
+foreign floatToNat : Float -> Nat end
+foreign fadd       : Float -> Float -> Float end
+foreign pyNpMatVec : FList -> Nat -> Nat -> FList -> FList end
+
+-- flat-array length (the run-time extent) and Nat multiply (NatElim recursion on arg 1).
+flen : FList -> Nat is
+  fn (xs : FList) is
+    FListElim (fn (w : FList) is Nat end) zero
+      (fn (h : Float) (t : FList) (ih : Nat) is succ ih end) xs
+  end
+end
+natAddH : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+natMul : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is natAddH b ih end) a
+  end
+end
+
+-- THE GENERALIZATION: a shape's flat extent is the PRODUCT of its dims. flatLen [] = 1
+-- (the empty product — a scalar holds one cell), flatLen (d::ds) = d * flatLen ds. This is
+-- the arbitrary-rank `flatLen sh` the design specifies, replacing ch467's hand-written m*k.
+flatLen : Shape -> Nat is
+  fn (sh : Shape) is
+    ShapeElim (fn (w : Shape) is Nat end) (succ zero)
+      (fn (d : Nat) (ds : Shape) (ih : Nat) is natMul d ih end) sh
+  end
+end
+
+-- THE ARBITRARY-RANK SHAPE-DISCHARGED ARRAY. A flat FList paired with a shape of ANY rank,
+-- the conformance `flen A = flatLen sh` discharged by a typed proof (erased). A flat array
+-- whose length is not the product of its declared dims is unrepresentable — a compile error.
+safeArr : (sh : Shape) -> (A : FList) -> Eq Nat (flen A) (flatLen sh) -> FList is
+  fn (sh : Shape) (A : FList) (pf : Eq Nat (flen A) (flatLen sh)) is A end
+end
+
+-- RANK-3 witness: a 2x2x2 tensor is a flat array of length 8 = 2*2*2. flatLen [2,2,2]
+-- reduces to 8 and flen ten8 to 8, so `refl` checks. A length-7 array, or shape [2,2,3]
+-- (flatLen 12), would FAIL here — arbitrary-rank conformance, discharged not guarded.
+sh3 : Shape is shcons 2 (shcons 2 (shcons 2 shnil)) end
+ten8 : FList is
+  fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4)
+  (fcons (fromNat 5) (fcons (fromNat 6) (fcons (fromNat 7) (fcons (fromNat 8) fnil))))))) end
+tensor3 : FList is safeArr sh3 ten8 refl end
+
+-- THE BRIDGE: ch467's rank-2 contract is the rank-2 instance of flatLen. For the concrete
+-- 2-D shape [2,2], flatLen reduces to 4, exactly `natMul 2 2`. So a flat array discharged by
+-- the GENERAL flatLen plugs straight into the rung-1 numpy call (whose own proof wants m*k).
+sh2 : Shape is shcons 2 (shcons 2 shnil) end
+flatLenBridge : Eq Nat (flatLen sh2) (natMul 2 2) is refl end
+
+matA : FList is fcons (fromNat 1) (fcons (fromNat 2) (fcons (fromNat 3) (fcons (fromNat 4) fnil))) end
+vecB : FList is fcons (fromNat 5) (fcons (fromNat 6) fnil) end
+
+-- shape-discharge the matrix via the GENERAL flatLen (sh2), then run REAL numpy. The flat
+-- length is proven against flatLen [2,2]; flatLenBridge ties that to the m*k pyNpMatVec wants.
+matAShaped : FList is safeArr sh2 matA refl end
+prodAv : FList is pyNpMatVec matAShaped 2 2 vecB end
+
+sumFList : FList -> Float is
+  fn (ys : FList) is
+    FListElim (fn (w : FList) is Float end) (fromNat 0)
+      (fn (h : Float) (r : FList) (ih : Float) is fadd h ih end) ys
+  end
+end
+
+-- witness: [[1,2],[3,4]] · [5,6] = [17,39], sum 56 — numpy via the embed, shape discharged
+-- through the arbitrary-rank flatLen. (tensor3 / flatLenBridge type-check, proving the rank
+-- generalization and the rank-2 bridge.)
+main : IO Unit is
+  bindIO Nat Unit (printNat (floatToNat (sumFList prodAv))) (fn (u1 : Nat) is pureIO Unit unit end)
+end

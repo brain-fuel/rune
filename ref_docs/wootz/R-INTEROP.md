@@ -99,11 +99,14 @@ kernel fixed (Thompson):
 
 1. **Guarded flat arrays** (ch221–228) — flat `FList` + `Nat` dims, shapes recomputed and
    compared at the boundary. DONE.
-2. **Shape-DISCHARGED flat arrays** (ch467) — the same flat `FList`, but the dim↔length
-   conformance is a TYPED precondition (`Eq Nat (flen A) (natMul m k)`), so a malformed array
-   is a compile error. DONE (1-D vector + 2-D matvec). NEXT within this rung: a `Shape =
-   List Nat` value + `flatLen : Shape -> Nat` (product) so the precondition reads
-   `Eq Nat (flen A) (flatLen sh)` for ARBITRARY rank, not hand-written `natMul m k`.
+2. **Shape-DISCHARGED flat arrays** (ch467 + ch470) — the same flat `FList`, but the dim↔length
+   conformance is a TYPED precondition, so a malformed array is a compile error. DONE: ch467
+   (1-D vector + 2-D matvec, hand-written `Eq Nat (flen A) (natMul m k)`) AND ch470 (v3.328.42 —
+   ARBITRARY RANK: a `Shape = List Nat` value + `flatLen : Shape -> Nat` (the product, `flatLen []
+   = 1`, `flatLen (d::ds) = d * flatLen ds`), so the precondition reads `Eq Nat (flen A)(flatLen
+   sh)` at ANY rank — a rank-3 [2,2,2] tensor discharges, a length-7 array against it is rejected
+   at `refl`, and the bridge `flatLen [m,k] ≡ natMul m k` recovers ch467's rank-2 call, which
+   runs real numpy via the embed → 56; TestD4ShapeFlatLen). Rung 2 is COMPLETE.
 3. **A `DType` kit** — a closed `data DType is f64 | f32 | i64 | ... end` + `elemTy : DType ->
    U` + `dtypeStr : DType -> String`, so the element type is a value the boundary marshaller
    reads (today everything is `Float`/f64). Rune library, no core.
@@ -114,8 +117,10 @@ kernel fixed (Thompson):
    The bidirectional marshalling (ch463) and the shape-discharge (ch467) become its `peek`/
    `poke`/`reshape` operations, now O(1) handle passing instead of element-wise FList walks.
 
-Rungs 1–2 are landed; 3 is a pure library; only rung 4 touches codegen. The design below is
-the rung-4 target; ch467 proves the shape-discharge semantics it will inherit.
+Rung 1 landed (ch467); rung 2 COMPLETE (ch470 — arbitrary-rank `Shape`/`flatLen`); 3 is a pure
+library; only rung 4 touches codegen. The design below is the rung-4 target; ch467/ch470 prove
+the shape-discharge semantics it will inherit. NEXT: rung 3, the `DType` kit (a closed enum +
+`elemTy`/`dtypeStr`), also a pure library — no core, no cloud.
 
 ## Problem (what's stuck/absent today, with file:line)
 
