@@ -80,3 +80,23 @@ func TestSlicesMaps(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch511_slicesmaps.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch511_slicesmaps.rune", want) })
 }
+
+// TestBignum is a Phase-2 tail gate: math/big arbitrary precision (ch512) —
+// 2^64, 20!, 25! computed exactly via the kernel bignum accel, full decimal,
+// byte-identical on all 8 backends.
+func TestBignum(t *testing.T) {
+	const want = "18446744073709551616\n2432902008176640000\n15511210043330985984000000\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch512_bignum.rune", "main", ""); got != want {
+				t.Fatalf("[%s] bignum gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch512_bignum.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch512_bignum.rune", want) })
+}
