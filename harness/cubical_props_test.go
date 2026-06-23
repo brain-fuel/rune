@@ -91,3 +91,63 @@ func TestClosedFaceNormalizesToConstant(t *testing.T) {
 		}
 	})
 }
+
+// ===== X2 canonicity suite (the C-REG gate): the De Morgan + lattice LAWS hold on
+// CLOSED terms. The canonicity-without-regularity bet (C-REG) is that every closed
+// cubical term reaches a canonical form; the algebra's laws are a sharp probe — both
+// sides of each law normalize to the SAME endpoint/constant over thousands of random
+// closed terms. The consumer that makes the canonicity property checkable: a law that
+// failed to hold canonically would be the first sign the non-regular bet is unsound.
+
+// lawEq normalizes two closed sources and asserts they reach the same canonical form.
+func lawEq(t *rapid.T, s *session.Session, lhs, rhs string) {
+	l, r := normIv(t, s, lhs), normIv(t, s, rhs)
+	if l != r {
+		t.Fatalf("law failed: %q ~> %q  vs  %q ~> %q", lhs, l, rhs, r)
+	}
+}
+
+func TestIntervalDeMorganLaws(t *testing.T) {
+	s := session.New()
+	rapid.Check(t, func(t *rapid.T) {
+		a := genInterval(t, rapid.IntRange(0, 3).Draw(t, "a"))
+		b := genInterval(t, rapid.IntRange(0, 3).Draw(t, "b"))
+		// ¬(a ∧ b) = ¬a ∨ ¬b  and  ¬(a ∨ b) = ¬a ∧ ¬b  (De Morgan over the interval).
+		lawEq(t, s, "(ineg (imin "+a+" "+b+"))", "(imax (ineg "+a+") (ineg "+b+"))")
+		lawEq(t, s, "(ineg (imax "+a+" "+b+"))", "(imin (ineg "+a+") (ineg "+b+"))")
+		// involution ¬¬a = a; idempotence a∧a = a, a∨a = a.
+		lawEq(t, s, "(ineg (ineg "+a+"))", a)
+		lawEq(t, s, "(imin "+a+" "+a+")", a)
+		lawEq(t, s, "(imax "+a+" "+a+")", a)
+	})
+}
+
+func TestIntervalAbsorptionLaws(t *testing.T) {
+	s := session.New()
+	rapid.Check(t, func(t *rapid.T) {
+		a := genInterval(t, rapid.IntRange(0, 3).Draw(t, "a"))
+		b := genInterval(t, rapid.IntRange(0, 3).Draw(t, "b"))
+		// the lattice absorption laws: a ∧ (a ∨ b) = a,  a ∨ (a ∧ b) = a.
+		lawEq(t, s, "(imin "+a+" (imax "+a+" "+b+"))", a)
+		lawEq(t, s, "(imax "+a+" (imin "+a+" "+b+"))", a)
+		// commutativity (both reach the same canonical endpoint).
+		lawEq(t, s, "(imin "+a+" "+b+")", "(imin "+b+" "+a+")")
+		lawEq(t, s, "(imax "+a+" "+b+")", "(imax "+b+" "+a+")")
+	})
+}
+
+func TestFaceDeMorganLaws(t *testing.T) {
+	s := session.New()
+	rapid.Check(t, func(t *rapid.T) {
+		a := genFace(t, rapid.IntRange(0, 3).Draw(t, "a"))
+		b := genFace(t, rapid.IntRange(0, 3).Draw(t, "b"))
+		// face-lattice canonicity: commutativity + idempotence of the cofibration meet/join.
+		lawEq(t, s, "(fand "+a+" "+b+")", "(fand "+b+" "+a+")")
+		lawEq(t, s, "(for "+a+" "+b+")", "(for "+b+" "+a+")")
+		lawEq(t, s, "(fand "+a+" "+a+")", a)
+		lawEq(t, s, "(for "+a+" "+a+")", a)
+		// the unit/zero laws: φ ∧ ⊤ = φ, φ ∨ ⊥ = φ.
+		lawEq(t, s, "(fand "+a+" ftop)", a)
+		lawEq(t, s, "(for "+a+" fbot)", a)
+	})
+}
