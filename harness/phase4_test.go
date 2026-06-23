@@ -110,3 +110,24 @@ func TestCompress(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch506_compress.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch506_compress.rune", want) })
 }
+
+// TestDatabase is the Phase-4 database/sql gate: the DB/driver API (open/exec/
+// query/scan) over an in-memory table (ch507), the table threaded functionally.
+// Pure-wootz, byte-identical on all 8 backends. Opens a DB, inserts two rows,
+// reads count (2) + three cells (Ada/Bob/2).
+func TestDatabase(t *testing.T) {
+	const want = "2\n\"Ada\"\n\"Bob\"\n\"2\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch507_database.rune", "main", ""); got != want {
+				t.Fatalf("[%s] database gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch507_database.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch507_database.rune", want) })
+}

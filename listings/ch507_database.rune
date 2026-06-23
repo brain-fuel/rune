@@ -1,0 +1,83 @@
+-- Chapter 507 — database/sql: the DB/driver API over an in-memory table (Phase 4).
+--
+-- Go's database/sql is a thin API (Open/Exec/Query/Scan) sitting on top of a
+-- driver interface, decoupled from any one store. The reachable, deterministic
+-- core is that API over an in-memory driver: `open` an empty table, `exec` to
+-- insert a row (returns the new DB — the table is threaded functionally, no
+-- mutation, total), `query`/`rowAt` to read rows back, and column accessors to
+-- Scan a cell. Pure wootz over Bin, no FFI beyond printNat/printBin,
+-- byte-identical on all 8 backends. A live Postgres-wire driver over Phase-1
+-- sockets (auth + message framing, a running DB) is the documented tail.
+--
+-- main opens a DB, inserts two rows, then reads the count and three cells.
+-- Observable:
+--   2
+--   "Ada"
+--   "Bob"
+--   "2"
+--   unit
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign printNat : Nat -> IO Nat end
+foreign printBin : Bin -> IO Unit end
+
+-- a table row (two columns: id, name) and the table (the DB state).
+data Row : U is
+  row : Bin -> Bin -> Row
+end
+data Rows : U is
+  rnil  : Rows
+| rcons : Row -> Rows -> Rows
+end
+
+colId   : Row -> Bin is RowElim (fn (x : Row) is Bin end) (fn (i : Bin) (n : Bin) is i end) end
+colName : Row -> Bin is RowElim (fn (x : Row) is Bin end) (fn (i : Bin) (n : Bin) is n end) end
+
+-- database/sql surface over the in-memory driver.
+open : Rows is rnil end
+
+-- exec INSERT: append a row to the end (preserving insertion order). ih is the
+-- append into the tail.
+appendRow : Rows -> Row -> Rows is
+  RowsElim (fn (x : Rows) is Row -> Rows end)
+    (fn (r : Row) is rcons r rnil end)
+    (fn (hd : Row) (tl : Rows) (ih : Row -> Rows) is fn (r : Row) is rcons hd (ih r) end end)
+end
+exec : Rows -> Bin -> Bin -> Rows is fn (db : Rows) (i : Bin) (n : Bin) is appendRow db (row i n) end end
+
+-- query: row count, and the i-th row (an empty row past the end).
+rowCount : Rows -> Nat is
+  RowsElim (fn (x : Rows) is Nat end) zero (fn (hd : Row) (tl : Rows) (ih : Nat) is succ ih end)
+end
+rowAt : Rows -> Nat -> Row is
+  RowsElim (fn (x : Rows) is Nat -> Row end)
+    (fn (n : Nat) is row binEmpty binEmpty end)
+    (fn (hd : Row) (tl : Rows) (ih : Nat -> Row) is
+       fn (n : Nat) is case n of | zero -> hd | succ k -> ih k end end end)
+end
+
+db : Rows is exec (exec open b"1" b"Ada") b"2" b"Bob" end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (rowCount db)) (fn (a : Nat) is
+    bindIO Unit Unit (printBin (colName (rowAt db 0))) (fn (b : Unit) is
+      bindIO Unit Unit (printBin (colName (rowAt db 1))) (fn (c : Unit) is
+        bindIO Unit Unit (printBin (colId (rowAt db 1))) (fn (d : Unit) is
+          pureIO Unit unit
+        end)
+      end)
+    end)
+  end)
+end
