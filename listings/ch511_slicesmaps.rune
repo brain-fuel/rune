@@ -1,0 +1,105 @@
+-- Chapter 511 — slices + maps: generic collection ops (Phase 2 tail).
+--
+-- Go's slices and maps packages are generic helpers over sequences and key/value
+-- maps. The pure core here is the same operations over a Nat list (Contains,
+-- Index, Max, Reverse) and an association map (Get, Len). Pure wootz, no FFI
+-- beyond printNat, byte-identical on all 8 backends.
+--
+-- main runs each op on [3,1,4,1,5] and a 2-entry map. Observable
+-- "1\n4\n5\n5\n20\n2\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+boolToNat : Bool -> Nat is fn (b : Bool) is case b of | true -> succ zero | false -> zero end end end
+
+data List : U is
+  lnil  : List
+| lcons : Nat -> List -> List
+end
+
+-- slices.Contains / Index / Max / Reverse.
+contains : List -> Nat -> Bool is
+  ListElim (fn (x : List) is Nat -> Bool end)
+    (fn (v : Nat) is false end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> Bool) is
+       fn (v : Nat) is case eqNat hd v of | true -> true | false -> ih v end end end)
+end
+indexOf : List -> Nat -> Nat is
+  ListElim (fn (x : List) is Nat -> Nat end)
+    (fn (v : Nat) is 999 end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> Nat) is
+       fn (v : Nat) is case eqNat hd v of | true -> 0 | false -> succ (ih v) end end end)
+end
+maxList : List -> Nat is
+  ListElim (fn (x : List) is Nat end)
+    0
+    (fn (hd : Nat) (tl : List) (ih : Nat) is case leb hd ih of | true -> ih | false -> hd end end)
+end
+reverse : List -> List is
+  fn (l : List) is
+    ListElim (fn (x : List) is List -> List end)
+      (fn (acc : List) is acc end)
+      (fn (hd : Nat) (tl : List) (ih : List -> List) is fn (acc : List) is ih (lcons hd acc) end end)
+      l lnil
+  end
+end
+headOf : List -> Nat is fn (l : List) is case l of | lnil -> 0 | lcons h t -> h end end end
+
+-- maps: an association map over Nat keys.
+data MMap : U is
+  mnil  : MMap
+| mcons : Nat -> Nat -> MMap -> MMap
+end
+minsert : MMap -> Nat -> Nat -> MMap is fn (m : MMap) (k : Nat) (v : Nat) is mcons k v m end end
+mget : MMap -> Nat -> Nat is
+  MMapElim (fn (x : MMap) is Nat -> Nat end)
+    (fn (k : Nat) is 0 end)
+    (fn (kk : Nat) (vv : Nat) (rest : MMap) (ih : Nat -> Nat) is
+       fn (k : Nat) is case eqNat kk k of | true -> vv | false -> ih k end end end)
+end
+mlen : MMap -> Nat is
+  MMapElim (fn (x : MMap) is Nat end) zero (fn (kk : Nat) (vv : Nat) (rest : MMap) (ih : Nat) is succ ih end)
+end
+
+xs : List is lcons 3 (lcons 1 (lcons 4 (lcons 1 (lcons 5 lnil)))) end
+m  : MMap is minsert (minsert mnil 1 10) 2 20 end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (boolToNat (contains xs 4))) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (indexOf xs 5)) (fn (b : Nat) is
+      bindIO Nat Unit (printNat (maxList xs)) (fn (c : Nat) is
+        bindIO Nat Unit (printNat (headOf (reverse xs))) (fn (d : Nat) is
+          bindIO Nat Unit (printNat (mget m 2)) (fn (e : Nat) is
+            bindIO Nat Unit (printNat (mlen m)) (fn (g : Nat) is
+              pureIO Unit unit
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

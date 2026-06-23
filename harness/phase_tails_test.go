@@ -61,3 +61,22 @@ func TestHeap(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch510_heap.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch510_heap.rune", want) })
 }
+
+// TestSlicesMaps is a Phase-2 tail gate: generic slice ops (Contains/Index/Max/
+// Reverse) + an assoc map (Get/Len) over Nat (ch511). Byte-identical on all 8.
+func TestSlicesMaps(t *testing.T) {
+	const want = "1\n4\n5\n5\n20\n2\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch511_slicesmaps.rune", "main", ""); got != want {
+				t.Fatalf("[%s] slicesmaps gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch511_slicesmaps.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch511_slicesmaps.rune", want) })
+}
