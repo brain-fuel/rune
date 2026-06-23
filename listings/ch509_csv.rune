@@ -1,0 +1,163 @@
+-- Chapter 509 — encoding/csv: split/join a record over Bin (Phase 2 tail).
+--
+-- Go's encoding/csv reads/writes comma-separated records. The pure core is a
+-- field splitter and a joiner over Bin: `split` cuts a line at each comma into a
+-- list of field byte-strings, `joinComma` rebuilds the line. The contract is the
+-- round-trip joinComma (split x) = x for comma-free fields. Pure wootz, no FFI
+-- beyond printNat/printBin, byte-identical on all 8 backends.
+--
+-- main splits "id,name,age", reads the field count + field 1, and round-trips.
+-- Observable "3\n\"name\"\n1\n\"id,name,age\"\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printNat : Nat -> IO Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+
+appGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (xs : Bin) (ys : Bin) (i : Nat) is ys end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is
+           case leb (binLen xs) i of | true -> ys | false -> binCons (binAt xs i) (ih xs ys (succ i)) end
+         end
+      end)
+      fuel
+  end
+end
+binApp : Bin -> Bin -> Bin is fn (xs : Bin) (ys : Bin) is appGo (binLen xs) xs ys 0 end end
+
+eqGo : Nat -> Bin -> Bin -> Nat -> Bool is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bool end) (fn (xs : Bin) (ys : Bin) (i : Nat) is true end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bool) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is
+           case leb (binLen xs) i of
+           | true  -> true
+           | false -> case eqNat (binAt xs i) (binAt ys i) of | true -> ih xs ys (succ i) | false -> false end
+           end
+         end
+      end)
+      fuel
+  end
+end
+eqBin : Bin -> Bin -> Bool is
+  fn (xs : Bin) (ys : Bin) is
+    case eqNat (binLen xs) (binLen ys) of | true -> eqGo (binLen xs) xs ys 0 | false -> false end
+  end
+end
+
+-- fieldEnd: smallest j >= i that is a comma (byte 44) or the end of input.
+feGo : Nat -> Bin -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat end) (fn (s : Bin) (i : Nat) is i end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> i
+           | false -> case eqNat (binAt s i) 44 of | true -> i | false -> ih s (succ i) end
+           end
+         end
+      end)
+      fuel
+  end
+end
+fieldEnd : Bin -> Nat -> Nat is fn (s : Bin) (i : Nat) is feGo (binLen s) s i end end
+
+-- substring s[i, j).
+srGo : Nat -> Bin -> Nat -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Bin end) (fn (s : Bin) (i : Nat) (j : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) (j : Nat) is
+           case leb j i of | true -> binEmpty | false -> binCons (binAt s i) (ih s (succ i) j) end
+         end
+      end)
+      fuel
+  end
+end
+substr : Bin -> Nat -> Nat -> Bin is fn (s : Bin) (i : Nat) (j : Nat) is srGo (binLen s) s i j end end
+
+data List : U is
+  lnil  : List
+| lcons : Bin -> List -> List
+end
+
+-- split a line at each comma. Fuel = len+1 (>= field count); ih in one arm.
+splitGo : Nat -> Bin -> Nat -> List is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> List end) (fn (s : Bin) (i : Nat) is lnil end)
+      (fn (f : Nat) (ih : Bin -> Nat -> List) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) (fieldEnd s i) of
+           | true  -> lcons (substr s i (fieldEnd s i)) lnil
+           | false -> lcons (substr s i (fieldEnd s i)) (ih s (succ (fieldEnd s i)))
+           end
+         end
+      end)
+      fuel
+  end
+end
+split : Bin -> List is fn (s : Bin) is splitGo (addN (binLen s) 1) s 0 end end
+
+listLen : List -> Nat is
+  ListElim (fn (x : List) is Nat end) zero (fn (hd : Bin) (tl : List) (ih : Nat) is succ ih end)
+end
+nth : List -> Nat -> Bin is
+  ListElim (fn (x : List) is Nat -> Bin end)
+    (fn (n : Nat) is binEmpty end)
+    (fn (hd : Bin) (tl : List) (ih : Nat -> Bin) is fn (n : Nat) is case n of | zero -> hd | succ k -> ih k end end end)
+end
+joinComma : List -> Bin is
+  ListElim (fn (x : List) is Bin end)
+    binEmpty
+    (fn (hd : Bin) (tl : List) (ih : Bin) is
+       case tl of | lnil -> hd | lcons a b -> binApp hd (binApp b"," ih) end end)
+end
+
+input  : Bin is b"id,name,age" end
+fields : List is split input end
+roundtrip : Nat is case eqBin (joinComma fields) input of | true -> succ zero | false -> zero end end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (listLen fields)) (fn (a : Nat) is
+    bindIO Unit Unit (printBin (nth fields 1)) (fn (b : Unit) is
+      bindIO Nat Unit (printNat roundtrip) (fn (c : Nat) is
+        bindIO Unit Unit (printBin (joinComma fields)) (fn (d : Unit) is
+          pureIO Unit unit
+        end)
+      end)
+    end)
+  end)
+end
