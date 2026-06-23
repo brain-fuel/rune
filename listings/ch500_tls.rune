@@ -1,0 +1,37 @@
+-- Chapter 500 — TLS (HTTPS) client over Bin (Phase 3).
+--
+-- tlsGet host port path : Bin -> Nat -> Bin -> IO Bin does an HTTPS GET via the
+-- host's TLS stack (Go crypto/tls, Python ssl, Node https) and returns the response
+-- body. (Certificate verification is skipped here so the harness can use a
+-- self-signed server.) The harness serves "secure" over TLS on a loopback port (fed
+-- on stdin); the client GETs it and prints the body. Observable "secure"\nunit.
+--
+-- Covered where the host ships TLS (go/py/js here; jvm/erl addable). Rust + native
+-- C/LLVM are excluded — no TLS library (same gap as crypto).
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign getNat   : IO Nat end
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign printBin : Bin -> IO Unit end
+foreign tlsGet   : Bin -> Nat -> Bin -> IO Bin end
+
+main : IO Unit is
+  bindIO Nat Unit getNat (fn (port : Nat) is
+    bindIO Bin Unit (tlsGet b"127.0.0.1" port b"/") (fn (body : Bin) is
+      bindIO Unit Unit (printBin body) (fn (u : Unit) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
