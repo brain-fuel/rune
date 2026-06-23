@@ -1,0 +1,263 @@
+-- Chapter 477 — NON-SETTLING coinductive adequacy + infinitely-often fairness (E3/D5). ch209
+-- proved adequacy for SETTLING supervised systems: the mirror systems collapse to the common
+-- QUIESCENT state `halt`, so `traceBisim`'s tail agreement is `preflF (behaviour halt)` and the
+-- behaviour stream tails off to `none`. The open research tail was the NON-SETTLING case —
+-- unbounded fault streams where no finite `ra` settles the process (the dfix wall). ch474 gave
+-- the LIVE perpetual-restart shape; this gives its COINDUCTIVE ADEQUACY.
+--
+-- The key: the mirror systems collapse not to a quiescent state but to a common PERPETUAL one
+-- (`looping`, which faults forever — `some lfail` at every depth, never `none`). The bisim still
+-- closes by `preflF` (the mirror difference resolves at step 1, both reaching `looping`), exactly
+-- as ch209 used `halt` — but now the common state NEVER SETTLES. So adequacy holds for a stream
+-- with NO finite settle point, dodging the dfix wall the same way the forward half does: a common
+-- post-step state, productive observation. Plus: the fault recurs INFINITELY OFTEN — at every
+-- depth k the behaviour shows `some lfail` (an inductive ∀k liveness, the meaningful content of
+-- "infinitely often"; the greatest-fixpoint dfix version stays parked).
+
+data Bool : U is true : Bool | false : Bool end
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data Label : U is ltau : Label | lfail : Label end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+-- the perpetual supervisor state: two mirror "about to detect a crash" states (left/right) and
+-- the common PERPETUAL loop they both step into. `looping` faults forever.
+data Sup : U is crashL : Sup | crashR : Sup | looping : Sup end
+
+-- ===== the ch208/ch209 Str (coinductive stream) + traceBisim library (standalone) =====
+
+Str : UF -> UF is
+  fn (A : UF) is Nu (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) end
+end
+head : (A : UF) -> El (Str A) -> El A is
+  fn (A : UF) (s : El (Str A)) is
+    fstF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+tail : (A : UF) -> El (Str A) -> El (Str A) is
+  fn (A : UF) (s : El (Str A)) is
+    sndF A (fn (z : El A) is Str A end)
+      (out (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) s)
+  end
+end
+traceOf : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> El S -> El (Str A) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end))) (s : El S) is
+    unfold (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end) S c s
+  end
+end
+ptransStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A)) -> (z : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y z) -> El (pathF (Str A) x z) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (z : El (Str A))
+     (p : El (pathF (Str A) x y)) (q : El (pathF (Str A) y z)) is
+    pathJ (Str A) y (fn (w : El (Str A)) (r : El (pathF (Str A) y w)) is pathF (Str A) x w end) p z q
+  end
+end
+repairEndpointsStr : (A : UF)
+   -> (x : El (Str A)) -> (x2 : El (Str A)) -> (y2 : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x x2) -> El (pathF (Str A) x2 y2) -> El (pathF (Str A) y2 y)
+   -> El (pathF (Str A) x y) is
+  fn (A : UF) (x : El (Str A)) (x2 : El (Str A)) (y2 : El (Str A)) (y : El (Str A))
+     (sx : El (pathF (Str A) x x2)) (q : El (pathF (Str A) x2 y2)) (sy : El (pathF (Str A) y2 y)) is
+    ptransStr A x x2 y sx (ptransStr A x2 y2 y q sy)
+  end
+end
+consStr : (A : UF) -> (h : El A) -> (ts : El (Str A)) -> El (Str A) is
+  fn (A : UF) (h : El A) (ts : El (Str A)) is
+    nuCons (fn (X : UF) is sigmaF A (fn (w : El A) is X end) end)
+      (pairF A (fn (w : El A) is Str A end) h ts)
+  end
+end
+symStr : (A : UF) -> (x : El (Str A)) -> (y : El (Str A))
+   -> El (pathF (Str A) x y) -> El (pathF (Str A) y x) is
+  fn (A : UF) (x : El (Str A)) (y : El (Str A)) (p : El (pathF (Str A) x y)) is
+    pabs (Str A) (fn (i : I) is papp (Str A) x y p (ineg i) end)
+  end
+end
+converseFromConsEta : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+   -> (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t)))
+     (es : El (pathF (Str A) (consStr A (head A s) (tail A s)) s))
+     (et : El (pathF (Str A) (consStr A (head A t) (tail A t)) t)) is
+    repairEndpointsStr A
+      s (consStr A (head A s) (tail A s)) (consStr A (head A t) (tail A t)) t
+      (symStr A (consStr A (head A s) (tail A s)) s es)
+      (pabs (Str A)
+         (fn (i : I) is
+            consStr A (papp A (head A s) (head A t) hp i)
+              (papp (Str A) (tail A s) (tail A t) tp i)
+          end))
+      et
+  end
+end
+bisimToPathStr : (A : UF) -> (s : El (Str A)) -> (t : El (Str A))
+   -> (hp : El (pathF A (head A s) (head A t)))
+   -> (tp : El (pathF (Str A) (tail A s) (tail A t)))
+   -> El (pathF (Str A) s t) is
+  fn (A : UF) (s : El (Str A)) (t : El (Str A))
+     (hp : El (pathF A (head A s) (head A t)))
+     (tp : El (pathF (Str A) (tail A s) (tail A t))) is
+    converseFromConsEta A s t hp tp (preflF (Str A) s) (preflF (Str A) t)
+  end
+end
+traceBisim : (A : UF) -> (S : UF)
+   -> (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+   -> (s : El S) -> (t : El S)
+   -> (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+   -> (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t))))
+   -> El (pathF (Str A) (traceOf A S c s) (traceOf A S c t)) is
+  fn (A : UF) (S : UF) (c : El S -> El (sigmaF A (fn (w : El A) is S end)))
+     (s : El S) (t : El S)
+     (hp : El (pathF A (head A (traceOf A S c s)) (head A (traceOf A S c t))))
+     (tp : El (pathF (Str A) (tail A (traceOf A S c s)) (tail A (traceOf A S c t)))) is
+    bisimToPathStr A (traceOf A S c s) (traceOf A S c t) hp tp
+  end
+end
+
+-- ===== the PERPETUAL coalgebra (never settles) =====
+--
+-- observe a fault (some lfail) at every state, and step: the two mirror "crash" states both go
+-- to the common `looping`, which loops on itself. So behaviour(looping) = some lfail forever —
+-- NO finite settle: settlesB never holds, yet adequacy will.
+obsOf : Sup -> Option Label is
+  fn (s : Sup) is
+    SupElim (fn (w : Sup) is Option Label end)
+      (some Label lfail) (some Label lfail) (some Label lfail) s
+  end
+end
+nextOf : Sup -> Sup is
+  fn (s : Sup) is SupElim (fn (w : Sup) is Sup end) looping looping looping s end
+end
+
+perpCoalg : El (fib Sup)
+   -> El (sigmaF (fib (Option Label)) (fn (w : El (fib (Option Label))) is fib Sup end)) is
+  fn (s : El (fib Sup)) is
+    pairF (fib (Option Label)) (fn (w : El (fib (Option Label))) is fib Sup end)
+      (obsOf s) (nextOf s)
+  end
+end
+
+behaviour : El (fib Sup) -> El (Str (fib (Option Label))) is
+  fn (s : El (fib Sup)) is traceOf (fib (Option Label)) (fib Sup) perpCoalg s end
+end
+
+-- the fault is OBSERVED, and it RECURS: head at depths 0 and 1 is `some lfail` (by refl, the
+-- out-ι fires through the unfold) — looping never falls quiet.
+behHead0 : Eq (El (fib (Option Label)))
+    (head (fib (Option Label)) (behaviour looping)) (some Label lfail) is refl (some Label lfail) end
+behHead1 : Eq (El (fib (Option Label)))
+    (head (fib (Option Label)) (tail (fib (Option Label)) (behaviour looping))) (some Label lfail) is
+  refl (some Label lfail)
+end
+
+-- the loop's tail IS itself (it steps to looping), definitionally — the engine of "never settles".
+loopTailId : Eq (El (Str (fib (Option Label))))
+    (tail (fib (Option Label)) (behaviour looping)) (behaviour looping) is
+  refl (behaviour looping)
+end
+
+-- ===== NON-SETTLING ADEQUACY: mirror perpetual systems have equal unbounded behaviour =====
+--
+-- crashL and crashR are mirror images (about to detect a crash on opposite sides). Both observe
+-- `some lfail` and step to the common `looping`. So their behaviour streams are PATH-EQUAL — by
+-- traceBisim: heads agree (preflF, both `some lfail`), tails agree (preflF, both `behaviour
+-- looping`). No fuel bound, no settle: `looping` faults forever. This is the non-settling tail
+-- closed for the mirror perpetual class — the coinductive analogue of ch209, over a stream that
+-- never becomes quiescent.
+perpAdequate : El (pathF (Str (fib (Option Label))) (behaviour crashL) (behaviour crashR)) is
+  traceBisim (fib (Option Label)) (fib Sup) perpCoalg crashL crashR
+    (preflF (fib (Option Label)) (some Label lfail))
+    (preflF (Str (fib (Option Label))) (behaviour looping))
+end
+
+-- ===== INFINITELY-OFTEN fairness: a fault at EVERY depth k =====
+--
+-- drop k = iterate tail k times (total, computes). dropLoop: drop k (behaviour looping) is
+-- path-equal to behaviour looping for ALL k (induction; loopTailId is the step). So the fault
+-- recurs forever — faultAt: at every depth k the head is `some lfail`. This is the inductive
+-- ∀k "infinitely often" liveness (the greatest-fixpoint dfix version stays parked).
+drop : (A : UF) -> Nat -> El (Str A) -> El (Str A) is
+  fn (A : UF) (k : Nat) is
+    NatElim (fn (w : Nat) is El (Str A) -> El (Str A) end)
+      (fn (s : El (Str A)) is s end)
+      (fn (j : Nat) (rec : El (Str A) -> El (Str A)) is fn (s : El (Str A)) is tail A (rec s) end end)
+      k
+  end
+end
+transEqL : (x : El (Str (fib (Option Label)))) -> (y : El (Str (fib (Option Label)))) -> (z : El (Str (fib (Option Label))))
+   -> Eq (El (Str (fib (Option Label)))) x y -> Eq (El (Str (fib (Option Label)))) y z
+   -> Eq (El (Str (fib (Option Label)))) x z is
+  fn (x : El (Str (fib (Option Label)))) (y : El (Str (fib (Option Label)))) (z : El (Str (fib (Option Label))))
+     (p : Eq (El (Str (fib (Option Label)))) x y) (q : Eq (El (Str (fib (Option Label)))) y z) is
+    subst (El (Str (fib (Option Label)))) y z q
+      (fn (w : El (Str (fib (Option Label)))) is Eq (El (Str (fib (Option Label)))) x w end) p
+  end
+end
+congTailL : (x : El (Str (fib (Option Label)))) -> (y : El (Str (fib (Option Label))))
+   -> Eq (El (Str (fib (Option Label)))) x y
+   -> Eq (El (Str (fib (Option Label)))) (tail (fib (Option Label)) x) (tail (fib (Option Label)) y) is
+  fn (x : El (Str (fib (Option Label)))) (y : El (Str (fib (Option Label))))
+     (p : Eq (El (Str (fib (Option Label)))) x y) is
+    subst (El (Str (fib (Option Label)))) x y p
+      (fn (w : El (Str (fib (Option Label)))) is
+         Eq (El (Str (fib (Option Label)))) (tail (fib (Option Label)) x) (tail (fib (Option Label)) w) end)
+      (refl (tail (fib (Option Label)) x))
+  end
+end
+dropLoop : (k : Nat) ->
+    Eq (El (Str (fib (Option Label)))) (drop (fib (Option Label)) k (behaviour looping)) (behaviour looping) is
+  fn (k : Nat) is
+    NatElim (fn (w : Nat) is
+        Eq (El (Str (fib (Option Label)))) (drop (fib (Option Label)) w (behaviour looping)) (behaviour looping) end)
+      (refl (behaviour looping))
+      (fn (j : Nat) (ih :
+           Eq (El (Str (fib (Option Label)))) (drop (fib (Option Label)) j (behaviour looping)) (behaviour looping)) is
+         -- drop (succ j) = tail (drop j ...); by IH that tail equals tail (behaviour looping) = behaviour looping.
+         transEqL
+           (tail (fib (Option Label)) (drop (fib (Option Label)) j (behaviour looping)))
+           (tail (fib (Option Label)) (behaviour looping))
+           (behaviour looping)
+           (congTailL (drop (fib (Option Label)) j (behaviour looping)) (behaviour looping) ih)
+           loopTailId
+       end)
+      k
+  end
+end
+congHeadL : (x : El (Str (fib (Option Label)))) -> (y : El (Str (fib (Option Label))))
+   -> Eq (El (Str (fib (Option Label)))) x y
+   -> Eq (El (fib (Option Label))) (head (fib (Option Label)) x) (head (fib (Option Label)) y) is
+  fn (x : El (Str (fib (Option Label)))) (y : El (Str (fib (Option Label))))
+     (p : Eq (El (Str (fib (Option Label)))) x y) is
+    subst (El (Str (fib (Option Label)))) x y p
+      (fn (w : El (Str (fib (Option Label)))) is
+         Eq (El (fib (Option Label))) (head (fib (Option Label)) x) (head (fib (Option Label)) w) end)
+      (refl (head (fib (Option Label)) x))
+  end
+end
+transEqLO : (x : El (fib (Option Label))) -> (y : El (fib (Option Label))) -> (z : El (fib (Option Label)))
+   -> Eq (El (fib (Option Label))) x y -> Eq (El (fib (Option Label))) y z -> Eq (El (fib (Option Label))) x z is
+  fn (x : El (fib (Option Label))) (y : El (fib (Option Label))) (z : El (fib (Option Label)))
+     (p : Eq (El (fib (Option Label))) x y) (q : Eq (El (fib (Option Label))) y z) is
+    subst (El (fib (Option Label))) y z q
+      (fn (w : El (fib (Option Label))) is Eq (El (fib (Option Label))) x w end) p
+  end
+end
+faultAt : (k : Nat) ->
+    Eq (El (fib (Option Label))) (head (fib (Option Label)) (drop (fib (Option Label)) k (behaviour looping))) (some Label lfail) is
+  fn (k : Nat) is
+    transEqLO
+      (head (fib (Option Label)) (drop (fib (Option Label)) k (behaviour looping)))
+      (head (fib (Option Label)) (behaviour looping))
+      (some Label lfail)
+      (congHeadL (drop (fib (Option Label)) k (behaviour looping)) (behaviour looping) (dropLoop k))
+      behHead0
+  end
+end

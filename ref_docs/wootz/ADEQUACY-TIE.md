@@ -229,3 +229,29 @@ So the consumer is genuine (a deployed service is the canonical OTP shape), and 
 the LIVE perpetual artifact — but the unbounded-stream adequacy proof remains the open
 research node, honestly. (The greatest-fixpoint Always-Eventually fairness — "restarts
 infinitely often" — is a further, separate dfix-wall research item, still no consumer.)
+
+## Non-settling adequacy CLOSED for the perpetual class (ch477)
+
+The "still RESEARCH" claim above is now substantially advanced. ch477 proves COINDUCTIVE
+adequacy for a NON-SETTLING system — driven by the ch474 perpetual-service consumer:
+
+- **The construction.** A perpetual coalgebra over `Sup = {crashL, crashR, looping}`: every
+  state observes `some lfail`, the two mirror "crash" states both step to the common `looping`,
+  and `looping` steps to itself. So `behaviour looping` is `some lfail` FOREVER — no finite `ra`
+  settles it (`loopTailId : tail (behaviour looping) ≡ behaviour looping` by refl is the
+  never-settling engine).
+- **Non-settling adequacy (`perpAdequate`).** The two mirror perpetual systems have PATH-EQUAL
+  unbounded behaviour streams, via `traceBisim`: heads agree (`preflF`, both `some lfail`), tails
+  agree (`preflF`, both `behaviour looping`). The bisim closes by `preflF` because the mirror
+  difference resolves at step 1 (both reach `looping`) — EXACTLY how ch209 closed via `halt`, but
+  the common post-step state is now PERPETUAL, not quiescent. So adequacy holds for a stream that
+  never settles, dodging the dfix wall the same way the forward half does (a common post-step
+  state + productive observation), NOT by a finite `settlesB`.
+- **Infinitely-often fairness (`faultAt`).** At EVERY depth k, `head (drop k (behaviour looping))
+  ≡ some lfail` (induction on k via `dropLoop` + `loopTailId`). This is the inductive ∀k content
+  of "infinitely often" — the fault recurs forever.
+
+What stays open: the FULLY-GENERAL all-P non-settling refinement (arbitrary non-settling P, not
+the mirror-to-common-perpetual-state class) and the GREATEST-fixpoint Always-Eventually fairness
+as a coinductive PREDICATE (the genuine dfix wall) — both still no consumer beyond this. ch477
+closes the perpetual-mirror class, the shape the ch474 service exhibits.
