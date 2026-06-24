@@ -39,3 +39,6 @@ go.work.sum
 
 # Ralph-loop / Claude Code session state
 .claude/
+
+# Vendored BearSSL build artifacts (rebuild via bin/build-bearssl.sh)
+third_party/bearssl/build/
