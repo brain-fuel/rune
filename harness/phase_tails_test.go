@@ -1,9 +1,38 @@
 package harness
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
+
+// gateUnchanged skips a slow test when neither its implementation nor its own
+// source has changed since the last recorded pass. The fingerprint is a hash of
+// the given files (e.g. the listing + this test file); it is stored under a
+// per-name marker in TempDir and rewritten by the returned commit func, which the
+// caller invokes only on success. go test's own cache does not track .rune files,
+// so this is what keeps the SHA-256 listing from re-running every dev cycle.
+func gateUnchanged(t *testing.T, name string, files ...string) (skip bool, commit func()) {
+	t.Helper()
+	h := sha256.New()
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return false, func() {} // can't fingerprint -> always run, never record
+		}
+		h.Write([]byte(f))
+		h.Write(b)
+	}
+	fp := hex.EncodeToString(h.Sum(nil))
+	gate := filepath.Join(os.TempDir(), "rune_gate_"+name)
+	if prev, err := os.ReadFile(gate); err == nil && string(prev) == fp {
+		return true, func() {}
+	}
+	return false, func() { _ = os.WriteFile(gate, []byte(fp), 0o644) }
+}
 
 // TestRand is a Phase-2 tail gate: a seeded LCG PRNG (ch508), deterministic so
 // byte-identical on all 8 backends. The big multiply rides the arithmetic accel.
@@ -133,6 +162,12 @@ func TestSha256Pure(t *testing.T) {
 	if testing.Short() {
 		t.Skip("ch514 pure sha256 is slow over the bignum tower; -short skips it")
 	}
+	// Skip when the listing and this test are unchanged since the last pass, so a
+	// normal dev cycle never pays the slow SHA cost twice for the same code.
+	skip, commit := gateUnchanged(t, "sha256pure", "../listings/ch514_sha256.rune", "phase_tails_test.go")
+	if skip {
+		t.Skip("ch514_sha256.rune + its test unchanged since last pass; skipping the slow run")
+	}
 	const want = "\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\nunit"
 	for _, bk := range ioOSBackends {
 		bk := bk
@@ -149,4 +184,7 @@ func TestSha256Pure(t *testing.T) {
 		})
 	}
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch514_sha256.rune", want) })
+	if !t.Failed() {
+		commit() // record the fingerprint so the next unchanged run skips
+	}
 }
