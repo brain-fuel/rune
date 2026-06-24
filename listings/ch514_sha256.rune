@@ -5,9 +5,13 @@
 -- expressible in pure wootz over the builtin bignum Nat: 32-bit words via mod 2^32,
 -- bitwise and/or/xor/not by recursion over bits, rotate/shift by the divmod accel,
 -- the message schedule, and the 64-round compression. Computing sha256("abc") it
--- reproduces the NIST vector ba7816bf...f20015ad, byte-identical on ALL 8 backends
--- (no host crypto needed). The padded "abc" block is supplied directly; general
--- padding over Bin is mechanical and is the documented follow-up.
+-- reproduces the NIST vector ba7816bf...f20015ad. The code is backend-agnostic
+-- pure wootz, so it is correct on all 8 by construction; it is VERIFIED on 7
+-- (js/py/go/rs/jvm + native c/ll). erl is excluded only for speed — the bignum
+-- divmod in the bit loops is too slow on BEAM, and erl already has host sha256
+-- (ch497). A bit-LIST word representation would cut the divmod and is the
+-- documented speedup. The padded "abc" block is supplied directly; general Bin
+-- padding is mechanical and is the documented follow-up.
 --
 -- Observable "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nunit".
 

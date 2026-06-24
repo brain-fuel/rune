@@ -169,10 +169,14 @@ func TestSha256Pure(t *testing.T) {
 		t.Skip("ch514_sha256.rune + its test unchanged since last pass; skipping the slow run")
 	}
 	const want = "\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\nunit"
+	// All 8 backends produce the NIST vector. erl is excluded from the routine gate
+	// only because it is slow over the bignum tower (~5 min) AND already has a host
+	// sha256 (ch497); it is verified separately. The other 7 — js/py/go/rs/jvm +
+	// native c/ll — run here (rs ~305s, c/ll ~55s, the rest fast).
 	for _, bk := range ioOSBackends {
 		bk := bk
-		if bk.name != "go" && bk.name != "rs" {
-			continue // go = fast oracle; rs = a crypto-less target. others have host sha256.
+		if bk.name == "erl" {
+			continue
 		}
 		t.Run(bk.name, func(t *testing.T) {
 			if _, err := exec.LookPath(bk.bin); err != nil {
@@ -184,6 +188,7 @@ func TestSha256Pure(t *testing.T) {
 		})
 	}
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch514_sha256.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch514_sha256.rune", want) })
 	if !t.Failed() {
 		commit() // record the fingerprint so the next unchanged run skips
 	}
