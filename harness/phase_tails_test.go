@@ -121,3 +121,32 @@ func TestJSON(t *testing.T) {
 	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch513_json.rune", want) })
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch513_json.rune", want) })
 }
+
+// TestSha256Pure is a Phase-3 tail gate: SHA-256 in PURE wootz (ch514), no host
+// crypto. It reproduces the NIST vector sha256("abc"). Its reason to exist is the
+// crypto-LESS backends — rust + native C/LLVM ship no digest, and the host-FFI
+// sha256 (ch497) does not cover them; this does, plus go as a fast oracle. The
+// 32-bit-word math runs over the builtin bignum, so it is SLOW (the int64
+// fast-lane that would make divmod-by-2 cheap is parked in the kernel); a bit-list
+// representation is the documented speedup. Skipped under -short.
+func TestSha256Pure(t *testing.T) {
+	if testing.Short() {
+		t.Skip("ch514 pure sha256 is slow over the bignum tower; -short skips it")
+	}
+	const want = "\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		if bk.name != "go" && bk.name != "rs" {
+			continue // go = fast oracle; rs = a crypto-less target. others have host sha256.
+		}
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch514_sha256.rune", "main", ""); got != want {
+				t.Fatalf("[%s] sha256 gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch514_sha256.rune", want) })
+}

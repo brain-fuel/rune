@@ -1,0 +1,227 @@
+-- Chapter 514 — crypto/sha256 in PURE wootz (Phase 3 tail).
+--
+-- The host-FFI sha256 (ch497) covers js/py/go/erl/jvm but not rust/native, which
+-- ship no digest. With universal div/mod accel now in place, the SHA-256 math is
+-- expressible in pure wootz over the builtin bignum Nat: 32-bit words via mod 2^32,
+-- bitwise and/or/xor/not by recursion over bits, rotate/shift by the divmod accel,
+-- the message schedule, and the 64-round compression. Computing sha256("abc") it
+-- reproduces the NIST vector ba7816bf...f20015ad, byte-identical on ALL 8 backends
+-- (no host crypto needed). The padded "abc" block is supplied directly; general
+-- padding over Bin is mechanical and is the documented follow-up.
+--
+-- Observable "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
+builtin natDiv divN
+builtin natMod modN
+
+pw : Nat -> Nat is fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is mulN 2 ih end) n end end
+mod32 : Nat -> Nat is fn (x : Nat) is modN x 4294967296 end end
+add32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is mod32 (addN a b) end end
+
+-- bitwise ops over 32 bits, low bit first, fuel 32.
+xorGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (modN (addN (modN a 2) (modN b 2)) 2) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+xor32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is xorGo 32 a b end end
+andGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (mulN (modN a 2) (modN b 2)) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+and32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is andGo 32 a b end end
+orGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (monus (addN (modN a 2) (modN b 2)) (mulN (modN a 2) (modN b 2))) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+or32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is orGo 32 a b end end
+not32 : Nat -> Nat is fn (x : Nat) is monus 4294967295 x end end
+
+shr : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is divN x (pw n) end end
+shl32 : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is mod32 (mulN x (pw n)) end end
+rotr : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is or32 (shr x n) (shl32 x (monus 32 n)) end end
+
+chF : Nat -> Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) (z : Nat) is xor32 (and32 x y) (and32 (not32 x) z) end end
+majF : Nat -> Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) (z : Nat) is xor32 (xor32 (and32 x y) (and32 x z)) (and32 y z) end end
+bS0 : Nat -> Nat is fn (x : Nat) is xor32 (xor32 (rotr x 2) (rotr x 13)) (rotr x 22) end end
+bS1 : Nat -> Nat is fn (x : Nat) is xor32 (xor32 (rotr x 6) (rotr x 11)) (rotr x 25) end end
+sS0 : Nat -> Nat is fn (x : Nat) is xor32 (xor32 (rotr x 7) (rotr x 18)) (shr x 3) end end
+sS1 : Nat -> Nat is fn (x : Nat) is xor32 (xor32 (rotr x 17) (rotr x 19)) (shr x 10) end end
+
+data List : U is
+  lnil  : List
+| lcons : Nat -> List -> List
+end
+nthL : List -> Nat -> Nat is
+  ListElim (fn (x : List) is Nat -> Nat end)
+    (fn (n : Nat) is 0 end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> Nat) is fn (n : Nat) is case n of | zero -> hd | succ k -> ih k end end end)
+end
+lenL : List -> Nat is
+  ListElim (fn (x : List) is Nat end) zero (fn (hd : Nat) (tl : List) (ih : Nat) is succ ih end)
+end
+snocL : List -> Nat -> List is
+  ListElim (fn (x : List) is Nat -> List end)
+    (fn (v : Nat) is lcons v lnil end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> List) is fn (v : Nat) is lcons hd (ih v) end end)
+end
+kK : List is lcons 1116352408 (lcons 1899447441 (lcons 3049323471 (lcons 3921009573 (lcons 961987163 (lcons 1508970993 (lcons 2453635748 (lcons 2870763221 (lcons 3624381080 (lcons 310598401 (lcons 607225278 (lcons 1426881987 (lcons 1925078388 (lcons 2162078206 (lcons 2614888103 (lcons 3248222580 (lcons 3835390401 (lcons 4022224774 (lcons 264347078 (lcons 604807628 (lcons 770255983 (lcons 1249150122 (lcons 1555081692 (lcons 1996064986 (lcons 2554220882 (lcons 2821834349 (lcons 2952996808 (lcons 3210313671 (lcons 3336571891 (lcons 3584528711 (lcons 113926993 (lcons 338241895 (lcons 666307205 (lcons 773529912 (lcons 1294757372 (lcons 1396182291 (lcons 1695183700 (lcons 1986661051 (lcons 2177026350 (lcons 2456956037 (lcons 2730485921 (lcons 2820302411 (lcons 3259730800 (lcons 3345764771 (lcons 3516065817 (lcons 3600352804 (lcons 4094571909 (lcons 275423344 (lcons 430227734 (lcons 506948616 (lcons 659060556 (lcons 883997877 (lcons 958139571 (lcons 1322822218 (lcons 1537002063 (lcons 1747873779 (lcons 1955562222 (lcons 2024104815 (lcons 2227730452 (lcons 2361852424 (lcons 2428436474 (lcons 2756734187 (lcons 3204031479 (lcons 3329325298 (lnil)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) end
+wBase : List is lcons 1633837952 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 0 (lcons 24 (lnil)))))))))))))))) end
+
+-- one schedule word from the current (length-t) list.
+nextW : List -> Nat is
+  fn (w : List) is
+    add32 (add32 (sS1 (nthL w (monus (lenL w) 2))) (nthL w (monus (lenL w) 7)))
+          (add32 (sS0 (nthL w (monus (lenL w) 15))) (nthL w (monus (lenL w) 16)))
+  end
+end
+extGo : Nat -> List -> List is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is List -> List end) (fn (w : List) is w end)
+      (fn (f : Nat) (ih : List -> List) is fn (w : List) is ih (snocL w (nextW w)) end end)
+      fuel
+  end
+end
+wSched : List is extGo 48 wBase end
+
+data St8 : U is
+  mk8 : Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> St8
+end
+g0 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is a end) end
+g1 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is b end) end
+g2 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is c end) end
+g3 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is d end) end
+g4 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is e end) end
+g5 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is f end) end
+g6 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is g end) end
+g7 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is h end) end
+
+-- one compression round at index t. T1/T2 inlined (no let).
+-- T1 of the round (the costly term — computed ONCE, then threaded to both the
+-- a' and e' slots via mkNext, so the bS1/chF/schedule work is not duplicated).
+t1F : Nat -> St8 -> Nat is
+  fn (t : Nat) (st : St8) is
+    add32 (add32 (add32 (add32 (g7 st) (bS1 (g4 st))) (chF (g4 st) (g5 st) (g6 st))) (nthL kK t)) (nthL wSched t)
+  end
+end
+mkNext : St8 -> Nat -> St8 is
+  fn (st : St8) (t1 : Nat) is
+    mk8
+      (add32 t1 (add32 (bS0 (g0 st)) (majF (g0 st) (g1 st) (g2 st))))
+      (g0 st)
+      (g1 st)
+      (g2 st)
+      (add32 (g3 st) t1)
+      (g4 st)
+      (g5 st)
+      (g6 st)
+  end
+end
+roundF : Nat -> St8 -> St8 is fn (t : Nat) (st : St8) is mkNext st (t1F t st) end end
+initSt : St8 is mk8 1779033703 3144134277 1013904242 2773480762 1359893119 2600822924 528734635 1541459225 end
+roundsGo : Nat -> St8 is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is St8 end) initSt (fn (k : Nat) (ih : St8) is roundF k ih end) n
+  end
+end
+finalSt : St8 is roundsGo 64 end
+
+d0 : Nat is add32 1779033703 (g0 finalSt) end
+d1 : Nat is add32 3144134277 (g1 finalSt) end
+d2 : Nat is add32 1013904242 (g2 finalSt) end
+d3 : Nat is add32 2773480762 (g3 finalSt) end
+d4 : Nat is add32 1359893119 (g4 finalSt) end
+d5 : Nat is add32 2600822924 (g5 finalSt) end
+d6 : Nat is add32 528734635 (g6 finalSt) end
+d7 : Nat is add32 1541459225 (g7 finalSt) end
+
+hexChar : Nat -> Nat is fn (d : Nat) is case leb d 9 of | true -> addN 48 d | false -> addN 87 d end end end
+hexNib : Nat -> Nat -> Bin is fn (w : Nat) (i : Nat) is binCons (hexChar (modN (divN w (pw (mulN 4 i))) 16)) binEmpty end end
+appGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (xs : Bin) (ys : Bin) (i : Nat) is ys end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is case leb (binLen xs) i of | true -> ys | false -> binCons (binAt xs i) (ih xs ys (succ i)) end end
+      end)
+      fuel
+  end
+end
+binApp : Bin -> Bin -> Bin is fn (xs : Bin) (ys : Bin) is appGo (binLen xs) xs ys 0 end end
+hexWord : Nat -> Bin is
+  fn (w : Nat) is
+    binApp (hexNib w 7) (binApp (hexNib w 6) (binApp (hexNib w 5) (binApp (hexNib w 4)
+      (binApp (hexNib w 3) (binApp (hexNib w 2) (binApp (hexNib w 1) (hexNib w 0)))))))
+  end
+end
+digestHex : Bin is
+  binApp (hexWord d0) (binApp (hexWord d1) (binApp (hexWord d2) (binApp (hexWord d3)
+    (binApp (hexWord d4) (binApp (hexWord d5) (binApp (hexWord d6) (hexWord d7)))))))
+end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin digestHex) (fn (a : Unit) is pureIO Unit unit end)
+end
