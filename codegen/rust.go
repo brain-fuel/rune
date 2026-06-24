@@ -91,6 +91,13 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 		b.WriteString("extern \"C\" { fn br_sha256_init(c: *mut BrSha256Ctx); fn br_sha224_update(c: *mut BrSha256Ctx, d: *const u8, n: usize); fn br_sha256_out(c: *const BrSha256Ctx, o: *mut u8); }\n")
 		b.WriteString("fn sha256() -> Rc<V> { vfun(|data: Rc<V>| -> Rc<V> { let b = _bytes(&data).clone(); let mut ctx = BrSha256Ctx { _b: [0u8; 128] }; let mut out = [0u8; 32]; unsafe { br_sha256_init(&mut ctx); br_sha224_update(&mut ctx, b.as_ptr(), b.len()); br_sha256_out(&ctx, out.as_mut_ptr()); } Rc::new(V::Bytes(out.to_vec())) }) }\n")
 	}
+	// Phase 3 TLS: HTTPS GET via the vendored rune_tls.c shim (BearSSL minimal
+	// client + skip-verify), linked alongside libbearssl.a. Rust declares one
+	// extern fn and never touches the TLS state machine.
+	if usesTLS(p) {
+		b.WriteString("extern \"C\" { fn rune_tls_get(host: *const u8, port: i32, path: *const u8, out: *mut *mut u8, outlen: *mut usize) -> i32; fn free(p: *mut core::ffi::c_void); }\n")
+		b.WriteString("fn tlsGet() -> Rc<V> { vfun(|host: Rc<V>| -> Rc<V> { let h = _bytes(&host).clone(); vfun(move |port: Rc<V>| -> Rc<V> { let p = _natusize(&port) as i32; let h = h.clone(); vfun(move |path: Rc<V>| -> Rc<V> { let pa = _bytes(&path).clone(); let h = h.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { let mut hc = h.clone(); hc.push(0); let mut pc = pa.clone(); pc.push(0); let mut outp: *mut u8 = core::ptr::null_mut(); let mut on: usize = 0; let rc = unsafe { rune_tls_get(hc.as_ptr(), p, pc.as_ptr(), &mut outp, &mut on) }; if rc != 0 || outp.is_null() { return Rc::new(V::Bytes(Vec::new())); } let body = unsafe { core::slice::from_raw_parts(outp, on) }.to_vec(); unsafe { free(outp as *mut core::ffi::c_void) }; Rc::new(V::Bytes(body)) }) }) }) }) }\n")
+	}
 	if usesForeign(p, "getNat") {
 		b.WriteString("fn getNat() -> Rc<V> { vfun(move |_u: Rc<V>| -> Rc<V> { let mut s = String::new(); std::io::stdin().read_line(&mut s).unwrap(); Rc::new(V::Nat(_big_from_u64(s.trim().parse::<u64>().unwrap()))) }) }\n")
 	}

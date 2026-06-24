@@ -215,8 +215,26 @@ func (LL) EmitRuntimeFor(p Program) string {
 	emitFSPrimsLL(&b, p)
 	emitProcPrimsLL(&b, p)
 	emitCryptoPrimsLL(&b, p)
+	emitTLSPrimsLL(&b, p)
 	b.WriteString(llRuntimeMain)
 	return b.String()
+}
+
+// emitTLSPrimsLL bakes the Phase-3 TLS client into the linked LLVM runtime — the LL
+// twin of emitTLSPrimsC. The TLS state machine is the vendored rune_tls.c shim
+// (compiled alongside); this body marshals Bin<->C and calls rune_tls_get. The
+// accessor is EXTERNAL (the .ll calls @tlsGet).
+func emitTLSPrimsLL(b *strings.Builder, p Program) {
+	if !usesTLS(p) {
+		return
+	}
+	b.WriteString(`extern int rune_tls_get(const char* host, int port, const char* path, unsigned char** out, unsigned long* outlen);
+static Value tlsGet_c4(Value u, Value* env) { (void)u; Value hb = env[0]; Value pb = env[1]; Value pa = env[2]; int hn = bytes_len(hb); char* host = (char*)malloc(hn + 1); for (int i = 0; i < hn; i++) host[i] = (char) bytes_at(hb, i); host[hn] = 0; int pn = bytes_len(pa); char* path = (char*)malloc(pn + 1); for (int i = 0; i < pn; i++) path[i] = (char) bytes_at(pa, i); path[pn] = 0; int port = (big_nlimbs(pb) == 0 ? 0 : (int) big_limb(pb, 0)); unsigned char* outp = 0; unsigned long on = 0; int rc = rune_tls_get(host, port, path, &outp, &on); free(host); free(path); if (rc != 0) { if (outp) free(outp); return mkbytes(0); } Value r = mkbytes((int) on); for (unsigned long i = 0; i < on; i++) bytes_set(r, (int) i, outp[i]); free(outp); return r; }
+static Value tlsGet_c3(Value path, Value* env) { Value c = rt_mkclo(&tlsGet_c4, 3); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, env[1]); rt_clo_set(c, 2, path); return c; }
+static Value tlsGet_c2(Value port, Value* env) { Value c = rt_mkclo(&tlsGet_c3, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, port); return c; }
+static Value tlsGet_c1(Value host, Value* env) { (void)env; Value c = rt_mkclo(&tlsGet_c2, 1); rt_clo_set(c, 0, host); return c; }
+Value tlsGet(void) { return rt_mkclo(&tlsGet_c1, 0); }
+`)
 }
 
 // emitCryptoPrimsLL bakes the Phase-3 BearSSL sha256 host body into the linked LLVM

@@ -185,6 +185,11 @@ func usesCrypto(p Program) bool { return usesForeign(p, "sha256") }
 // lack a TLS lib (same gap as crypto).
 func usesTLS(p Program) bool { return usesForeign(p, "tlsGet") }
 
+// UsesCrypto / UsesTLS are exported so the harness can decide native link flags
+// (the vendored libbearssl.a, and the TLS shim object) per program.
+func UsesCrypto(p Program) bool { return usesCrypto(p) }
+func UsesTLS(p Program) bool    { return usesTLS(p) }
+
 // usesForeign reports whether any emitted definition references a `foreign` axiom
 // of the given name (erased to an IForeign accessor). Mirrors usesOTP's walk.
 func usesForeign(p Program, name string) bool {

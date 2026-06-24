@@ -219,11 +219,23 @@ func bearsslDir() string  { d, _ := filepath.Abs(filepath.Join("..", "third_part
 func bearsslInc() string  { return filepath.Join(bearsslDir(), "inc") }
 func bearsslLib() string  { return filepath.Join(bearsslDir(), "build", "libbearssl.a") }
 func bearsslReady() bool  { _, err := os.Stat(bearsslLib()); return err == nil }
-func bearsslArgs() []string {
+func bearsslShim() string {
+	d, _ := filepath.Abs(filepath.Join("..", "third_party", "bearssl_shim", "rune_tls.c"))
+	return d
+}
+
+// bearsslArgs returns the native link args for a program: the -I include flag, the
+// TLS shim source (when the program uses tlsGet), and the static archive LAST (so
+// the shim's BearSSL references resolve). Empty if the lib is not built.
+func bearsslArgs(prog codegen.Program) []string {
 	if !bearsslReady() {
 		return nil
 	}
-	return []string{"-I", bearsslInc(), bearsslLib()}
+	args := []string{"-I", bearsslInc()}
+	if codegen.UsesTLS(prog) {
+		args = append(args, bearsslShim())
+	}
+	return append(args, bearsslLib())
 }
 
 func compileC(t *testing.T, prog codegen.Program) string {
@@ -236,7 +248,7 @@ func compileC(t *testing.T, prog codegen.Program) string {
 	f := filepath.Join(dir, "main.c")
 	bin := filepath.Join(dir, "main.bin")
 	os.WriteFile(f, []byte(src), 0o644)
-	args := append([]string{"-o", bin, f}, bearsslArgs()...)
+	args := append([]string{"-o", bin, f}, bearsslArgs(prog)...)
 	if out, err := exec.Command("cc", args...).CombinedOutput(); err != nil {
 		t.Fatalf("[c] compile: %v\n%s", err, out)
 	}
@@ -256,7 +268,7 @@ func compileLL(t *testing.T, prog codegen.Program) string {
 	bin := filepath.Join(dir, "main.bin")
 	os.WriteFile(f, []byte(ll), 0o644)
 	os.WriteFile(rtf, []byte(rt), 0o644)
-	args := append([]string{f, rtf, "-o", bin}, bearsslArgs()...)
+	args := append([]string{f, rtf, "-o", bin}, bearsslArgs(prog)...)
 	if out, err := exec.Command("clang", args...).CombinedOutput(); err != nil {
 		t.Fatalf("[ll] compile: %v\n%s", err, out)
 	}

@@ -99,6 +99,8 @@ func (C) Emit(p Program) (TargetSource, error) {
 	emitProcPrimsC(&b, p)
 	// Phase 3: bake the BearSSL crypto host bodies (sha256) when referenced.
 	emitCryptoPrimsC(&b, p)
+	// Phase 3: bake the BearSSL TLS client (tlsGet) when referenced.
+	emitTLSPrimsC(&b, p)
 
 	// Forward declarations: every code block and every thunk, so the bodies may
 	// reference one another (and themselves) regardless of definition order.
@@ -664,6 +666,23 @@ func emitCryptoPrimsC(b *strings.Builder, p Program) {
 	}
 	b.WriteString(`static Value sha256_c1(Value data, Value* env) { (void)env; int n = bytes_len(data); unsigned char* buf = (unsigned char*)malloc(n > 0 ? n : 1); for (int i = 0; i < n; i++) buf[i] = (unsigned char) bytes_at(data, i); unsigned char out[32]; br_sha256_context ctx; br_sha256_init(&ctx); br_sha256_update(&ctx, buf, n); br_sha256_out(&ctx, out); free(buf); Value r = mkbytes(32); for (int i = 0; i < 32; i++) bytes_set(r, i, out[i]); return r; }
 static Value sha256(void) { return mkclo(&sha256_c1, 0); }
+`)
+}
+
+// emitTLSPrimsC bakes the Phase-3 TLS client (tlsGet : Bin -> Nat -> Bin -> IO Bin)
+// on the C backend. The TLS state machine lives in the vendored rune_tls.c shim
+// (BearSSL minimal client + skip-verify); this body just marshals Bin<->C and
+// calls rune_tls_get. The harness compiles the shim alongside + links libbearssl.a.
+func emitTLSPrimsC(b *strings.Builder, p Program) {
+	if !usesTLS(p) {
+		return
+	}
+	b.WriteString(`extern int rune_tls_get(const char* host, int port, const char* path, unsigned char** out, unsigned long* outlen);
+static Value tlsGet_c4(Value u, Value* env) { (void)u; Value hb = env[0]; Value pb = env[1]; Value pa = env[2]; int hn = bytes_len(hb); char* host = (char*)malloc(hn + 1); for (int i = 0; i < hn; i++) host[i] = (char) bytes_at(hb, i); host[hn] = 0; int pn = bytes_len(pa); char* path = (char*)malloc(pn + 1); for (int i = 0; i < pn; i++) path[i] = (char) bytes_at(pa, i); path[pn] = 0; int port = (big_nlimbs(pb) == 0 ? 0 : (int) big_limb(pb, 0)); unsigned char* outp = 0; unsigned long on = 0; int rc = rune_tls_get(host, port, path, &outp, &on); free(host); free(path); if (rc != 0) { if (outp) free(outp); return mkbytes(0); } Value r = mkbytes((int) on); for (unsigned long i = 0; i < on; i++) bytes_set(r, (int) i, outp[i]); free(outp); return r; }
+static Value tlsGet_c3(Value path, Value* env) { Value c = mkclo(&tlsGet_c4, 3); clo_set(c, 0, env[0]); clo_set(c, 1, env[1]); clo_set(c, 2, path); return c; }
+static Value tlsGet_c2(Value port, Value* env) { Value c = mkclo(&tlsGet_c3, 2); clo_set(c, 0, env[0]); clo_set(c, 1, port); return c; }
+static Value tlsGet_c1(Value host, Value* env) { (void)env; Value c = mkclo(&tlsGet_c2, 1); clo_set(c, 0, host); return c; }
+static Value tlsGet(void) { return mkclo(&tlsGet_c1, 0); }
 `)
 }
 

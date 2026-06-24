@@ -168,7 +168,7 @@ func TestTLS(t *testing.T) {
 	for _, bk := range ioOSBackends {
 		bk := bk
 		if bk.name == "rs" {
-			continue // no TLS library on rust (same gap as crypto)
+			continue // rust TLS goes through the BearSSL shim path below
 		}
 		t.Run(bk.name, func(t *testing.T) {
 			if _, err := exec.LookPath(bk.bin); err != nil {
@@ -187,6 +187,50 @@ func TestTLS(t *testing.T) {
 		dir := compileJVM(t, "ch500_tls.rune", javac25)
 		if got := runCmdStdin(t, exec.Command(java25, "-cp", dir, "main"), port+"\n"); got != want {
 			t.Fatalf("[jvm] tls gave %q, want %q", got, want)
+		}
+	})
+
+	// Native backends (C, LLVM, Rust) via the vendored BearSSL TLS shim — the
+	// backends that ship no TLS of their own now reach the same self-signed server.
+	if !bearsslReady() {
+		t.Run("native", func(t *testing.T) { t.Skip("BearSSL not built — run bin/build-bearssl.sh") })
+		return
+	}
+	s := loadListing(t, "ch500_tls.rune")
+	prog, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("c", func(t *testing.T) {
+		if got := runCmdStdin(t, exec.Command(compileC(t, prog)), port+"\n"); got != want {
+			t.Fatalf("[c] tls gave %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if got := runCmdStdin(t, exec.Command(compileLL(t, prog)), port+"\n"); got != want {
+			t.Fatalf("[ll] tls gave %q, want %q", got, want)
+		}
+	})
+	t.Run("rs", func(t *testing.T) {
+		if _, err := exec.LookPath("rustc"); err != nil {
+			t.Skip("rustc not in PATH")
+		}
+		dir := t.TempDir()
+		shimO := filepath.Join(dir, "shim.o")
+		if out, err := exec.Command("cc", "-c", "-I", bearsslInc(), bearsslShim(), "-o", shimO).CombinedOutput(); err != nil {
+			t.Fatalf("[rs] shim compile: %v\n%s", err, out)
+		}
+		src, _ := codegen.Rust{}.Emit(prog)
+		f := filepath.Join(dir, "main.rs")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		out, err := exec.Command("rustc", "--edition", "2021", "-o", bin, f,
+			"-C", "link-arg="+shimO, "-C", "link-arg="+bearsslLib()).CombinedOutput()
+		if err != nil {
+			t.Fatalf("[rs] compile: %v\n%s", err, out)
+		}
+		if got := runCmdStdin(t, exec.Command(bin), port+"\n"); got != want {
+			t.Fatalf("[rs] tls gave %q, want %q", got, want)
 		}
 	})
 }
