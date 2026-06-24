@@ -211,6 +211,21 @@ func serverRoundTrip(t *testing.T, name string, newCmd func() *exec.Cmd) {
 // compileC/compileLL/compileJVM emit `prog`/`listing` and compile to a runnable
 // artifact, skipping if the toolchain is absent. Shared by the native/JVM server +
 // fs round-trip tests.
+// bearsslInc / bearsslLib locate the vendored BearSSL static lib (built by
+// bin/build-bearssl.sh). bearsslArgs returns the -I include flag and the archive
+// path to append to a native compile; empty if the lib is not built (crypto/TLS
+// native tests then skip via bearsslReady).
+func bearsslDir() string  { d, _ := filepath.Abs(filepath.Join("..", "third_party", "bearssl")); return d }
+func bearsslInc() string  { return filepath.Join(bearsslDir(), "inc") }
+func bearsslLib() string  { return filepath.Join(bearsslDir(), "build", "libbearssl.a") }
+func bearsslReady() bool  { _, err := os.Stat(bearsslLib()); return err == nil }
+func bearsslArgs() []string {
+	if !bearsslReady() {
+		return nil
+	}
+	return []string{"-I", bearsslInc(), bearsslLib()}
+}
+
 func compileC(t *testing.T, prog codegen.Program) string {
 	t.Helper()
 	if _, err := exec.LookPath("cc"); err != nil {
@@ -221,7 +236,8 @@ func compileC(t *testing.T, prog codegen.Program) string {
 	f := filepath.Join(dir, "main.c")
 	bin := filepath.Join(dir, "main.bin")
 	os.WriteFile(f, []byte(src), 0o644)
-	if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+	args := append([]string{"-o", bin, f}, bearsslArgs()...)
+	if out, err := exec.Command("cc", args...).CombinedOutput(); err != nil {
 		t.Fatalf("[c] compile: %v\n%s", err, out)
 	}
 	return bin
@@ -240,7 +256,8 @@ func compileLL(t *testing.T, prog codegen.Program) string {
 	bin := filepath.Join(dir, "main.bin")
 	os.WriteFile(f, []byte(ll), 0o644)
 	os.WriteFile(rtf, []byte(rt), 0o644)
-	if out, err := exec.Command("clang", f, rtf, "-o", bin).CombinedOutput(); err != nil {
+	args := append([]string{f, rtf, "-o", bin}, bearsslArgs()...)
+	if out, err := exec.Command("clang", args...).CombinedOutput(); err != nil {
 		t.Fatalf("[ll] compile: %v\n%s", err, out)
 	}
 	return bin

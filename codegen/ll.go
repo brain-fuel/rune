@@ -214,8 +214,23 @@ func (LL) EmitRuntimeFor(p Program) string {
 	emitNetPrimsLL(&b, p)
 	emitFSPrimsLL(&b, p)
 	emitProcPrimsLL(&b, p)
+	emitCryptoPrimsLL(&b, p)
 	b.WriteString(llRuntimeMain)
 	return b.String()
+}
+
+// emitCryptoPrimsLL bakes the Phase-3 BearSSL sha256 host body into the linked LLVM
+// runtime — the LL twin of emitCryptoPrimsC. The accessor is EXTERNAL (the .ll calls
+// @sha256); the program links the vendored libbearssl.a. Fast real digest on a
+// backend that ships none; the pure-wootz ch514 stays the in-language oracle.
+func emitCryptoPrimsLL(b *strings.Builder, p Program) {
+	if !usesCrypto(p) {
+		return
+	}
+	b.WriteString(`#include <bearssl.h>
+static Value sha256_c1(Value data, Value* env) { (void)env; int n = bytes_len(data); unsigned char* buf = (unsigned char*)malloc(n > 0 ? n : 1); for (int i = 0; i < n; i++) buf[i] = (unsigned char) bytes_at(data, i); unsigned char out[32]; br_sha256_context ctx; br_sha256_init(&ctx); br_sha256_update(&ctx, buf, n); br_sha256_out(&ctx, out); free(buf); Value r = mkbytes(32); for (int i = 0; i < 32; i++) bytes_set(r, i, out[i]); return r; }
+Value sha256(void) { return rt_mkclo(&sha256_c1, 0); }
+`)
 }
 
 // emitNetPrimsLL bakes the Phase-1 POSIX socket host bodies into the linked LLVM

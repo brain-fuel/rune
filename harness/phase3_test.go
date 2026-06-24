@@ -4,9 +4,59 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
+
+	"goforge.dev/rune/v3/codegen"
 )
+
+// TestCryptoNative is the Phase-3 crypto gate for the backends that ship NO host
+// digest of their own: native C, LLVM, and Rust now get a real, fast sha256 from
+// the vendored BearSSL static lib (bin/build-bearssl.sh). Computes sha256("abc")
+// = the NIST vector, matching the source backends + the pure-wootz oracle (ch514).
+// Skips cleanly when BearSSL is not built.
+func TestCryptoNative(t *testing.T) {
+	if !bearsslReady() {
+		t.Skip("BearSSL not built — run bin/build-bearssl.sh")
+	}
+	const want = "\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"\nunit"
+	s := loadListing(t, "ch497_crypto.rune")
+	prog, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("c", func(t *testing.T) {
+		if got := runCmdStdin(t, exec.Command(compileC(t, prog)), ""); got != want {
+			t.Fatalf("[c] sha256 = %q, want %q", got, want)
+		}
+	})
+	t.Run("ll", func(t *testing.T) {
+		if got := runCmdStdin(t, exec.Command(compileLL(t, prog)), ""); got != want {
+			t.Fatalf("[ll] sha256 = %q, want %q", got, want)
+		}
+	})
+	t.Run("rs", func(t *testing.T) {
+		if _, err := exec.LookPath("rustc"); err != nil {
+			t.Skip("rustc not in PATH")
+		}
+		dir := t.TempDir()
+		src, _ := codegen.Rust{}.Emit(prog)
+		f := filepath.Join(dir, "main.rs")
+		bin := filepath.Join(dir, "main.bin")
+		os.WriteFile(f, []byte(src), 0o644)
+		out, err := exec.Command("rustc", "--edition", "2021",
+			"-L", "native="+filepath.Dir(bearsslLib()), "-l", "static=bearssl",
+			"-o", bin, f).CombinedOutput()
+		if err != nil {
+			t.Fatalf("[rs] compile: %v\n%s", err, out)
+		}
+		if got := runCmdStdin(t, exec.Command(bin), ""); got != want {
+			t.Fatalf("[rs] sha256 = %q, want %q", got, want)
+		}
+	})
+}
 
 // TestCrypto is the Phase-3 crypto gate: host sha256 over Bin (ch497), hex-encoded
 // and checked against the NIST vector sha256("abc"). Runs on the backends with a

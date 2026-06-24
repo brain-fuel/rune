@@ -81,6 +81,16 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesProc(p) {
 		b.WriteString("fn procRun() -> Rc<V> { vfun(|prog: Rc<V>| -> Rc<V> { let p = String::from_utf8_lossy(_bytes(&prog)).to_string(); vfun(move |arg: Rc<V>| -> Rc<V> { let a = String::from_utf8_lossy(_bytes(&arg)).to_string(); let p = p.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { match std::process::Command::new(&p).arg(&a).output() { Ok(o) => Rc::new(V::Bytes(o.stdout)), Err(_) => Rc::new(V::Bytes(Vec::new())) } }) }) }) }\n")
 	}
+	// Phase 3 crypto: real sha256 via the vendored BearSSL static lib (extern "C").
+	// The context is an oversized 8-aligned opaque blob (BearSSL's is vtable+buf[64]+
+	// count+val[8] ~112B). Gives rust a fast digest; pure-wootz ch514 is the oracle.
+	if usesCrypto(p) {
+		b.WriteString("#[repr(C, align(8))] struct BrSha256Ctx { _b: [u8; 128] }\n")
+		// NB: br_sha256_update is a C MACRO for br_sha224_update (shared 256/224
+		// context); the real symbol is br_sha224_update. init/out are real symbols.
+		b.WriteString("extern \"C\" { fn br_sha256_init(c: *mut BrSha256Ctx); fn br_sha224_update(c: *mut BrSha256Ctx, d: *const u8, n: usize); fn br_sha256_out(c: *const BrSha256Ctx, o: *mut u8); }\n")
+		b.WriteString("fn sha256() -> Rc<V> { vfun(|data: Rc<V>| -> Rc<V> { let b = _bytes(&data).clone(); let mut ctx = BrSha256Ctx { _b: [0u8; 128] }; let mut out = [0u8; 32]; unsafe { br_sha256_init(&mut ctx); br_sha224_update(&mut ctx, b.as_ptr(), b.len()); br_sha256_out(&ctx, out.as_mut_ptr()); } Rc::new(V::Bytes(out.to_vec())) }) }\n")
+	}
 	if usesForeign(p, "getNat") {
 		b.WriteString("fn getNat() -> Rc<V> { vfun(move |_u: Rc<V>| -> Rc<V> { let mut s = String::new(); std::io::stdin().read_line(&mut s).unwrap(); Rc::new(V::Nat(_big_from_u64(s.trim().parse::<u64>().unwrap()))) }) }\n")
 	}
