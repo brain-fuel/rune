@@ -1,0 +1,45 @@
+-- Chapter 516 — mutually-recursive `partial` functions (mutual general recursion).
+--
+-- rune now admits a MUTUAL group: `mutual … end` holding two or more `partial`
+-- members. Every member's name is in scope in every member's body, so isEven may
+-- call isOdd and vice versa. The members are stored as one content-addressed SCC
+-- group; their heads stay neutral (the C4 firewall), so mutual recursion cannot
+-- diverge the checker — yet they RUN through codegen on every backend.
+--
+-- main: isEven 10 (= true → 1), isOdd 10 (= false → 0). Observable "1\n0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+boolToNat : Bool -> Nat is fn (b : Bool) is case b of | true -> 1 | false -> 0 end end end
+
+mutual
+  partial isEven : Nat -> Bool is
+    fn (n : Nat) is case n of | zero -> true | succ k -> isOdd k end end
+  end
+  partial isOdd : Nat -> Bool is
+    fn (n : Nat) is case n of | zero -> false | succ k -> isEven k end end
+  end
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (boolToNat (isEven 10))) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (boolToNat (isOdd 10))) (fn (b : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end

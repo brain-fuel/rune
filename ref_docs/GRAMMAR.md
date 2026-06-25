@@ -78,7 +78,8 @@ unwise. See `rune-v2-implementation.md` and `rune-v3-implementation.md`.
   or `"` inside the interpolation is an error.)
 - **Reserved words** (never identifiers): `fn`, `is`, `end`, `seq`, `let`, `in`, `U`, the
   equality stratum's `Prop`, `Eq`, `refl`, `cast`, `subst` (Phases 3–4), `data` (Phase 4),
-  `builtin` (ergonomics rung 2), `case`, `of`, `with` (rung 4), and `calc`, `by` (rung 5). The bare underscore `_` is
+  `builtin` (ergonomics rung 2), `case`, `of`, `with` (rung 4), `calc`, `by` (rung 5), and
+  `mutual` (mutual-recursion groups). The bare underscore `_` is
   reserved as the hole; identifiers may still begin with `_` (`_x` is a name). `|` separates
   constructors inside a `data` block and leads each clause of a `case`.
 - **Braces** `{` `}` open implicit binders/arguments (Phase 2); `{-` always opens a block comment
@@ -106,10 +107,19 @@ Notation: `X*` zero+ , `X+` one+ , `[X]` optional, `|` alternation, `"…"` term
 generative skeleton; §5 gives the deterministic parse for the `(`-forms and for `seq`.
 
 ```
-Program   ::= (Definition | DataDecl | BuiltinDecl | ProtocolDecl)*
+Program   ::= (Definition | DataDecl | BuiltinDecl | ProtocolDecl | MutualDecl)*
 
 Definition ::= DefName ":" Expr "is" Expr "end"
 DefName   ::= Ident | Op
+
+-- MutualDecl: a mutually-recursive group. The block holds two or more members, all
+-- `partial` defs OR all `data` decls (not a mix); every member's name is in scope in
+-- every member's body/constructors. Each member is a COMPLETE declaration with its
+-- own `end` (so there is no separator-vs-application ambiguity). A single `partial`/
+-- `data` needs no `mutual`. The members are stored as one content-addressed SCC
+-- group; `partial` heads stay neutral (so mutual recursion cannot diverge the checker)
+-- and mutual datatypes share a strict-positivity check over the whole set.
+MutualDecl ::= "mutual" (Definition' | DataDecl)+ "end"   -- Definition' carries `partial`
 
 -- ProtocolDecl (E4 / wavelet): a VERIFIED-CvRDT block. It is a checked grouping, not
 -- a namespace — the inner items pass through as ordinary top-level definitions (bare

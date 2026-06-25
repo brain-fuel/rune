@@ -54,6 +54,7 @@ const (
 	tWith    // with (binds the induction hypotheses in a clause)
 	tCalc    // calc (an equational-reasoning block; GRAMMAR §5.7)
 	tBy      // by   (justifies one calc step)
+	tMutual  // mutual  (opens a mutually-recursive `data`/`partial` group block)
 )
 
 type token struct {
@@ -104,6 +105,8 @@ func (k tokKind) String() string {
 		return "'_'"
 	case tData:
 		return "'data'"
+	case tMutual:
+		return "'mutual'"
 	case tBar:
 		return "'|'"
 	case tProp:
@@ -346,6 +349,8 @@ func keyword(word string, pos int) token {
 		return token{tCalc, word, pos}
 	case "by":
 		return token{tBy, word, pos}
+	case "mutual":
+		return token{tMutual, word, pos}
 	case "Prop":
 		return token{tProp, word, pos}
 	case "Eq":

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"goforge.dev/rune/v3/core"
+	"goforge.dev/rune/v3/store"
 	"goforge.dev/rune/v3/surface"
 )
 
@@ -1168,6 +1169,58 @@ func (e *Elaborator) ElabPartialDef(d surface.Def, selfHash core.Hash) (ty, body
 		return nil, nil, fmt.Errorf("%s: internal: metavariable survived zonking", d.Name)
 	}
 	return ty, body, nil
+}
+
+// ElabPartialGroup elaborates a MUTUALLY-recursive `partial` group (mutual general
+// recursion). Every member's name is in scope in every member's body, resolving to
+// Placeholder(i) with the declared type — neutral, bodiless self/sibling references.
+// Types are elaborated first (a member's body may need a sibling's type); then every
+// body is checked against the shared overlay. The caller (store.AddPartialGroup)
+// SCC-hashes the result and substitutes the real content hashes for the placeholders.
+func (e *Elaborator) ElabPartialGroup(ds []surface.Def) (tys, bodies []core.Tm, err error) {
+	n := len(ds)
+	tys = make([]core.Tm, n)
+	for i, d := range ds {
+		if d.Ty == nil {
+			return nil, nil, fmt.Errorf("%s: definition has no type", d.Name)
+		}
+		c := &Ctx{}
+		ty, _, err := e.checkType(c, d.Ty)
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+		}
+		tys[i] = ty
+	}
+	// Bind every member name to its placeholder, and expose its type, for ALL bodies.
+	e.SelfTypes = make(map[core.Hash]core.Tm, n)
+	for i, d := range ds {
+		ph := store.Placeholder(i)
+		e.Refs[d.Name] = ph
+		e.SelfTypes[ph] = tys[i]
+	}
+	bodies = make([]core.Tm, n)
+	for i, d := range ds {
+		c := &Ctx{}
+		body, err := e.Check(c, d.Body, e.Eval(c, tys[i]))
+		if err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+		}
+		if err := e.ResolvePending(); err != nil {
+			return nil, nil, fmt.Errorf("%s: %w", d.Name, err)
+		}
+		bodies[i] = e.Zonk(0, body)
+		if err := e.ErrUnsolved(d.Name); err != nil {
+			return nil, nil, err
+		}
+		if !MetaFree(bodies[i]) {
+			return nil, nil, fmt.Errorf("%s: internal: metavariable survived zonking", d.Name)
+		}
+	}
+	for i := range tys {
+		tys[i] = e.Zonk(0, tys[i])
+	}
+	e.SelfTypes = nil
+	return tys, bodies, nil
 }
 
 // piSort is the sort of a Pi from its domain's and codomain's sorts: a

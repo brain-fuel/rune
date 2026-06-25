@@ -34,6 +34,25 @@ func gateUnchanged(t *testing.T, name string, files ...string) (skip bool, commi
 	return false, func() { _ = os.WriteFile(gate, []byte(fp), 0o644) }
 }
 
+// TestMutualPartial gates mutually-recursive `partial` functions (ch516): a
+// `mutual … end` group of isEven/isOdd that call each other. Byte-identical on all 8.
+func TestMutualPartial(t *testing.T) {
+	const want = "1\n0\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch516_mutual_partial.rune", "main", ""); got != want {
+				t.Fatalf("[%s] mutual partial gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch516_mutual_partial.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch516_mutual_partial.rune", want) })
+}
+
 // TestRand is a Phase-2 tail gate: a seeded LCG PRNG (ch508), deterministic so
 // byte-identical on all 8 backends. The big multiply rides the arithmetic accel.
 func TestRand(t *testing.T) {

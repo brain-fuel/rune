@@ -175,6 +175,34 @@ func (s *Store) AddPartial(name string, ty, body core.Tm) core.Hash {
 	return h
 }
 
+// AddPartialGroup stores a MUTUALLY-recursive `partial` group (mutual general
+// recursion). Each member's body references its siblings (and itself) at
+// Placeholder(i); this SCC-hashes the group (store/scc.go HashSCC), substitutes
+// every placeholder with its derived content hash in every member's type and body,
+// and marks each member partial (heads stay neutral). A singleton group delegates
+// to AddPartial so a single `partial` def hashes byte-identically to today.
+func (s *Store) AddPartialGroup(names []string, tys, bodies []core.Tm) []core.Hash {
+	if len(names) == 1 {
+		return []core.Hash{s.AddPartial(names[0], tys[0], bodies[0])}
+	}
+	group := make([]content, len(names))
+	for i := range names {
+		group[i] = content{Type: tys[i], Body: bodies[i]}
+	}
+	hs := HashSCC(group)
+	for i := range names {
+		ty, body := tys[i], bodies[i]
+		for j, hj := range hs {
+			ty = replaceRef(ty, Placeholder(j), hj)
+			body = replaceRef(body, Placeholder(j), hj)
+		}
+		s.defs[hs[i]] = NewDef(ty, body)
+		s.names[names[i]] = hs[i]
+		s.partial[hs[i]] = true
+	}
+	return hs
+}
+
 // IsPartial implements core.PartialInfo.
 func (s *Store) IsPartial(h core.Hash) bool { return s.partial[h] }
 

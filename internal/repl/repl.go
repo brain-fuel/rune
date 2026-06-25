@@ -184,6 +184,12 @@ func addItem(s *session.Session, it surface.Item, out io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(out, "declared %s\n", strings.Join(names, " "))
+	case surface.DefGroup:
+		names, err := s.AddDefGroup(d)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "defined %s\n", strings.Join(names, " "))
 	case surface.BuiltinNat:
 		if err := s.AddBuiltinNat(d); err != nil {
 			return err
@@ -237,7 +243,7 @@ func looksLikeDecl(src string) bool {
 		i++
 	}
 	switch t[:i] {
-	case "data", "foreign", "builtin", "instance", "partial", "module":
+	case "data", "foreign", "builtin", "instance", "partial", "module", "mutual":
 		return true
 	}
 	return looksLikeDef(src)

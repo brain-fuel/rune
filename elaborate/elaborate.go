@@ -44,6 +44,11 @@ type Elaborator struct {
 	// SelfHash after the body is hashed). Zero SelfType disables it.
 	SelfHash core.Hash
 	SelfType core.Tm
+	// SelfTypes generalises SelfHash/SelfType to a mutually-recursive `partial`
+	// group: while any member's body is elaborated, every member's name resolves
+	// to its Placeholder(i) (a neutral, bodiless self/sibling reference) and that
+	// placeholder's TYPE is read from here. Nil for a non-group elaboration.
+	SelfTypes map[core.Hash]core.Tm
 
 	// InstanceFor resolves a typeclass dictionary by implicit search (C2): given
 	// a class type former's hash and the head hash of its last argument, it
@@ -174,6 +179,11 @@ func (e *Elaborator) refType(h core.Hash) (core.Val, error) {
 	// elaborator while its body is checked, before its real hash exists.
 	if e.SelfType != nil && h == e.SelfHash {
 		return e.M.Eval(nil, e.SelfType), nil
+	}
+	if e.SelfTypes != nil {
+		if ty, ok := e.SelfTypes[h]; ok {
+			return e.M.Eval(nil, ty), nil
+		}
 	}
 	ty, ok := e.M.G.TypeOf(h)
 	if !ok || ty == nil {

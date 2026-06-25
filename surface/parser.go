@@ -326,9 +326,62 @@ func (p *parser) parseItem() (Item, error) {
 		return p.parseData()
 	case tBuiltin:
 		return p.parseBuiltin()
+	case tMutual:
+		return p.parseMutual()
 	default:
 		return p.parseDef()
 	}
+}
+
+// parseMutual parses a mutually-recursive group block:
+//
+//	mutual
+//	  partial f : T is e end
+//	  partial g : U is d end
+//	end
+//
+// or the same with `data` members. Each member is a complete declaration carrying
+// its own `end`; the block holds >= 2 members, all `partial` defs (→ DefGroup) or
+// all `data` decls (→ DataGroup). Members see each other's names (mutual recursion).
+func (p *parser) parseMutual() (Item, error) {
+	p.next() // 'mutual'
+	var defs []Def
+	var datas []DataDef
+	for p.peek().kind != tEnd {
+		if p.peek().kind == tEOF {
+			return nil, fmt.Errorf("%w: a `mutual` block is missing its 'end'", ErrIncomplete)
+		}
+		if p.peek().kind == tData {
+			dd, err := p.parseData()
+			if err != nil {
+				return nil, err
+			}
+			datas = append(datas, dd)
+		} else {
+			d, err := p.parseDef()
+			if err != nil {
+				return nil, err
+			}
+			if !d.IsPartial {
+				return nil, fmt.Errorf("`mutual` member %q must be `partial` (only `partial` functions and `data` types are mutually recursive)", d.Name)
+			}
+			defs = append(defs, d)
+		}
+	}
+	p.next() // 'end'
+	if len(defs) > 0 && len(datas) > 0 {
+		return nil, fmt.Errorf("a `mutual` block must be all `partial` or all `data`, not a mix")
+	}
+	if len(datas) > 0 {
+		if len(datas) < 2 {
+			return nil, fmt.Errorf("a `mutual data` block needs at least two members (a single `data` needs no `mutual`)")
+		}
+		return DataGroup{Members: datas}, nil
+	}
+	if len(defs) < 2 {
+		return nil, fmt.Errorf("a `mutual` block needs at least two members (a single `partial` needs no `mutual`)")
+	}
+	return DefGroup{Members: defs}, nil
 }
 
 // protocolRequired are the members a `protocol … end` block MUST define: the CvRDT
@@ -404,17 +457,11 @@ func (p *parser) parseProtocol() ([]Item, error) {
 
 // parseDef parses `DefName ":" Expr "is" Expr "end"`. The type annotation is
 // mandatory in v0.2.0. A definition name is an identifier or an operator (§3).
-func (p *parser) parseDef() (Def, error) {
-	isInstance := false
-	if p.peek().kind == tInstance {
-		p.next()
-		isInstance = true
-	}
-	isPartial := false
-	if p.peek().kind == tPartial {
-		p.next()
-		isPartial = true
-	}
+// parseDefHeadBody parses `DefName ":" Expr "is" Expr` WITHOUT consuming the
+// closing `end` — the prefix flags (instance/partial) are read by the caller, and
+// the terminator (`end` for a single def, or `and`/`end` for a group member) is
+// the caller's concern.
+func (p *parser) parseDefHeadBody(isInstance, isPartial bool) (Def, error) {
 	id := p.peek()
 	if id.kind != tIdent && id.kind != tOp {
 		if id.kind == tEOF {
@@ -437,11 +484,30 @@ func (p *parser) parseDef() (Def, error) {
 	if err != nil {
 		return Def{}, err
 	}
+	return Def{Name: id.text, Ty: ty, Body: body, IsInstance: isInstance, IsPartial: isPartial}, nil
+}
+
+func (p *parser) parseDef() (Def, error) {
+	isInstance := false
+	if p.peek().kind == tInstance {
+		p.next()
+		isInstance = true
+	}
+	isPartial := false
+	if p.peek().kind == tPartial {
+		p.next()
+		isPartial = true
+	}
+	d, err := p.parseDefHeadBody(isInstance, isPartial)
+	if err != nil {
+		return Def{}, err
+	}
 	if _, err := p.expect(tEnd); err != nil {
 		return Def{}, err
 	}
-	return Def{Name: id.text, Ty: ty, Body: body, IsInstance: isInstance, IsPartial: isPartial}, nil
+	return d, nil
 }
+
 
 func (p *parser) parseExpr() (Exp, error) {
 	if p.peek().kind == tLet {

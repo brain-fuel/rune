@@ -243,6 +243,31 @@ type ENum struct {
 	Pos int
 }
 
+// DefGroup is a mutually-recursive `partial` group (mutual general recursion):
+//
+//	partial f : T is e and g : U is d end
+//
+// Every member is a `partial` def whose name is in scope in EVERY member's body
+// (so f may call g and g may call f). A single `partial … end` with no `and`
+// parses to a plain Def (IsPartial), not a DefGroup — so existing listings are
+// unchanged. The members are stored as one content-addressed SCC group; their
+// heads stay neutral (the C4 firewall), so mutual recursion cannot diverge the
+// checker.
+type DefGroup struct {
+	Members []Def // each IsPartial; len >= 2
+}
+
+// DataGroup is a mutually-recursive datatype group:
+//
+//	data D : U is … and E : U is … end
+//
+// Each member's former is in scope in every member's constructor types (so D's
+// constructors may reference E and vice versa). A single `data … end` with no
+// `and` parses to a plain DataDef, so existing listings are unchanged.
+type DataGroup struct {
+	Members []DataDef // len >= 2
+}
+
 // Item is one top-level program item: a Def, a DataDef, or a builtin binding.
 type Item interface {
 	isItem()
@@ -250,6 +275,8 @@ type Item interface {
 
 func (Def) isItem()          {}
 func (DataDef) isItem()      {}
+func (DefGroup) isItem()      {}
+func (DataGroup) isItem()     {}
 func (BuiltinNat) isItem()    {}
 func (BuiltinNatOp) isItem()  {}
 func (BuiltinNumInj) isItem() {}

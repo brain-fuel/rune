@@ -394,6 +394,33 @@ func (s *Session) addPartialDef(d surface.Def) (Def, error) {
 	return rd, nil
 }
 
+// addPartialGroup elaborates and stores a MUTUALLY-recursive `partial` group: all
+// members are elaborated with every member's name in scope (at Placeholder(i)),
+// then SCC-hashed and bound. Each head stays neutral (the C4 firewall), so mutual
+// recursion cannot diverge the checker.
+func (s *Session) AddDefGroup(g surface.DefGroup) ([]string, error) {
+	el := s.elaborator()
+	names := make([]string, len(g.Members))
+	for i, m := range g.Members {
+		names[i] = m.Name
+	}
+	tys, bodies, err := el.ElabPartialGroup(g.Members)
+	if err != nil {
+		return nil, err
+	}
+	hs := s.st.AddPartialGroup(names, tys, bodies)
+	for i, h := range hs {
+		rd := Def{Name: names[i], Ty: tys[i], Body: bodies[i], Hash: h}
+		if _, exists := s.byHash[h]; !exists {
+			s.order = append(s.order, h)
+		}
+		s.refs[names[i]] = h
+		s.refNames[h] = names[i]
+		s.byHash[h] = rd
+	}
+	return names, nil
+}
+
 // LoadSource parses a file of top-level items (definitions and datatype
 // declarations) and adds each in order, returning the names added. On the
 // first error the names added so far are returned alongside it.
@@ -415,6 +442,12 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 			added = append(added, rd.Name)
 		case surface.DataDef:
 			names, err := s.AddData(d)
+			if err != nil {
+				return added, err
+			}
+			added = append(added, names...)
+		case surface.DefGroup:
+			names, err := s.AddDefGroup(d)
 			if err != nil {
 				return added, err
 			}
