@@ -1531,6 +1531,39 @@ func TestE3QuietNeutral(t *testing.T) {
 	}
 }
 
+// TestE3InertAdequate gates ch465: adequacy closed under prepending ANY quiescent-INERT
+// peer, abstracting over the fuel. quietInertAdequate composes ch464's parQuietNeutral
+// (runtime side: visibleRun f (par q p) = visibleRun f p) with projParInert (spec side:
+// project (par q p) = project p, since project q = nil), so an adequate p stays adequate
+// beside an arbitrary inert bystander q. The theorem type-checks under
+// TestListingsElaborateAndCheck; the all-refl witness (q = par halt halt, p = a supervised
+// unit adequate at fuel 1) certifies `par q p` adequate and prints its trace length 1.
+func TestE3InertAdequate(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch465_adequacy_inert.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		t.Fatalf("go run: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); !strings.HasPrefix(got, "1") {
+		t.Errorf("inert-adequate witness = %q, want it to start with 1 (par-halt-halt beside an adequate unit)", got)
+	}
+}
+
 // TestE3TowerAdequacy gates ch459: the first PARAMETRIC adequacy — visibleRun n (tower n)
 // = project (tower n) for the INFINITE family of supervised towers (n units par crash
 // (mon halt) in parallel), one proof by induction on n. The key parHaltNeutral lemma (a
