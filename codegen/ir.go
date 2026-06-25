@@ -176,6 +176,17 @@ type ICaseArm struct {
 	Body Ir
 }
 
+// IBounce marks a tail-position recursive call to a partial-group member (the
+// trampoline). The backend renders it as a 0-arg thunk (a "bounce") that the
+// group's driver loop forces, instead of a direct call — flattening tail and
+// mutual-tail recursion onto the heap so deep recursion runs in O(1) host stack
+// (the JVM has no TCO). Call is the original SATURATED application spine whose head
+// names a member of the current partial recursion group. Semantically identical to
+// Call (the driver forces it exactly once before the loop continues); it changes
+// only WHEN the frame is created, never the value. Backends without the trampoline
+// (BEAM has native TCO; Python raises its recursion limit) emit Call directly.
+type IBounce struct{ Call Ir }
+
 func (IVar) isIr()     {}
 func (IGlobal) isIr()  {}
 func (IUnit) isIr()    {}
@@ -189,6 +200,7 @@ func (ISnd) isIr()     {}
 func (IForeign) isIr() {}
 func (IField) isIr()   {}
 func (ICase) isIr()    {}
+func (IBounce) isIr()  {}
 
 // CtorSpec is one constructor of an emitted datatype: its bound name, its
 // 0-based tag, and the total number of curried parameters it takes (datatype
@@ -209,10 +221,13 @@ type DataSpec struct {
 	Rec       [][]bool
 }
 
-// DefSpec is one emitted definition.
+// DefSpec is one emitted definition. Arity is the number of leading curried
+// lambdas of Body (0 for a non-function value); the trampoline's saturation gate
+// reads it to know when a partial-member call is a tail call vs a partial value.
 type DefSpec struct {
-	Name string
-	Body Ir
+	Name  string
+	Body  Ir
+	Arity int
 }
 
 // NatSpec marks a datatype as the `builtin nat` binding (ergonomics rung 6):
@@ -285,6 +300,11 @@ type Program struct {
 	// program RUNS the IO action (forces the world thunk) before showing it,
 	// rather than printing the action itself.
 	IOMain bool
+	// Partials is the set of emitted def names that are `partial` (general
+	// recursion). The trampoline pass marks tail-position calls to these as
+	// IBounce; the backends wrap each partial def's body in a driver loop. Nil/
+	// empty means no trampolining (every def emitted as today).
+	Partials map[string]bool
 }
 
 // Erase lowers elaborated, meta-free core to the erased IR. names maps a

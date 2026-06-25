@@ -354,6 +354,8 @@ func (em *pyEmitter) expr(t Ir, env []string) string {
 		return fmt.Sprintf("(%s)[1]", em.expr(x.P, env))
 	case IField:
 		return fmt.Sprintf("(%s)[\"args\"][%d]", em.expr(x.Scrut, env), x.Index)
+	case IBounce:
+		return em.expr(x.Call, env)
 	case ICase:
 		// Chained conditional expression on the scrutinee tag (Python has no
 		// statement switch in an expression position).

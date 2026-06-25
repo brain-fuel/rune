@@ -1276,8 +1276,18 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 				continue
 			}
 		}
-		p.Defs = append(p.Defs, codegen.DefSpec{Name: name, Body: ir})
+		if s.st.IsPartial(h) {
+			if p.Partials == nil {
+				p.Partials = map[string]bool{}
+			}
+			p.Partials[name] = true
+		}
+		p.Defs = append(p.Defs, codegen.DefSpec{Name: name, Body: ir, Arity: codegen.LeadingLamCount(ir)})
 	}
+	// Trampoline: mark tail-position self-calls in partial defs so the backends
+	// with a driver flatten deep tail recursion onto the heap (no host-stack
+	// overflow). A no-op when nothing is partial; byte-identical on every backend.
+	codegen.MarkTailBounces(&p)
 	return p, emitEnv{eraseNames: eraseNames, typeRefs: typeRefs, tainted: tainted, eraser: eraser}, nil
 }
 

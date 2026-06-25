@@ -359,6 +359,8 @@ func (em *rustEmitter) expr(t Ir, env []string) string {
 		return fmt.Sprintf("_snd(%s)", em.expr(x.P, env))
 	case IField:
 		return fmt.Sprintf("_field(%s, %d)", em.expr(x.Scrut, env), x.Index)
+	case IBounce:
+		return em.expr(x.Call, env)
 	case ICase:
 		scrut := em.expr(x.Scrut, env)
 		var b strings.Builder

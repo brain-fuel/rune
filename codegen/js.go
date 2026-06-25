@@ -509,6 +509,8 @@ func (em *jsEmitter) expr(t Ir, env []string) string {
 		return fmt.Sprintf("(%s)[1]", em.expr(x.P, env))
 	case IField:
 		return fmt.Sprintf("(%s).args[%d]", em.expr(x.Scrut, env), x.Index)
+	case IBounce:
+		return em.expr(x.Call, env)
 	case ICase:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(() => { switch ((%s).tag) {", em.expr(x.Scrut, env))

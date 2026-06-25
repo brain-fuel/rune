@@ -53,6 +53,16 @@ func TestMutualPartial(t *testing.T) {
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch516_mutual_partial.rune", want) })
 }
 
+// TestTrampolineDeepJVM proves the shared-IR trampoline (T1): a self-recursive
+// `partial` counting down from two million runs FLAT on the JVM — the tail self-call
+// (through the NatElim one-peel) bounces, driven by a loop, so no StackOverflowError
+// and no reliance on the virtual-thread stack. JVM-only until the other stack-limited
+// backends get the driver (T2); they currently emit the bounce as a direct call and
+// would overflow at this depth.
+func TestTrampolineDeepJVM(t *testing.T) {
+	runBytesJVM(t, "ch517_countdown_deep.rune", "0\nunit")
+}
+
 // TestRand is a Phase-2 tail gate: a seeded LCG PRNG (ch508), deterministic so
 // byte-identical on all 8 backends. The big multiply rides the arithmetic accel.
 func TestRand(t *testing.T) {

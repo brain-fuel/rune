@@ -1,0 +1,31 @@
+-- Chapter 517 — deep tail recursion flattened by the trampoline (T1).
+--
+-- `countdown` is a self-recursive `partial` whose recursive call sits in TAIL
+-- position (the succ arm). The trampoline pass marks it; backends with a driver
+-- (JVM here) render the tail call as a bounce that a single driver loop forces, so
+-- counting down from two million runs in O(1) host stack — no StackOverflowError,
+-- no reliance on the JVM virtual thread's growable stack.
+--
+-- main prints countdown 2000000 (= zero). Observable "0\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+partial countdown : Nat -> Nat is
+  fn (n : Nat) is case n of | zero -> zero | succ k -> countdown k end end
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (countdown 2000000)) (fn (a : Nat) is
+    pureIO Unit unit
+  end)
+end

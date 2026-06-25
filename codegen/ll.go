@@ -172,6 +172,8 @@ func foreignNames(p Program) []string {
 			walk(x.P)
 		case IField:
 			walk(x.Scrut)
+		case IBounce:
+			walk(x.Call)
 		case ICase:
 			walk(x.Scrut)
 			for _, arm := range x.Arms {

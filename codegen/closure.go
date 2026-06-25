@@ -311,6 +311,8 @@ func freeVars(t Ir) []int {
 			walk(x.P, depth)
 		case IField:
 			walk(x.Scrut, depth)
+		case IBounce:
+			walk(x.Call, depth)
 		case ICase:
 			walk(x.Scrut, depth)
 			for _, arm := range x.Arms {
@@ -415,6 +417,8 @@ func (cc *closureConverter) convert(t Ir, depth int) CIr {
 		return CSnd{P: cc.convert(x.P, depth)}
 	case IField:
 		return CField{Scrut: cc.convert(x.Scrut, depth), Index: x.Index}
+	case IBounce:
+		return cc.convert(x.Call, depth)
 	case ICase:
 		arms := make([]CCaseArm, len(x.Arms))
 		for i, arm := range x.Arms {
@@ -536,6 +540,8 @@ func (cc *closureConverter) liftBody(t Ir, slotOf map[int]int) CIr {
 			return CSnd{P: walk(x.P, depth)}
 		case IField:
 			return CField{Scrut: walk(x.Scrut, depth), Index: x.Index}
+		case IBounce:
+			return walk(x.Call, depth)
 		case ICase:
 			arms := make([]CCaseArm, len(x.Arms))
 			for i, arm := range x.Arms {

@@ -340,6 +340,8 @@ func (em *beamEmitter) expr(t Ir, env []string) string {
 		return fmt.Sprintf("element(3, %s)", em.expr(x.P, env))
 	case IField:
 		return fmt.Sprintf("lists:nth(%d, element(4, %s))", x.Index+1, em.expr(x.Scrut, env))
+	case IBounce:
+		return em.expr(x.Call, env)
 	case ICase:
 		var b strings.Builder
 		fmt.Fprintf(&b, "case element(2, %s) of ", em.expr(x.Scrut, env))

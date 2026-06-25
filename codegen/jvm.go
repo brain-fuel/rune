@@ -180,6 +180,17 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 		fmt.Fprintf(&b, "  static V %s() { return %s; }\n", jvmThunk(d.ElimName), em.expr(LowerElim(d), nil))
 	}
 	for _, def := range p.Defs {
+		if p.Partials[def.Name] {
+			// A partial is emitted in two parts so deep tail recursion runs flat:
+			//   <P>_step()  — the body; a tail self-call evaluates to a VBounce that
+			//                 re-enters _step (NOT the driver), so no frame accrues.
+			//   <P>()       — the public entry: apply _step to the params, then
+			//                 trampoline() the result ONCE. Callers see a value.
+			stepName := jvmThunk(def.Name) + "_step"
+			fmt.Fprintf(&b, "  static V %s() { return %s; }\n", stepName, em.expr(def.Body, nil))
+			fmt.Fprintf(&b, "  static V %s() { return %s; }\n", jvmThunk(def.Name), em.exprPartialPublic(def.Body, stepName, nil))
+			continue
+		}
 		fmt.Fprintf(&b, "  static V %s() { return %s; }\n", jvmThunk(def.Name), em.expr(def.Body, nil))
 	}
 	b.WriteString("  public static void main(String[] argv) throws Exception {\n")
@@ -284,6 +295,8 @@ func (em *jvmEmitter) expr(t Ir, env []string) string {
 		return fmt.Sprintf("_snd(%s)", em.expr(x.P, env))
 	case IField:
 		return fmt.Sprintf("_field(%s, %d)", em.expr(x.Scrut, env), x.Index)
+	case IBounce:
+		return em.exprBounce(x.Call, env)
 	case ICase:
 		scrut := em.expr(x.Scrut, env)
 		var b strings.Builder
@@ -358,6 +371,58 @@ func (em *jvmEmitter) natDispatch(app IApp, env []string) (string, bool) {
 	return out, true
 }
 
+// exprBounce emits a tail self/sibling call as a VBounce that re-enters the head's
+// _step entry (the body without a driver), so forcing it advances ONE iteration and
+// returns the next bounce or value — the enclosing public driver loops without
+// nesting (a flat host stack). The head of a marked bounce is always a partial.
+func (em *jvmEmitter) exprBounce(call Ir, env []string) string {
+	var args []Ir
+	t := call
+	for {
+		app, ok := t.(IApp)
+		if !ok {
+			break
+		}
+		args = append([]Ir{app.Arg}, args...)
+		t = app.Fn
+	}
+	g, ok := t.(IGlobal)
+	if !ok {
+		return em.expr(call, env) // not a recognizable spine; emit directly
+	}
+	s := jvmThunk(g.Name) + "_step()"
+	for _, a := range args {
+		s = fmt.Sprintf("ap(%s, %s)", s, em.expr(a, env))
+	}
+	return "new VBounce(() -> " + s + ")"
+}
+
+// exprPartialPublic emits a partial def's public entry: peel its parameter lambdas,
+// apply the _step thunk to them, and trampoline() the result once.
+func (em *jvmEmitter) exprPartialPublic(t Ir, stepThunk string, env []string) string {
+	var params []string
+	cur := t
+	for {
+		lam, ok := cur.(ILam)
+		if !ok {
+			break
+		}
+		n := freshJVM(lam.Name, env)
+		params = append(params, n)
+		env = prepend(n, env)
+		cur = lam.Body
+	}
+	app := stepThunk + "()"
+	for _, pn := range params {
+		app = fmt.Sprintf("ap(%s, %s)", app, pn)
+	}
+	out := "trampoline(" + app + ")"
+	for i := len(params) - 1; i >= 0; i-- {
+		out = fmt.Sprintf("fun(%s -> %s)", params[i], out)
+	}
+	return out
+}
+
 func freshJVM(hint string, env []string) string {
 	n := jvmName(hint)
 	if n == "" || n == "_" {
@@ -423,7 +488,7 @@ var jvmReserved = map[string]bool{
 // jvmRuntime is the sealed value interface and its record variants (Java 25).
 const jvmRuntime = `import java.util.function.Function;
 import java.util.concurrent.*;
-sealed interface V permits VUnit, VInt, VNat, VFloat, VStr, VBytes, VPtr, VFun, VCtor, VPair, VProc {}
+sealed interface V permits VUnit, VInt, VNat, VFloat, VStr, VBytes, VPtr, VFun, VCtor, VPair, VProc, VBounce {}
 record VUnit() implements V {}
 record VBytes(int[] b) implements V {} // Phase 0 real byte string (Bin): arbitrary bytes
 record VInt(long n) implements V {}            // host machine int (FFI LitInt)
@@ -435,6 +500,7 @@ record VFun(Function<V,V> f) implements V {}
 record VCtor(int tag, String name, V[] args) implements V {}
 record VPair(V a, V b) implements V {}
 record VProc(BlockingQueue<V> mb, CountDownLatch down) implements V {} // D5 OTP: a live process (typed mailbox + DOWN)
+record VBounce(java.util.function.Supplier<V> k) implements V {} // trampoline: a deferred tail call, forced by the driver loop
 `
 
 // jvmHelpers are the shared runtime helpers (methods of class `main`): application,
@@ -448,6 +514,12 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
       case VFun g -> g.f().apply(x);
       default -> throw new RuntimeException("rune: applied a non-function");
     };
+  }
+  // The trampoline driver: force a chain of deferred tail calls (bounces) until a
+  // real value emerges, keeping the Java call stack flat (the JVM has no TCO).
+  static V trampoline(V v) {
+    while (v instanceof VBounce b) v = b.k().get();
+    return v;
   }
   static long _int(V v) {
     return switch (v) { case VInt i -> i.n(); default -> throw new RuntimeException("rune: expected an int"); };
@@ -504,6 +576,7 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
       case VNat i -> i.n().toString();
       case VFloat f -> Double.toString(f.d());
       case VProc p -> "<proc>";
+      case VBounce b -> _show(trampoline(b)); // defensive: drivers resolve first
       case VStr s -> s.s();
       case VBytes bb -> _binShow(bb.b());
       case VPtr p -> "<ptr>";

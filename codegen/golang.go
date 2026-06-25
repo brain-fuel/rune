@@ -427,6 +427,8 @@ func (em *goEmitter) expr(t Ir, env []string) string {
 		return fmt.Sprintf("(%s).([]any)[1]", em.expr(x.P, env))
 	case IField:
 		return fmt.Sprintf("(%s).(map[string]any)[\"args\"].([]any)[%d]", em.expr(x.Scrut, env), x.Index)
+	case IBounce:
+		return em.expr(x.Call, env)
 	case ICase:
 		// IIFE over a statement switch on the scrutinee tag.
 		scrut := em.expr(x.Scrut, env)
