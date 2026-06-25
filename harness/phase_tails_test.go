@@ -285,6 +285,30 @@ func TestJSON(t *testing.T) {
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch513_json.rune", want) })
 }
 
+// TestJSONParse is the encoding/json Unmarshal gate (ch521), the Marshal/Unmarshal
+// round-trip `serialize (parse x) = x`. It is the listing the no-mutual-recursion
+// workaround stood in for: a JSON value is now the honest 3-way MUTUAL datatype group
+// JVal/JList/JMembers (MB1), and both the parser (parseVal/parseList/parseObj) and the
+// serializer (serVal/serList/serMembers) are `mutual partial` groups descending into
+// one another. main parses {"name":"Ada","tags":[1,2,3]}, re-serializes (the same
+// canonical JSON, quote bytes shown \x22), and prints 1 for the round trip. All 8.
+func TestJSONParse(t *testing.T) {
+	const want = "\"{\\x22name\\x22:\\x22Ada\\x22,\\x22tags\\x22:[1,2,3]}\"\n1\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch521_json_parse.rune", "main", ""); got != want {
+				t.Fatalf("[%s] json parse gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch521_json_parse.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch521_json_parse.rune", want) })
+}
+
 // TestSha256Pure is a Phase-3 tail gate: SHA-256 in PURE wootz (ch514), no host
 // crypto. It reproduces the NIST vector sha256("abc"). Its reason to exist is the
 // crypto-LESS backends — rust + native C/LLVM ship no digest, and the host-FFI

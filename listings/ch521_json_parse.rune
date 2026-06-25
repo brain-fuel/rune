@@ -1,0 +1,315 @@
+-- Chapter 521 — encoding/json Unmarshal via MUTUAL RECURSION (Phase 4 tail).
+--
+-- ch513 was Marshal (a JSON value -> Bin). This is Unmarshal (Bin -> value),
+-- completing the round-trip `serialize (parse x) = x` — Go's encoding/json contract.
+-- It is the listing the no-mutual-recursion workaround (the old single-recursive
+-- JVal + mode-tag fuel parser) was a stand-in for: now that rune has mutually-
+-- recursive DATATYPES (`mutual data`) and mutually-recursive `partial` FUNCTIONS, a
+-- JSON value is the honest 3-way mutual group
+--
+--   JVal = null | num | str | arr JList | obj JMembers
+--   JList = [] | JVal :: JList
+--   JMembers = {} | (key, JVal) :: JMembers
+--
+-- and both the parser (parseVal/parseList/parseObj) and the serializer
+-- (serVal/serList/serMembers) are `mutual partial` groups that descend into one
+-- another — the cross-type recursion a same-type-IH eliminator cannot express. No
+-- FFI beyond printBin/printNat, so byte-identical on all 8 backends.
+--
+-- main parses {"name":"Ada","tags":[1,2,3]}, re-serializes, and checks the round
+-- trip. Observable: the JSON, then 1 (round-trip holds), then unit.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+foreign printNat : Nat -> IO Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+and2 : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> false | true -> b end end end
+-- neq a b is 0 iff a = b (else positive); eqG a b is 1 iff a = b (else 0). These are
+-- the byte-dispatch guards for the `mutual partial` parser: a `case neq … of zero ->
+-- … | succ k -> RECURSE` (or `case eqG …`) keeps every recursive descent in the
+-- succ-arm, which the eliminator lambda-wraps and so evaluates LAZILY — putting it in
+-- a nullary `true`/`false` arm would force the untaken recursion (strict-arm hazard).
+neq : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is addN (monus a b) (monus b a) end end
+eqG : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus 1 (neq a b) end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natDiv divN
+builtin natMod modN
+
+appGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (xs : Bin) (ys : Bin) (i : Nat) is ys end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is case leb (binLen xs) i of | true -> ys | false -> binCons (binAt xs i) (ih xs ys (succ i)) end end
+      end)
+      fuel
+  end
+end
+binApp : Bin -> Bin -> Bin is fn (xs : Bin) (ys : Bin) is appGo (binLen xs) xs ys 0 end end
+
+eqGo : Nat -> Bin -> Bin -> Nat -> Bool is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bool end) (fn (xs : Bin) (ys : Bin) (i : Nat) is true end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bool) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is
+           case leb (binLen xs) i of | true -> true | false -> case eqNat (binAt xs i) (binAt ys i) of | true -> ih xs ys (succ i) | false -> false end end
+         end
+      end)
+      fuel
+  end
+end
+eqBin : Bin -> Bin -> Bool is
+  fn (xs : Bin) (ys : Bin) is case eqNat (binLen xs) (binLen ys) of | true -> eqGo (binLen xs) xs ys 0 | false -> false end end
+end
+
+-- substring buf[i, j)
+srGo : Nat -> Bin -> Nat -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Bin end) (fn (s : Bin) (i : Nat) (j : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) (j : Nat) is case leb j i of | true -> binEmpty | false -> binCons (binAt s i) (ih s (succ i) j) end end
+      end)
+      fuel
+  end
+end
+substr : Bin -> Nat -> Nat -> Bin is fn (s : Bin) (i : Nat) (j : Nat) is srGo (binLen s) s i j end end
+
+digitByte : Nat -> Bin is fn (d : Nat) is binCons (addN 48 d) binEmpty end end
+showGo : Nat -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bin end) (fn (n : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Nat -> Bin) is fn (n : Nat) is case leb n 9 of | true -> digitByte n | false -> binApp (ih (divN n 10)) (digitByte (modN n 10)) end end end)
+      fuel
+  end
+end
+showNat : Nat -> Bin is fn (n : Nat) is showGo 30 n end end
+
+isDigit : Nat -> Bool is fn (b : Nat) is and2 (leb 48 b) (leb b 57) end end
+-- inRange s i is 0 iff i is past the end (else positive); isDigN b is positive iff b
+-- is a decimal digit (else 0). These are the SAME succ-arm-lazy guards the parser
+-- uses: a `case <guard> of zero -> base | succ k -> ih …` keeps the recursive ih in
+-- the succ-arm. With a Bool `case … of true -> ih … | false -> base` the eliminator
+-- forces BOTH arms — so the ih runs at every level regardless of the test, and
+-- numGo's accumulator (×10 per level) explodes over the whole input length.
+inRange : Bin -> Nat -> Nat is fn (s : Bin) (i : Nat) is monus (binLen s) i end end
+isDigN  : Nat -> Nat is fn (b : Nat) is monus 1 (addN (monus 48 b) (monus b 57)) end end
+
+-- scan a decimal number from i, accumulating the value; the recursion fires only on
+-- an actual digit (the succ-arm), so it stops at the first non-digit.
+numGo : Nat -> Bin -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Nat end)
+      (fn (s : Bin) (i : Nat) (acc : Nat) is acc end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) (acc : Nat) is
+           case inRange s i of
+           | zero   -> acc
+           | succ a -> case isDigN (binAt s i) of
+                       | zero   -> acc
+                       | succ k -> ih s (succ i) (addN (mulN 10 acc) (monus (binAt s i) 48))
+                       end
+           end
+         end
+      end)
+      fuel
+  end
+end
+-- index just past the last digit at/after i (same succ-arm-lazy discipline).
+numEnd : Nat -> Bin -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat end) (fn (s : Bin) (i : Nat) is i end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) is
+           case inRange s i of
+           | zero   -> i
+           | succ a -> case isDigN (binAt s i) of | zero -> i | succ k -> ih s (succ i) end
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+-- index of the closing quote at/after i (i points just past the opening quote).
+closeQ : Nat -> Bin -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat end) (fn (s : Bin) (i : Nat) is i end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) is case eqNat (binAt s i) 34 of | true -> i | false -> ih s (succ i) end end
+      end)
+      fuel
+  end
+end
+
+-- THE JSON VALUE — an honest 3-way mutual datatype group.
+mutual
+  data JVal : U is
+    jnull : JVal
+  | jnum  : Nat -> JVal
+  | jstr  : Bin -> JVal
+  | jarr  : JList -> JVal
+  | jobj  : JMembers -> JVal
+  end
+  data JList : U is
+    jnil  : JList
+  | jcons : JVal -> JList -> JList
+  end
+  data JMembers : U is
+    mnil  : JMembers
+  | mcons : Bin -> JVal -> JMembers -> JMembers
+  end
+end
+
+q : Bin is b"\"" end
+quote : Bin -> Bin is fn (s : Bin) is binApp q (binApp s q) end end
+
+-- SERIALIZER — a `mutual partial` group descending the mutual value.
+mutual
+  partial serVal : JVal -> Bin is
+    fn (v : JVal) is
+      case v of
+      | jnull   -> b"null"
+      | jnum n  -> showNat n
+      | jstr s  -> quote s
+      | jarr l  -> binApp b"[" (binApp (serList l) b"]")
+      | jobj m  -> binApp b"{" (binApp (serMembers m) b"}")
+      end
+    end
+  end
+  partial serList : JList -> Bin is
+    fn (xs : JList) is
+      case xs of
+      | jnil -> binEmpty
+      | jcons v rest -> binApp (serVal v) (case rest of | jnil -> binEmpty | jcons a b -> binApp b"," (serList rest) end)
+      end
+    end
+  end
+  partial serMembers : JMembers -> Bin is
+    fn (ms : JMembers) is
+      case ms of
+      | mnil -> binEmpty
+      | mcons k v rest -> binApp (binApp (quote k) (binApp b":" (serVal v))) (case rest of | mnil -> binEmpty | mcons a b c -> binApp b"," (serMembers rest) end)
+      end
+    end
+  end
+end
+serialize : JVal -> Bin is fn (v : JVal) is serVal v end end
+
+-- PARSE RESULTS — each parser returns its value paired with the next index.
+data PRV : U is prv : JVal -> Nat -> PRV end
+data PRL : U is prl : JList -> Nat -> PRL end
+data PRM : U is prm : JMembers -> Nat -> PRM end
+prvV : PRV -> JVal is PRVElim (fn (x : PRV) is JVal end) (fn (v : JVal) (i : Nat) is v end) end
+prvI : PRV -> Nat  is PRVElim (fn (x : PRV) is Nat  end) (fn (v : JVal) (i : Nat) is i end) end
+prlV : PRL -> JList is PRLElim (fn (x : PRL) is JList end) (fn (v : JList) (i : Nat) is v end) end
+prlI : PRL -> Nat   is PRLElim (fn (x : PRL) is Nat   end) (fn (v : JList) (i : Nat) is i end) end
+prmV : PRM -> JMembers is PRMElim (fn (x : PRM) is JMembers end) (fn (v : JMembers) (i : Nat) is v end) end
+prmI : PRM -> Nat      is PRMElim (fn (x : PRM) is Nat      end) (fn (v : JMembers) (i : Nat) is i end) end
+
+-- THE PARSER — a `mutual partial` group of mutually-recursive descent functions.
+-- parseVal dispatches on the byte at i; an array recurses through parseList, an
+-- object through parseObj, and both of those recurse back through parseVal.
+mutual
+  partial parseVal : Bin -> Nat -> PRV is
+    fn (s : Bin) (i : Nat) is
+      -- recursion is in the MATCH branch (byte == '[' / '{'), so guard with eqG and
+      -- keep the descent in the succ-arm; the cascade falls through the zero-arms.
+      case eqG (binAt s i) 34 of
+      | succ a -> let e = closeQ (binLen s) s (succ i) in prv (jstr (substr s (succ i) e)) (succ e)
+      | zero   -> case eqG (binAt s i) 91 of
+                  | succ a -> let l = parseList s (succ i) in prv (jarr (prlV l)) (prlI l)
+                  | zero   -> case eqG (binAt s i) 123 of
+                              | succ a -> let m = parseObj s (succ i) in prv (jobj (prmV m)) (prmI m)
+                              | zero   -> case eqG (binAt s i) 110 of
+                                          | succ a -> prv jnull (addN i 4)
+                                          | zero   -> prv (jnum (numGo (binLen s) s i 0)) (numEnd (binLen s) s i)
+                                          end
+                              end
+                  end
+      end
+    end
+  end
+  partial parseList : Bin -> Nat -> PRL is
+    fn (s : Bin) (i : Nat) is
+      -- terminator ']' is the base (no recursion) → zero-arm of neq; the element
+      -- descent rides the succ-arm. Continue on ',' (the match) → eqG succ-arm.
+      case neq (binAt s i) 93 of
+      | zero   -> prl jnil (succ i)
+      | succ a -> let e = parseVal s i in
+                    case eqG (binAt s (prvI e)) 44 of
+                    | succ b -> let rest = parseList s (succ (prvI e)) in prl (jcons (prvV e) (prlV rest)) (prlI rest)
+                    | zero   -> prl (jcons (prvV e) jnil) (succ (prvI e))
+                    end
+      end
+    end
+  end
+  partial parseObj : Bin -> Nat -> PRM is
+    fn (s : Bin) (i : Nat) is
+      case neq (binAt s i) 125 of
+      | zero   -> prm mnil (succ i)
+      | succ a -> let ke = closeQ (binLen s) s (succ i) in
+                    let key = substr s (succ i) ke in
+                    let v = parseVal s (addN ke 2) in
+                    case eqG (binAt s (prvI v)) 44 of
+                    | succ b -> let rest = parseObj s (succ (prvI v)) in prm (mcons key (prvV v) (prmV rest)) (prmI rest)
+                    | zero   -> prm (mcons key (prvV v) mnil) (succ (prvI v))
+                    end
+      end
+    end
+  end
+end
+parse : Bin -> JVal is fn (s : Bin) is prvV (parseVal s 0) end end
+
+doc : Bin is b"{\"name\":\"Ada\",\"tags\":[1,2,3]}" end
+roundtrip : Nat is case eqBin (serialize (parse doc)) doc of | true -> succ zero | false -> zero end end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin (serialize (parse doc))) (fn (a : Unit) is
+    bindIO Nat Unit (printNat roundtrip) (fn (b : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end

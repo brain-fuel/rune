@@ -261,6 +261,22 @@ func replaceRef(t core.Tm, from, to core.Hash) core.Tm {
 		return core.Subst{A: replaceRef(x.A, from, to), X: replaceRef(x.X, from, to),
 			Y: replaceRef(x.Y, from, to), Prf: replaceRef(x.Prf, from, to),
 			P: replaceRef(x.P, from, to), Px: replaceRef(x.Px, from, to)}
+	case core.Sig:
+		return core.Sig{Qty: x.Qty, Dom: replaceRef(x.Dom, from, to),
+			Cod: core.Scope{Name: x.Cod.Name, Body: replaceRef(x.Cod.Body, from, to)}}
+	case core.Pair:
+		return core.Pair{Dom: replaceRef(x.Dom, from, to),
+			Cod: core.Scope{Name: x.Cod.Name, Body: replaceRef(x.Cod.Body, from, to)},
+			A:   replaceRef(x.A, from, to), B: replaceRef(x.B, from, to)}
+	case core.Fst:
+		return core.Fst{P: replaceRef(x.P, from, to)}
+	case core.Snd:
+		return core.Snd{P: replaceRef(x.P, from, to)}
+	case core.NatLit:
+		// A compressed numeral: its N is a bigint and Zero/Succ are the builtin-nat
+		// ctor hashes, never a group-internal placeholder, so it carries no Ref to
+		// rewrite. (Reachable once a `mutual` group body holds a numeric literal.)
+		return t
 	default:
 		panic("store.replaceRef: unknown core term")
 	}
