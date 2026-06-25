@@ -236,6 +236,15 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 		fmt.Fprintf(&b, "fn %s() -> Rc<V> { %s }\n", rustThunk(d.ElimName), em.expr(LowerElim(d), nil))
 	}
 	for _, def := range p.Defs {
+		if p.Partials[def.Name] {
+			// T2: a partial emits in two parts so deep tail recursion runs flat —
+			//   <name>_step: the body (a marked tail call is a V::Bounce re-entering
+			//                _step, no frame nests); <name>: apply _step, _tramp once.
+			step := rustThunk(def.Name) + "_step"
+			fmt.Fprintf(&b, "fn %s() -> Rc<V> { %s }\n", step, em.expr(def.Body, nil))
+			fmt.Fprintf(&b, "fn %s() -> Rc<V> { %s }\n", rustThunk(def.Name), em.exprPartialPublic(def.Body, step, nil))
+			continue
+		}
 		fmt.Fprintf(&b, "fn %s() -> Rc<V> { %s }\n", rustThunk(def.Name), em.expr(def.Body, nil))
 	}
 	b.WriteString("fn main() {\n")
@@ -271,6 +280,62 @@ func rustCurry(params []string, body string) string {
 		inner = cl.String()
 	}
 	return inner
+}
+
+// exprBounce emits a marked tail self/sibling call as a V::Bounce whose thunk
+// re-enters the head partial's _step entry, so forcing it advances ONE iteration;
+// the public driver (_tramp) loops without nesting. The move closure only clones its
+// captures (every IVar emits `.clone()`), so it stays Fn.
+func (em *rustEmitter) exprBounce(call Ir, env []string) string {
+	var args []Ir
+	t := call
+	for {
+		app, ok := t.(IApp)
+		if !ok {
+			break
+		}
+		args = append([]Ir{app.Arg}, args...)
+		t = app.Fn
+	}
+	g, ok := t.(IGlobal)
+	if !ok {
+		return em.expr(call, env)
+	}
+	s := rustThunk(g.Name) + "_step()"
+	for _, a := range args {
+		s = fmt.Sprintf("ap(%s, %s)", s, em.expr(a, env))
+	}
+	// The inner `move` closure must capture FRESH clones, not the outer Fn closure's
+	// own bindings (moving those out of an Fn closure is illegal). Pre-clone every
+	// in-scope binder into a same-named local, so `move` moves the clone.
+	var pre strings.Builder
+	pre.WriteString("{ ")
+	for _, e := range env {
+		fmt.Fprintf(&pre, "let %s = %s.clone(); ", e, e)
+	}
+	return pre.String() + "Rc::new(V::Bounce(Rc::new(move || " + s + "))) }"
+}
+
+// exprPartialPublic emits a partial def's public entry: peel its parameter lambdas,
+// apply the _step thunk to them, and drive (_tramp) the result once.
+func (em *rustEmitter) exprPartialPublic(t Ir, step string, env []string) string {
+	var params []string
+	cur := t
+	for {
+		lam, ok := cur.(ILam)
+		if !ok {
+			break
+		}
+		n := freshRust(lam.Name, env)
+		params = append(params, n)
+		env = prepend(n, env)
+		cur = lam.Body
+	}
+	app := step + "()"
+	for _, pn := range params {
+		app = fmt.Sprintf("ap(%s, %s.clone())", app, pn)
+	}
+	return rustCurry(params, "_tramp("+app+")")
 }
 
 func emitCtorRust(b *strings.Builder, c CtorSpec) {
@@ -360,7 +425,7 @@ func (em *rustEmitter) expr(t Ir, env []string) string {
 	case IField:
 		return fmt.Sprintf("_field(%s, %d)", em.expr(x.Scrut, env), x.Index)
 	case IBounce:
-		return em.expr(x.Call, env)
+		return em.exprBounce(x.Call, env)
 	case ICase:
 		scrut := em.expr(x.Scrut, env)
 		var b strings.Builder
@@ -508,6 +573,16 @@ enum V {
     Fun(Rc<dyn Fn(Rc<V>) -> Rc<V>>),
     Ctor(i64, &'static str, Vec<Rc<V>>),
     Pair(Rc<V>, Rc<V>),
+    Bounce(Rc<dyn Fn() -> Rc<V>>), // T2 trampoline: a deferred tail call, forced by _tramp
+}
+// _tramp is the T2 driver: force a chain of deferred tail calls (bounces) until a
+// real value surfaces. A partial's public entry drives once; a tail self/sibling
+// call inside the _step body evaluates to a V::Bounce instead of nesting a frame.
+fn _tramp(mut r: Rc<V>) -> Rc<V> {
+    loop {
+        let next = match &*r { V::Bounce(k) => k(), _ => return r };
+        r = next;
+    }
 }
 fn unit() -> Rc<V> { Rc::new(V::Unit) }
 fn vfun<F: Fn(Rc<V>) -> Rc<V> + 'static>(f: F) -> Rc<V> { Rc::new(V::Fun(Rc::new(f))) }
@@ -705,6 +780,7 @@ fn _show(v: &Rc<V>) -> String {
         V::Bytes(b) => _binshow(b),
         V::Ptr(_) => "<ptr>".to_string(),
         V::Fun(_) => "<function>".to_string(),
+        V::Bounce(_) => _show(&_tramp(v.clone())), // defensive: drivers resolve first
         V::Pair(a, b) => format!("({}, {})", _show(a), _show(b)),
         V::Ctor(_, name, args) => {
             let mut s = name.to_string();

@@ -111,6 +111,17 @@ func (C) Emit(p Program) (TargetSource, error) {
 	for _, name := range thunks {
 		fmt.Fprintf(&b, "static Value %s(void);\n", cThunkName(name))
 	}
+	// A partial also gets a _step thunk + `arity` driver code blocks (T2 trampoline);
+	// forward-declare them so a (mutual) bounce target links regardless of order.
+	for _, def := range cp.Defs {
+		if !cp.Partials[def.Name] {
+			continue
+		}
+		fmt.Fprintf(&b, "static Value %s_step(void);\n", cThunkName(def.Name))
+		for i := 0; i < def.Arity; i++ {
+			fmt.Fprintf(&b, "static Value %s(Value arg, Value* env);\n", cDrvName(def.Name, i))
+		}
+	}
 	// The constructor code blocks (one per argument) reference one another in a
 	// chain; forward-declare them all so the chain links regardless of order.
 	for _, d := range cp.Datas {
@@ -143,8 +154,13 @@ func (C) Emit(p Program) (TargetSource, error) {
 	for _, blk := range cp.Blocks {
 		em.emitBlock(&b, blk)
 	}
-	// Definition thunks (eliminators converted as CDefSpec, then user defs).
+	// Definition thunks (eliminators converted as CDefSpec, then user defs). A
+	// `partial` is split into a _step body + a public trampoline driver (T2).
 	for _, def := range cp.Defs {
+		if cp.Partials[def.Name] {
+			em.emitPartialC(&b, def.Name, def.Arity, def.Body)
+			continue
+		}
 		em.emitDefThunk(&b, def.Name, def.Body)
 	}
 
@@ -421,6 +437,8 @@ func (em *cEmitter) exprIn(t CIr, locals []string) string {
 		return fmt.Sprintf("con_get(%s, %d)", em.exprIn(x.Scrut, locals), x.Index)
 	case CCase:
 		return em.caseExpr(x, locals)
+	case CBounce:
+		return em.bounceExpr(x.Call, locals)
 	default:
 		panic(fmt.Sprintf("codegen(c): unknown CIr node %T", t))
 	}
@@ -461,6 +479,85 @@ func (em *cEmitter) caseExpr(x CCase, locals []string) string {
 	}
 	fmt.Fprintf(&b, " default: rt_abort(); }; %s; })", r)
 	return b.String()
+}
+
+// bounceExpr renders a CBounce (a marked tail call) as a statement expression that
+// builds a K_BOUNCE object: mkbounce(<head>_step(), nargs) then fill the evaluated
+// args. The head partial's _step entry is the body without a driver, so forcing the
+// bounce (in the public driver loop) advances ONE iteration without nesting a frame.
+func (em *cEmitter) bounceExpr(call CIr, locals []string) string {
+	var args []CIr
+	t := call
+	for {
+		app, ok := t.(AppClosure)
+		if !ok {
+			break
+		}
+		args = append([]CIr{app.Arg}, args...)
+		t = app.Clo
+	}
+	g, ok := t.(CGlobal)
+	if !ok {
+		return em.exprIn(call, locals) // not a recognizable spine; emit the call directly
+	}
+	n := em.fresh()
+	var b strings.Builder
+	fmt.Fprintf(&b, "({ Value %s = mkbounce(%s_step(), %d); ", n, cThunkName(g.Name), len(args))
+	for i, a := range args {
+		fmt.Fprintf(&b, "bounce_set(%s, %d, %s); ", n, i+1, em.exprIn(a, locals))
+	}
+	fmt.Fprintf(&b, "%s; })", n)
+	return b.String()
+}
+
+// cDrvName is the i-th public-driver code block of a partial (the curried arg
+// collector; the last block saturates the _step entry and drives the bounce chain).
+func cDrvName(name string, i int) string { return fmt.Sprintf("drvfn_%s_%d", cName(name), i) }
+
+// emitPartialC emits a `partial` def's native trampoline split: a memoized _step
+// thunk (the body, where a marked tail call is a K_BOUNCE), `arity` curried driver
+// code blocks that collect the args, and the public thunk returning the first
+// driver closure. The last driver block applies _step to all args and `tramp`s.
+func (em *cEmitter) emitPartialC(b *strings.Builder, name string, arity int, body CIr) {
+	step := cThunkName(name) + "_step"
+	// The _step thunk: the body, memoized exactly like a normal def thunk.
+	fmt.Fprintf(b, "static Value %s(void) {\n", step)
+	b.WriteString("  static int done = 0; static Value cache = 0;\n")
+	b.WriteString("  if (done) return cache;\n  done = 1;\n  gc_add_root(&cache);\n")
+	fmt.Fprintf(b, "  cache = %s;\n  return cache;\n}\n", em.expr(body))
+	if arity == 0 {
+		// No args to collect: the public entry just drives the (bounce-free) step.
+		fmt.Fprintf(b, "static Value %s(void) {\n", cThunkName(name))
+		b.WriteString("  static int done = 0; static Value cache = 0;\n")
+		b.WriteString("  if (done) return cache;\n  done = 1;\n  gc_add_root(&cache);\n")
+		fmt.Fprintf(b, "  cache = tramp(%s());\n  return cache;\n}\n", step)
+		return
+	}
+	for i := 0; i < arity; i++ {
+		fmt.Fprintf(b, "static Value %s(Value arg, Value* env) {\n", cDrvName(name, i))
+		b.WriteString("  (void)arg; (void)env;\n")
+		if i < arity-1 {
+			// Collect: build the next driver closure capturing env[0..i-1] + arg.
+			fmt.Fprintf(b, "  Value c = mkclo(&%s, %d);\n", cDrvName(name, i+1), i+1)
+			for k := 0; k < i; k++ {
+				fmt.Fprintf(b, "  clo_set(c, %d, env[%d]);\n", k, k)
+			}
+			fmt.Fprintf(b, "  clo_set(c, %d, arg);\n", i)
+			b.WriteString("  return c;\n}\n")
+			continue
+		}
+		// Last block: saturate _step with env[0..i-1] + arg, then drive once.
+		fmt.Fprintf(b, "  Value f = %s();\n", step)
+		for k := 0; k < i; k++ {
+			fmt.Fprintf(b, "  f = apply(f, env[%d]);\n", k)
+		}
+		b.WriteString("  f = apply(f, arg);\n  return tramp(f);\n}\n")
+	}
+	// The public thunk: a closure entering the first driver block (no captures).
+	fmt.Fprintf(b, "static Value %s(void) {\n", cThunkName(name))
+	b.WriteString("  static int done = 0; static Value cache = 0;\n")
+	b.WriteString("  if (done) return cache;\n  done = 1;\n  gc_add_root(&cache);\n")
+	fmt.Fprintf(b, "  cache = mkclo(&%s, 0);\n  return cache;\n}\n", cDrvName(name, 0))
 }
 
 // accelDispatch emits a registered accel-op def on two args as native integer
@@ -968,7 +1065,7 @@ typedef intptr_t Value;
 
 /* Object kinds. K_BIG is a naive arbitrary-precision integer (builtin-nat): see
    the bignum section. */
-enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7, K_BYTES = 8 };
+enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7, K_BYTES = 8, K_BOUNCE = 9 };
 
 typedef struct Obj {
   int kind;
@@ -1104,6 +1201,9 @@ static size_t gc_obj_size(Obj* o) {
     /* K_BYTES (Phase 0 real byte string): one byte per Value slot, nenv = count.
        Raw bytes, never traced (default in gc_mark_obj). */
     case K_BYTES: extra = o->nenv  > 0 ? o->nenv   - 1 : 0; break;
+    /* K_BOUNCE (T2 trampoline): nfield Value slots — slots[0] = the head partial's
+       _step closure, slots[1..tag] = the evaluated tail-call arguments. */
+    case K_BOUNCE: extra = o->nfield > 0 ? o->nfield - 1 : 0; break;
     default:     extra = 0; break; /* K_STR, K_PTR, K_UNIT: just the header */
   }
   size_t sz = base + (size_t)extra * sizeof(Value);
@@ -1140,6 +1240,7 @@ static void gc_mark_obj(Obj* o) {
     case K_CLO:  for (int i = 0; i < o->nenv;   i++) gc_mark_value(o->slots[i]); break;
     case K_CON:  for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
     case K_PAIR: gc_mark_value(o->slots[0]); gc_mark_value(o->slots[1]); break;
+    case K_BOUNCE: for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
     default: break; /* K_STR, K_PTR, K_UNIT carry no heap pointers */
   }
 }
@@ -1262,6 +1363,28 @@ static Value apply(Value clo, Value arg) {
   }
   Obj* o = obj(clo);
   return o->code(arg, o->slots);
+}
+
+/* T2 TRAMPOLINE. A partial's tail self/sibling call evaluates to a K_BOUNCE — a
+   deferred saturated re-application {step, arg0..arg_{n-1}} — instead of nesting a
+   native frame. mkbounce allocates the object (slots[0] = step closure, slots[1..n]
+   = args, filled by the caller). tramp forces the chain: re-apply step to the args
+   (running ONE iteration of the partial body, which returns the next bounce or a
+   value) until a non-bounce surfaces. So deep tail recursion runs in O(1) C stack. */
+static Value mkbounce(Value step, int nargs) {
+  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (size_t)nargs * sizeof(Value));
+  o->kind = K_BOUNCE; o->tag = nargs; o->nfield = nargs + 1; o->slots[0] = step;
+  return (Value)o;
+}
+static void bounce_set(Value bnc, int i, Value x) { obj(bnc)->slots[i] = x; }
+static Value tramp(Value v) {
+  while (!IS_INT(v) && obj(v)->kind == K_BOUNCE) {
+    Obj* o = obj(v);
+    Value f = o->slots[0];
+    for (int i = 1; i <= o->tag; i++) f = apply(f, o->slots[i]);
+    v = f;
+  }
+  return v;
 }
 
 /* ===========================================================================

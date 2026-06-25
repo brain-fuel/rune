@@ -281,7 +281,21 @@ func (JS) Emit(p Program) (TargetSource, error) {
 		// code beyond rendering ICase/IField.
 		fmt.Fprintf(&b, "const %s = %s;\n", jsName(d.ElimName), em.expr(LowerElim(d), nil))
 	}
+	if len(p.Partials) > 0 {
+		b.WriteString(trampolineRuntime)
+	}
 	for _, def := range p.Defs {
+		if p.Partials[def.Name] {
+			// T2: a partial emits in two parts so deep tail recursion runs flat.
+			//   <name>_step — the body; a marked tail call (IBounce) evaluates to a
+			//                 bounce {$b: thunk} that re-enters _step, so no frame nests.
+			//   <name>      — the public entry: apply _step to the params, then drive
+			//                 the bounce chain once ($tramp). Callers see a value.
+			step := jsName(def.Name) + "_step"
+			fmt.Fprintf(&b, "const %s = %s;\n", step, em.expr(def.Body, nil))
+			fmt.Fprintf(&b, "const %s = %s;\n", jsName(def.Name), em.exprPartialPublic(def.Body, step, nil))
+			continue
+		}
 		fmt.Fprintf(&b, "const %s = %s;\n", jsName(def.Name), em.expr(def.Body, nil))
 	}
 
@@ -436,6 +450,65 @@ func emitNat(b *strings.Builder, n NatSpec) {
 	b.WriteString("};\n")
 }
 
+// trampolineRuntime is the T2 driver: a bounce is the tagged thunk {$b: () => …}
+// a marked tail call evaluates to; $tramp forces the chain until a real value
+// surfaces. No real erased value carries a `$b` property (ctors are {tag,name,args},
+// pairs are arrays, functions/BigInt/strings have no such field), so the marker is
+// unambiguous. Emitted only when the program has a partial def.
+const trampolineRuntime = `const $tramp = r => { while (r && r.$b !== undefined) r = r.$b(); return r; };
+`
+
+// exprBounce emits a marked tail self/sibling call as a bounce {$b: () => <head>_step(args…)}
+// re-entering the head partial's _step entry (the body without a driver), so forcing
+// it advances ONE iteration; the enclosing public driver loops without nesting.
+func (em *jsEmitter) exprBounce(call Ir, env []string) string {
+	var args []Ir
+	t := call
+	for {
+		app, ok := t.(IApp)
+		if !ok {
+			break
+		}
+		args = append([]Ir{app.Arg}, args...)
+		t = app.Fn
+	}
+	g, ok := t.(IGlobal)
+	if !ok {
+		return em.expr(call, env) // not a recognizable spine; emit directly
+	}
+	s := jsName(g.Name) + "_step"
+	for _, a := range args {
+		s = fmt.Sprintf("%s(%s)", s, em.expr(a, env))
+	}
+	return "({$b: () => " + s + "})"
+}
+
+// exprPartialPublic emits a partial def's public entry: peel its parameter lambdas,
+// apply the _step thunk to them, and drive ($tramp) the result once.
+func (em *jsEmitter) exprPartialPublic(t Ir, step string, env []string) string {
+	var params []string
+	cur := t
+	for {
+		lam, ok := cur.(ILam)
+		if !ok {
+			break
+		}
+		n := freshJS(lam.Name, env)
+		params = append(params, n)
+		env = prepend(n, env)
+		cur = lam.Body
+	}
+	app := step
+	for _, pn := range params {
+		app = fmt.Sprintf("%s(%s)", app, pn)
+	}
+	out := "$tramp(" + app + ")"
+	for i := len(params) - 1; i >= 0; i-- {
+		out = fmt.Sprintf("%s => %s", params[i], out)
+	}
+	return out
+}
+
 // jsEmitter renders IR terms. It knows the builtin-nat eliminator's name so
 // it can emit DISPATCH for case-shaped eliminations (rung 6): the BigInt
 // eliminator is a strict fold, which evaluates the successor branch's body at
@@ -510,7 +583,7 @@ func (em *jsEmitter) expr(t Ir, env []string) string {
 	case IField:
 		return fmt.Sprintf("(%s).args[%d]", em.expr(x.Scrut, env), x.Index)
 	case IBounce:
-		return em.expr(x.Call, env)
+		return em.exprBounce(x.Call, env)
 	case ICase:
 		var b strings.Builder
 		fmt.Fprintf(&b, "(() => { switch ((%s).tag) {", em.expr(x.Scrut, env))

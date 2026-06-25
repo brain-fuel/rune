@@ -240,6 +240,8 @@ func (e *evaluator) evalIr(t cg.Ir, env []val) val {
 			}
 		}
 		panic("evalIr: unmatched tag")
+	case cg.IBounce:
+		return e.evalIr(x.Call, env) // a bounce is semantically its deferred call
 	default:
 		panic(fmt.Sprintf("evalIr: unsupported %T", t))
 	}
@@ -302,6 +304,8 @@ func (e *evaluator) evalCIr(t cg.CIr, locals, recEnv []val) val {
 			}
 		}
 		panic("evalCIr: unmatched tag")
+	case cg.CBounce:
+		return e.evalCIr(x.Call, locals, recEnv) // a bounce is semantically its deferred call
 	default:
 		panic(fmt.Sprintf("evalCIr: unsupported %T", t))
 	}

@@ -99,6 +99,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	b.WriteString("package main\n\nimport (\n" + imports.String() + ")\n\n")
 	b.WriteString(goRuntime)
+	if len(p.Partials) > 0 {
+		b.WriteString(goTrampolineRuntime)
+	}
 	if usesQuot(p) {
 		b.WriteString(goQuotRuntime)
 	}
@@ -332,6 +335,15 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		fmt.Fprintf(&b, "func %s() any { return %s }\n", goThunk(d.ElimName), em.expr(LowerElim(d), nil))
 	}
 	for _, def := range p.Defs {
+		if p.Partials[def.Name] {
+			// T2: a partial emits in two parts so deep tail recursion runs flat —
+			//   <name>_step: the body (a marked tail call is a _bounce thunk re-entering
+			//                _step, so no frame nests); <name>: apply _step, drive once.
+			step := goThunk(def.Name) + "_step"
+			fmt.Fprintf(&b, "func %s() any { return %s }\n", step, em.expr(def.Body, nil))
+			fmt.Fprintf(&b, "func %s() any { return %s }\n", goThunk(def.Name), em.exprPartialPublic(def.Body, step, nil))
+			continue
+		}
 		fmt.Fprintf(&b, "func %s() any { return %s }\n", goThunk(def.Name), em.expr(def.Body, nil))
 	}
 	b.WriteString("func main() {\n")
@@ -428,7 +440,7 @@ func (em *goEmitter) expr(t Ir, env []string) string {
 	case IField:
 		return fmt.Sprintf("(%s).(map[string]any)[\"args\"].([]any)[%d]", em.expr(x.Scrut, env), x.Index)
 	case IBounce:
-		return em.expr(x.Call, env)
+		return em.exprBounce(x.Call, env)
 	case ICase:
 		// IIFE over a statement switch on the scrutinee tag.
 		scrut := em.expr(x.Scrut, env)
@@ -442,6 +454,57 @@ func (em *goEmitter) expr(t Ir, env []string) string {
 	default:
 		panic("codegen(go): unknown IR node")
 	}
+}
+
+// exprBounce emits a marked tail self/sibling call as a _bounce whose thunk re-enters
+// the head partial's _step entry, so forcing it advances ONE iteration; the public
+// driver loops without nesting (a flat host stack).
+func (em *goEmitter) exprBounce(call Ir, env []string) string {
+	var args []Ir
+	t := call
+	for {
+		app, ok := t.(IApp)
+		if !ok {
+			break
+		}
+		args = append([]Ir{app.Arg}, args...)
+		t = app.Fn
+	}
+	g, ok := t.(IGlobal)
+	if !ok {
+		return em.expr(call, env)
+	}
+	s := goThunk(g.Name) + "_step()"
+	for _, a := range args {
+		s = fmt.Sprintf("ap(%s, %s)", s, em.expr(a, env))
+	}
+	return "_bounce{func() any { return " + s + " }}"
+}
+
+// exprPartialPublic emits a partial def's public entry: peel its parameter lambdas,
+// apply the _step thunk to them, and drive (_tramp) the result once.
+func (em *goEmitter) exprPartialPublic(t Ir, step string, env []string) string {
+	var params []string
+	cur := t
+	for {
+		lam, ok := cur.(ILam)
+		if !ok {
+			break
+		}
+		n := freshGo(lam.Name, env)
+		params = append(params, n)
+		env = prepend(n, env)
+		cur = lam.Body
+	}
+	app := step + "()"
+	for _, pn := range params {
+		app = fmt.Sprintf("ap(%s, %s)", app, pn)
+	}
+	out := "_tramp(" + app + ")"
+	for i := len(params) - 1; i >= 0; i-- {
+		out = fmt.Sprintf("func(%s any) any { return %s }", params[i], out)
+	}
+	return out
 }
 
 // accelDispatch emits a registered accel-op def on two args as native int
@@ -545,6 +608,14 @@ func goLocal(n string) string {
 	}
 	return n
 }
+
+// goTrampolineRuntime is the T2 driver. A marked tail call evaluates to a _bounce
+// (a deferred thunk); _tramp forces the chain until a real value surfaces. _bounce
+// is a dedicated struct type, so it never aliases an erased value (*big.Int, []any,
+// map[string]any, func, string). Emitted only when the program has a partial def.
+const goTrampolineRuntime = `type _bounce struct{ k func() any }
+func _tramp(r any) any { for { b, ok := r.(_bounce); if !ok { return r }; r = b.k() } }
+`
 
 const goRuntime = `type _ptr int64 // opaque host pointer (B4): never shown structurally
 func ap(f, x any) any { return f.(func(any) any)(x) }

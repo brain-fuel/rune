@@ -33,6 +33,9 @@ declare i64 @rt_pair_snd(i64)
 declare i64 @rt_mkstr(i8*)
 declare i64 @rt_mkptr(i64)
 declare i64 @rt_apply(i64, i64)
+declare i64 @rt_mkbounce(i64, i32)
+declare void @rt_bounce_set(i64, i32, i64)
+declare i64 @rt_tramp(i64)
 declare i64 @rt_nat_add(i64, i64)
 declare i64 @rt_nat_mul(i64, i64)
 declare i64 @rt_nat_monus(i64, i64)
@@ -78,7 +81,7 @@ const llRuntimeC = `/* rune llvm-backend runtime — the external-linkage twin o
 
 typedef intptr_t Value;
 
-enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7, K_BYTES = 8 };
+enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG = 6, K_FLOAT = 7, K_BYTES = 8, K_BOUNCE = 9 };
 
 typedef struct Obj {
   int kind;
@@ -144,6 +147,7 @@ static size_t gc_obj_size(Obj* o) {
     case K_PAIR: extra = 1; break;
     case K_BIG:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break; /* nenv = limb capacity */
     case K_BYTES: extra = o->nenv  > 0 ? o->nenv   - 1 : 0; break; /* Phase 0 Bin: 1 byte/slot, nenv = count */
+    case K_BOUNCE: extra = o->nfield > 0 ? o->nfield - 1 : 0; break; /* T2: step + args */
     default:     extra = 0; break;
   }
   size_t sz = base + (size_t)extra * sizeof(Value);
@@ -171,6 +175,7 @@ static void gc_mark_obj(Obj* o) {
     case K_CLO:  for (int i = 0; i < o->nenv;   i++) gc_mark_value(o->slots[i]); break;
     case K_CON:  for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
     case K_PAIR: gc_mark_value(o->slots[0]); gc_mark_value(o->slots[1]); break;
+    case K_BOUNCE: for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
     default: break;
   }
 }
@@ -271,6 +276,25 @@ Value rt_apply(Value clo, Value arg) {
   }
   Obj* o = obj(clo);
   return o->code(arg, o->slots);
+}
+
+/* T2 trampoline (twin of c.go's mkbounce/tramp). A partial's marked tail call
+   builds a K_BOUNCE {step, args...}; the public driver forces the chain so deep
+   tail recursion runs in O(1) native stack. */
+Value rt_mkbounce(Value step, int nargs) {
+  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (size_t)nargs * sizeof(Value));
+  o->kind = K_BOUNCE; o->tag = nargs; o->nfield = nargs + 1; o->slots[0] = step;
+  return (Value)o;
+}
+void rt_bounce_set(Value bnc, int i, Value x) { obj(bnc)->slots[i] = x; }
+Value rt_tramp(Value v) {
+  while (!IS_INT(v) && obj(v)->kind == K_BOUNCE) {
+    Obj* o = obj(v);
+    Value f = o->slots[0];
+    for (int i = 1; i <= o->tag; i++) f = rt_apply(f, o->slots[i]);
+    v = f;
+  }
+  return v;
 }
 
 /* ---- naive arbitrary-precision integers (builtin-nat); twin of c.go's bignum.

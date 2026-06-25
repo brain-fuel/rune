@@ -5,9 +5,9 @@ package codegen
 // especially). MarkTailBounces rewrites each partial def's body, wrapping a
 // SATURATED tail-position call to a member of its recursion group as an IBounce —
 // a 0-arg thunk the def's driver loop forces, flattening the recursion onto the
-// heap (Clojure core/trampoline). Backends with a driver render IBounce as a
-// bounce value; BEAM (native TCO) and Python (raised recursion limit) emit the
-// wrapped call directly, so they are byte-identical no-ops.
+// heap (Clojure core/trampoline). Every stack-limited backend renders IBounce as a
+// bounce value (js/py/go/rs/jvm + native c/ll); BEAM (native TCO) emits the wrapped
+// call directly, so it is a byte-identical no-op.
 //
 // The recursion in real rune code threads through a NatElim ONE-PEEL: a partial's
 // self-call sits in the succ-arm of a `case n of zero -> … | succ k -> P k`, which

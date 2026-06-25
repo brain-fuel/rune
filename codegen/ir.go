@@ -183,8 +183,9 @@ type ICaseArm struct {
 // (the JVM has no TCO). Call is the original SATURATED application spine whose head
 // names a member of the current partial recursion group. Semantically identical to
 // Call (the driver forces it exactly once before the loop continues); it changes
-// only WHEN the frame is created, never the value. Backends without the trampoline
-// (BEAM has native TCO; Python raises its recursion limit) emit Call directly.
+// only WHEN the frame is created, never the value. Every stack-limited backend now
+// renders it as a real bounce (js/py/go/rs/jvm + native c/ll, the T2 driver); BEAM
+// has native TCO, so it emits the wrapped Call directly (a byte-identical passthrough).
 type IBounce struct{ Call Ir }
 
 func (IVar) isIr()     {}

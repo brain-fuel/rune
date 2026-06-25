@@ -130,6 +130,14 @@ type CCaseArm struct {
 	Body CIr
 }
 
+// CBounce is the closure-converted IBounce (T2 native trampoline): a SATURATED
+// tail call to a partial-group member, deferred. A native backend renders it as a
+// heap "bounce" object holding the head partial's _step entry + the (eagerly
+// evaluated) argument values; the partial's public driver loop forces the chain so
+// deep tail recursion runs in O(1) native stack. Call is the converted application
+// spine whose head is a CGlobal naming the group member.
+type CBounce struct{ Call CIr }
+
 func (CVar) isCIr()       {}
 func (CEnv) isCIr()       {}
 func (CGlobal) isCIr()    {}
@@ -144,6 +152,7 @@ func (CFst) isCIr()       {}
 func (CSnd) isCIr()       {}
 func (CField) isCIr()     {}
 func (CCase) isCIr()      {}
+func (CBounce) isCIr()    {}
 
 // CodeBlock is a lifted lambda body: a top-level code block with exactly two
 // binders (the argument, then the environment record; see CVar). Its Body refers
@@ -170,12 +179,18 @@ type ClosureProgram struct {
 	Nat    *NatSpec
 	Main   string
 	IOMain bool
+	// Partials is the set of def names that are `partial` (carried from Program so a
+	// native backend can split each into a _step body + a public trampoline driver).
+	Partials map[string]bool
 }
 
-// CDefSpec is a converted top-level definition.
+// CDefSpec is a converted top-level definition. Arity is the count of leading
+// curried lambdas of the ORIGINAL erased body (0 for eliminators / non-functions);
+// the native trampoline's public driver reads it to know how many args to collect.
 type CDefSpec struct {
-	Name string
-	Body CIr
+	Name  string
+	Body  CIr
+	Arity int
 }
 
 // NatElimSpine unwinds a closure-converted application spine and, if its head is
@@ -270,6 +285,8 @@ func cirUsesArg(t CIr, idx int) bool {
 			}
 		}
 		return false
+	case CBounce:
+		return cirUsesArg(x.Call, idx)
 	default:
 		return false
 	}
@@ -361,10 +378,11 @@ type closureConverter struct {
 func ClosureConvert(p Program) ClosureProgram {
 	cc := &closureConverter{}
 	out := ClosureProgram{
-		Datas:  p.Datas,
-		Nat:    p.Nat,
-		Main:   p.Main,
-		IOMain: p.IOMain,
+		Datas:    p.Datas,
+		Nat:      p.Nat,
+		Main:     p.Main,
+		IOMain:   p.IOMain,
+		Partials: p.Partials,
 	}
 	// Lower each datatype eliminator the same way the source backends do, then
 	// convert it — a native backend gets the eliminator as a closed code block.
@@ -376,7 +394,7 @@ func ClosureConvert(p Program) ClosureProgram {
 		out.Defs = append(out.Defs, CDefSpec{Name: d.ElimName, Body: body})
 	}
 	for _, def := range p.Defs {
-		out.Defs = append(out.Defs, CDefSpec{Name: def.Name, Body: cc.convert(def.Body, 0)})
+		out.Defs = append(out.Defs, CDefSpec{Name: def.Name, Body: cc.convert(def.Body, 0), Arity: def.Arity})
 	}
 	out.Blocks = cc.blocks
 	return out
@@ -418,7 +436,7 @@ func (cc *closureConverter) convert(t Ir, depth int) CIr {
 	case IField:
 		return CField{Scrut: cc.convert(x.Scrut, depth), Index: x.Index}
 	case IBounce:
-		return cc.convert(x.Call, depth)
+		return CBounce{Call: cc.convert(x.Call, depth)}
 	case ICase:
 		arms := make([]CCaseArm, len(x.Arms))
 		for i, arm := range x.Arms {
@@ -541,7 +559,7 @@ func (cc *closureConverter) liftBody(t Ir, slotOf map[int]int) CIr {
 		case IField:
 			return CField{Scrut: walk(x.Scrut, depth), Index: x.Index}
 		case IBounce:
-			return walk(x.Call, depth)
+			return CBounce{Call: walk(x.Call, depth)}
 		case ICase:
 			arms := make([]CCaseArm, len(x.Arms))
 			for i, arm := range x.Arms {

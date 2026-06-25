@@ -53,14 +53,41 @@ func TestMutualPartial(t *testing.T) {
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch516_mutual_partial.rune", want) })
 }
 
-// TestTrampolineDeepJVM proves the shared-IR trampoline (T1): a self-recursive
-// `partial` counting down from two million runs FLAT on the JVM — the tail self-call
-// (through the NatElim one-peel) bounces, driven by a loop, so no StackOverflowError
-// and no reliance on the virtual-thread stack. JVM-only until the other stack-limited
-// backends get the driver (T2); they currently emit the bounce as a direct call and
-// would overflow at this depth.
-func TestTrampolineDeepJVM(t *testing.T) {
-	runBytesJVM(t, "ch517_countdown_deep.rune", "0\nunit")
+// TestTrampolineDeep is the T3 byte-identical cross-backend gate for the shared-IR
+// trampoline: a self-recursive `partial` counting down from two MILLION runs FLAT on
+// EVERY backend and yields the same "0\nunit". The tail self-call (through the NatElim
+// one-peel) is marked IBounce; each backend renders it as a deferred bounce its public
+// driver loop forces, so deep tail recursion runs in O(1) host stack — no overflow.
+//   - js/py/go/rs + native c/ll + jvm: the T2 driver (a bounce value + a _step/public
+//     split). Without it these overflow the host stack at this depth.
+//   - erl: BEAM has native TCO, so the bounce is emitted as a direct tail call and the
+//     scheduler flattens it — byte-identical output, the passthrough path of IBounce.
+// Slow (2M iterations × 8 backends + native/JVM compiles), so fingerprint-gated.
+func TestTrampolineDeep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("ch517 deep countdown is slow; -short skips it")
+	}
+	skip, commit := gateUnchanged(t, "trampolinedeep", "../listings/ch517_countdown_deep.rune", "phase_tails_test.go")
+	if skip {
+		t.Skip("ch517_countdown_deep.rune + its test unchanged since last pass; skipping the slow run")
+	}
+	const want = "0\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch517_countdown_deep.rune", "main", ""); got != want {
+				t.Fatalf("[%s] deep countdown gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch517_countdown_deep.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch517_countdown_deep.rune", want) })
+	if !t.Failed() {
+		commit()
+	}
 }
 
 // TestRand is a Phase-2 tail gate: a seeded LCG PRNG (ch508), deterministic so

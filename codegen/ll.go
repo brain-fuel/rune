@@ -78,8 +78,13 @@ func (LL) Emit(p Program) (TargetSource, error) {
 	for _, blk := range cp.Blocks {
 		em.emitBlock(&body, blk)
 	}
-	// Definition thunks (eliminators converted as CDefSpec, then user defs).
+	// Definition thunks (eliminators converted as CDefSpec, then user defs). A
+	// `partial` is split into a _step body + a public trampoline driver (T2).
 	for _, def := range cp.Defs {
+		if cp.Partials[def.Name] {
+			em.emitPartialLL(&body, def.Name, def.Arity, def.Body)
+			continue
+		}
 		em.emitDefThunk(&body, def.Name, def.Body)
 	}
 
@@ -907,6 +912,8 @@ func (f *llFunc) emitIn(b *strings.Builder, t CIr, locals []string) string {
 		return r
 	case CCase:
 		return f.emitCase(b, x, locals)
+	case CBounce:
+		return f.emitBounce(b, x.Call, locals)
 	default:
 		panic(fmt.Sprintf("codegen(ll): unknown CIr node %T", t))
 	}
@@ -978,6 +985,121 @@ func (f *llFunc) emitCase(b *strings.Builder, x CCase, locals []string) string {
 	r := f.fresh()
 	fmt.Fprintf(b, "  %s = load i64, i64* %s\n", r, slot)
 	return r
+}
+
+// emitBounce lowers a CBounce (a marked tail call) to a K_BOUNCE construction: it
+// calls the head partial's _step thunk, builds the bounce object, and fills the
+// (evaluated) arg slots. Forcing the bounce (in the public driver via rt_tramp)
+// advances ONE iteration without nesting a native frame.
+func (f *llFunc) emitBounce(b *strings.Builder, call CIr, locals []string) string {
+	var args []CIr
+	t := call
+	for {
+		app, ok := t.(AppClosure)
+		if !ok {
+			break
+		}
+		args = append([]CIr{app.Arg}, args...)
+		t = app.Clo
+	}
+	g, ok := t.(CGlobal)
+	if !ok {
+		return f.emitIn(b, call, locals) // not a recognizable spine; emit the call directly
+	}
+	step := f.fresh()
+	fmt.Fprintf(b, "  %s = call i64 @%s_step()\n", step, llThunkName(g.Name))
+	bnc := f.fresh()
+	fmt.Fprintf(b, "  %s = call i64 @rt_mkbounce(i64 %s, i32 %d)\n", bnc, step, len(args))
+	for i, a := range args {
+		av := f.emitIn(b, a, locals)
+		fmt.Fprintf(b, "  call void @rt_bounce_set(i64 %s, i32 %d, i64 %s)\n", bnc, i+1, av)
+	}
+	return bnc
+}
+
+// emitPartialLL emits a `partial` def's native trampoline split (the LL twin of
+// emitPartialC): a memoized _step thunk (the body, where a marked tail call is a
+// K_BOUNCE), `arity` curried driver code blocks collecting the args, and the public
+// thunk returning the first driver closure. The last driver block saturates _step
+// and drives the bounce chain (rt_tramp).
+func (em *llEmitter) emitPartialLL(b *strings.Builder, name string, arity int, body CIr) {
+	stepSym := llThunkName(name) + "_step"
+	em.emitNamedThunk(b, stepSym, llName(name)+"_step", func(f *llFunc) string {
+		return f.emit(b, body, nil)
+	})
+	if arity == 0 {
+		// No args to collect: the public entry just drives the (bounce-free) step.
+		em.emitNamedThunk(b, llThunkName(name), llName(name), func(f *llFunc) string {
+			s := f.fresh()
+			fmt.Fprintf(b, "  %s = call i64 @%s()\n", s, stepSym)
+			r := f.fresh()
+			fmt.Fprintf(b, "  %s = call i64 @rt_tramp(i64 %s)\n", r, s)
+			return r
+		})
+		return
+	}
+	drv := func(i int) string { return fmt.Sprintf("drvfn_%s_%d", llName(name), i) }
+	for i := 0; i < arity; i++ {
+		if i < arity-1 {
+			// Collect: build the next driver closure capturing env[0..i-1] + arg.
+			copyEnv := make([]int, i)
+			for k := range copyEnv {
+				copyEnv[k] = k
+			}
+			em.emitCurryBlock(b, drv(i), drv(i+1), i+1, copyEnv, i)
+			continue
+		}
+		// Last block: saturate _step with env[0..i-1] + arg, then drive.
+		fmt.Fprintf(b, "define i64 @%s(i64 %%arg, i64* %%env) {\nentry:\n", drv(i))
+		f := &llFunc{em: em}
+		fv := f.fresh()
+		fmt.Fprintf(b, "  %s = call i64 @%s()\n", fv, stepSym)
+		for k := 0; k < i; k++ {
+			ev := f.loadEnv(b, k)
+			nf := f.fresh()
+			fmt.Fprintf(b, "  %s = call i64 @rt_apply(i64 %s, i64 %s)\n", nf, fv, ev)
+			fv = nf
+		}
+		nf := f.fresh()
+		fmt.Fprintf(b, "  %s = call i64 @rt_apply(i64 %s, i64 %%arg)\n", nf, fv)
+		r := f.fresh()
+		fmt.Fprintf(b, "  %s = call i64 @rt_tramp(i64 %s)\n", r, nf)
+		fmt.Fprintf(b, "  ret i64 %s\n}\n", r)
+	}
+	// The public thunk: a closure entering the first driver block (no captures).
+	em.emitNamedThunk(b, llThunkName(name), llName(name), func(f *llFunc) string {
+		r := f.fresh()
+		fmt.Fprintf(b, "  %s = call i64 @rt_mkclo(i64 (i64, i64*)* @%s, i32 0)\n", r, drv(0))
+		return r
+	})
+}
+
+// emitNamedThunk is emitCachedThunk with an explicit thunk symbol + a distinct
+// global tag (so a partial's _step and public thunks get separate cache/done
+// globals). The body callback emits the value to memoize.
+func (em *llEmitter) emitNamedThunk(b *strings.Builder, thunkSym, tag string, body func(*llFunc) string) {
+	cache := "@cache_" + tag
+	done := "@done_" + tag
+	fmt.Fprintf(b, "%s = internal global i64 0\n", cache)
+	fmt.Fprintf(b, "%s = internal global i1 0\n", done)
+	fmt.Fprintf(b, "define i64 @%s() {\nentry:\n", thunkSym)
+	f := &llFunc{em: em}
+	d := f.fresh()
+	fmt.Fprintf(b, "  %s = load i1, i1* %s\n", d, done)
+	lret := f.freshLabel("ret")
+	lcomp := f.freshLabel("comp")
+	fmt.Fprintf(b, "  br i1 %s, label %%%s, label %%%s\n", d, lret, lcomp)
+	fmt.Fprintf(b, "%s:\n", lret)
+	c0 := f.fresh()
+	fmt.Fprintf(b, "  %s = load i64, i64* %s\n", c0, cache)
+	fmt.Fprintf(b, "  ret i64 %s\n", c0)
+	fmt.Fprintf(b, "%s:\n", lcomp)
+	fmt.Fprintf(b, "  store i1 1, i1* %s\n", done)
+	fmt.Fprintf(b, "  call void @rt_add_root(i64* %s)\n", cache)
+	v := body(f)
+	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", v, cache)
+	fmt.Fprintf(b, "  ret i64 %s\n", v)
+	b.WriteString("}\n")
 }
 
 // accelDispatch emits a registered accel-op def on two args as native integer

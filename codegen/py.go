@@ -262,7 +262,19 @@ func (Py) Emit(p Program) (TargetSource, error) {
 		// and emitted as an ordinary binding — no eliminator-specific backend code.
 		fmt.Fprintf(&b, "%s = %s\n", pyName(d.ElimName), em.expr(LowerElim(d), nil))
 	}
+	if len(p.Partials) > 0 {
+		b.WriteString(pyTrampolineRuntime)
+	}
 	for _, def := range p.Defs {
+		if p.Partials[def.Name] {
+			// T2: a partial emits in two parts so deep tail recursion runs flat —
+			//   <name>_step: the body (a marked tail call is a _Bounce re-entering
+			//                _step); <name>: apply _step to the params, then drive.
+			step := pyName(def.Name) + "_step"
+			fmt.Fprintf(&b, "%s = %s\n", step, em.expr(def.Body, nil))
+			fmt.Fprintf(&b, "%s = %s\n", pyName(def.Name), em.exprPartialPublic(def.Body, step, nil))
+			continue
+		}
 		fmt.Fprintf(&b, "%s = %s\n", pyName(def.Name), em.expr(def.Body, nil))
 	}
 	if p.Main != "" {
@@ -355,7 +367,7 @@ func (em *pyEmitter) expr(t Ir, env []string) string {
 	case IField:
 		return fmt.Sprintf("(%s)[\"args\"][%d]", em.expr(x.Scrut, env), x.Index)
 	case IBounce:
-		return em.expr(x.Call, env)
+		return em.exprBounce(x.Call, env)
 	case ICase:
 		// Chained conditional expression on the scrutinee tag (Python has no
 		// statement switch in an expression position).
@@ -373,6 +385,69 @@ func (em *pyEmitter) expr(t Ir, env []string) string {
 }
 
 // accelDispatch emits a registered accel-op def on two args as native Python int
+// pyTrampolineRuntime is the T2 driver: a marked tail call evaluates to a _Bounce
+// (a deferred thunk) instead of recursing; _tramp forces the chain until a real
+// value surfaces. A dedicated class so it never aliases an erased value (int, str,
+// tuple, ctor/ptr dict, lambda, _unit). Emitted only when a partial def is present.
+const pyTrampolineRuntime = `class _Bounce:
+    __slots__ = ("k",)
+    def __init__(self, k): self.k = k
+def _tramp(r):
+    while isinstance(r, _Bounce): r = r.k()
+    return r
+`
+
+// exprBounce emits a marked tail self/sibling call as a _Bounce re-entering the head
+// partial's _step entry (the body without a driver), so forcing it advances ONE
+// iteration; the enclosing public driver loops without nesting (a flat host stack).
+func (em *pyEmitter) exprBounce(call Ir, env []string) string {
+	var args []Ir
+	t := call
+	for {
+		app, ok := t.(IApp)
+		if !ok {
+			break
+		}
+		args = append([]Ir{app.Arg}, args...)
+		t = app.Fn
+	}
+	g, ok := t.(IGlobal)
+	if !ok {
+		return em.expr(call, env)
+	}
+	s := pyName(g.Name) + "_step"
+	for _, a := range args {
+		s = fmt.Sprintf("%s(%s)", s, em.expr(a, env))
+	}
+	return "_Bounce(lambda: " + s + ")"
+}
+
+// exprPartialPublic emits a partial def's public entry: peel its parameter lambdas,
+// apply the _step thunk to them, and drive (_tramp) the result once.
+func (em *pyEmitter) exprPartialPublic(t Ir, step string, env []string) string {
+	var params []string
+	cur := t
+	for {
+		lam, ok := cur.(ILam)
+		if !ok {
+			break
+		}
+		n := freshPy(lam.Name, env)
+		params = append(params, n)
+		env = prepend(n, env)
+		cur = lam.Body
+	}
+	app := step
+	for _, pn := range params {
+		app = fmt.Sprintf("%s(%s)", app, pn)
+	}
+	out := "_tramp(" + app + ")"
+	for i := len(params) - 1; i >= 0; i-- {
+		out = fmt.Sprintf("(lambda %s: %s)", params[i], out)
+	}
+	return out
+}
+
 // arithmetic (C7 / R-NUM Decision 4): add → `(a + b)`, mul → `(a * b)`, monus →
 // saturating `(a - b if a > b else 0)` (Peano monus floors at 0). Python ints are
 // arbitrary precision, the SAME representation NatSpec gives nat.
