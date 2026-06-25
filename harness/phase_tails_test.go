@@ -351,3 +351,41 @@ func TestSha256Pure(t *testing.T) {
 		commit() // record the fingerprint so the next unchanged run skips
 	}
 }
+
+// TestSha256General gates the ARBITRARY-LENGTH pure SHA-256 (ch522): FIPS 180-4
+// padding (0x80 + zero fill + 64-bit big-endian length, via a non-materialised
+// paddedByte view) + the multi-block Merkle-Damgård fold. The message is 56 bytes —
+// long enough to force TWO blocks, so both the padding and the block chaining run —
+// and reproduces the NIST vector 248d6a61…419db06c1. It is the mechanical follow-up
+// to ch514's single hard-coded "abc" block. Verified on the FAST source backends
+// (js/py/go); the math kit is byte-identical to ch514 (which gates the full 7-backend
+// run on the 1-block path), and the padding/fold additions are pure Nat, so the
+// result is correct on all 8 by construction. Two blocks doubles ch514's already-slow
+// pure path, so the slow backends are out of the routine gate. Fingerprint-gated.
+func TestSha256General(t *testing.T) {
+	if testing.Short() {
+		t.Skip("ch522 general pure sha256 is slow over the bignum tower; -short skips it")
+	}
+	skip, commit := gateUnchanged(t, "sha256general", "../listings/ch522_sha256_general.rune", "phase_tails_test.go")
+	if skip {
+		t.Skip("ch522_sha256_general.rune + its test unchanged since last pass; skipping the slow run")
+	}
+	const want = "\"248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1\"\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		if bk.name == "rs" || bk.name == "erl" {
+			continue // slow over the bignum tower; correct by construction (pure wootz)
+		}
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch522_sha256_general.rune", "main", ""); got != want {
+				t.Fatalf("[%s] sha256 general gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	if !t.Failed() {
+		commit()
+	}
+}
