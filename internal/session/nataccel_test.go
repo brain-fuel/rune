@@ -9,7 +9,7 @@ import (
 )
 
 // C7 / R-NUM Decision-1 SESSION WIRING tests. The core mechanism (NatLit,
-// tryNatAccel, m.Na) is unit-tested in core/natlit_test.go against a hand-built
+// tryNatAccel, m.NatAccel) is unit-tested in core/natlit_test.go against a hand-built
 // Machine; these tests pin that a REAL session, loading `builtin natAdd add`
 // (etc.), actually threads the acceleration table onto the Machines it builds so
 // the fast path fires for the user's own ops — AND that the registration's
@@ -89,7 +89,7 @@ func litValueWith(t *testing.T, s *Session, src string, norm func(core.Tm) core.
 }
 
 // TestNatAccelSessionWiringDifferential is the differential soundness gate at the
-// SESSION level: for many (a,b), the accelerated result (m.Na set, the fast path)
+// SESSION level: for many (a,b), the accelerated result (m.NatAccel set, the fast path)
 // equals the def's UNFOLDED recursive result (acceleration OFF) AND the expected
 // integer. A second session with NO acceleration declared runs the same calls by
 // the ordinary eliminator body; both must agree with each other and with Go.

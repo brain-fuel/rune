@@ -53,7 +53,7 @@ func TestTypePreservation(t *testing.T) {
 		tm, want, el := elabClosed(rt, e, ty)
 		nf := el.M.NormalizeUnfold(tm)
 		// Re-check the normal form with a FRESH machine over the same store.
-		el2 := elaborate.New(el.M.G, nil, nil)
+		el2 := elaborate.New(el.M.Globals, nil, nil)
 		if err := el2.CheckCore(&elaborate.Ctx{}, nf, want); err != nil {
 			rt.Fatalf("normal form lost its type: %v\nbefore: %s\nafter:  %s",
 				err, surface.Pretty(tm), surface.Pretty(nf))

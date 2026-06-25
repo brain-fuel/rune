@@ -101,7 +101,7 @@ type pendingNumeral struct {
 func New(g core.Globals, refs map[string]core.Hash, refNames map[core.Hash]string) *Elaborator {
 	e := &Elaborator{M: core.NewMachine(g), Refs: refs, RefNames: refNames}
 	e.M.Metas = &e.metas
-	e.M.EqS = equality.Default()
+	e.M.Equality = equality.Default()
 	e.sr = quantity.Default()
 	e.mult = core.QOne
 	e.uses = map[int]core.Qty{}
@@ -185,7 +185,7 @@ func (e *Elaborator) refType(h core.Hash) (core.Val, error) {
 			return e.M.Eval(nil, ty), nil
 		}
 	}
-	ty, ok := e.M.G.TypeOf(h)
+	ty, ok := e.M.Globals.TypeOf(h)
 	if !ok || ty == nil {
 		name := e.RefNames[h]
 		return nil, fmt.Errorf("definition %s has no stored type", name)

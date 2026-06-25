@@ -164,7 +164,7 @@ func (m *Machine) convApplied(lvl int, a, b Val) bool {
 // `other = preflF`), and at i1 it is `pabs A (λj. p@j)` against the result type
 // `P y p` (general η, `other = p`).
 func (m *Machine) convPathEta(lvl int, a, b Val) (bool, bool) {
-	if m.Pa == nil || m.Fib == nil {
+	if m.Path == nil || m.Fibrant == nil {
 		return false, false
 	}
 	abs := func(v Val) ([]Val, bool) {
@@ -174,7 +174,7 @@ func (m *Machine) convPathEta(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Pa.PathRoleOf(ref.Hash) != PRoleAbs || len(as) != 2 {
+		if !ok || m.Path.PathRoleOf(ref.Hash) != PRoleAbs || len(as) != 2 {
 			return nil, false
 		}
 		return as, true
@@ -188,9 +188,9 @@ func (m *Machine) convPathEta(lvl int, a, b Val) (bool, bool) {
 	if bAbs {
 		absArgs, other = bArgs, a
 	}
-	pappH, ok1 := m.Pa.PathHash(PRoleApp)
-	i0h, ok2 := m.Iv.IntervalHash(IRoleI0)
-	i1h, ok3 := m.Iv.IntervalHash(IRoleI1)
+	pappH, ok1 := m.Path.PathHash(PRoleApp)
+	i0h, ok2 := m.Interval.IntervalHash(IRoleI0)
+	i1h, ok3 := m.Interval.IntervalHash(IRoleI1)
 	if !ok1 || !ok2 || !ok3 {
 		return false, false
 	}
@@ -215,7 +215,7 @@ func (m *Machine) convPathEta(lvl int, a, b Val) (bool, bool) {
 // and at i1 it is `pabsU (λj. pappU p j)` against the result `El (P B p)` (general η,
 // other = p).
 func (m *Machine) convPathUEta(lvl int, a, b Val) (bool, bool) {
-	if m.Pu == nil || m.PpU == nil || m.Iv == nil {
+	if m.PabsU == nil || m.PappU == nil || m.Interval == nil {
 		return false, false
 	}
 	absU := func(v Val) (Val, bool) {
@@ -225,7 +225,7 @@ func (m *Machine) convPathUEta(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Pu.PabsURoleOf(ref.Hash) != PURolePabsU || len(as) != 1 {
+		if !ok || m.PabsU.PabsURoleOf(ref.Hash) != PURolePabsU || len(as) != 1 {
 			return nil, false
 		}
 		return as[0], true
@@ -239,9 +239,9 @@ func (m *Machine) convPathUEta(lvl int, a, b Val) (bool, bool) {
 	if bAbs {
 		line, other = bLine, a
 	}
-	pappH, ok1 := m.PpU.PappUHash()
-	i0h, ok2 := m.Iv.IntervalHash(IRoleI0)
-	i1h, ok3 := m.Iv.IntervalHash(IRoleI1)
+	pappH, ok1 := m.PappU.PappUHash()
+	i0h, ok2 := m.Interval.IntervalHash(IRoleI0)
+	i1h, ok3 := m.Interval.IntervalHash(IRoleI1)
 	if !ok1 || !ok2 || !ok3 {
 		return false, false
 	}
@@ -263,7 +263,7 @@ func (m *Machine) convPathUEta(lvl int, a, b Val) (bool, bool) {
 // dfix heads are otherwise distinct neutrals. dfix has NO eval ι-rule (the kernel
 // never diverges); its definitional content lives entirely here.
 func (m *Machine) convDfix(lvl int, a, b Val) (bool, bool) {
-	if m.Gd == nil {
+	if m.Guard == nil {
 		return false, false
 	}
 	dfx := func(v Val) ([]Val, bool) {
@@ -273,7 +273,7 @@ func (m *Machine) convDfix(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Gd.GuardRoleOf(ref.Hash) != LRoleDfix || len(as) != 3 {
+		if !ok || m.Guard.GuardRoleOf(ref.Hash) != LRoleDfix || len(as) != 3 {
 			return nil, false
 		}
 		return as, true
@@ -287,8 +287,8 @@ func (m *Machine) convDfix(lvl int, a, b Val) (bool, bool) {
 	if bD {
 		args, other = bArgs, a
 	}
-	nextH, ok1 := m.Gd.GuardHash(LRoleNext)
-	dfixH, ok2 := m.Gd.GuardHash(LRoleDfix)
+	nextH, ok1 := m.Guard.GuardHash(LRoleNext)
+	dfixH, ok2 := m.Guard.GuardHash(LRoleDfix)
 	if !ok1 || !ok2 {
 		return false, false
 	}
@@ -311,7 +311,7 @@ func (m *Machine) convDfix(lvl int, a, b Val) (bool, bool) {
 // equation of the guarded fixpoint, and gfix heads are otherwise distinct neutrals with
 // no eval ι, so the kernel never diverges.
 func (m *Machine) convGfix(lvl int, a, b Val) (bool, bool) {
-	if m.Gd == nil {
+	if m.Guard == nil {
 		return false, false
 	}
 	gfx := func(v Val) ([]Val, bool) {
@@ -321,7 +321,7 @@ func (m *Machine) convGfix(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Gd.GuardRoleOf(ref.Hash) != LRoleGfix || len(as) != 2 {
+		if !ok || m.Guard.GuardRoleOf(ref.Hash) != LRoleGfix || len(as) != 2 {
 			return nil, false
 		}
 		return as, true
@@ -335,7 +335,7 @@ func (m *Machine) convGfix(lvl int, a, b Val) (bool, bool) {
 	if bG {
 		args, other = bArgs, a
 	}
-	gfixH, ok := m.Gd.GuardHash(LRoleGfix)
+	gfixH, ok := m.Guard.GuardHash(LRoleGfix)
 	if !ok {
 		return false, false
 	}
@@ -360,7 +360,7 @@ func (m *Machine) convGfix(lvl int, a, b Val) (bool, bool) {
 // the recursive occurrence in a guarded Φ sits under `Later`, where both sides carry the
 // same applied gfixF and spine comparison terminates the recursion.
 func (m *Machine) convGfixF(lvl int, a, b Val) (bool, bool) {
-	if m.Gd == nil {
+	if m.Guard == nil {
 		return false, false
 	}
 	// gfxF recognises a `gfixF k D Φ d` (an APPLIED indexed fixpoint: 4 args).
@@ -371,7 +371,7 @@ func (m *Machine) convGfixF(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Gd.GuardRoleOf(ref.Hash) != LRoleGfixF || len(as) != 4 {
+		if !ok || m.Guard.GuardRoleOf(ref.Hash) != LRoleGfixF || len(as) != 4 {
 			return nil, false
 		}
 		return as, true
@@ -385,7 +385,7 @@ func (m *Machine) convGfixF(lvl int, a, b Val) (bool, bool) {
 	if bG {
 		args, other = bArgs, a
 	}
-	gfixFH, ok := m.Gd.GuardHash(LRoleGfixF)
+	gfixFH, ok := m.Guard.GuardHash(LRoleGfixF)
 	if !ok {
 		return false, false
 	}
@@ -416,7 +416,7 @@ func (m *Machine) convProj(lvl int, a, b Val) bool {
 // the comparison is the standard negative-Σ η. Returns (_, false) when neither side
 // is a pairF, so the caller falls through.
 func (m *Machine) convSigmaEta(lvl int, a, b Val) (bool, bool) {
-	if m.Si == nil {
+	if m.Sigma == nil {
 		return false, false
 	}
 	pairArgs := func(v Val) ([]Val, bool) {
@@ -426,7 +426,7 @@ func (m *Machine) convSigmaEta(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Si.SigmaRoleOf(ref.Hash) != GRolePair || len(as) != 4 {
+		if !ok || m.Sigma.SigmaRoleOf(ref.Hash) != GRolePair || len(as) != 4 {
 			return nil, false
 		}
 		return as, true
@@ -442,8 +442,8 @@ func (m *Machine) convSigmaEta(lvl int, a, b Val) (bool, bool) {
 	}
 	// args = [A, fam, _, _]; the projections only need the type args A, fam.
 	A, fam := args[0], args[1]
-	fstH, ok1 := m.Si.SigmaHash(GRoleFst)
-	sndH, ok2 := m.Si.SigmaHash(GRoleSnd)
+	fstH, ok1 := m.Sigma.SigmaHash(GRoleFst)
+	sndH, ok2 := m.Sigma.SigmaHash(GRoleSnd)
 	if !ok1 || !ok2 {
 		return false, false
 	}
@@ -464,7 +464,7 @@ func (m *Machine) convSigmaEta(lvl int, a, b Val) (bool, bool) {
 // to `T htop` and recurses; returns (_, false) when neither side is, so the caller
 // falls through. Sound: on a total face the glued type genuinely is its fibre.
 func (m *Machine) convGlueTop(lvl int, a, b Val) (bool, bool) {
-	if m.Gl == nil || m.Sy == nil {
+	if m.Glue == nil || m.System == nil {
 		return false, false
 	}
 	glueTop := func(v Val) (Val, bool) {
@@ -474,13 +474,13 @@ func (m *Machine) convGlueTop(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Gl.GlueRoleOf(ref.Hash) != URoleGlue || len(as) != 4 {
+		if !ok || m.Glue.GlueRoleOf(ref.Hash) != URoleGlue || len(as) != 4 {
 			return nil, false
 		}
 		if c, ok := m.faceConst(as[1]); !ok || c != CRoleTop {
 			return nil, false
 		}
-		hth, ok := m.Sy.SysHash(SRoleTop)
+		hth, ok := m.System.SysHash(SRoleTop)
 		if !ok {
 			return nil, false
 		}
@@ -583,7 +583,7 @@ func (m *Machine) Sub(lvl int, a, b Val) bool {
 // η that makes `consStr (head s)(tail s) ≡ s`). nuCons-vs-nuCons is left to spine
 // comparison (both saturated → handled by the VNeu fast path / structural descent).
 func (m *Machine) convNuConsEta(lvl int, a, b Val) (bool, bool) {
-	if m.Cn == nil {
+	if m.Coind == nil {
 		return false, false
 	}
 	consArgs := func(v Val) ([]Val, bool) {
@@ -593,7 +593,7 @@ func (m *Machine) convNuConsEta(lvl int, a, b Val) (bool, bool) {
 		}
 		head, as := spineParts(n.Spine)
 		ref, ok := head.(NRef)
-		if !ok || m.Cn.CoindRoleOf(ref.Hash) != NRoleNuCons || len(as) != 2 {
+		if !ok || m.Coind.CoindRoleOf(ref.Hash) != NRoleNuCons || len(as) != 2 {
 			return nil, false
 		}
 		return as, true
@@ -607,7 +607,7 @@ func (m *Machine) convNuConsEta(lvl int, a, b Val) (bool, bool) {
 	if bCons {
 		consA, other = cb, a
 	}
-	outH, ok := m.Cn.CoindHash(NRoleOut)
+	outH, ok := m.Coind.CoindHash(NRoleOut)
 	if !ok {
 		return false, false
 	}

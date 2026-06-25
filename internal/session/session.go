@@ -54,7 +54,7 @@ type Session struct {
 	// add` (etc.) maps the named def's content hash to a NatOp, so a call on two
 	// compressed literals takes the one-bigint-step fast path (core.tryNatAccel)
 	// instead of O(a·b) eliminator peeling. It is consulted by every Machine the
-	// session builds (set as m.Na). Empty means no acceleration.
+	// session builds (set as m.NatAccel). Empty means no acceleration.
 	natAccel map[core.Hash]core.NatOp
 }
 
@@ -81,7 +81,7 @@ func (t natAccelTable) NatCtors() (zero, succ core.Hash, ok bool) {
 }
 
 // natAccelInfo returns the session's acceleration table as a core.NatAccelInfo,
-// or nil when nothing is registered (so m.Na stays nil and tryRules short-
+// or nil when nothing is registered (so m.NatAccel stays nil and tryRules short-
 // circuits exactly as before). The nat constructor hashes come from the active
 // `builtin nat` binding — the accel rule needs them to fold its bigint result
 // back into the right literal.
@@ -654,7 +654,7 @@ func (s *Session) unfoldedNatCall(defName string, a, b int64) (int64, error) {
 		return 0, err
 	}
 	call := core.App{Fn: core.App{Fn: core.Ref{Hash: s.refs[defName]}, Arg: litA}, Arg: litB}
-	// A machine with the FULL ι wiring but with acceleration OFF (m.Na nil), so
+	// A machine with the FULL ι wiring but with acceleration OFF (m.NatAccel nil), so
 	// the call reduces by the def's recursive body / eliminator peeling.
 	m := s.normalizerNoAccel()
 	nf := m.NormalizeUnfold(call)
@@ -772,33 +772,33 @@ func (s *Session) elaborator() *elaborate.Elaborator {
 	el.Num = s.numConfig()
 	el.M.Data = s.st
 	el.M.Quot = s.st
-	el.M.Fib = s.st
-	el.M.U = s.st
-	el.M.Iv = s.st
-	el.M.Pa = s.st
-	el.M.Fc = s.st
-	el.M.Sy = s.st
-	el.M.Kn = s.st
-	el.M.Si = s.st
-	el.M.Cn = s.st
-	el.M.Gd = s.st
-	el.M.Gl = s.st
-	el.M.Fs = s.st
-	el.M.SyU = s.st
-	el.M.FsD = s.st
-	el.M.Fa = s.st
-	el.M.Pu = s.st
-	el.M.PpU = s.st
-	el.M.Hi = s.st
-	el.M.Su = s.st
-	el.M.Qh = s.st
-	el.M.Pp = s.st
-	el.M.Ci = s.st
-	el.M.SuI = s.st
-	el.M.QuI = s.st
-	el.M.Tr = s.st
-	el.M.Pt = s.st
-	el.M.Na = s.natAccelInfo()
+	el.M.Fibrant = s.st
+	el.M.FibUniverse = s.st
+	el.M.Interval = s.st
+	el.M.Path = s.st
+	el.M.Face = s.st
+	el.M.System = s.st
+	el.M.Kan = s.st
+	el.M.Sigma = s.st
+	el.M.Coind = s.st
+	el.M.Guard = s.st
+	el.M.Glue = s.st
+	el.M.Fsplit = s.st
+	el.M.SystemU = s.st
+	el.M.FsplitD = s.st
+	el.M.Forall = s.st
+	el.M.PabsU = s.st
+	el.M.PappU = s.st
+	el.M.Hit = s.st
+	el.M.Susp = s.st
+	el.M.QuotHit = s.st
+	el.M.PathP = s.st
+	el.M.CircInd = s.st
+	el.M.SuspInd = s.st
+	el.M.QuotInd = s.st
+	el.M.Trunc = s.st
+	el.M.Partial = s.st
+	el.M.NatAccel = s.natAccelInfo()
 	el.InstanceFor = func(class, arg core.Hash) (core.Tm, bool) {
 		if h, ok := s.instances[[2]core.Hash{class, arg}]; ok {
 			return core.Ref{Hash: h}, true
@@ -873,42 +873,42 @@ func (s *Session) ElabExpr(e surface.Exp) (tm, ty core.Tm, err error) {
 
 // newNormalizer builds a fresh per-run core Machine with the full ι wiring over
 // the session store. When accel is true it also installs the C7 acceleration
-// table (m.Na); with accel false the nat ops reduce by their ordinary recursive
+// table (m.NatAccel); with accel false the nat ops reduce by their ordinary recursive
 // bodies — the latter is the registration-time differential oracle
 // (unfoldedNatCall) the soundness gate compares the accelerated rule against.
 func (s *Session) newNormalizer(accel bool) *core.Machine {
 	m := core.NewMachine(s.st)
-	m.EqS = equality.Default()
+	m.Equality = equality.Default()
 	m.Data = s.st
 	m.Quot = s.st
-	m.Fib = s.st
-	m.U = s.st
-	m.Iv = s.st
-	m.Pa = s.st
-	m.Fc = s.st
-	m.Sy = s.st
-	m.Kn = s.st
-	m.Si = s.st
-	m.Cn = s.st
-	m.Gd = s.st
-	m.Gl = s.st
-	m.Fs = s.st
-	m.SyU = s.st
-	m.FsD = s.st
-	m.Fa = s.st
-	m.Pu = s.st
-	m.PpU = s.st
-	m.Hi = s.st
-	m.Su = s.st
-	m.Qh = s.st
-	m.Pp = s.st
-	m.Ci = s.st
-	m.SuI = s.st
-	m.QuI = s.st
-	m.Tr = s.st
-	m.Pt = s.st
+	m.Fibrant = s.st
+	m.FibUniverse = s.st
+	m.Interval = s.st
+	m.Path = s.st
+	m.Face = s.st
+	m.System = s.st
+	m.Kan = s.st
+	m.Sigma = s.st
+	m.Coind = s.st
+	m.Guard = s.st
+	m.Glue = s.st
+	m.Fsplit = s.st
+	m.SystemU = s.st
+	m.FsplitD = s.st
+	m.Forall = s.st
+	m.PabsU = s.st
+	m.PappU = s.st
+	m.Hit = s.st
+	m.Susp = s.st
+	m.QuotHit = s.st
+	m.PathP = s.st
+	m.CircInd = s.st
+	m.SuspInd = s.st
+	m.QuotInd = s.st
+	m.Trunc = s.st
+	m.Partial = s.st
 	if accel {
-		m.Na = s.natAccelInfo()
+		m.NatAccel = s.natAccelInfo()
 	}
 	return m
 }

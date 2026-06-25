@@ -27,32 +27,32 @@ import (
 // cubical/guarded/sigma builtin groups, …) from e into a freshly-made inner
 // elaborator, so a datatype declaration's constructor types may mention any of them.
 func (e *Elaborator) copyStrata(inner *Elaborator) {
-	inner.M.EqS = e.M.EqS
+	inner.M.Equality = e.M.Equality
 	inner.M.Data = e.M.Data
 	inner.M.Quot = e.M.Quot
-	inner.M.Fib = e.M.Fib
-	inner.M.Iv = e.M.Iv
-	inner.M.Pa = e.M.Pa
-	inner.M.Fc = e.M.Fc
-	inner.M.Sy = e.M.Sy
-	inner.M.Kn = e.M.Kn
-	inner.M.Si = e.M.Si
-	inner.M.Cn = e.M.Cn
-	inner.M.Gl = e.M.Gl
-	inner.M.Fs = e.M.Fs
-	inner.M.SyU = e.M.SyU
-	inner.M.FsD = e.M.FsD
-	inner.M.Fa = e.M.Fa
-	inner.M.Pu = e.M.Pu
-	inner.M.PpU = e.M.PpU
-	inner.M.Hi = e.M.Hi
-	inner.M.Su = e.M.Su
-	inner.M.Qh = e.M.Qh
-	inner.M.Pp = e.M.Pp
-	inner.M.Ci = e.M.Ci
-	inner.M.SuI = e.M.SuI
-	inner.M.QuI = e.M.QuI
-	inner.M.Tr = e.M.Tr
+	inner.M.Fibrant = e.M.Fibrant
+	inner.M.Interval = e.M.Interval
+	inner.M.Path = e.M.Path
+	inner.M.Face = e.M.Face
+	inner.M.System = e.M.System
+	inner.M.Kan = e.M.Kan
+	inner.M.Sigma = e.M.Sigma
+	inner.M.Coind = e.M.Coind
+	inner.M.Glue = e.M.Glue
+	inner.M.Fsplit = e.M.Fsplit
+	inner.M.SystemU = e.M.SystemU
+	inner.M.FsplitD = e.M.FsplitD
+	inner.M.Forall = e.M.Forall
+	inner.M.PabsU = e.M.PabsU
+	inner.M.PappU = e.M.PappU
+	inner.M.Hit = e.M.Hit
+	inner.M.Susp = e.M.Susp
+	inner.M.QuotHit = e.M.QuotHit
+	inner.M.PathP = e.M.PathP
+	inner.M.CircInd = e.M.CircInd
+	inner.M.SuspInd = e.M.SuspInd
+	inner.M.QuotInd = e.M.QuotInd
+	inner.M.Trunc = e.M.Trunc
 }
 
 // ElabData elaborates one surface datatype declaration.
@@ -83,7 +83,7 @@ func (e *Elaborator) ElabData(d surface.DataDef) (store.DataDecl, error) {
 	// types are elaborated.
 	ph := store.Placeholder(0)
 	refs := overlayRefs(e.Refs, d.Name, ph)
-	g := overlayGlobals{base: e.M.G, hash: ph, ty: ty}
+	g := overlayGlobals{base: e.M.Globals, hash: ph, ty: ty}
 	inner := New(g, refs, e.RefNames)
 	e.copyStrata(inner)
 
@@ -187,7 +187,7 @@ func (e *Elaborator) ElabDataGroup(grp surface.DataGroup) ([]store.DataDecl, err
 		refs[d.Name] = formerPH(m)
 		gtys[formerPH(m)] = tys[m]
 	}
-	inner := New(groupGlobals{base: e.M.G, tys: gtys}, refs, e.RefNames)
+	inner := New(groupGlobals{base: e.M.Globals, tys: gtys}, refs, e.RefNames)
 	e.copyStrata(inner)
 
 	// 3. Per member: elaborate constructors, check generalised strict positivity.

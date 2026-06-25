@@ -27,121 +27,122 @@ type Globals interface {
 // values they produce must not be shared across runs, or a memoized forced thunk
 // would swallow a later run's dependency.
 type Machine struct {
-	G    Globals
+	Globals    Globals
 	Deps map[Hash]struct{}
-	// Metas, when non-nil, resolves metavariable solutions (Phase 2). It is set
-	// only during elaboration; pure core runs (the cached checker judgment, REPL
+	// Metas resolves metavariable solutions (Phase 2). It is set only during
+	// elaboration; pure core runs (the cached checker judgment, REPL
 	// normalization) operate on zonked, meta-free terms and leave it nil.
 	Metas MetaSolver
-	// EqS, when non-nil, supplies the equality stratum's reduction rules.
-	EqS EqStratum
-	// Data, when non-nil, supplies datatype roles for ι-reduction.
+
+	// The fields below are the pluggable rule-provider strata. Each holds the
+	// roles for one builtin group and is nil until that group is registered into
+	// this Machine. A nil stratum is INACTIVE: its heads stay rigid and none of
+	// its ι-rules fire. Each field's name IS its stratum; the comment records
+	// only what that stratum makes COMPUTE.
+
+	Equality EqStratum
+	// datatype ι-reduction.
 	Data DataInfo
-	// Quot, when non-nil, supplies quotient-builtin roles for the quotient
-	// ι-rules (v2): qlift/qind compute when their scrutinee is qin-headed.
+	// qlift/qind compute when their scrutinee is qin-headed (v2).
 	Quot QuotInfo
-	// Fib, when non-nil, supplies fibrant-builtin roles for the two-level
-	// ι-rules (v3): El decodes, pathJ computes on preflF, castU computes on
-	// ureflU and through ua.
-	Fib FibInfo
-	// U, when non-nil, supplies fibrant-universe-hierarchy roles (R-UFH): El1
-	// decodes a UF1-code (El1 codeUF ~> UF; El1 (liftF a) ~> El a).
-	U UFHInfo
-	// Iv, when non-nil, supplies interval-builtin roles for the De Morgan
-	// ι-rules (§F phase 1): ineg/imin/imax compute on the endpoints i0/i1.
-	Iv IntervalInfo
-	// Pa, when non-nil, supplies path-builtin roles for the cubical path
-	// ι-rules (§F phase 2): papp computes by β, refl, and endpoint boundary.
-	Pa PathInfo
-	// Fc, when non-nil, supplies face-builtin roles for the face-lattice
-	// ι-rules (§F phase 3a): ieq0/ieq1/fand/for compute on endpoints and ⊤/⊥.
-	Fc FaceInfo
-	// Sy, when non-nil, supplies cofibration-validity roles (§F phase 3b):
-	// holds and its canonical intros (rigid heads; no ι-rules of their own).
-	Sy SysInfo
-	// Kn, when non-nil, supplies Kan-builtin roles for the Kan ι-rules (§F
-	// phase 3c+): transp computes the regularity (constant type-line) case.
-	Kn KanInfo
-	// Si, when non-nil, supplies inner-Sigma roles (§F / R-SIGMA / A5): fstF/sndF
-	// compute by ι on a pairF intro; sigmaF/pairF are rigid heads.
-	Si SigmaInfo
-	// Cn, when non-nil, supplies coinductive roles (R-COIND / C5a): out computes
-	// by ι on an unfold; Nu/unfold are rigid heads.
-	Cn CoindInfo
-	// Gd, when non-nil, supplies guarded-recursion roles (R-COIND / C5b): Later /
-	// next / dfix. Heads are rigid in eval; dfix unfolds once in convDfix.
-	Gd GuardInfo
-	// Gl, when non-nil, supplies inner-Glue roles (§F / R-GLUE / A6): unglue
-	// computes by ι (β on a glue intro, the equivFun boundary on ⊤); Glue/glue
-	// are rigid heads, and El (Glue A ⊤ T e) decodes to El (T htop).
-	Gl GlueInfo
-	// Fs, when non-nil, supplies the face-split eliminator role (§F / R-BOX / A3):
-	// fsplit computes by face-ι — `fsplit A φ ψ u v h ~> u htop` when φ ≡ ⊤,
-	// `~> v htop` when ψ ≡ ⊤. The dispatch primitive the Kan rules build systems
-	// from (a `holds (for φ ψ)` eliminator); rigid head otherwise.
-	Fs FsplitInfo
-	// SyU, when non-nil, supplies the UF-valued face-split role (§F / R-BOX / A8):
-	// sysU computes by face-ι — `sysU φ ψ u v h ~> u htop` when φ ≡ ⊤, `~> v htop`
-	// when ψ ≡ ⊤. The type-level counterpart of fsplit (a partial TYPE selector);
-	// rigid head otherwise.
-	SyU SysUInfo
-	// FsD, when non-nil, supplies the dependent face-split role (§F / R-BOX / A8):
-	// fsplitD computes by face-ι like fsplit, but carries a motive so its branch
-	// (and result) types may depend on the face — the e-component of a univalence
-	// Glue line; rigid head otherwise.
-	FsD SplitDInfo
-	// Fa, when non-nil, supplies the ∀-cofibration role (§F / R-GLUE / A6):
-	// forallF computes `forallF (λ_. ⊤) ~> ⊤`; rigid head otherwise.
-	Fa ForallInfo
-	// Pu, when non-nil, supplies the type-level path-abstraction role (§F / R-UA /
-	// A7): pabsU is a rigid pathU intro, and castU along it computes via transp.
-	Pu PabsUInfo
-	// PpU, when non-nil, supplies the type-level path-application role (§F / R-UA /
-	// A7): pappU applies a pathU at an interval point, computing by β/refl/boundary
-	// like papp; rigid head otherwise.
-	PpU PappUInfo
-	// Hi, when non-nil, supplies inner-HIT roles (§F / R-HIT / A9): the circle's
-	// recursor circElim computes by ι on base and along loop; Circle/base/loop are
+	// the two-level core (v3): El decodes, pathJ computes on preflF, castU
+	// computes on ureflU and through ua.
+	Fibrant FibInfo
+	// the fibrant universe hierarchy (R-UFH): El1 decodes a UF1-code
+	// (El1 codeUF ~> UF; El1 (liftF a) ~> El a).
+	FibUniverse UFHInfo
+	// the De Morgan interval algebra (§F phase 1): ineg/imin/imax compute on the
+	// endpoints i0/i1.
+	Interval IntervalInfo
+	// cubical paths (§F phase 2): papp computes by β, refl, and endpoint boundary.
+	Path PathInfo
+	// the face lattice (§F phase 3a): ieq0/ieq1/fand/for compute on endpoints
+	// and ⊤/⊥.
+	Face FaceInfo
+	// cofibration validity (§F phase 3b): holds and its canonical intros are
+	// rigid heads with no ι-rules of their own.
+	System SysInfo
+	// the Kan operations (§F phase 3c+): transp computes the regularity
+	// (constant type-line) case.
+	Kan KanInfo
+	// inner Sigma (§F / R-SIGMA / A5): fstF/sndF compute by ι on a pairF intro;
+	// sigmaF/pairF are rigid heads.
+	Sigma SigmaInfo
+	// coinductives (R-COIND / C5a): out computes by ι on an unfold; Nu/unfold are
 	// rigid heads.
-	Hi HitInfo
-	// Su, when non-nil, supplies suspension-HIT roles (§F / R-HIT / A9): suspElim
-	// computes by ι on north/south and along merid; Susp/north/south/merid rigid.
-	Su SuspInfo
-	// Qh, when non-nil, supplies fibrant-quotient-HIT roles (§F / R-HIT / A9):
-	// quotElim computes by ι on qinc and along qrel; Quotient/qinc/qrel rigid.
-	Qh QuotHitInfo
-	// Pp, when non-nil, supplies dependent-path roles (§F / R-HIT / A9): pappP
-	// computes by β and boundary; pathP/pabsP are rigid heads.
-	Pp PathPInfo
-	// Ci, when non-nil, supplies the circle's dependent eliminator (§F / R-HIT /
-	// A9): circInd computes by ι on base and along loop into a dependent motive.
-	Ci CircIndInfo
-	// SuI, when non-nil, supplies the suspension's dependent eliminator (A9):
-	// suspInd computes by ι on north/south and along merid into a dependent motive.
-	SuI SuspIndInfo
-	// QuI, when non-nil, supplies the fibrant quotient's dependent eliminator (A9):
-	// quotInd computes by ι on qinc and along qrel into a dependent motive.
-	QuI QuotIndInfo
-	// Tr, when non-nil, supplies set-truncation roles (§F / R-HIT / A9 dim-2):
-	// trunc0Rec computes on inc; Trunc0/inc/squash are rigid heads.
-	Tr TruncInfo
-	// Na, when non-nil, supplies the opt-in kernel ACCELERATION table for nat
-	// arithmetic (C7 / R-NUM, Decision 1): a `builtin natAdd add` (etc.)
-	// registers the def's content hash with a NatOp. The fast-path ι fires ONLY
-	// when every argument forces to a VNatLit, computing the result in one bigint
-	// step (a single VNatLit). On any neutral argument it does NOT fire — the def
-	// reduces by its ordinary recursive body (the NatLit-peeling eliminator), so
-	// open-term reasoning is byte-identical and the normalizer cannot get stuck
-	// differently. The bridge to the unfolded definition is refl (the accelerated
-	// op IS the user's own def); agreement is the differential-tested soundness
-	// gate, not a trust assumption.
-	Na NatAccelInfo
-	// Pt, when non-nil, reports which definition hashes are `partial` (C4): a
-	// general-recursive definition whose head is PERMANENTLY NEUTRAL in
-	// eval/conversion — the firewall that keeps the normalizer terminating. Its
-	// body is reachable only through codegen's direct Unfold (it runs, it does
-	// not reduce during type-checking). The total fragment is unaffected.
-	Pt PartialInfo
+	Coind CoindInfo
+	// guarded recursion (R-COIND / C5b): Later/next/dfix. Heads are rigid in
+	// eval; dfix unfolds once in convDfix.
+	Guard GuardInfo
+	// inner Glue (§F / R-GLUE / A6): unglue computes by ι (β on a glue intro, the
+	// equivFun boundary on ⊤); Glue/glue are rigid heads, and
+	// El (Glue A ⊤ T e) decodes to El (T htop).
+	Glue GlueInfo
+	// the face-split eliminator (§F / R-BOX / A3): fsplit computes by face-ι —
+	// `fsplit A φ ψ u v h ~> u htop` when φ ≡ ⊤, `~> v htop` when ψ ≡ ⊤. The
+	// dispatch primitive the Kan rules build systems from (a `holds (for φ ψ)`
+	// eliminator); rigid head otherwise.
+	Fsplit FsplitInfo
+	// the UF-valued face-split (§F / R-BOX / A8): sysU computes by face-ι —
+	// `sysU φ ψ u v h ~> u htop` when φ ≡ ⊤, `~> v htop` when ψ ≡ ⊤. The
+	// type-level counterpart of fsplit (a partial TYPE selector); rigid head
+	// otherwise.
+	SystemU SysUInfo
+	// the dependent face-split (§F / R-BOX / A8): fsplitD computes by face-ι like
+	// fsplit, but carries a motive so its branch (and result) types may depend on
+	// the face — the e-component of a univalence Glue line; rigid head otherwise.
+	FsplitD SplitDInfo
+	// the ∀-cofibration (§F / R-GLUE / A6): forallF computes
+	// `forallF (λ_. ⊤) ~> ⊤`; rigid head otherwise.
+	Forall ForallInfo
+	// type-level path abstraction (§F / R-UA / A7): pabsU is a rigid pathU intro,
+	// and castU along it computes via transp.
+	PabsU PabsUInfo
+	// type-level path application (§F / R-UA / A7): pappU applies a pathU at an
+	// interval point, computing by β/refl/boundary like papp; rigid head
+	// otherwise.
+	PappU PappUInfo
+	// inner HITs (§F / R-HIT / A9): the circle's recursor circElim computes by ι
+	// on base and along loop; Circle/base/loop are rigid heads.
+	Hit HitInfo
+	// the suspension HIT (§F / R-HIT / A9): suspElim computes by ι on north/south
+	// and along merid; Susp/north/south/merid rigid.
+	Susp SuspInfo
+	// the fibrant-quotient HIT (§F / R-HIT / A9): quotElim computes by ι on qinc
+	// and along qrel; Quotient/qinc/qrel rigid.
+	QuotHit QuotHitInfo
+	// dependent paths (§F / R-HIT / A9): pappP computes by β and boundary;
+	// pathP/pabsP are rigid heads.
+	PathP PathPInfo
+	// the circle's dependent eliminator (§F / R-HIT / A9): circInd computes by ι
+	// on base and along loop into a dependent motive.
+	CircInd CircIndInfo
+	// the suspension's dependent eliminator (A9): suspInd computes by ι on
+	// north/south and along merid into a dependent motive.
+	SuspInd SuspIndInfo
+	// the fibrant quotient's dependent eliminator (A9): quotInd computes by ι on
+	// qinc and along qrel into a dependent motive.
+	QuotInd QuotIndInfo
+	// set truncation (§F / R-HIT / A9 dim-2): trunc0Rec computes on inc;
+	// Trunc0/inc/squash are rigid heads.
+	Trunc TruncInfo
+	// the opt-in kernel ACCELERATION table for nat arithmetic (C7 / R-NUM,
+	// Decision 1): a `builtin natAdd add` (etc.) registers the def's content hash
+	// with a NatOp. The fast-path ι fires ONLY when every argument forces to a
+	// VNatLit, computing the result in one bigint step (a single VNatLit). On any
+	// neutral argument it does NOT fire — the def reduces by its ordinary
+	// recursive body (the NatLit-peeling eliminator), so open-term reasoning is
+	// byte-identical and the normalizer cannot get stuck differently. The bridge
+	// to the unfolded definition is refl (the accelerated op IS the user's own
+	// def); agreement is the differential-tested soundness gate, not a trust
+	// assumption.
+	NatAccel NatAccelInfo
+	// reports which definition hashes are `partial` (C4): a general-recursive
+	// definition whose head is PERMANENTLY NEUTRAL in eval/conversion — the
+	// firewall that keeps the normalizer terminating. Its body is reachable only
+	// through codegen's direct Unfold (it runs, it does not reduce during
+	// type-checking). The total fragment is unaffected.
+	Partial PartialInfo
 }
 
 // PartialInfo reports whether a stored hash is a `partial` (general-recursive)
@@ -904,7 +905,7 @@ type EqStratum interface {
 
 // NewMachine returns a Machine over g with an empty dependency log.
 func NewMachine(g Globals) *Machine {
-	return &Machine{G: g, Deps: map[Hash]struct{}{}}
+	return &Machine{Globals: g, Deps: map[Hash]struct{}{}}
 }
 
 // DepList returns the logged dependency set as an unordered slice.
@@ -1193,7 +1194,7 @@ func (m *Machine) tryNatAccel(op NatOp, spine Neutral) (Val, bool) {
 	if !ok {
 		return nil, false
 	}
-	zero, succ, ok := m.Na.NatCtors()
+	zero, succ, ok := m.NatAccel.NatCtors()
 	if !ok {
 		return nil, false
 	}
@@ -1244,7 +1245,7 @@ func (m *Machine) refVal(h Hash) Val {
 	var memo Val
 	return VNeu{Spine: NRef{Hash: h}, Unfold: func() Val {
 		if memo == nil {
-			body, ok := m.G.Unfold(h)
+			body, ok := m.Globals.Unfold(h)
 			if !ok {
 				// Bodiless (a datatype former, constructor, or eliminator) or
 				// unknown: permanently rigid. No body was read, so no
@@ -1276,80 +1277,80 @@ func (m *Machine) rigidHead(h Hash) bool {
 	if m.Quot != nil && m.Quot.QuotRoleOf(h) != QRoleNone {
 		return true
 	}
-	if m.Fib != nil && m.Fib.FibRoleOf(h) != FRoleNone {
+	if m.Fibrant != nil && m.Fibrant.FibRoleOf(h) != FRoleNone {
 		return true
 	}
-	if m.Iv != nil && m.Iv.IntervalRoleOf(h) != IRoleNone {
+	if m.Interval != nil && m.Interval.IntervalRoleOf(h) != IRoleNone {
 		return true
 	}
-	if m.Pa != nil && m.Pa.PathRoleOf(h) != PRoleNone {
+	if m.Path != nil && m.Path.PathRoleOf(h) != PRoleNone {
 		return true
 	}
-	if m.Fc != nil && m.Fc.FaceRoleOf(h) != CRoleNone {
+	if m.Face != nil && m.Face.FaceRoleOf(h) != CRoleNone {
 		return true
 	}
-	if m.Sy != nil && m.Sy.SysRoleOf(h) != SRoleNone {
+	if m.System != nil && m.System.SysRoleOf(h) != SRoleNone {
 		return true
 	}
-	if m.Kn != nil && m.Kn.KanRoleOf(h) != KRoleNone {
+	if m.Kan != nil && m.Kan.KanRoleOf(h) != KRoleNone {
 		return true
 	}
-	if m.Si != nil && m.Si.SigmaRoleOf(h) != GRoleNone {
+	if m.Sigma != nil && m.Sigma.SigmaRoleOf(h) != GRoleNone {
 		return true
 	}
-	if m.Cn != nil && m.Cn.CoindRoleOf(h) != NRoleNone {
+	if m.Coind != nil && m.Coind.CoindRoleOf(h) != NRoleNone {
 		return true
 	}
-	if m.Gl != nil && m.Gl.GlueRoleOf(h) != URoleNone {
+	if m.Glue != nil && m.Glue.GlueRoleOf(h) != URoleNone {
 		return true
 	}
-	if m.Fs != nil && m.Fs.FsplitRoleOf(h) != SRoleNoneF {
+	if m.Fsplit != nil && m.Fsplit.FsplitRoleOf(h) != SRoleNoneF {
 		return true
 	}
-	if m.SyU != nil && m.SyU.SysURoleOf(h) != SURoleNone {
+	if m.SystemU != nil && m.SystemU.SysURoleOf(h) != SURoleNone {
 		return true
 	}
-	if m.FsD != nil && m.FsD.SplitDRoleOf(h) != SDRoleNone {
+	if m.FsplitD != nil && m.FsplitD.SplitDRoleOf(h) != SDRoleNone {
 		return true
 	}
-	if m.Fa != nil && m.Fa.ForallRoleOf(h) != ARoleNone {
+	if m.Forall != nil && m.Forall.ForallRoleOf(h) != ARoleNone {
 		return true
 	}
-	if m.Pu != nil && m.Pu.PabsURoleOf(h) != PURoleNone {
+	if m.PabsU != nil && m.PabsU.PabsURoleOf(h) != PURoleNone {
 		return true
 	}
-	if m.PpU != nil && m.PpU.PappURoleOf(h) != PPURoleNone {
+	if m.PappU != nil && m.PappU.PappURoleOf(h) != PPURoleNone {
 		return true
 	}
-	if m.Hi != nil && m.Hi.HitRoleOf(h) != HRoleNone {
+	if m.Hit != nil && m.Hit.HitRoleOf(h) != HRoleNone {
 		return true
 	}
-	if m.Su != nil && m.Su.SuspRoleOf(h) != SuRoleNone {
+	if m.Susp != nil && m.Susp.SuspRoleOf(h) != SuRoleNone {
 		return true
 	}
-	if m.Qh != nil && m.Qh.QuotHitRoleOf(h) != QHRoleNone {
+	if m.QuotHit != nil && m.QuotHit.QuotHitRoleOf(h) != QHRoleNone {
 		return true
 	}
-	if m.Pp != nil && m.Pp.PathPRoleOf(h) != PPRoleNone {
+	if m.PathP != nil && m.PathP.PathPRoleOf(h) != PPRoleNone {
 		return true
 	}
-	if m.Ci != nil && m.Ci.IsCircInd(h) {
+	if m.CircInd != nil && m.CircInd.IsCircInd(h) {
 		return true
 	}
-	if m.Tr != nil && m.Tr.TruncRoleOf(h) != TRoleNone {
+	if m.Trunc != nil && m.Trunc.TruncRoleOf(h) != TRoleNone {
 		return true
 	}
-	if m.SuI != nil && m.SuI.IsSuspInd(h) {
+	if m.SuspInd != nil && m.SuspInd.IsSuspInd(h) {
 		return true
 	}
-	if m.QuI != nil && m.QuI.IsQuotInd(h) {
+	if m.QuotInd != nil && m.QuotInd.IsQuotInd(h) {
 		return true
 	}
 	// A `partial` definition is a permanently-neutral head in eval/conversion
 	// (the C4 firewall): its general-recursive body never unfolds here, so the
 	// normalizer cannot diverge. Codegen reaches the body through its own direct
 	// Unfold; type-checking treats the head as opaque.
-	if m.Pt != nil && m.Pt.IsPartial(h) {
+	if m.Partial != nil && m.Partial.IsPartial(h) {
 		return true
 	}
 	return false
@@ -1445,24 +1446,24 @@ func (m *Machine) force1(v Val) (Val, bool) {
 
 // EvalEq applies the equality stratum's Eq reduction, or leaves the type stuck.
 func (m *Machine) EvalEq(ty, l, r Val) Val {
-	if m.EqS != nil {
-		return m.EqS.EvalEq(m, ty, l, r)
+	if m.Equality != nil {
+		return m.Equality.EvalEq(m, ty, l, r)
 	}
 	return VEq{Ty: ty, L: l, R: r}
 }
 
 // EvalCast applies the equality stratum's cast reduction, or leaves it stuck.
 func (m *Machine) EvalCast(a, b, p, x Val) Val {
-	if m.EqS != nil {
-		return m.EqS.EvalCast(m, a, b, p, x)
+	if m.Equality != nil {
+		return m.Equality.EvalCast(m, a, b, p, x)
 	}
 	return VNeu{Spine: NCast{A: a, B: b, P: p, X: x}}
 }
 
 // EvalSubst applies the equality stratum's transport, or leaves it stuck.
 func (m *Machine) EvalSubst(a, x, y, prf, pmot, px Val) Val {
-	if m.EqS != nil {
-		return m.EqS.EvalSubst(m, a, x, y, prf, pmot, px)
+	if m.Equality != nil {
+		return m.Equality.EvalSubst(m, a, x, y, prf, pmot, px)
 	}
 	return VNeu{Spine: NSubst{A: a, X: x, Y: y, Prf: prf, P: pmot, Px: px}}
 }
@@ -1545,7 +1546,7 @@ func usesVar(t Tm, idx int) bool {
 // evaluation. A head cannot belong to two families, so dispatching to exactly
 // one preserves the old try-each-in-order behavior.
 func (m *Machine) tryRules(spine Neutral) (Val, bool) {
-	if m.Data == nil && m.Quot == nil && m.Fib == nil && m.Iv == nil && m.Pa == nil && m.Fc == nil && m.Kn == nil && m.Na == nil {
+	if m.Data == nil && m.Quot == nil && m.Fibrant == nil && m.Interval == nil && m.Path == nil && m.Face == nil && m.Kan == nil && m.NatAccel == nil {
 		return nil, false
 	}
 	head := spine
@@ -1571,7 +1572,7 @@ func (m *Machine) tryRules(spine Neutral) (Val, bool) {
 	// `succ (NatLit n)`), and BOUNDED because it removes one `succ` and the literal
 	// strictly grows toward a fixed point with no `succ` to fold. The `succ` head
 	// is recognised by the literal's self-carried Succ hash, so it fires whether or
-	// not the accel table (m.Na) is configured.
+	// not the accel table (m.NatAccel) is configured.
 	//
 	// The fold fires ONLY when the head is a RIGID `succ` (a genuine data
 	// constructor): a GENERALIZED `builtin nat` binding remaps succ to a def WITH
@@ -1587,8 +1588,8 @@ func (m *Machine) tryRules(spine Neutral) (Val, bool) {
 			}
 		}
 	}
-	if m.Na != nil {
-		if op := m.Na.NatOpOf(ref.Hash); op != NatOpNone {
+	if m.NatAccel != nil {
+		if op := m.NatAccel.NatOpOf(ref.Hash); op != NatOpNone {
 			if red, ok := m.tryNatAccel(op, spine); ok {
 				return red, true
 			}
@@ -1608,38 +1609,38 @@ func (m *Machine) tryRules(spine Neutral) (Val, bool) {
 			return m.tryQuotIota(role, args)
 		}
 	}
-	if m.Fib != nil {
-		if role := m.Fib.FibRoleOf(ref.Hash); role == FRoleEl || role == FRoleJ || role == FRoleCastU {
+	if m.Fibrant != nil {
+		if role := m.Fibrant.FibRoleOf(ref.Hash); role == FRoleEl || role == FRoleJ || role == FRoleCastU {
 			_, args := spineParts(spine)
 			return m.tryFibIota(role, ref.Hash, args)
 		}
 	}
-	if m.U != nil {
-		if role := m.U.UFHRoleOf(ref.Hash); role == URoleEl1 {
+	if m.FibUniverse != nil {
+		if role := m.FibUniverse.UFHRoleOf(ref.Hash); role == URoleEl1 {
 			_, args := spineParts(spine)
 			return m.tryUFHIota(args)
 		}
 	}
-	if m.Iv != nil {
-		if role := m.Iv.IntervalRoleOf(ref.Hash); role == IRoleNeg || role == IRoleMin || role == IRoleMax {
+	if m.Interval != nil {
+		if role := m.Interval.IntervalRoleOf(ref.Hash); role == IRoleNeg || role == IRoleMin || role == IRoleMax {
 			_, args := spineParts(spine)
 			return m.tryIntervalIota(role, args)
 		}
 	}
-	if m.Pa != nil {
-		if m.Pa.PathRoleOf(ref.Hash) == PRoleApp {
+	if m.Path != nil {
+		if m.Path.PathRoleOf(ref.Hash) == PRoleApp {
 			_, args := spineParts(spine)
 			return m.tryPathIota(args)
 		}
 	}
-	if m.Fc != nil {
-		if role := m.Fc.FaceRoleOf(ref.Hash); role == CRoleEq0 || role == CRoleEq1 || role == CRoleAnd || role == CRoleOr {
+	if m.Face != nil {
+		if role := m.Face.FaceRoleOf(ref.Hash); role == CRoleEq0 || role == CRoleEq1 || role == CRoleAnd || role == CRoleOr {
 			_, args := spineParts(spine)
 			return m.tryFaceIota(role, args)
 		}
 	}
-	if m.Kn != nil {
-		switch m.Kn.KanRoleOf(ref.Hash) {
+	if m.Kan != nil {
+		switch m.Kan.KanRoleOf(ref.Hash) {
 		case KRoleTransp:
 			_, args := spineParts(spine)
 			return m.tryTransp(args)
@@ -1657,105 +1658,105 @@ func (m *Machine) tryRules(spine Neutral) (Val, bool) {
 			return m.transpG(args[0], args[1], args[2])
 		}
 	}
-	if m.Si != nil {
-		if role := m.Si.SigmaRoleOf(ref.Hash); role == GRoleFst || role == GRoleSnd {
+	if m.Sigma != nil {
+		if role := m.Sigma.SigmaRoleOf(ref.Hash); role == GRoleFst || role == GRoleSnd {
 			_, args := spineParts(spine)
 			return m.trySigmaIota(role, args)
 		}
 	}
-	if m.Cn != nil && m.Cn.CoindRoleOf(ref.Hash) == NRoleOut {
+	if m.Coind != nil && m.Coind.CoindRoleOf(ref.Hash) == NRoleOut {
 		_, args := spineParts(spine)
 		return m.tryCoindIota(args)
 	}
-	if m.Cn != nil && m.Cn.CoindRoleOf(ref.Hash) == NRoleUnfold {
+	if m.Coind != nil && m.Coind.CoindRoleOf(ref.Hash) == NRoleUnfold {
 		_, args := spineParts(spine)
 		return m.tryUnfoldEta(args)
 	}
-	if m.Cn != nil && m.Cn.CoindRoleOf(ref.Hash) == NRoleNuCons {
+	if m.Coind != nil && m.Coind.CoindRoleOf(ref.Hash) == NRoleNuCons {
 		_, args := spineParts(spine)
 		return m.tryNuConsEta(args)
 	}
-	if m.Gd != nil && m.Gd.GuardRoleOf(ref.Hash) == LRoleLmap {
+	if m.Guard != nil && m.Guard.GuardRoleOf(ref.Hash) == LRoleLmap {
 		_, args := spineParts(spine)
 		return m.tryGuardIota(args)
 	}
-	if m.Gd != nil && m.Gd.GuardRoleOf(ref.Hash) == LRoleLap {
+	if m.Guard != nil && m.Guard.GuardRoleOf(ref.Hash) == LRoleLap {
 		_, args := spineParts(spine)
 		return m.tryGuardLapIota(args)
 	}
-	if m.Gd != nil && m.Gd.GuardRoleOf(ref.Hash) == LRoleForce {
+	if m.Guard != nil && m.Guard.GuardRoleOf(ref.Hash) == LRoleForce {
 		_, args := spineParts(spine)
 		return m.tryForceIota(args)
 	}
-	if m.Gd != nil && m.Gd.GuardRoleOf(ref.Hash) == LRoleForceD {
+	if m.Guard != nil && m.Guard.GuardRoleOf(ref.Hash) == LRoleForceD {
 		_, args := spineParts(spine)
 		return m.tryForceDIota(args)
 	}
-	if m.Gd != nil && m.Gd.GuardRoleOf(ref.Hash) == LRoleLaterApp {
+	if m.Guard != nil && m.Guard.GuardRoleOf(ref.Hash) == LRoleLaterApp {
 		_, args := spineParts(spine)
 		return m.tryLaterAppIota(args)
 	}
-	if m.Gd != nil && m.Gd.GuardRoleOf(ref.Hash) == LRoleLapD {
+	if m.Guard != nil && m.Guard.GuardRoleOf(ref.Hash) == LRoleLapD {
 		_, args := spineParts(spine)
 		return m.tryLapDIota(args)
 	}
-	if m.Gl != nil && m.Gl.GlueRoleOf(ref.Hash) == URoleUnglue {
+	if m.Glue != nil && m.Glue.GlueRoleOf(ref.Hash) == URoleUnglue {
 		_, args := spineParts(spine)
 		return m.tryGlueIota(args)
 	}
-	if m.Gl != nil && m.Gl.GlueRoleOf(ref.Hash) == URoleUnglueT {
+	if m.Glue != nil && m.Glue.GlueRoleOf(ref.Hash) == URoleUnglueT {
 		_, args := spineParts(spine)
 		return m.tryGlueTIota(args)
 	}
-	if m.Fs != nil && m.Fs.FsplitRoleOf(ref.Hash) == SRoleSplit {
+	if m.Fsplit != nil && m.Fsplit.FsplitRoleOf(ref.Hash) == SRoleSplit {
 		_, args := spineParts(spine)
 		return m.tryFsplitIota(args)
 	}
-	if m.SyU != nil && m.SyU.SysURoleOf(ref.Hash) == SURoleSysU {
+	if m.SystemU != nil && m.SystemU.SysURoleOf(ref.Hash) == SURoleSysU {
 		_, args := spineParts(spine)
 		return m.trySysUIota(args)
 	}
-	if m.FsD != nil && m.FsD.SplitDRoleOf(ref.Hash) == SDRoleSplitD {
+	if m.FsplitD != nil && m.FsplitD.SplitDRoleOf(ref.Hash) == SDRoleSplitD {
 		_, args := spineParts(spine)
 		return m.trySplitDIota(args)
 	}
-	if m.Fa != nil && m.Fa.ForallRoleOf(ref.Hash) == ARoleForall {
+	if m.Forall != nil && m.Forall.ForallRoleOf(ref.Hash) == ARoleForall {
 		_, args := spineParts(spine)
 		return m.tryForallIota(args)
 	}
-	if m.PpU != nil && m.PpU.PappURoleOf(ref.Hash) == PPURoleApp {
+	if m.PappU != nil && m.PappU.PappURoleOf(ref.Hash) == PPURoleApp {
 		_, args := spineParts(spine)
 		return m.tryPappUIota(args)
 	}
-	if m.Hi != nil && m.Hi.HitRoleOf(ref.Hash) == HRoleElim {
+	if m.Hit != nil && m.Hit.HitRoleOf(ref.Hash) == HRoleElim {
 		_, args := spineParts(spine)
 		return m.tryHitIota(args)
 	}
-	if m.Su != nil && m.Su.SuspRoleOf(ref.Hash) == SuRoleElim {
+	if m.Susp != nil && m.Susp.SuspRoleOf(ref.Hash) == SuRoleElim {
 		_, args := spineParts(spine)
 		return m.trySuspIota(args)
 	}
-	if m.Qh != nil && m.Qh.QuotHitRoleOf(ref.Hash) == QHRoleElim {
+	if m.QuotHit != nil && m.QuotHit.QuotHitRoleOf(ref.Hash) == QHRoleElim {
 		_, args := spineParts(spine)
 		return m.tryQuotHitIota(args)
 	}
-	if m.Pp != nil && m.Pp.PathPRoleOf(ref.Hash) == PPRoleApp {
+	if m.PathP != nil && m.PathP.PathPRoleOf(ref.Hash) == PPRoleApp {
 		_, args := spineParts(spine)
 		return m.tryPathPIota(args)
 	}
-	if m.Ci != nil && m.Ci.IsCircInd(ref.Hash) {
+	if m.CircInd != nil && m.CircInd.IsCircInd(ref.Hash) {
 		_, args := spineParts(spine)
 		return m.tryCircIndIota(args)
 	}
-	if m.Tr != nil && m.Tr.TruncRoleOf(ref.Hash) == TRoleElim {
+	if m.Trunc != nil && m.Trunc.TruncRoleOf(ref.Hash) == TRoleElim {
 		_, args := spineParts(spine)
 		return m.tryTruncIota(args)
 	}
-	if m.SuI != nil && m.SuI.IsSuspInd(ref.Hash) {
+	if m.SuspInd != nil && m.SuspInd.IsSuspInd(ref.Hash) {
 		_, args := spineParts(spine)
 		return m.trySuspIndIota(args)
 	}
-	if m.QuI != nil && m.QuI.IsQuotInd(ref.Hash) {
+	if m.QuotInd != nil && m.QuotInd.IsQuotInd(ref.Hash) {
 		_, args := spineParts(spine)
 		return m.tryQuotIndIota(args)
 	}
@@ -1778,7 +1779,7 @@ func (m *Machine) tryRules(spine Neutral) (Val, bool) {
 // recursor stays stuck. Constant-line transport over Circle needs no rule here:
 // the regularity rule already returns the argument for a constant former line.
 func (m *Machine) tryHitIota(args []Val) (Val, bool) {
-	if len(args) != 4 || m.Hi == nil {
+	if len(args) != 4 || m.Hit == nil {
 		return nil, false
 	}
 	s := m.Force(args[3])
@@ -1792,19 +1793,19 @@ func (m *Machine) tryHitIota(args []Val) (Val, bool) {
 		return nil, false
 	}
 	// Point branch: circElim P b l base ~> b.
-	if m.Hi.HitRoleOf(ref.Hash) == HRoleBase && len(sargs) == 0 {
+	if m.Hit.HitRoleOf(ref.Hash) == HRoleBase && len(sargs) == 0 {
 		return args[1], true
 	}
 	// Loop branch: the scrutinee is papp Circle base base loop i. papp is a
 	// five-argument spine [A, x, y, p, i]; fire when its path argument p (index 3)
 	// is the loop constructor.
-	if m.Pa != nil && m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
+	if m.Path != nil && m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
 		pn, ok := m.Force(sargs[3]).(VNeu)
 		if ok {
 			ph, pa := spineParts(pn.Spine)
 			if pref, ok := ph.(NRef); ok && len(pa) == 0 &&
-				m.Hi.HitRoleOf(pref.Hash) == HRoleLoop {
-				pappH, ok := m.Pa.PathHash(PRoleApp)
+				m.Hit.HitRoleOf(pref.Hash) == HRoleLoop {
+				pappH, ok := m.Path.PathHash(PRoleApp)
 				if ok {
 					P, b, l, i := args[0], args[1], args[2], sargs[4]
 					// papp P b b l i
@@ -1825,15 +1826,15 @@ func (m *Machine) tryHitIota(args []Val) (Val, bool) {
 	// under a former, the eliminator pushes the motive's composition over the
 	// recursively-eliminated box. Closed `El Circle` terms thus reach a generator
 	// (base, loop-point, or this hcomp cell), and the recursor consumes all three.
-	if m.Kn != nil && m.Kn.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
+	if m.Kan != nil && m.Kan.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
 		// The scrutinee's type is El Circle, so its head former is Circle; guard
 		// defensively before commuting.
 		if cf, ok := m.Force(sargs[0]).(VNeu); ok {
 			ch, ca := spineParts(cf.Spine)
 			if cref, ok := ch.(NRef); ok && len(ca) == 0 &&
-				m.Hi.HitRoleOf(cref.Hash) == HRoleCircle {
-				if hcompH, ok := m.Kn.KanHash(KRoleHcomp); ok {
-					if elimH, ok := m.Hi.HitHash(HRoleElim); ok {
+				m.Hit.HitRoleOf(cref.Hash) == HRoleCircle {
+				if hcompH, ok := m.Kan.KanHash(KRoleHcomp); ok {
+					if elimH, ok := m.Hit.HitHash(HRoleElim); ok {
 						P, b, l := args[0], args[1], args[2]
 						phi, u, u0 := sargs[1], sargs[2], sargs[3]
 						ce := func(x Val) Val {
@@ -1886,7 +1887,7 @@ func (m *Machine) tryHitIota(args []Val) (Val, bool) {
 // All four agree with the point branch via pabs/papp β and the squash/setB
 // boundaries — exactly the dim-1 coherence, lifted to a square.
 func (m *Machine) tryTruncIota(args []Val) (Val, bool) {
-	if len(args) != 5 || m.Tr == nil {
+	if len(args) != 5 || m.Trunc == nil {
 		return nil, false
 	}
 	A, B, setB, f := args[0], args[1], args[2], args[3]
@@ -1901,7 +1902,7 @@ func (m *Machine) tryTruncIota(args []Val) (Val, bool) {
 		return nil, false
 	}
 	// Point branch: inc A a (a two-argument spine [A, a]).
-	if m.Tr.TruncRoleOf(ref.Hash) == TRoleInc && len(sargs) == 2 {
+	if m.Trunc.TruncRoleOf(ref.Hash) == TRoleInc && len(sargs) == 2 {
 		return m.Apply(f, sargs[1]), true
 	}
 	// Dim-2 interior branch: the scrutinee is a squash 2-cell observed at two
@@ -1909,7 +1910,7 @@ func (m *Machine) tryTruncIota(args []Val) (Val, bool) {
 	// scrutinee itself; the INNER (the squash square's outer dimension) is its
 	// path argument. Detect papp (Trunc0 A) x y OUTER j with OUTER itself
 	// papp (pathF (Trunc0 A) x y) p q (squash A x y p q) i.
-	if m.Pa != nil && m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
+	if m.Path != nil && m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
 		jOuter := sargs[4] // the inner (along-the-path) interval coordinate j
 		outer := m.Force(sargs[3])
 		on, ok := outer.(VNeu)
@@ -1918,7 +1919,7 @@ func (m *Machine) tryTruncIota(args []Val) (Val, bool) {
 		}
 		ohead, oargs := spineParts(on.Spine)
 		oref, ok := ohead.(NRef)
-		if !ok || m.Pa.PathRoleOf(oref.Hash) != PRoleApp || len(oargs) != 5 {
+		if !ok || m.Path.PathRoleOf(oref.Hash) != PRoleApp || len(oargs) != 5 {
 			return nil, false
 		}
 		iSquash := oargs[4] // the outer (between-paths) interval coordinate i
@@ -1929,19 +1930,19 @@ func (m *Machine) tryTruncIota(args []Val) (Val, bool) {
 		}
 		shead, qargs := spineParts(sn.Spine)
 		sqref, ok := shead.(NRef)
-		if !ok || m.Tr.TruncRoleOf(sqref.Hash) != TRoleSquash || len(qargs) != 5 {
+		if !ok || m.Trunc.TruncRoleOf(sqref.Hash) != TRoleSquash || len(qargs) != 5 {
 			return nil, false
 		}
 		// squash A x y p q — qargs = [A, x, y, p, q]; reuse the recursor's own A.
 		px, py, pp, pq := qargs[1], qargs[2], qargs[3], qargs[4]
-		pappH, ok1 := m.Pa.PathHash(PRoleApp)
-		pabsH, ok2 := m.Pa.PathHash(PRoleAbs)
-		elimH, ok3 := m.Tr.TruncHash(TRoleElim)
-		truncH, ok4 := m.Tr.TruncHash(TRoleTrunc)
+		pappH, ok1 := m.Path.PathHash(PRoleApp)
+		pabsH, ok2 := m.Path.PathHash(PRoleAbs)
+		elimH, ok3 := m.Trunc.TruncHash(TRoleElim)
+		truncH, ok4 := m.Trunc.TruncHash(TRoleTrunc)
 		var pathFH Hash
 		ok5 := false
-		if m.Fib != nil {
-			pathFH, ok5 = m.Fib.FibHash(FRolePathF)
+		if m.Fibrant != nil {
+			pathFH, ok5 = m.Fibrant.FibHash(FRolePathF)
 		}
 		if !(ok1 && ok2 && ok3 && ok4 && ok5) {
 			return nil, false
@@ -1990,7 +1991,7 @@ func (m *Machine) tryTruncIota(args []Val) (Val, bool) {
 // i0/i1 the line is P base and pappP l reads off b, agreeing with the base branch.
 // The dependent hcomp branch (comp over the motive line) is the deferred tail.
 func (m *Machine) tryCircIndIota(args []Val) (Val, bool) {
-	if len(args) != 4 || m.Ci == nil || m.Hi == nil {
+	if len(args) != 4 || m.CircInd == nil || m.Hit == nil {
 		return nil, false
 	}
 	P, b, l := args[0], args[1], args[2]
@@ -2005,18 +2006,18 @@ func (m *Machine) tryCircIndIota(args []Val) (Val, bool) {
 		return nil, false
 	}
 	// Point branch.
-	if m.Hi.HitRoleOf(ref.Hash) == HRoleBase && len(sargs) == 0 {
+	if m.Hit.HitRoleOf(ref.Hash) == HRoleBase && len(sargs) == 0 {
 		return b, true
 	}
 	// Loop branch: scrutinee papp Circle base base loop i (sargs [C,base,base,loop,i]).
-	if m.Pa != nil && m.Pp != nil &&
-		m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
+	if m.Path != nil && m.PathP != nil &&
+		m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
 		if ln, ok := m.Force(sargs[3]).(VNeu); ok {
 			lh, la := spineParts(ln.Spine)
 			if lref, ok := lh.(NRef); ok && len(la) == 0 &&
-				m.Hi.HitRoleOf(lref.Hash) == HRoleLoop {
-				pappH, ok1 := m.Pa.PathHash(PRoleApp)
-				pappPH, ok2 := m.Pp.PathPHash(PPRoleApp)
+				m.Hit.HitRoleOf(lref.Hash) == HRoleLoop {
+				pappH, ok1 := m.Path.PathHash(PRoleApp)
+				pappPH, ok2 := m.PathP.PathPHash(PPRoleApp)
 				if ok1 && ok2 {
 					circle, base, loop := sargs[0], sargs[1], sargs[3]
 					// line = λi. P (papp Circle base base loop i)
@@ -2044,14 +2045,14 @@ func (m *Machine) tryCircIndIota(args []Val) (Val, bool) {
 	// The floor circInd P b l u0 : El (P u0) = El (A i0) (hfill at i0 is u0), and on
 	// φ the wall agrees (hfill on φ is u i). So closed dependent elimination of an
 	// hcomp cell reduces — the induction principle is total on all three generators.
-	if m.Kn != nil {
-		if m.Kn.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
+	if m.Kan != nil {
+		if m.Kan.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
 			if cf, ok := m.Force(sargs[0]).(VNeu); ok {
 				ch, ca := spineParts(cf.Spine)
 				if cref, ok := ch.(NRef); ok && len(ca) == 0 &&
-					m.Hi.HitRoleOf(cref.Hash) == HRoleCircle {
-					compH, okc := m.Kn.KanHash(KRoleComp)
-					elimH, oke := m.Ci.CircIndHash()
+					m.Hit.HitRoleOf(cref.Hash) == HRoleCircle {
+					compH, okc := m.Kan.KanHash(KRoleComp)
+					elimH, oke := m.CircInd.CircIndHash()
 					filler, okf := m.hfill(sargs[0], sargs[1], sargs[2], sargs[3])
 					if okc && oke && okf {
 						phi, u, u0 := sargs[1], sargs[2], sargs[3]
@@ -2088,7 +2089,7 @@ func (m *Machine) tryCircIndIota(args []Val) (Val, bool) {
 //
 // The meridian method pm a is a DEPENDENT path over λi. P (merid@i) from pn to ps.
 func (m *Machine) trySuspIndIota(args []Val) (Val, bool) {
-	if len(args) != 6 || m.SuI == nil || m.Su == nil {
+	if len(args) != 6 || m.SuspInd == nil || m.Susp == nil {
 		return nil, false
 	}
 	P, pn, ps, pm := args[1], args[2], args[3], args[4]
@@ -2102,7 +2103,7 @@ func (m *Machine) trySuspIndIota(args []Val) (Val, bool) {
 	if !ok {
 		return nil, false
 	}
-	switch m.Su.SuspRoleOf(ref.Hash) {
+	switch m.Susp.SuspRoleOf(ref.Hash) {
 	case SuRoleNorth:
 		if len(sargs) == 1 {
 			return pn, true
@@ -2113,14 +2114,14 @@ func (m *Machine) trySuspIndIota(args []Val) (Val, bool) {
 		}
 	}
 	// Meridian branch: papp (Susp A) north south (merid A a) i.
-	if m.Pa != nil && m.Pp != nil &&
-		m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
+	if m.Path != nil && m.PathP != nil &&
+		m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
 		if mn, ok := m.Force(sargs[3]).(VNeu); ok {
 			mh, ma := spineParts(mn.Spine)
 			if mref, ok := mh.(NRef); ok &&
-				m.Su.SuspRoleOf(mref.Hash) == SuRoleMerid && len(ma) == 2 {
-				pappH, ok1 := m.Pa.PathHash(PRoleApp)
-				pappPH, ok2 := m.Pp.PathPHash(PPRoleApp)
+				m.Susp.SuspRoleOf(mref.Hash) == SuRoleMerid && len(ma) == 2 {
+				pappH, ok1 := m.Path.PathHash(PRoleApp)
+				pappPH, ok2 := m.PathP.PathPHash(PPRoleApp)
 				if ok1 && ok2 {
 					suspA, nor, sou, mer, a, i := sargs[0], sargs[1], sargs[2], sargs[3], ma[1], sargs[4]
 					line := VLam{Name: "i", Icit: Expl, Body: func(iv Val) Val {
@@ -2137,14 +2138,14 @@ func (m *Machine) trySuspIndIota(args []Val) (Val, bool) {
 	}
 	// hcomp branch (dependent): suspInd over a formal hcomp cell commutes via comp
 	// over the motive line λi. P (hfill (Susp A) φ u u0 i).
-	if m.Kn != nil && m.Su.SuspRoleOf(ref.Hash) == SuRoleNone &&
-		m.Kn.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
+	if m.Kan != nil && m.Susp.SuspRoleOf(ref.Hash) == SuRoleNone &&
+		m.Kan.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
 		if cf, ok := m.Force(sargs[0]).(VNeu); ok {
 			ch, ca := spineParts(cf.Spine)
 			if cref, ok := ch.(NRef); ok && len(ca) == 1 &&
-				m.Su.SuspRoleOf(cref.Hash) == SuRoleSusp {
-				compH, okc := m.Kn.KanHash(KRoleComp)
-				elimH, oke := m.SuI.SuspIndHash()
+				m.Susp.SuspRoleOf(cref.Hash) == SuRoleSusp {
+				compH, okc := m.Kan.KanHash(KRoleComp)
+				elimH, oke := m.SuspInd.SuspIndHash()
 				filler, okf := m.hfill(sargs[0], sargs[1], sargs[2], sargs[3])
 				if okc && oke && okf {
 					A, phi, u, u0 := args[0], sargs[1], sargs[2], sargs[3]
@@ -2178,7 +2179,7 @@ func (m *Machine) trySuspIndIota(args []Val) (Val, bool) {
 //
 // The relation method rel a b r is a DEPENDENT path over λi. P (qrel@i).
 func (m *Machine) tryQuotIndIota(args []Val) (Val, bool) {
-	if len(args) != 6 || m.QuI == nil || m.Qh == nil {
+	if len(args) != 6 || m.QuotInd == nil || m.QuotHit == nil {
 		return nil, false
 	}
 	P, f, rel := args[2], args[3], args[4]
@@ -2193,18 +2194,18 @@ func (m *Machine) tryQuotIndIota(args []Val) (Val, bool) {
 		return nil, false
 	}
 	// Point branch: quotInd … (qinc A R a) ~> f a (qinc spine [A, R, a]).
-	if m.Qh.QuotHitRoleOf(ref.Hash) == QHRoleInc && len(sargs) == 3 {
+	if m.QuotHit.QuotHitRoleOf(ref.Hash) == QHRoleInc && len(sargs) == 3 {
 		return m.Apply(f, sargs[2]), true
 	}
 	// Relation branch: papp (Quotient A R) (qinc a) (qinc b) (qrel A R a b r) i.
-	if m.Pa != nil && m.Pp != nil &&
-		m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
+	if m.Path != nil && m.PathP != nil &&
+		m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
 		if qn, ok := m.Force(sargs[3]).(VNeu); ok {
 			qh, qa := spineParts(qn.Spine)
 			if qref, ok := qh.(NRef); ok &&
-				m.Qh.QuotHitRoleOf(qref.Hash) == QHRoleRel && len(qa) == 5 {
-				pappH, ok1 := m.Pa.PathHash(PRoleApp)
-				pappPH, ok2 := m.Pp.PathPHash(PPRoleApp)
+				m.QuotHit.QuotHitRoleOf(qref.Hash) == QHRoleRel && len(qa) == 5 {
+				pappH, ok1 := m.Path.PathHash(PRoleApp)
+				pappPH, ok2 := m.PathP.PathPHash(PPRoleApp)
 				if ok1 && ok2 {
 					quotAR, qiA, qiB, qr := sargs[0], sargs[1], sargs[2], sargs[3]
 					a, b, rr, i := qa[2], qa[3], qa[4], sargs[4]
@@ -2223,14 +2224,14 @@ func (m *Machine) tryQuotIndIota(args []Val) (Val, bool) {
 	}
 	// hcomp branch (dependent): quotInd over a formal hcomp cell commutes via comp
 	// over the motive line λi. P (hfill (Quotient A R) φ u u0 i).
-	if m.Kn != nil && m.Qh.QuotHitRoleOf(ref.Hash) == QHRoleNone &&
-		m.Kn.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
+	if m.Kan != nil && m.QuotHit.QuotHitRoleOf(ref.Hash) == QHRoleNone &&
+		m.Kan.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
 		if cf, ok := m.Force(sargs[0]).(VNeu); ok {
 			ch, ca := spineParts(cf.Spine)
 			if cref, ok := ch.(NRef); ok && len(ca) == 2 &&
-				m.Qh.QuotHitRoleOf(cref.Hash) == QHRoleQuot {
-				compH, okc := m.Kn.KanHash(KRoleComp)
-				elimH, oke := m.QuI.QuotIndHash()
+				m.QuotHit.QuotHitRoleOf(cref.Hash) == QHRoleQuot {
+				compH, okc := m.Kan.KanHash(KRoleComp)
+				elimH, oke := m.QuotInd.QuotIndHash()
 				filler, okf := m.hfill(sargs[0], sargs[1], sargs[2], sargs[3])
 				if okc && oke && okf {
 					A, R, phi, u, u0 := args[0], args[1], sargs[1], sargs[2], sargs[3]
@@ -2269,7 +2270,7 @@ func (m *Machine) tryQuotIndIota(args []Val) (Val, bool) {
 // meridian method m at the same interval coordinate, boundary-coherent on the
 // nose (papp (merid A a) i0 ~> north, suspElim north ~> n, papp (m a) i0 ~> n).
 func (m *Machine) trySuspIota(args []Val) (Val, bool) {
-	if len(args) != 6 || m.Su == nil {
+	if len(args) != 6 || m.Susp == nil {
 		return nil, false
 	}
 	A, P, n, s, mer := args[0], args[1], args[2], args[3], args[4]
@@ -2283,7 +2284,7 @@ func (m *Machine) trySuspIota(args []Val) (Val, bool) {
 	if !ok {
 		return nil, false
 	}
-	switch m.Su.SuspRoleOf(ref.Hash) {
+	switch m.Susp.SuspRoleOf(ref.Hash) {
 	case SuRoleNorth:
 		if len(sargs) == 1 {
 			return n, true
@@ -2294,12 +2295,12 @@ func (m *Machine) trySuspIota(args []Val) (Val, bool) {
 		}
 	}
 	// Meridian branch: scrutinee papp (Susp A) north south (merid A a) i.
-	if m.Pa != nil && m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
+	if m.Path != nil && m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
 		if mn, ok := m.Force(sargs[3]).(VNeu); ok {
 			mh, ma := spineParts(mn.Spine)
 			if mref, ok := mh.(NRef); ok &&
-				m.Su.SuspRoleOf(mref.Hash) == SuRoleMerid && len(ma) == 2 {
-				if pappH, ok := m.Pa.PathHash(PRoleApp); ok {
+				m.Susp.SuspRoleOf(mref.Hash) == SuRoleMerid && len(ma) == 2 {
+				if pappH, ok := m.Path.PathHash(PRoleApp); ok {
 					a, i := ma[1], sargs[4]
 					// papp P n s (m a) i
 					r := m.Apply(m.Apply(m.Apply(m.Apply(m.Apply(
@@ -2310,12 +2311,12 @@ func (m *Machine) trySuspIota(args []Val) (Val, bool) {
 		}
 	}
 	// hcomp branch: the recursor commutes with composition at Susp A.
-	if m.Kn != nil && m.Kn.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
+	if m.Kan != nil && m.Kan.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
 		if sf, ok := m.Force(sargs[0]).(VNeu); ok {
 			sh, _ := spineParts(sf.Spine)
-			if sref, ok := sh.(NRef); ok && m.Su.SuspRoleOf(sref.Hash) == SuRoleSusp {
-				if hcompH, ok := m.Kn.KanHash(KRoleHcomp); ok {
-					if elimH, ok := m.Su.SuspHash(SuRoleElim); ok {
+			if sref, ok := sh.(NRef); ok && m.Susp.SuspRoleOf(sref.Hash) == SuRoleSusp {
+				if hcompH, ok := m.Kan.KanHash(KRoleHcomp); ok {
+					if elimH, ok := m.Susp.SuspHash(SuRoleElim); ok {
 						phi, u, u0 := sargs[1], sargs[2], sargs[3]
 						se := func(v Val) Val {
 							return m.Apply(m.Apply(m.Apply(m.Apply(m.Apply(m.Apply(
@@ -2349,7 +2350,7 @@ func (m *Machine) trySuspIota(args []Val) (Val, bool) {
 // ~> f, rel a b r boundary f a/f b). This is the path-respecting, EFFECTIVE
 // quotient the strict Quot (v2) cannot give.
 func (m *Machine) tryQuotHitIota(args []Val) (Val, bool) {
-	if len(args) != 6 || m.Qh == nil {
+	if len(args) != 6 || m.QuotHit == nil {
 		return nil, false
 	}
 	A, R, P, f, rel := args[0], args[1], args[2], args[3], args[4]
@@ -2364,16 +2365,16 @@ func (m *Machine) tryQuotHitIota(args []Val) (Val, bool) {
 		return nil, false
 	}
 	// Point branch: quotElim … (qinc A R a) ~> f a (qinc spine is [A, R, a]).
-	if m.Qh.QuotHitRoleOf(ref.Hash) == QHRoleInc && len(sargs) == 3 {
+	if m.QuotHit.QuotHitRoleOf(ref.Hash) == QHRoleInc && len(sargs) == 3 {
 		return m.Apply(f, sargs[2]), true
 	}
 	// Relation branch: scrutinee papp (Quotient A R) (qinc a) (qinc b) (qrel A R a b r) i.
-	if m.Pa != nil && m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
+	if m.Path != nil && m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(sargs) == 5 {
 		if qn, ok := m.Force(sargs[3]).(VNeu); ok {
 			qh, qa := spineParts(qn.Spine)
 			if qref, ok := qh.(NRef); ok &&
-				m.Qh.QuotHitRoleOf(qref.Hash) == QHRoleRel && len(qa) == 5 {
-				if pappH, ok := m.Pa.PathHash(PRoleApp); ok {
+				m.QuotHit.QuotHitRoleOf(qref.Hash) == QHRoleRel && len(qa) == 5 {
+				if pappH, ok := m.Path.PathHash(PRoleApp); ok {
 					a, b, r, i := qa[2], qa[3], qa[4], sargs[4]
 					// papp P (f a) (f b) (rel a b r) i
 					relabr := m.Apply(m.Apply(m.Apply(rel, a), b), r)
@@ -2385,12 +2386,12 @@ func (m *Machine) tryQuotHitIota(args []Val) (Val, bool) {
 		}
 	}
 	// hcomp branch: the recursor commutes with composition at Quotient A R.
-	if m.Kn != nil && m.Kn.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
+	if m.Kan != nil && m.Kan.KanRoleOf(ref.Hash) == KRoleHcomp && len(sargs) == 4 {
 		if qf, ok := m.Force(sargs[0]).(VNeu); ok {
 			qhh, _ := spineParts(qf.Spine)
-			if qref, ok := qhh.(NRef); ok && m.Qh.QuotHitRoleOf(qref.Hash) == QHRoleQuot {
-				if hcompH, ok := m.Kn.KanHash(KRoleHcomp); ok {
-					if elimH, ok := m.Qh.QuotHitHash(QHRoleElim); ok {
+			if qref, ok := qhh.(NRef); ok && m.QuotHit.QuotHitRoleOf(qref.Hash) == QHRoleQuot {
+				if hcompH, ok := m.Kan.KanHash(KRoleHcomp); ok {
+					if elimH, ok := m.QuotHit.QuotHitHash(QHRoleElim); ok {
 						phi, u, u0 := sargs[1], sargs[2], sargs[3]
 						qe := func(v Val) Val {
 							return m.Apply(m.Apply(m.Apply(m.Apply(m.Apply(m.Apply(
@@ -2418,12 +2419,12 @@ func (m *Machine) tryQuotHitIota(args []Val) (Val, bool) {
 // a face). This is the slice the transp-over-Glue ⊤-degeneracy needs; the general
 // ∀ on a proper line is honest-stuck.
 func (m *Machine) tryForallIota(args []Val) (Val, bool) {
-	if len(args) != 1 || m.Fc == nil {
+	if len(args) != 1 || m.Face == nil {
 		return nil, false
 	}
 	at := m.Apply(args[0], VNeu{Spine: NRef{Hash: kanFreshSentinel}})
 	if c, ok := m.faceConst(at); ok && c == CRoleTop {
-		if topH, ok := m.Fc.FaceHash(CRoleTop); ok {
+		if topH, ok := m.Face.FaceHash(CRoleTop); ok {
 			return m.refVal(topH), true
 		}
 	}
@@ -2458,18 +2459,18 @@ var coindXSentinel = Hash{
 // reduces to `next ra`, so the converter body's endpoints land on the nose. Bounded
 // (fires once per lmap, the probe never forces a recursion), no conv.go change.
 func (m *Machine) tryGuardIota(args []Val) (Val, bool) {
-	if len(args) != 5 || m.Gd == nil {
+	if len(args) != 5 || m.Guard == nil {
 		return nil, false
 	}
 	k, B, g := args[0], args[2], args[3]
-	nextH, ok := m.Gd.GuardHash(LRoleNext)
+	nextH, ok := m.Guard.GuardHash(LRoleNext)
 	if !ok {
 		return nil, false
 	}
 	l := m.Force(args[4])
 	if ln, ok := l.(VNeu); ok {
 		if head, nargs := spineParts(ln.Spine); len(nargs) == 3 {
-			if nref, ok := head.(NRef); ok && m.Gd.GuardRoleOf(nref.Hash) == LRoleNext {
+			if nref, ok := head.(NRef); ok && m.Guard.GuardRoleOf(nref.Hash) == LRoleNext {
 				// next k A x ; apply g to x and re-wrap under `next k B`.
 				x := nargs[2]
 				return m.Apply(m.Apply(m.Apply(m.refVal(nextH), k), B), m.Apply(g, x)), true
@@ -2492,7 +2493,7 @@ func (m *Machine) tryGuardIota(args []Val) (Val, bool) {
 // This makes ▹ an applicative functor (next is pure, lap is ⊛). The clock k is
 // carried onto the result.
 func (m *Machine) tryGuardLapIota(args []Val) (Val, bool) {
-	if len(args) != 5 || m.Gd == nil {
+	if len(args) != 5 || m.Guard == nil {
 		return nil, false
 	}
 	k, B := args[0], args[2]
@@ -2503,7 +2504,7 @@ func (m *Machine) tryGuardLapIota(args []Val) (Val, bool) {
 		}
 		head, nargs := spineParts(n.Spine)
 		nref, ok := head.(NRef)
-		if !ok || m.Gd.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
+		if !ok || m.Guard.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
 			return nil, false
 		}
 		return nargs[2], true
@@ -2513,7 +2514,7 @@ func (m *Machine) tryGuardLapIota(args []Val) (Val, bool) {
 	if !ok1 || !ok2 {
 		return nil, false
 	}
-	nextH, ok := m.Gd.GuardHash(LRoleNext)
+	nextH, ok := m.Guard.GuardHash(LRoleNext)
 	if !ok {
 		return nil, false
 	}
@@ -2534,7 +2535,7 @@ func (m *Machine) tryGuardLapIota(args []Val) (Val, bool) {
 // `force : ▹A -> A` is never reachable (the clock-indexing of Later makes its type
 // uninhabitable). This is what turns guarded recursion into genuine coinduction.
 func (m *Machine) tryForceIota(args []Val) (Val, bool) {
-	if len(args) != 2 || m.Gd == nil {
+	if len(args) != 2 || m.Guard == nil {
 		return nil, false
 	}
 	g := args[1]
@@ -2546,7 +2547,7 @@ func (m *Machine) tryForceIota(args []Val) (Val, bool) {
 	}
 	head, nargs := spineParts(gn.Spine)
 	nref, ok := head.(NRef)
-	if !ok || m.Gd.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
+	if !ok || m.Guard.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
 		return nil, false
 	}
 	// next κ A x : the delayed value must be on the BOUND clock κ (the sentinel).
@@ -2582,7 +2583,7 @@ func (m *Machine) tryForceIota(args []Val) (Val, bool) {
 // sentinel is representative. The result re-applies g at the bound clock and strips the
 // `next`, substituting the real clock for κ automatically. Stays neutral on any other g.
 func (m *Machine) tryForceDIota(args []Val) (Val, bool) {
-	if len(args) != 2 || m.Gd == nil {
+	if len(args) != 2 || m.Guard == nil {
 		return nil, false
 	}
 	g := args[1]
@@ -2595,7 +2596,7 @@ func (m *Machine) tryForceDIota(args []Val) (Val, bool) {
 	}
 	head, nargs := spineParts(gn.Spine)
 	nref, ok := head.(NRef)
-	if !ok || m.Gd.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
+	if !ok || m.Guard.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
 		return nil, false
 	}
 	// next κ (A κ) x : the delayed value must be on the BOUND clock κ (the sentinel).
@@ -2615,7 +2616,7 @@ func (m *Machine) tryForceDIota(args []Val) (Val, bool) {
 		body := m.Force(m.Apply(g, kv))
 		if bn, ok := body.(VNeu); ok {
 			bh, bargs := spineParts(bn.Spine)
-			if br, ok := bh.(NRef); ok && m.Gd.GuardRoleOf(br.Hash) == LRoleNext && len(bargs) == 3 {
+			if br, ok := bh.(NRef); ok && m.Guard.GuardRoleOf(br.Hash) == LRoleNext && len(bargs) == 3 {
 				return bargs[2]
 			}
 		}
@@ -2633,7 +2634,7 @@ func (m *Machine) tryForceDIota(args []Val) (Val, bool) {
 // `Later k` of the applied type — the piece a UF-valued recursive occurrence (bisimilarity)
 // needs to sit under ▹κ. Sound: it only re-wraps under `Later`, never escapes it.
 func (m *Machine) tryLaterAppIota(args []Val) (Val, bool) {
-	if len(args) != 4 || m.Gd == nil {
+	if len(args) != 4 || m.Guard == nil {
 		return nil, false
 	}
 	k, f := args[0], args[2]
@@ -2644,10 +2645,10 @@ func (m *Machine) tryLaterAppIota(args []Val) (Val, bool) {
 	}
 	head, nargs := spineParts(ln.Spine)
 	nref, ok := head.(NRef)
-	if !ok || m.Gd.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
+	if !ok || m.Guard.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
 		return nil, false
 	}
-	laterH, ok := m.Gd.GuardHash(LRoleLater)
+	laterH, ok := m.Guard.GuardHash(LRoleLater)
 	if !ok {
 		return nil, false
 	}
@@ -2666,7 +2667,7 @@ func (m *Machine) tryLaterAppIota(args []Val) (Val, bool) {
 // lapD's declared result. The combinator the converse's path-assembly recursion uses to
 // apply the delayed (dependent) recursive path-builder to the delayed tail index.
 func (m *Machine) tryLapDIota(args []Val) (Val, bool) {
-	if len(args) != 5 || m.Gd == nil {
+	if len(args) != 5 || m.Guard == nil {
 		return nil, false
 	}
 	k, B := args[0], args[2]
@@ -2677,7 +2678,7 @@ func (m *Machine) tryLapDIota(args []Val) (Val, bool) {
 		}
 		head, nargs := spineParts(n.Spine)
 		nref, ok := head.(NRef)
-		if !ok || m.Gd.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
+		if !ok || m.Guard.GuardRoleOf(nref.Hash) != LRoleNext || len(nargs) != 3 {
 			return nil, false
 		}
 		return nargs[2], true
@@ -2687,7 +2688,7 @@ func (m *Machine) tryLapDIota(args []Val) (Val, bool) {
 	if !ok1 || !ok2 {
 		return nil, false
 	}
-	nextH, ok := m.Gd.GuardHash(LRoleNext)
+	nextH, ok := m.Guard.GuardHash(LRoleNext)
 	if !ok {
 		return nil, false
 	}
@@ -2700,7 +2701,7 @@ func (m *Machine) tryLapDIota(args []Val) (Val, bool) {
 // It fires when s forces to a saturated unfold (four args F' S c s0); on any
 // other s (a neutral) it stays stuck.
 func (m *Machine) tryCoindIota(args []Val) (Val, bool) {
-	if len(args) != 2 || m.Cn == nil || m.Fib == nil {
+	if len(args) != 2 || m.Coind == nil || m.Fibrant == nil {
 		return nil, false
 	}
 	F := args[0]
@@ -2727,12 +2728,12 @@ func (m *Machine) tryCoindIota(args []Val) (Val, bool) {
 	// makes `head`/`tail (hcomp (Str A) …)` compute componentwise — opening the
 	// global repair route for the E2 converse. (transp/comp over Nu are the duals,
 	// deferred until a consumer needs them.)
-	if m.Kn != nil && m.Kn.KanRoleOf(uref.Hash) == KRoleHcomp && len(uargs) == 4 && m.headIsNu(uargs[0]) {
+	if m.Kan != nil && m.Kan.KanRoleOf(uref.Hash) == KRoleHcomp && len(uargs) == 4 && m.headIsNu(uargs[0]) {
 		F := args[0]
 		phi, u, u0 := uargs[1], uargs[2], uargs[3]
-		hcompH, ok1 := m.Kn.KanHash(KRoleHcomp)
-		outH, ok2 := m.Cn.CoindHash(NRoleOut)
-		nuH, ok3 := m.Cn.CoindHash(NRoleNu)
+		hcompH, ok1 := m.Kan.KanHash(KRoleHcomp)
+		outH, ok2 := m.Coind.CoindHash(NRoleOut)
+		nuH, ok3 := m.Coind.CoindHash(NRoleNu)
 		if ok1 && ok2 && ok3 {
 			out := func(x Val) Val { return m.Apply(m.Apply(m.refVal(outH), F), x) }
 			target := m.Apply(F, m.Apply(m.refVal(nuH), F)) // F (Nu F)
@@ -2746,20 +2747,20 @@ func (m *Machine) tryCoindIota(args []Val) (Val, bool) {
 		}
 	}
 	// β for the one-level constructor: out F (nuCons F x) ~> x.
-	if m.Cn.CoindRoleOf(uref.Hash) == NRoleNuCons && len(uargs) == 2 {
+	if m.Coind.CoindRoleOf(uref.Hash) == NRoleNuCons && len(uargs) == 2 {
 		return uargs[1], true // x
 	}
-	if m.Cn.CoindRoleOf(uref.Hash) != NRoleUnfold || len(uargs) != 4 {
+	if m.Coind.CoindRoleOf(uref.Hash) != NRoleUnfold || len(uargs) != 4 {
 		return nil, false
 	}
 	// unfold F' S c s0 ; the recursive map g = unfold F' S c (the first three
 	// args re-applied), the seed-step value is c s0.
 	uF, uS, uc, us := uargs[0], uargs[1], uargs[2], uargs[3]
-	unfoldH, ok := m.Cn.CoindHash(NRoleUnfold)
+	unfoldH, ok := m.Coind.CoindHash(NRoleUnfold)
 	if !ok {
 		return nil, false
 	}
-	nuH, ok := m.Cn.CoindHash(NRoleNu)
+	nuH, ok := m.Coind.CoindHash(NRoleNu)
 	if !ok {
 		return nil, false
 	}
@@ -2811,7 +2812,7 @@ func (m *Machine) fmapF(probe, target, g, val Val) (Val, bool) {
 	}
 	// sigmaF A Pfam (A X-free): keep the first component, recurse on the second,
 	// rebuilding the pair at the target (F (Nu F)) codes.
-	if m.Si != nil {
+	if m.Sigma != nil {
 		if role, pargs, ok := m.sigmaFormer(probe); ok && role == GRoleSigma && len(pargs) == 2 {
 			trole, targs, tok := m.sigmaFormer(target)
 			if !tok || trole != GRoleSigma || len(targs) != 2 {
@@ -2823,11 +2824,11 @@ func (m *Machine) fmapF(probe, target, g, val Val) (Val, bool) {
 			}
 			vh, vargs := spineParts(vn.Spine)
 			vref, ok := vh.(NRef)
-			if !ok || m.Si.SigmaRoleOf(vref.Hash) != GRolePair || len(vargs) != 4 {
+			if !ok || m.Sigma.SigmaRoleOf(vref.Hash) != GRolePair || len(vargs) != 4 {
 				return nil, false
 			}
 			a, b := vargs[2], vargs[3]
-			pairH, ok := m.Si.SigmaHash(GRolePair)
+			pairH, ok := m.Sigma.SigmaHash(GRolePair)
 			if !ok {
 				return nil, false
 			}
@@ -2845,7 +2846,7 @@ func (m *Machine) fmapF(probe, target, g, val Val) (Val, bool) {
 // sigmaFormer decomposes an inner-Sigma former value (sigmaF A B), returning its
 // role and argument values — the SigmaInfo analogue of fibFormer.
 func (m *Machine) sigmaFormer(v Val) (SigmaRole, []Val, bool) {
-	if m.Si == nil {
+	if m.Sigma == nil {
 		return GRoleNone, nil, false
 	}
 	n, ok := m.Force(v).(VNeu)
@@ -2857,7 +2858,7 @@ func (m *Machine) sigmaFormer(v Val) (SigmaRole, []Val, bool) {
 	if !ok {
 		return GRoleNone, nil, false
 	}
-	role := m.Si.SigmaRoleOf(ref.Hash)
+	role := m.Sigma.SigmaRoleOf(ref.Hash)
 	if role == GRoleNone {
 		return GRoleNone, nil, false
 	}
@@ -2874,7 +2875,7 @@ func (m *Machine) sigmaFormer(v Val) (SigmaRole, []Val, bool) {
 // the projection of a variable is canonical neutral data (NFst/NSnd's inner-layer
 // analogue), exactly as papp on a neutral path stays stuck.
 func (m *Machine) trySigmaIota(role SigmaRole, args []Val) (Val, bool) {
-	if len(args) != 3 || m.Si == nil {
+	if len(args) != 3 || m.Sigma == nil {
 		return nil, false
 	}
 	p := m.Force(args[2])
@@ -2884,7 +2885,7 @@ func (m *Machine) trySigmaIota(role SigmaRole, args []Val) (Val, bool) {
 	}
 	head, pargs := spineParts(pn.Spine)
 	pref, ok := head.(NRef)
-	if !ok || m.Si.SigmaRoleOf(pref.Hash) != GRolePair || len(pargs) != 4 {
+	if !ok || m.Sigma.SigmaRoleOf(pref.Hash) != GRolePair || len(pargs) != 4 {
 		return nil, false
 	}
 	if role == GRoleFst {
@@ -2913,7 +2914,7 @@ func (m *Machine) trySigmaIota(role SigmaRole, args []Val) (Val, bool) {
 // ref_docs/wootz/GLUE-DESIGN.md §4.3.
 func (m *Machine) tryGlueIota(args []Val) (Val, bool) {
 	// unglue A φ T e g — five arguments, the scrutinee g at index 4.
-	if len(args) != 5 || m.Gl == nil {
+	if len(args) != 5 || m.Glue == nil {
 		return nil, false
 	}
 	g := m.Force(args[4])
@@ -2922,15 +2923,15 @@ func (m *Machine) tryGlueIota(args []Val) (Val, bool) {
 	if gn, ok := g.(VNeu); ok {
 		head, gargs := spineParts(gn.Spine)
 		if gref, ok := head.(NRef); ok &&
-			m.Gl.GlueRoleOf(gref.Hash) == URoleGlueIn && len(gargs) == 6 {
+			m.Glue.GlueRoleOf(gref.Hash) == URoleGlueIn && len(gargs) == 6 {
 			return gargs[5], true // the A-component a
 		}
 	}
 	// ⊤ boundary: on a total face, unglue is equivFun (e htop) applied to g.
-	if m.Sy != nil {
+	if m.System != nil {
 		if c, ok := m.faceConst(args[1]); ok && c == CRoleTop {
-			efH, ok1 := m.Gl.EquivFunHash()
-			hth, ok2 := m.Sy.SysHash(SRoleTop)
+			efH, ok1 := m.Glue.EquivFunHash()
+			hth, ok2 := m.System.SysHash(SRoleTop)
 			if ok1 && ok2 {
 				htop := m.refVal(hth)
 				A, T, e := args[0], args[2], args[3]
@@ -2960,10 +2961,10 @@ func (m *Machine) tryGlueIota(args []Val) (Val, bool) {
 // agreement obligation (for disjoint faces like ieq0/ieq1 it never arises). See
 // ref_docs/wootz/RBOX-DESIGN.md §1.
 func (m *Machine) tryFsplitIota(args []Val) (Val, bool) {
-	if len(args) != 6 || m.Fc == nil || m.Sy == nil {
+	if len(args) != 6 || m.Face == nil || m.System == nil {
 		return nil, false
 	}
-	hth, ok := m.Sy.SysHash(SRoleTop)
+	hth, ok := m.System.SysHash(SRoleTop)
 	if !ok {
 		return nil, false
 	}
@@ -2994,7 +2995,7 @@ func (m *Machine) tryFsplitIota(args []Val) (Val, bool) {
 // face-split eliminator dispatches on when the face itself is still a proper (non-⊤)
 // cofibration but the validity proof already names its disjunct.
 func (m *Machine) holdsInjection(v Val) (left bool, inner Val, ok bool) {
-	if m.Sy == nil {
+	if m.System == nil {
 		return false, nil, false
 	}
 	n, isNeu := m.Force(v).(VNeu)
@@ -3006,7 +3007,7 @@ func (m *Machine) holdsInjection(v Val) (left bool, inner Val, ok bool) {
 	if !isRef || len(as) != 3 {
 		return false, nil, false
 	}
-	switch m.Sy.SysRoleOf(ref.Hash) {
+	switch m.System.SysRoleOf(ref.Hash) {
 	case SRoleOrL:
 		return true, as[2], true
 	case SRoleOrR:
@@ -3028,10 +3029,10 @@ func (m *Machine) holdsInjection(v Val) (left bool, inner Val, ok bool) {
 // `holds φ -> UF` cannot dispatch (no `holds` eliminator). Overlap takes the
 // φ-branch; agreement is the caller's obligation (vacuous for disjoint faces).
 func (m *Machine) trySysUIota(args []Val) (Val, bool) {
-	if len(args) != 5 || m.Fc == nil || m.Sy == nil {
+	if len(args) != 5 || m.Face == nil || m.System == nil {
 		return nil, false
 	}
-	hth, ok := m.Sy.SysHash(SRoleTop)
+	hth, ok := m.System.SysHash(SRoleTop)
 	if !ok {
 		return nil, false
 	}
@@ -3067,10 +3068,10 @@ func (m *Machine) trySysUIota(args []Val) (Val, bool) {
 // element-system — e.g. the e-component of a univalence Glue line, whose type
 // varies per face — is built from. Overlap takes the φ-branch.
 func (m *Machine) trySplitDIota(args []Val) (Val, bool) {
-	if len(args) != 6 || m.Fc == nil || m.Sy == nil {
+	if len(args) != 6 || m.Face == nil || m.System == nil {
 		return nil, false
 	}
-	hth, ok := m.Sy.SysHash(SRoleTop)
+	hth, ok := m.System.SysHash(SRoleTop)
 	if !ok {
 		return nil, false
 	}
@@ -3103,7 +3104,7 @@ func (m *Machine) trySplitDIota(args []Val) (Val, bool) {
 // when g is not a glue intro. Used by hcomp-over-Glue to extract glued-fibre
 // components of the walls/floor (staying symbolic on neutral walls).
 func (m *Machine) tryGlueTIota(args []Val) (Val, bool) {
-	if len(args) != 6 || m.Gl == nil {
+	if len(args) != 6 || m.Glue == nil {
 		return nil, false
 	}
 	g := m.Force(args[4])
@@ -3113,7 +3114,7 @@ func (m *Machine) tryGlueTIota(args []Val) (Val, bool) {
 	}
 	head, gargs := spineParts(gn.Spine)
 	gref, ok := head.(NRef)
-	if !ok || m.Gl.GlueRoleOf(gref.Hash) != URoleGlueIn || len(gargs) != 6 {
+	if !ok || m.Glue.GlueRoleOf(gref.Hash) != URoleGlueIn || len(gargs) != 6 {
 		return nil, false
 	}
 	// glue _ _ _ _ t a: the T-component t is at index 4; apply it to the proof h.
@@ -3180,7 +3181,7 @@ func (m *Machine) tryQuotIota(role QuotRole, args []Val) (Val, bool) {
 // fibrant codes is itself a fibrant code) and El1 (liftF a) ~> El a (a lifted small code
 // decodes to its small type). Mirrors tryFibIota's El case, one universe level up.
 func (m *Machine) tryUFHIota(args []Val) (Val, bool) {
-	if len(args) != 1 || m.Fib == nil {
+	if len(args) != 1 || m.Fibrant == nil {
 		return nil, false
 	}
 	code := m.Force(args[0])
@@ -3193,16 +3194,16 @@ func (m *Machine) tryUFHIota(args []Val) (Val, bool) {
 	if !ok {
 		return nil, false
 	}
-	switch m.U.UFHRoleOf(cref.Hash) {
+	switch m.FibUniverse.UFHRoleOf(cref.Hash) {
 	case URoleCodeUF:
 		if len(cargs) == 0 {
-			if uf, ok := m.Fib.FibHash(FRoleUF); ok {
+			if uf, ok := m.Fibrant.FibHash(FRoleUF); ok {
 				return m.refVal(uf), true
 			}
 		}
 	case URoleLiftF:
 		if len(cargs) == 1 {
-			if el, ok := m.Fib.FibHash(FRoleEl); ok {
+			if el, ok := m.Fibrant.FibHash(FRoleEl); ok {
 				return m.Apply(m.refVal(el), cargs[0]), true
 			}
 		}
@@ -3226,7 +3227,7 @@ func (m *Machine) tryFibIota(role FibRole, h Hash, args []Val) (Val, bool) {
 		if !ok {
 			return nil, false
 		}
-		switch m.Fib.FibRoleOf(cref.Hash) {
+		switch m.Fibrant.FibRoleOf(cref.Hash) {
 		case FRoleFib:
 			if len(cargs) == 1 {
 				return cargs[0], true
@@ -3244,9 +3245,9 @@ func (m *Machine) tryFibIota(role FibRole, h Hash, args []Val) (Val, bool) {
 		// El (Glue A φ T e) ~> El (T htop)  when φ ≡ ⊤ (R-GLUE / A6 type boundary):
 		// on a total face the glued type IS its partial T-component. On a proper or
 		// neutral φ, Glue is a genuinely new fibrant type and El stays neutral.
-		if m.Gl != nil && m.Sy != nil && m.Gl.GlueRoleOf(cref.Hash) == URoleGlue && len(cargs) == 4 {
+		if m.Glue != nil && m.System != nil && m.Glue.GlueRoleOf(cref.Hash) == URoleGlue && len(cargs) == 4 {
 			if c, ok := m.faceConst(cargs[1]); ok && c == CRoleTop {
-				if hth, ok := m.Sy.SysHash(SRoleTop); ok {
+				if hth, ok := m.System.SysHash(SRoleTop); ok {
 					// El (T htop): decode the partial code at the canonical proof.
 					return m.Apply(m.refVal(h), m.Apply(cargs[2], m.refVal(hth))), true
 				}
@@ -3273,12 +3274,12 @@ func (m *Machine) tryFibIota(role FibRole, h Hash, args []Val) (Val, bool) {
 		// result type. Both coherences are the path-η just added to conversion.
 		// When p reduces to preflF the line is constant in i and transp collapses to
 		// d by regularity — consistent with the fast path above.
-		if m.Pa != nil && m.Kn != nil && m.Iv != nil && m.Fc != nil {
-			tgH, ok1 := m.Kn.KanHash(KRoleTranspG)
-			pappH, ok2 := m.Pa.PathHash(PRoleApp)
-			pabsH, ok3 := m.Pa.PathHash(PRoleAbs)
-			iminH, ok4 := m.Iv.IntervalHash(IRoleMin)
-			fbotH, ok5 := m.Fc.FaceHash(CRoleBot)
+		if m.Path != nil && m.Kan != nil && m.Interval != nil && m.Face != nil {
+			tgH, ok1 := m.Kan.KanHash(KRoleTranspG)
+			pappH, ok2 := m.Path.PathHash(PRoleApp)
+			pabsH, ok3 := m.Path.PathHash(PRoleAbs)
+			iminH, ok4 := m.Interval.IntervalHash(IRoleMin)
+			fbotH, ok5 := m.Face.FaceHash(CRoleBot)
 			if ok1 && ok2 && ok3 && ok4 && ok5 {
 				A, x, P, d, y, p := args[0], args[1], args[2], args[3], args[4], args[5]
 				papp := func(k Val) Val {
@@ -3312,10 +3313,10 @@ func (m *Machine) tryFibIota(role FibRole, h Hash, args []Val) (Val, bool) {
 			// The derived `ua A B f g s t` (ambient prelude) unfolds to such a
 			// pabsU-Glue line, so castU over a univalence path reduces here, through
 			// the genuine transp-over-Glue arm — there is no postulated-`ua` fiat.
-			if m.Pu != nil && m.Kn != nil {
+			if m.PabsU != nil && m.Kan != nil {
 				if pref, ok := phead.(NRef); ok &&
-					m.Pu.PabsURoleOf(pref.Hash) == PURolePabsU && len(pargs) == 1 {
-					if tgH, ok := m.Kn.KanHash(KRoleTranspG); ok {
+					m.PabsU.PabsURoleOf(pref.Hash) == PURolePabsU && len(pargs) == 1 {
+					if tgH, ok := m.Kan.KanHash(KRoleTranspG); ok {
 						return m.vTranspG(tgH, pargs[0], m.vFbot(), args[3]), true
 					}
 				}
@@ -3326,9 +3327,9 @@ func (m *Machine) tryFibIota(role FibRole, h Hash, args []Val) (Val, bool) {
 			// to a stuck `transpG` over its `pappU` decoding (not a stuck `castU`), so
 			// castU is uniformly "transport along the line" — this is what makes
 			// `transportF` in the identity family equal to `castU` definitionally.
-			if m.Pu != nil && m.PpU != nil && m.Kn != nil {
-				pappH, ok1 := m.PpU.PappUHash()
-				tgH, ok2 := m.Kn.KanHash(KRoleTranspG)
+			if m.PabsU != nil && m.PappU != nil && m.Kan != nil {
+				pappH, ok1 := m.PappU.PappUHash()
+				tgH, ok2 := m.Kan.KanHash(KRoleTranspG)
 				if ok1 && ok2 {
 					A, B, pth := args[0], args[1], args[2]
 					line := VLam{Name: "i", Icit: Expl, Body: func(iv Val) Val {
@@ -3357,7 +3358,7 @@ func fibHeadIs(m *Machine, v Val, role FibRole, arity int) bool {
 	if !ok {
 		return false
 	}
-	return m.Fib.FibRoleOf(ref.Hash) == role && len(args) == arity
+	return m.Fibrant.FibRoleOf(ref.Hash) == role && len(args) == arity
 }
 
 // intervalEndpoint forces v and reports whether it is the bare endpoint i0 or
@@ -3373,7 +3374,7 @@ func (m *Machine) intervalEndpoint(v Val) (IntervalRole, bool) {
 	if !ok || len(args) != 0 {
 		return IRoleNone, false
 	}
-	if role := m.Iv.IntervalRoleOf(ref.Hash); role == IRoleI0 || role == IRoleI1 {
+	if role := m.Interval.IntervalRoleOf(ref.Hash); role == IRoleI0 || role == IRoleI1 {
 		return role, true
 	}
 	return IRoleNone, false
@@ -3391,7 +3392,7 @@ func (m *Machine) intervalEndpoint(v Val) (IntervalRole, bool) {
 //	imax i0 j ~> j    imax i1 _ ~> i1  imax _ i0 ~> i    imax _ i1 ~> i1
 func (m *Machine) tryIntervalIota(role IntervalRole, args []Val) (Val, bool) {
 	endpoint := func(r IntervalRole) Val {
-		h, ok := m.Iv.IntervalHash(r)
+		h, ok := m.Interval.IntervalHash(r)
 		if !ok {
 			return nil
 		}
@@ -3467,16 +3468,16 @@ func (m *Machine) tryPathIota(args []Val) (Val, bool) {
 	if pneu, ok := m.Force(path).(VNeu); ok {
 		phead, pargs := spineParts(pneu.Spine)
 		if pref, ok := phead.(NRef); ok {
-			if m.Pa != nil && m.Pa.PathRoleOf(pref.Hash) == PRoleAbs && len(pargs) == 2 {
+			if m.Path != nil && m.Path.PathRoleOf(pref.Hash) == PRoleAbs && len(pargs) == 2 {
 				return m.Apply(pargs[1], pt), true // β: f i
 			}
-			if m.Fib != nil && m.Fib.FibRoleOf(pref.Hash) == FRolePrefl && len(pargs) == 2 {
+			if m.Fibrant != nil && m.Fibrant.FibRoleOf(pref.Hash) == FRolePrefl && len(pargs) == 2 {
 				return pargs[1], true // refl is the constant path at its point
 			}
 		}
 	}
 	// Boundary rules: inspect the interval point.
-	if m.Iv != nil {
+	if m.Interval != nil {
 		switch e, ok := m.intervalEndpoint(pt); {
 		case ok && e == IRoleI0:
 			return args[1], true // left endpoint x
@@ -3505,16 +3506,16 @@ func (m *Machine) tryPappUIota(args []Val) (Val, bool) {
 	if pneu, ok := m.Force(path).(VNeu); ok {
 		phead, pargs := spineParts(pneu.Spine)
 		if pref, ok := phead.(NRef); ok {
-			if m.Pu != nil && m.Pu.PabsURoleOf(pref.Hash) == PURolePabsU && len(pargs) == 1 {
+			if m.PabsU != nil && m.PabsU.PabsURoleOf(pref.Hash) == PURolePabsU && len(pargs) == 1 {
 				return m.Apply(pargs[0], pt), true // β: line i
 			}
-			if m.Fib != nil && m.Fib.FibRoleOf(pref.Hash) == FRoleUrefl && len(pargs) == 1 {
+			if m.Fibrant != nil && m.Fibrant.FibRoleOf(pref.Hash) == FRoleUrefl && len(pargs) == 1 {
 				return args[0], true // ureflU: the constant type-path is A
 			}
 		}
 	}
 	// Boundary rules: inspect the interval point.
-	if m.Iv != nil {
+	if m.Interval != nil {
 		switch e, ok := m.intervalEndpoint(pt); {
 		case ok && e == IRoleI0:
 			return args[0], true // left endpoint A
@@ -3535,7 +3536,7 @@ func (m *Machine) tryPappUIota(args []Val) (Val, bool) {
 // There is no refl rule (preflF is non-dependent); the β and boundary rules suffice
 // for the dependent HIT eliminators' path methods.
 func (m *Machine) tryPathPIota(args []Val) (Val, bool) {
-	if len(args) != 5 || m.Pp == nil {
+	if len(args) != 5 || m.PathP == nil {
 		return nil, false
 	}
 	path, pt := args[3], args[4]
@@ -3543,12 +3544,12 @@ func (m *Machine) tryPathPIota(args []Val) (Val, bool) {
 	if pneu, ok := m.Force(path).(VNeu); ok {
 		phead, pargs := spineParts(pneu.Spine)
 		if pref, ok := phead.(NRef); ok &&
-			m.Pp.PathPRoleOf(pref.Hash) == PPRoleAbs && len(pargs) == 2 {
+			m.PathP.PathPRoleOf(pref.Hash) == PPRoleAbs && len(pargs) == 2 {
 			return m.Apply(pargs[1], pt), true // f i
 		}
 	}
 	// Boundary rules: a dependent path's value at an endpoint is that endpoint.
-	if m.Iv != nil {
+	if m.Interval != nil {
 		switch e, ok := m.intervalEndpoint(pt); {
 		case ok && e == IRoleI0:
 			return args[1], true // left endpoint x
@@ -3572,7 +3573,7 @@ func (m *Machine) faceConst(v Val) (FaceRole, bool) {
 	if !ok || len(args) != 0 {
 		return CRoleNone, false
 	}
-	if role := m.Fc.FaceRoleOf(ref.Hash); role == CRoleTop || role == CRoleBot {
+	if role := m.Face.FaceRoleOf(ref.Hash); role == CRoleTop || role == CRoleBot {
 		return role, true
 	}
 	return CRoleNone, false
@@ -3587,7 +3588,7 @@ func (m *Machine) faceConst(v Val) (FaceRole, bool) {
 //	for  ⊥ φ ~> φ  for  ⊤ _ ~> ⊤     (symmetric)
 func (m *Machine) tryFaceIota(role FaceRole, args []Val) (Val, bool) {
 	face := func(r FaceRole) Val {
-		h, ok := m.Fc.FaceHash(r)
+		h, ok := m.Face.FaceHash(r)
 		if !ok {
 			return nil
 		}
@@ -3595,7 +3596,7 @@ func (m *Machine) tryFaceIota(role FaceRole, args []Val) (Val, bool) {
 	}
 	switch role {
 	case CRoleEq0, CRoleEq1:
-		if len(args) != 1 || m.Iv == nil {
+		if len(args) != 1 || m.Interval == nil {
 			return nil, false
 		}
 		e, ok := m.intervalEndpoint(args[0])
@@ -3736,10 +3737,10 @@ func mentionsRefNeu(m *Machine, n Neutral, h Hash) bool {
 // fill) do the work — keeping one code path for both forms and letting a stuck
 // `transp` and a stuck `transpG ⊥` share a normal form.
 func (m *Machine) tryTransp(args []Val) (Val, bool) {
-	if len(args) != 2 || m.Fc == nil || m.Kn == nil {
+	if len(args) != 2 || m.Face == nil || m.Kan == nil {
 		return nil, false
 	}
-	tgH, ok := m.Kn.KanHash(KRoleTranspG)
+	tgH, ok := m.Kan.KanHash(KRoleTranspG)
 	if !ok {
 		return nil, false
 	}
@@ -3749,7 +3750,7 @@ func (m *Machine) tryTransp(args []Val) (Val, bool) {
 // glueFormer probes a value for a saturated Glue former, returning its four args
 // [A, φ, T, e] (Glue is a separate builtin group, so fibFormer does not see it).
 func (m *Machine) glueFormer(v Val) ([]Val, bool) {
-	if m.Gl == nil {
+	if m.Glue == nil {
 		return nil, false
 	}
 	n, ok := m.Force(v).(VNeu)
@@ -3758,7 +3759,7 @@ func (m *Machine) glueFormer(v Val) ([]Val, bool) {
 	}
 	head, args := spineParts(n.Spine)
 	ref, ok := head.(NRef)
-	if !ok || m.Gl.GlueRoleOf(ref.Hash) != URoleGlue || len(args) != 4 {
+	if !ok || m.Glue.GlueRoleOf(ref.Hash) != URoleGlue || len(args) != 4 {
 		return nil, false
 	}
 	return args, true
@@ -3768,7 +3769,7 @@ func (m *Machine) glueFormer(v Val) ([]Val, bool) {
 // argument [Afam] (the suspension HIT is a separate group; fibFormer does not
 // see it).
 func (m *Machine) suspFormer(v Val) ([]Val, bool) {
-	if m.Su == nil {
+	if m.Susp == nil {
 		return nil, false
 	}
 	n, ok := m.Force(v).(VNeu)
@@ -3777,7 +3778,7 @@ func (m *Machine) suspFormer(v Val) ([]Val, bool) {
 	}
 	head, args := spineParts(n.Spine)
 	ref, ok := head.(NRef)
-	if !ok || m.Su.SuspRoleOf(ref.Hash) != SuRoleSusp || len(args) != 1 {
+	if !ok || m.Susp.SuspRoleOf(ref.Hash) != SuRoleSusp || len(args) != 1 {
 		return nil, false
 	}
 	return args, true
@@ -3786,7 +3787,7 @@ func (m *Machine) suspFormer(v Val) ([]Val, bool) {
 // quotFormer probes a value for a saturated Quotient former, returning its two
 // arguments [Afam, Rfam].
 func (m *Machine) quotFormer(v Val) ([]Val, bool) {
-	if m.Qh == nil {
+	if m.QuotHit == nil {
 		return nil, false
 	}
 	n, ok := m.Force(v).(VNeu)
@@ -3795,7 +3796,7 @@ func (m *Machine) quotFormer(v Val) ([]Val, bool) {
 	}
 	head, args := spineParts(n.Spine)
 	ref, ok := head.(NRef)
-	if !ok || m.Qh.QuotHitRoleOf(ref.Hash) != QHRoleQuot || len(args) != 2 {
+	if !ok || m.QuotHit.QuotHitRoleOf(ref.Hash) != QHRoleQuot || len(args) != 2 {
 		return nil, false
 	}
 	return args, true
@@ -3819,15 +3820,15 @@ func (m *Machine) quotFormer(v Val) ([]Val, bool) {
 // consumes; verified standalone, no kernel caller yet. See
 // FACE-RESTRICTED-EVAL-DESIGN.md §4 and cubicaltt Eval.hs `extend`.
 func (m *Machine) extend(B, contr, phi, u Val) (Val, bool) {
-	if m.Fib == nil || m.Si == nil || m.Kn == nil || m.Pa == nil {
+	if m.Fibrant == nil || m.Sigma == nil || m.Kan == nil || m.Path == nil {
 		return nil, false
 	}
-	piFH, ok1 := m.Fib.FibHash(FRolePiF)
-	pathFH, ok2 := m.Fib.FibHash(FRolePathF)
-	fstFH, ok3 := m.Si.SigmaHash(GRoleFst)
-	sndFH, ok4 := m.Si.SigmaHash(GRoleSnd)
-	hcompH, ok5 := m.Kn.KanHash(KRoleHcomp)
-	pappH, ok6 := m.Pa.PathHash(PRoleApp)
+	piFH, ok1 := m.Fibrant.FibHash(FRolePiF)
+	pathFH, ok2 := m.Fibrant.FibHash(FRolePathF)
+	fstFH, ok3 := m.Sigma.SigmaHash(GRoleFst)
+	sndFH, ok4 := m.Sigma.SigmaHash(GRoleSnd)
+	hcompH, ok5 := m.Kan.KanHash(KRoleHcomp)
+	pappH, ok6 := m.Path.PathHash(PRoleApp)
 	if !(ok1 && ok2 && ok3 && ok4 && ok5 && ok6) {
 		return nil, false
 	}
@@ -3870,7 +3871,7 @@ func (m *Machine) extend(B, contr, phi, u Val) (Val, bool) {
 // in i and a glue-intro input; otherwise stuck (neutral input / varying φ need
 // the face-restricted route — RestrictIv/extend — a later increment).
 func (m *Machine) transpGlueIntro(ALine, a0 Val) (Val, bool) {
-	if m.Gl == nil || m.Kn == nil || m.Pa == nil || m.Fc == nil || m.Iv == nil {
+	if m.Glue == nil || m.Kan == nil || m.Path == nil || m.Face == nil || m.Interval == nil {
 		return nil, false
 	}
 	g := m.Force(a0)
@@ -3880,7 +3881,7 @@ func (m *Machine) transpGlueIntro(ALine, a0 Val) (Val, bool) {
 	}
 	gh, gargs := spineParts(gn.Spine)
 	gref, ok := gh.(NRef)
-	if !ok || m.Gl.GlueRoleOf(gref.Hash) != URoleGlueIn || len(gargs) != 6 {
+	if !ok || m.Glue.GlueRoleOf(gref.Hash) != URoleGlueIn || len(gargs) != 6 {
 		return nil, false
 	}
 	tComp, aComp := gargs[4], gargs[5] // the intro's T-component and base
@@ -3897,12 +3898,12 @@ func (m *Machine) transpGlueIntro(ALine, a0 Val) (Val, bool) {
 	if !ok || mentionsRefVal(m, phiS, kanFreshSentinel) {
 		return nil, false // φ varies in i: needs the face-restricted route
 	}
-	transpGH, ok1 := m.Kn.KanHash(KRoleTranspG)
-	compH, ok2 := m.Kn.KanHash(KRoleComp)
-	hcompH, ok3 := m.Kn.KanHash(KRoleHcomp)
-	eq1H, ok6 := m.Fc.FaceHash(CRoleEq1)
-	efH, ok7 := m.Gl.EquivFunHash()
-	i1h, ok8 := m.Iv.IntervalHash(IRoleI1)
+	transpGH, ok1 := m.Kan.KanHash(KRoleTranspG)
+	compH, ok2 := m.Kan.KanHash(KRoleComp)
+	hcompH, ok3 := m.Kan.KanHash(KRoleHcomp)
+	eq1H, ok6 := m.Face.FaceHash(CRoleEq1)
+	efH, ok7 := m.Glue.EquivFunHash()
+	i1h, ok8 := m.Interval.IntervalHash(IRoleI1)
 	if !(ok1 && ok2 && ok3 && ok6 && ok7 && ok8) {
 		return nil, false
 	}
@@ -3946,7 +3947,7 @@ func (m *Machine) transpGlueIntro(ALine, a0 Val) (Val, bool) {
 	}}
 	// a1 = hcomp (A i1) φ (λj h. pathComp_h @ j) vi1'
 	a1v := m.Apply(m.Apply(m.Apply(m.Apply(m.refVal(hcompH), Ai1), phi), body), vi1p)
-	glueInH, ok := m.Gl.GlueHash(URoleGlueIn)
+	glueInH, ok := m.Glue.GlueHash(URoleGlueIn)
 	if !ok {
 		return nil, false
 	}
@@ -3978,7 +3979,7 @@ func (m *Machine) transpGlueIntro(ALine, a0 Val) (Val, bool) {
 // fully-general compGlue with multi-atom face restriction (RestrictIv) — stuck, the
 // remaining tail (FACE-RESTRICTED-EVAL-DESIGN.md §7).
 func (m *Machine) transpGlueEndpointTotal(ALine, g0 Val) (Val, bool) {
-	if m.Gl == nil || m.Iv == nil || m.Sy == nil || m.Fc == nil || m.Si == nil || m.Kn == nil {
+	if m.Glue == nil || m.Interval == nil || m.System == nil || m.Face == nil || m.Sigma == nil || m.Kan == nil {
 		return nil, false
 	}
 	part := func(iv Val, k int) (Val, bool) {
@@ -3996,13 +3997,13 @@ func (m *Machine) transpGlueEndpointTotal(ALine, g0 Val) (Val, bool) {
 	if _, ok := part(sent, 0); !ok {
 		return nil, false
 	}
-	i0h, ok0 := m.Iv.IntervalHash(IRoleI0)
-	i1h, ok1 := m.Iv.IntervalHash(IRoleI1)
-	hth, okh := m.Sy.SysHash(SRoleTop)
-	unglueH, oku := m.Gl.GlueHash(URoleUnglue)
-	epH, okep := m.Gl.EquivProofHash()
-	fstH, okf := m.Si.SigmaHash(GRoleFst)
-	transpGH, okt := m.Kn.KanHash(KRoleTranspG)
+	i0h, ok0 := m.Interval.IntervalHash(IRoleI0)
+	i1h, ok1 := m.Interval.IntervalHash(IRoleI1)
+	hth, okh := m.System.SysHash(SRoleTop)
+	unglueH, oku := m.Glue.GlueHash(URoleUnglue)
+	epH, okep := m.Glue.EquivProofHash()
+	fstH, okf := m.Sigma.SigmaHash(GRoleFst)
+	transpGH, okt := m.Kan.KanHash(KRoleTranspG)
 	if !(ok0 && ok1 && okh && oku && okep && okf && okt) {
 		return nil, false
 	}
@@ -4073,7 +4074,7 @@ func (m *Machine) TranspGlueEndpointTotalForTest(line, g0 Val) (Val, bool) {
 // (2) A constant in i (the sentinel probe) ⇒ a0 (regularity); (3) structural by
 // the head former — the varying-domain piF rule (A1) below; (4) otherwise stuck.
 func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
-	if m.Fib == nil || m.Kn == nil || m.Fc == nil || m.Iv == nil {
+	if m.Fibrant == nil || m.Kan == nil || m.Face == nil || m.Interval == nil {
 		return nil, false
 	}
 	// (1) φ = ⊤: A is constant everywhere it matters; transport is the identity.
@@ -4085,14 +4086,14 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 	if !mentionsRefVal(m, line, kanFreshSentinel) {
 		return a0, true
 	}
-	tgH, okk := m.Kn.KanHash(KRoleTranspG)
+	tgH, okk := m.Kan.KanHash(KRoleTranspG)
 	if !okk {
 		return nil, false
 	}
 	// (3b) structural over an inner Sigma line (A5a): a NON-DEPENDENT product
 	// transports componentwise. sigmaF lives in its own group, so fibFormer does
 	// not see it — probe with sigmaFormer.
-	if r, sa, ok := m.sigmaFormer(line); ok && r == GRoleSigma && len(sa) == 2 && m.Si != nil {
+	if r, sa, ok := m.sigmaFormer(line); ok && r == GRoleSigma && len(sa) == 2 && m.Sigma != nil {
 		if v, done := m.transpSigma(A, phi, a0, tgH); done {
 			return v, true
 		}
@@ -4104,9 +4105,9 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 		// ⊤-degeneracy (READY): if the Glue's φ is constantly ⊤ the glued type IS
 		// its T-component (the type boundary), so transport reduces to transport
 		// over the T-line λi. (T i) htop.
-		if m.Sy != nil {
+		if m.System != nil {
 			if c, ok := m.faceConst(gargs[1]); ok && c == CRoleTop {
-				if hth, ok := m.Sy.SysHash(SRoleTop); ok {
+				if hth, ok := m.System.SysHash(SRoleTop); ok {
 					htop := m.refVal(hth)
 					tLine := VLam{Name: "i", Icit: Expl, Body: func(iv Val) Val {
 						ga, ok := m.glueFormer(m.Apply(A, iv))
@@ -4148,7 +4149,7 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 	// the cell — its system is transport-dimension-constant), so all three generator
 	// shapes (poles, meridian, hcomp cell) transport: the Susp Kan structure is TOTAL.
 	if _, ok := m.suspFormer(line); ok {
-		i1h, oki1 := m.Iv.IntervalHash(IRoleI1)
+		i1h, oki1 := m.Interval.IntervalHash(IRoleI1)
 		if !oki1 {
 			return nil, false
 		}
@@ -4165,23 +4166,23 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 			head, aargs := spineParts(an.Spine)
 			if ref, ok := head.(NRef); ok {
 				// point ctor: re-index.
-				role := m.Su.SuspRoleOf(ref.Hash)
+				role := m.Susp.SuspRoleOf(ref.Hash)
 				if role == SuRoleNorth || role == SuRoleSouth {
-					if ctorH, ok := m.Su.SuspHash(role); ok {
+					if ctorH, ok := m.Susp.SuspHash(role); ok {
 						return m.Apply(m.refVal(ctorH), afam1), true
 					}
 				}
 				// meridian point: papp (Susp(A i0)) north south (merid (A i0) a) k.
-				if m.Pa != nil && m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(aargs) == 5 {
+				if m.Path != nil && m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(aargs) == 5 {
 					if mn, ok := m.Force(aargs[3]).(VNeu); ok {
 						mh, ma := spineParts(mn.Spine)
 						if mref, ok := mh.(NRef); ok &&
-							m.Su.SuspRoleOf(mref.Hash) == SuRoleMerid && len(ma) == 2 {
-							northH, ok1 := m.Su.SuspHash(SuRoleNorth)
-							southH, ok2 := m.Su.SuspHash(SuRoleSouth)
-							meridH, ok3 := m.Su.SuspHash(SuRoleMerid)
-							suspH, ok4 := m.Su.SuspHash(SuRoleSusp)
-							pappH, ok5 := m.Pa.PathHash(PRoleApp)
+							m.Susp.SuspRoleOf(mref.Hash) == SuRoleMerid && len(ma) == 2 {
+							northH, ok1 := m.Susp.SuspHash(SuRoleNorth)
+							southH, ok2 := m.Susp.SuspHash(SuRoleSouth)
+							meridH, ok3 := m.Susp.SuspHash(SuRoleMerid)
+							suspH, ok4 := m.Susp.SuspHash(SuRoleSusp)
+							pappH, ok5 := m.Path.PathHash(PRoleApp)
 							if ok1 && ok2 && ok3 && ok4 && ok5 {
 								carrierLine := VLam{Name: "i", Icit: Expl, Body: func(iv Val) Val {
 									ca, ok := m.suspFormer(m.Apply(A, iv))
@@ -4218,7 +4219,7 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 	// The formal hcomp CELL is handled by transpHitHcompCell (transp commutes with the
 	// cell), so the fibrant-quotient Kan structure is TOTAL on all generator shapes.
 	if _, ok := m.quotFormer(line); ok {
-		i1h, oki1 := m.Iv.IntervalHash(IRoleI1)
+		i1h, oki1 := m.Interval.IntervalHash(IRoleI1)
 		if !oki1 {
 			return nil, false
 		}
@@ -4242,8 +4243,8 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 			head, aargs := spineParts(an.Spine)
 			if ref, ok := head.(NRef); ok {
 				// point ctor: transport carrier + re-index.
-				if m.Qh.QuotHitRoleOf(ref.Hash) == QHRoleInc && len(aargs) == 3 {
-					if qincH, ok := m.Qh.QuotHitHash(QHRoleInc); ok {
+				if m.QuotHit.QuotHitRoleOf(ref.Hash) == QHRoleInc && len(aargs) == 3 {
+					if qincH, ok := m.QuotHit.QuotHitHash(QHRoleInc); ok {
 						aT := m.vTranspG(tgH, carrierA, phi, aargs[2])
 						return m.Apply(m.Apply(m.Apply(
 							m.refVal(qincH), afam1), rfam1), aT), true
@@ -4251,15 +4252,15 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 				}
 				// relation point: papp (Quotient(A i0)(R i0)) (qinc a)(qinc b)
 				//                       (qrel (A i0)(R i0) a b r) k.
-				if m.Pa != nil && m.Pa.PathRoleOf(ref.Hash) == PRoleApp && len(aargs) == 5 {
+				if m.Path != nil && m.Path.PathRoleOf(ref.Hash) == PRoleApp && len(aargs) == 5 {
 					if qn, ok := m.Force(aargs[3]).(VNeu); ok {
 						qh, qa := spineParts(qn.Spine)
 						if qref, ok := qh.(NRef); ok &&
-							m.Qh.QuotHitRoleOf(qref.Hash) == QHRoleRel && len(qa) == 5 {
-							qincH, ok1 := m.Qh.QuotHitHash(QHRoleInc)
-							qrelH, ok2 := m.Qh.QuotHitHash(QHRoleRel)
-							quotH, ok3 := m.Qh.QuotHitHash(QHRoleQuot)
-							pappH, ok4 := m.Pa.PathHash(PRoleApp)
+							m.QuotHit.QuotHitRoleOf(qref.Hash) == QHRoleRel && len(qa) == 5 {
+							qincH, ok1 := m.QuotHit.QuotHitHash(QHRoleInc)
+							qrelH, ok2 := m.QuotHit.QuotHitHash(QHRoleRel)
+							quotH, ok3 := m.QuotHit.QuotHitHash(QHRoleQuot)
+							pappH, ok4 := m.Path.PathHash(PRoleApp)
 							if ok1 && ok2 && ok3 && ok4 {
 								a, b, r := qa[2], qa[3], qa[4]
 								aT := m.vTranspG(tgH, carrierA, phi, a)
@@ -4306,7 +4307,7 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 		if len(cargs) != 2 {
 			return nil, false
 		}
-		i0h, ok1 := m.Iv.IntervalHash(IRoleI0)
+		i0h, ok1 := m.Interval.IntervalHash(IRoleI0)
 		if !ok1 {
 			return nil, false
 		}
@@ -4352,23 +4353,23 @@ func (m *Machine) transpG(A, phi, a0 Val) (Val, bool) {
 		if c, ok := m.faceConst(phi); !ok || c != CRoleBot {
 			return nil, false
 		}
-		compH, okc := m.Kn.KanHash(KRoleComp)
-		i0h, ok0 := m.Iv.IntervalHash(IRoleI0)
-		i1h, ok1 := m.Iv.IntervalHash(IRoleI1)
+		compH, okc := m.Kan.KanHash(KRoleComp)
+		i0h, ok0 := m.Interval.IntervalHash(IRoleI0)
+		i1h, ok1 := m.Interval.IntervalHash(IRoleI1)
 		var pabsH, pappH, orH, eq0H, eq1H, fsH Hash
 		var okp1, okp2, oko, oke0, oke1, okf bool
-		if m.Pa != nil {
-			pabsH, okp1 = m.Pa.PathHash(PRoleAbs)
-			pappH, okp2 = m.Pa.PathHash(PRoleApp)
+		if m.Path != nil {
+			pabsH, okp1 = m.Path.PathHash(PRoleAbs)
+			pappH, okp2 = m.Path.PathHash(PRoleApp)
 		}
 		oko = false
-		if m.Fc != nil {
-			orH, oko = m.Fc.FaceHash(CRoleOr)
-			eq0H, oke0 = m.Fc.FaceHash(CRoleEq0)
-			eq1H, oke1 = m.Fc.FaceHash(CRoleEq1)
+		if m.Face != nil {
+			orH, oko = m.Face.FaceHash(CRoleOr)
+			eq0H, oke0 = m.Face.FaceHash(CRoleEq0)
+			eq1H, oke1 = m.Face.FaceHash(CRoleEq1)
 		}
-		if m.Fs != nil {
-			fsH, okf = m.Fs.FsplitHash()
+		if m.Fsplit != nil {
+			fsH, okf = m.Fsplit.FsplitHash()
 		}
 		if !(okc && ok0 && ok1 && okp1 && okp2 && oko && oke0 && oke1 && okf) {
 			return nil, false
@@ -4436,11 +4437,11 @@ func (m *Machine) transpSigma(A, phi, a0 Val, tgH Hash) (Val, bool) {
 	}
 	argSent := VNeu{Spine: NRef{Hash: coindXSentinel}}
 	dependent := mentionsRefVal(m, m.Apply(bfamS, argSent), coindXSentinel)
-	i0h, ok1 := m.Iv.IntervalHash(IRoleI0)
-	i1h, ok2 := m.Iv.IntervalHash(IRoleI1)
-	fstH, ok3 := m.Si.SigmaHash(GRoleFst)
-	sndH, ok4 := m.Si.SigmaHash(GRoleSnd)
-	pairH, ok5 := m.Si.SigmaHash(GRolePair)
+	i0h, ok1 := m.Interval.IntervalHash(IRoleI0)
+	i1h, ok2 := m.Interval.IntervalHash(IRoleI1)
+	fstH, ok3 := m.Sigma.SigmaHash(GRoleFst)
+	sndH, ok4 := m.Sigma.SigmaHash(GRoleSnd)
+	pairH, ok5 := m.Sigma.SigmaHash(GRolePair)
 	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 {
 		return nil, false
 	}
@@ -4507,7 +4508,7 @@ func (m *Machine) transpSigma(A, phi, a0 Val, tgH Hash) (Val, bool) {
 // canonicity is preserved with NO new elimination branch. i1Type is `D(A i1)` (the
 // line applied at i1). Matches the standard cubical transp-on-hcomp reduction.
 func (m *Machine) transpHitHcompCell(A, phi, a0, i1Type Val, tgH Hash) (Val, bool) {
-	if m.Kn == nil {
+	if m.Kan == nil {
 		return nil, false
 	}
 	an, ok := m.Force(a0).(VNeu)
@@ -4516,10 +4517,10 @@ func (m *Machine) transpHitHcompCell(A, phi, a0, i1Type Val, tgH Hash) (Val, boo
 	}
 	head, hargs := spineParts(an.Spine)
 	ref, ok := head.(NRef)
-	if !ok || m.Kn.KanRoleOf(ref.Hash) != KRoleHcomp || len(hargs) != 4 {
+	if !ok || m.Kan.KanRoleOf(ref.Hash) != KRoleHcomp || len(hargs) != 4 {
 		return nil, false
 	}
-	hcompH, ok := m.Kn.KanHash(KRoleHcomp)
+	hcompH, ok := m.Kan.KanHash(KRoleHcomp)
 	if !ok {
 		return nil, false
 	}
@@ -4540,7 +4541,7 @@ func (m *Machine) transpHitHcompCell(A, phi, a0, i1Type Val, tgH Hash) (Val, boo
 // At s = i0 the restricted line A(s∧j) is constant (ieq0 i0 ~> ftop), so the
 // fill is the identity there; at s = i1 it is the full transport.
 func (m *Machine) transpFillF(A, phi, u0, s Val) Val {
-	tgH, ok := m.Kn.KanHash(KRoleTranspG)
+	tgH, ok := m.Kan.KanHash(KRoleTranspG)
 	if !ok {
 		return nil
 	}
@@ -4558,7 +4559,7 @@ func (m *Machine) transpFillF(A, phi, u0, s Val) Val {
 // At r = i1 the reversed restricted line is constant (ieq1 i1 ~> ftop), so the
 // fill is the identity; at r = i0 it is the full backward transport.
 func (m *Machine) transpFillB(A, phi, u1, r Val) Val {
-	tgH, ok := m.Kn.KanHash(KRoleTranspG)
+	tgH, ok := m.Kan.KanHash(KRoleTranspG)
 	if !ok {
 		return nil
 	}
@@ -4577,7 +4578,7 @@ func (m *Machine) vTranspG(tgH Hash, A, phi, a0 Val) Val {
 // Interval/face value constructors over the existing members, so the Kan rules
 // read like the CCHM formulas. Each is m.Apply over m.refVal(memberHash).
 func (m *Machine) vIntervalOp(role IntervalRole, args ...Val) Val {
-	h, ok := m.Iv.IntervalHash(role)
+	h, ok := m.Interval.IntervalHash(role)
 	if !ok {
 		return nil
 	}
@@ -4593,7 +4594,7 @@ func (m *Machine) vImax(a, b Val) Val { return m.vIntervalOp(IRoleMax, a, b) }
 func (m *Machine) vIneg(a Val) Val    { return m.vIntervalOp(IRoleNeg, a) }
 
 func (m *Machine) vFaceOp(role FaceRole, args ...Val) Val {
-	h, ok := m.Fc.FaceHash(role)
+	h, ok := m.Face.FaceHash(role)
 	if !ok {
 		return nil
 	}
@@ -4614,7 +4615,7 @@ func (m *Machine) vFbot() Val        { return m.vFaceOp(CRoleBot) }
 // argument values. Used by the structural Kan rules to recurse on the head of a
 // type-line. Returns ok=false on a neutral that is not a fibrant former head.
 func (m *Machine) fibFormer(v Val) (FibRole, []Val, bool) {
-	if m.Fib == nil {
+	if m.Fibrant == nil {
 		return FRoleNone, nil, false
 	}
 	f := m.Force(v)
@@ -4627,7 +4628,7 @@ func (m *Machine) fibFormer(v Val) (FibRole, []Val, bool) {
 	if !ok {
 		return FRoleNone, nil, false
 	}
-	role := m.Fib.FibRoleOf(ref.Hash)
+	role := m.Fibrant.FibRoleOf(ref.Hash)
 	if role == FRoleNone {
 		return FRoleNone, nil, false
 	}
@@ -4641,15 +4642,15 @@ func (m *Machine) fibFormer(v Val) (FibRole, []Val, bool) {
 // hcomp stuck: the genuine homogeneous filling by recursion on A's former is the
 // labelled remainder of the frontier.
 func (m *Machine) tryHcomp(args []Val) (Val, bool) {
-	if len(args) != 4 || m.Fc == nil || m.Iv == nil || m.Sy == nil {
+	if len(args) != 4 || m.Face == nil || m.Interval == nil || m.System == nil {
 		return nil, false
 	}
 	if c, ok := m.faceConst(args[1]); ok {
 		switch c {
 		case CRoleTop:
 			// total system: the lid is the system at i1 — u i1 htop.
-			i1h, ok1 := m.Iv.IntervalHash(IRoleI1)
-			hth, ok2 := m.Sy.SysHash(SRoleTop)
+			i1h, ok1 := m.Interval.IntervalHash(IRoleI1)
+			hth, ok2 := m.System.SysHash(SRoleTop)
 			if ok1 && ok2 {
 				return m.Apply(m.Apply(args[2], m.refVal(i1h)), m.refVal(hth)), true
 			}
@@ -4664,9 +4665,9 @@ func (m *Machine) tryHcomp(args []Val) (Val, bool) {
 	// Sound and transpFill-free: the base type is fixed (homogeneous), only the
 	// codomain family is indexed by x. (The ⊤ rule above has already fired on a
 	// total face, so here φ is proper or ⊥.)
-	if m.Fib != nil && m.Kn != nil {
+	if m.Fibrant != nil && m.Kan != nil {
 		if role, cargs, ok := m.fibFormer(args[0]); ok && role == FRolePiF && len(cargs) == 2 {
-			if hcompH, ok1 := m.Kn.KanHash(KRoleHcomp); ok1 {
+			if hcompH, ok1 := m.Kan.KanHash(KRoleHcomp); ok1 {
 				phi, u, u0, fam := args[1], args[2], args[3], cargs[1]
 				return VLam{Name: "x", Icit: Expl, Body: func(x Val) Val {
 					innerU := VLam{Name: "i", Icit: Expl, Body: func(iv Val) Val {
@@ -4691,14 +4692,14 @@ func (m *Machine) tryHcomp(args []Val) (Val, bool) {
 	// reads off a/b through those boundaries — so the result inhabits pathF A a b
 	// on the nose for ANY φ, with NO per-face dispatch (overlap-free). The interior
 	// (generic j, proper φ) is a symbolic inner hcomp A. See RBOX-DESIGN.md §2.
-	if m.Fib != nil && m.Kn != nil && m.Pa != nil && m.Fc != nil {
+	if m.Fibrant != nil && m.Kan != nil && m.Path != nil && m.Face != nil {
 		if role, cargs, ok := m.fibFormer(args[0]); ok && role == FRolePathF && len(cargs) == 3 {
-			pabsH, ok1 := m.Pa.PathHash(PRoleAbs)
-			pappH, ok2 := m.Pa.PathHash(PRoleApp)
-			hcompH, ok3 := m.Kn.KanHash(KRoleHcomp)
-			orH, ok4 := m.Fc.FaceHash(CRoleOr)
-			eq0H, ok5 := m.Fc.FaceHash(CRoleEq0)
-			eq1H, ok6 := m.Fc.FaceHash(CRoleEq1)
+			pabsH, ok1 := m.Path.PathHash(PRoleAbs)
+			pappH, ok2 := m.Path.PathHash(PRoleApp)
+			hcompH, ok3 := m.Kan.KanHash(KRoleHcomp)
+			orH, ok4 := m.Face.FaceHash(CRoleOr)
+			eq0H, ok5 := m.Face.FaceHash(CRoleEq0)
+			eq1H, ok6 := m.Face.FaceHash(CRoleEq1)
 			if ok1 && ok2 && ok3 && ok4 && ok5 && ok6 {
 				A, a, b := cargs[0], cargs[1], cargs[2]
 				phi, u, u0 := args[1], args[2], args[3]
@@ -4734,14 +4735,14 @@ func (m *Machine) tryHcomp(args []Val) (Val, bool) {
 	// unglued walls/floor in A, the t-part composes the T-projected walls/floor in
 	// each fibre, and `glue` re-assembles — a glue constructor (canonicity). The
 	// ⊤/⊥ short-circuits above have already handled total/empty ψ.
-	if m.Gl != nil && m.Kn != nil {
+	if m.Glue != nil && m.Kan != nil {
 		if gargs, ok := m.glueFormer(args[0]); ok && len(gargs) == 4 {
 			A, phi, T, e := gargs[0], gargs[1], gargs[2], gargs[3]
 			psi, u, u0 := args[1], args[2], args[3]
-			hcompH, ok1 := m.Kn.KanHash(KRoleHcomp)
-			unglueH, ok2 := m.Gl.GlueHash(URoleUnglue)
-			unglueTH, ok3 := m.Gl.GlueHash(URoleUnglueT)
-			glueInH, ok4 := m.Gl.GlueHash(URoleGlueIn)
+			hcompH, ok1 := m.Kan.KanHash(KRoleHcomp)
+			unglueH, ok2 := m.Glue.GlueHash(URoleUnglue)
+			unglueTH, ok3 := m.Glue.GlueHash(URoleUnglueT)
+			glueInH, ok4 := m.Glue.GlueHash(URoleGlueIn)
 			if ok1 && ok2 && ok3 && ok4 {
 				unglue := func(x Val) Val {
 					return m.Apply(m.Apply(m.Apply(m.Apply(m.Apply(m.refVal(unglueH), A), phi), T), e), x)
@@ -4771,7 +4772,7 @@ func (m *Machine) tryHcomp(args []Val) (Val, bool) {
 	//     ~> pairF A B (hcomp A φ (λi h. (u i h).1) u0.1)
 	//                  (hcomp B φ (λi h. (u i h).2) u0.2)
 	// where B is the (argument-ignoring) family. fstF/sndF compute on a pairF.
-	if m.Si != nil && m.Kn != nil {
+	if m.Sigma != nil && m.Kan != nil {
 		if role, ca, ok := m.sigmaFormer(args[0]); ok && role == GRoleSigma && len(ca) == 2 {
 			if v, done := m.hcompSigma(args, ca[0], ca[1]); done {
 				return v, true
@@ -4806,7 +4807,7 @@ func (m *Machine) tryHcomp(args []Val) (Val, bool) {
 // This lets streams reconstructed from their observations bottom out — the law the
 // global E2 converse's endpoints rely on.
 func (m *Machine) tryUnfoldEta(args []Val) (Val, bool) {
-	if len(args) != 4 || m.Cn == nil {
+	if len(args) != 4 || m.Coind == nil {
 		return nil, false
 	}
 	// carrier S = Nu F'
@@ -4816,7 +4817,7 @@ func (m *Machine) tryUnfoldEta(args []Val) (Val, bool) {
 	}
 	sHead, _ := spineParts(sn.Spine)
 	sRef, ok := sHead.(NRef)
-	if !ok || m.Cn.CoindRoleOf(sRef.Hash) != NRoleNu {
+	if !ok || m.Coind.CoindRoleOf(sRef.Hash) != NRoleNu {
 		return nil, false
 	}
 	// coalgebra c = out F'' (a partial application: out-headed neutral with one arg)
@@ -4826,7 +4827,7 @@ func (m *Machine) tryUnfoldEta(args []Val) (Val, bool) {
 	}
 	cHead, cArgs := spineParts(cn.Spine)
 	cRef, ok := cHead.(NRef)
-	if !ok || m.Cn.CoindRoleOf(cRef.Hash) != NRoleOut || len(cArgs) != 1 {
+	if !ok || m.Coind.CoindRoleOf(cRef.Hash) != NRoleOut || len(cArgs) != 1 {
 		return nil, false
 	}
 	return args[3], true // s
@@ -4846,7 +4847,7 @@ func (m *Machine) tryUnfoldEta(args []Val) (Val, bool) {
 // coinductive extensionality `consStr (head s)(tail s) ≡ s` is DEFINITIONAL when
 // `consStr := nuCons`, which discharges the E2 converse's cons-η.
 func (m *Machine) tryNuConsEta(args []Val) (Val, bool) {
-	if len(args) != 2 || m.Cn == nil {
+	if len(args) != 2 || m.Coind == nil {
 		return nil, false
 	}
 	// arg = out F' s : an out-headed neutral with two args [F', s].
@@ -4856,7 +4857,7 @@ func (m *Machine) tryNuConsEta(args []Val) (Val, bool) {
 	}
 	oHead, oArgs := spineParts(on.Spine)
 	oRef, ok := oHead.(NRef)
-	if !ok || m.Cn.CoindRoleOf(oRef.Hash) != NRoleOut || len(oArgs) != 2 {
+	if !ok || m.Coind.CoindRoleOf(oRef.Hash) != NRoleOut || len(oArgs) != 2 {
 		return nil, false
 	}
 	return oArgs[1], true // s
@@ -4866,7 +4867,7 @@ func (m *Machine) tryNuConsEta(args []Val) (Val, bool) {
 // the Nu former). Used by the Kan-over-Nu rule to confirm an hcomp's type before
 // commuting `out` through it.
 func (m *Machine) headIsNu(ty Val) bool {
-	if m.Cn == nil {
+	if m.Coind == nil {
 		return false
 	}
 	n, ok := m.Force(ty).(VNeu)
@@ -4875,7 +4876,7 @@ func (m *Machine) headIsNu(ty Val) bool {
 	}
 	head, _ := spineParts(n.Spine)
 	ref, ok := head.(NRef)
-	return ok && m.Cn.CoindRoleOf(ref.Hash) == NRoleNu
+	return ok && m.Coind.CoindRoleOf(ref.Hash) == NRoleNu
 }
 
 // unfoldGfixType unfolds a guarded-recursive TYPE value one step so the Kan operations
@@ -4903,7 +4904,7 @@ func (m *Machine) headIsNu(ty Val) bool {
 // `gBisim` via `laterApp ▸ Later`) are guarded, so they unfold and repair. Returns false
 // on any non-gfix/gfixF type, or on an unguarded one.
 func (m *Machine) unfoldGfixType(ty Val) (Val, bool) {
-	if m.Gd == nil {
+	if m.Guard == nil {
 		return nil, false
 	}
 	n, ok := m.Force(ty).(VNeu)
@@ -4915,10 +4916,10 @@ func (m *Machine) unfoldGfixType(ty Val) (Val, bool) {
 	if !ok {
 		return nil, false
 	}
-	role := m.Gd.GuardRoleOf(ref.Hash)
+	role := m.Guard.GuardRoleOf(ref.Hash)
 	switch {
 	case role == LRoleGfix && len(as) == 2:
-		gfixH, ok := m.Gd.GuardHash(LRoleGfix)
+		gfixH, ok := m.Guard.GuardHash(LRoleGfix)
 		if !ok {
 			return nil, false
 		}
@@ -4932,7 +4933,7 @@ func (m *Machine) unfoldGfixType(ty Val) (Val, bool) {
 		gfixKF := m.Apply(m.Apply(m.refVal(gfixH), k), F) // rigid gfix k F
 		return m.Apply(F, gfixKF), true                   // F (gfix k F)
 	case role == LRoleGfixF && len(as) == 4:
-		gfixFH, ok := m.Gd.GuardHash(LRoleGfixF)
+		gfixFH, ok := m.Guard.GuardHash(LRoleGfixF)
 		if !ok {
 			return nil, false
 		}
@@ -4986,10 +4987,10 @@ func (m *Machine) recOccGuardedNeu(n Neutral, h Hash) bool {
 		// If this spine is `Later k X` (or `laterApp …`), the recursive position is
 		// GUARDED — stop descending into the guarded payload. Detect by walking to the
 		// head ref and checking its guard role.
-		if m.Gd != nil {
+		if m.Guard != nil {
 			head, _ := spineParts(x)
 			if ref, ok := head.(NRef); ok {
-				role := m.Gd.GuardRoleOf(ref.Hash)
+				role := m.Guard.GuardRoleOf(ref.Hash)
 				if role == LRoleLater || role == LRoleLaterApp {
 					return true // guarded: the payload sits under ▹κ
 				}
@@ -5011,10 +5012,10 @@ func (m *Machine) recOccGuardedNeu(n Neutral, h Hash) bool {
 // remainder (the second hcomp's type would slide with the first projection) and
 // returns done=false → stuck.
 func (m *Machine) hcompSigma(args []Val, aCode, bFam Val) (Val, bool) {
-	hcompH, ok1 := m.Kn.KanHash(KRoleHcomp)
-	fstH, ok2 := m.Si.SigmaHash(GRoleFst)
-	sndH, ok3 := m.Si.SigmaHash(GRoleSnd)
-	pairH, ok4 := m.Si.SigmaHash(GRolePair)
+	hcompH, ok1 := m.Kan.KanHash(KRoleHcomp)
+	fstH, ok2 := m.Sigma.SigmaHash(GRoleFst)
+	sndH, ok3 := m.Sigma.SigmaHash(GRoleSnd)
+	pairH, ok4 := m.Sigma.SigmaHash(GRolePair)
 	if !ok1 || !ok2 || !ok3 || !ok4 {
 		return nil, false
 	}
@@ -5050,7 +5051,7 @@ func (m *Machine) hcompSigma(args []Val, aCode, bFam Val) (Val, bool) {
 	// DEPENDENT family (A5b): the second component is a comp along the B-fibre
 	// line over the FIRST component's filler a* = hfill A φ (fst∘u) (fst u0).
 	//   b1 = comp (λj. B (a* j)) φ (snd∘u) (snd u0)   :  El (B a1)   (a* i1 = a1)
-	compH, okc := m.Kn.KanHash(KRoleComp)
+	compH, okc := m.Kan.KanHash(KRoleComp)
 	if !okc {
 		return nil, false
 	}
@@ -5078,14 +5079,14 @@ func (m *Machine) hcompSigma(args []Val, aCode, bFam Val) (Val, bool) {
 // condition (the floor extends the walls' bottom on φ) — so the fsplit dispatch
 // is sound. Returns a `λr. …` Val. See ref_docs/wootz/RBOX-DESIGN.md.
 func (m *Machine) hfill(A, phi, u, u0 Val) (Val, bool) {
-	if m.Kn == nil || m.Fc == nil || m.Iv == nil || m.Fs == nil {
+	if m.Kan == nil || m.Face == nil || m.Interval == nil || m.Fsplit == nil {
 		return nil, false
 	}
-	hcompH, ok1 := m.Kn.KanHash(KRoleHcomp)
-	orH, ok2 := m.Fc.FaceHash(CRoleOr)
-	eq0H, ok3 := m.Fc.FaceHash(CRoleEq0)
-	iminH, ok4 := m.Iv.IntervalHash(IRoleMin)
-	fsH, ok5 := m.Fs.FsplitHash()
+	hcompH, ok1 := m.Kan.KanHash(KRoleHcomp)
+	orH, ok2 := m.Face.FaceHash(CRoleOr)
+	eq0H, ok3 := m.Face.FaceHash(CRoleEq0)
+	iminH, ok4 := m.Interval.IntervalHash(IRoleMin)
+	fsH, ok5 := m.Fsplit.FsplitHash()
 	if !(ok1 && ok2 && ok3 && ok4 && ok5) {
 		return nil, false
 	}
@@ -5118,15 +5119,15 @@ func (m *Machine) hfill(A, phi, u, u0 Val) (Val, bool) {
 // under ⊥ leaves comp stuck: the structural box-fill (classically transp ∘
 // hcomp, by recursion on A's former) is the labelled remainder of the frontier.
 func (m *Machine) tryComp(args []Val) (Val, bool) {
-	if len(args) != 4 || m.Fc == nil || m.Iv == nil || m.Sy == nil {
+	if len(args) != 4 || m.Face == nil || m.Interval == nil || m.System == nil {
 		return nil, false
 	}
 	if c, ok := m.faceConst(args[1]); ok {
 		switch c {
 		case CRoleTop:
 			// total system: the lid is the system at i1.
-			i1h, ok1 := m.Iv.IntervalHash(IRoleI1)
-			hth, ok2 := m.Sy.SysHash(SRoleTop)
+			i1h, ok1 := m.Interval.IntervalHash(IRoleI1)
+			hth, ok2 := m.System.SysHash(SRoleTop)
 			if ok1 && ok2 {
 				return m.Apply(m.Apply(args[2], m.refVal(i1h)), m.refVal(hth)), true
 			}
@@ -5145,11 +5146,11 @@ func (m *Machine) tryComp(args []Val) (Val, bool) {
 	//   comp (λi. piF P (Fam i)) φ u u0 ~> λx. comp (λi. Fam i x) φ (λi h. u i h x) (u0 x)
 	// Constant domain ⇒ no argument fill (transpFill); a varying domain is the
 	// labelled deep remainder.
-	if m.Fib != nil && m.Kn != nil {
+	if m.Fibrant != nil && m.Kan != nil {
 		sent := VNeu{Spine: NRef{Hash: kanFreshSentinel}}
 		role, cargs, ok := m.fibFormer(m.Apply(args[0], sent))
 		if ok && role == FRolePiF && len(cargs) == 2 && !mentionsRefVal(m, cargs[0], kanFreshSentinel) {
-			if compH, ok1 := m.Kn.KanHash(KRoleComp); ok1 {
+			if compH, ok1 := m.Kan.KanHash(KRoleComp); ok1 {
 				A, phi, u, u0 := args[0], args[1], args[2], args[3]
 				return VLam{Name: "x", Icit: Expl, Body: func(x Val) Val {
 					codLine := VLam{Name: "i", Icit: Expl, Body: func(iv Val) Val {
@@ -5178,14 +5179,14 @@ func (m *Machine) tryComp(args []Val) (Val, bool) {
 	//     ~> hcomp (Glue_i1) ψ
 	//          (λj h. transp (λk. Glue_(imax j k)) (ieq1 j) (u j h))  -- wall j→i1
 	//          (transp (λi. Glue_i) ⊥ u0)                              -- floor i0→i1
-	if m.Gl != nil && m.Kn != nil && m.Iv != nil && m.Fc != nil {
+	if m.Glue != nil && m.Kan != nil && m.Interval != nil && m.Face != nil {
 		sent := VNeu{Spine: NRef{Hash: kanFreshSentinel}}
 		if _, ok := m.glueFormer(m.Apply(args[0], sent)); ok {
-			transpGH, ok1 := m.Kn.KanHash(KRoleTranspG)
-			hcompH, ok2 := m.Kn.KanHash(KRoleHcomp)
-			imaxH, ok3 := m.Iv.IntervalHash(IRoleMax)
-			eq1H, ok4 := m.Fc.FaceHash(CRoleEq1)
-			i1h, ok5 := m.Iv.IntervalHash(IRoleI1)
+			transpGH, ok1 := m.Kan.KanHash(KRoleTranspG)
+			hcompH, ok2 := m.Kan.KanHash(KRoleHcomp)
+			imaxH, ok3 := m.Interval.IntervalHash(IRoleMax)
+			eq1H, ok4 := m.Face.FaceHash(CRoleEq1)
+			i1h, ok5 := m.Interval.IntervalHash(IRoleI1)
 			if ok1 && ok2 && ok3 && ok4 && ok5 {
 				A, psi, u, u0 := args[0], args[1], args[2], args[3]
 				glueI1 := m.Apply(A, m.refVal(i1h))
@@ -5216,7 +5217,7 @@ func (m *Machine) tryComp(args []Val) (Val, bool) {
 	// The three-branch endpoint+walls system dispatches via nested fsplit; the
 	// endpoint/φ overlaps agree (papp of a wall at i0/i1 is a/b). Endpoints compute
 	// to a i1 / b i1; the interior is the symbolic carrier comp.
-	if m.Fib != nil && m.Kn != nil && m.Pa != nil && m.Fc != nil && m.Fs != nil {
+	if m.Fibrant != nil && m.Kan != nil && m.Path != nil && m.Face != nil && m.Fsplit != nil {
 		sent := VNeu{Spine: NRef{Hash: kanFreshSentinel}}
 		if role, ca, ok := m.fibFormer(m.Apply(args[0], sent)); ok && role == FRolePathF && len(ca) == 3 {
 			if v, done := m.compPath(args); done {
@@ -5228,7 +5229,7 @@ func (m *Machine) tryComp(args []Val) (Val, bool) {
 	//   comp (λi. sigmaF (A i) (λ_. B i)) φ u u0
 	//     ~> pairF (A i1) (B i1) (comp (λi. A i) φ (λi h. (u i h).1) u0.1)
 	//                            (comp (λi. B i) φ (λi h. (u i h).2) u0.2)
-	if m.Si != nil && m.Kn != nil {
+	if m.Sigma != nil && m.Kan != nil {
 		sent := VNeu{Spine: NRef{Hash: kanFreshSentinel}}
 		if role, sa, ok := m.sigmaFormer(m.Apply(args[0], sent)); ok && role == GRoleSigma && len(sa) == 2 {
 			if v, done := m.compSigma(args); done {
@@ -5244,15 +5245,15 @@ func (m *Machine) tryComp(args []Val) (Val, bool) {
 // built from nested fsplit. See tryComp and ref_docs/wootz/RBOX-DESIGN.md.
 func (m *Machine) compPath(args []Val) (Val, bool) {
 	A, phi, u, u0 := args[0], args[1], args[2], args[3]
-	compH, okc := m.Kn.KanHash(KRoleComp)
-	i0h, ok0 := m.Iv.IntervalHash(IRoleI0)
-	i1h, ok1 := m.Iv.IntervalHash(IRoleI1)
-	pabsH, okp1 := m.Pa.PathHash(PRoleAbs)
-	pappH, okp2 := m.Pa.PathHash(PRoleApp)
-	orH, oko := m.Fc.FaceHash(CRoleOr)
-	eq0H, oke0 := m.Fc.FaceHash(CRoleEq0)
-	eq1H, oke1 := m.Fc.FaceHash(CRoleEq1)
-	fsH, okf := m.Fs.FsplitHash()
+	compH, okc := m.Kan.KanHash(KRoleComp)
+	i0h, ok0 := m.Interval.IntervalHash(IRoleI0)
+	i1h, ok1 := m.Interval.IntervalHash(IRoleI1)
+	pabsH, okp1 := m.Path.PathHash(PRoleAbs)
+	pappH, okp2 := m.Path.PathHash(PRoleApp)
+	orH, oko := m.Face.FaceHash(CRoleOr)
+	eq0H, oke0 := m.Face.FaceHash(CRoleEq0)
+	eq1H, oke1 := m.Face.FaceHash(CRoleEq1)
+	fsH, okf := m.Fsplit.FsplitHash()
 	if !(okc && ok0 && ok1 && okp1 && okp2 && oko && oke0 && oke1 && okf) {
 		return nil, false
 	}
@@ -5315,12 +5316,12 @@ func (m *Machine) compSigma(args []Val) (Val, bool) {
 	}
 	argSent := VNeu{Spine: NRef{Hash: coindXSentinel}}
 	dependent := mentionsRefVal(m, m.Apply(bfamS, argSent), coindXSentinel)
-	compH, ok1 := m.Kn.KanHash(KRoleComp)
-	fstH, ok2 := m.Si.SigmaHash(GRoleFst)
-	sndH, ok3 := m.Si.SigmaHash(GRoleSnd)
-	pairH, ok4 := m.Si.SigmaHash(GRolePair)
-	i0h, ok5 := m.Iv.IntervalHash(IRoleI0)
-	i1h, ok6 := m.Iv.IntervalHash(IRoleI1)
+	compH, ok1 := m.Kan.KanHash(KRoleComp)
+	fstH, ok2 := m.Sigma.SigmaHash(GRoleFst)
+	sndH, ok3 := m.Sigma.SigmaHash(GRoleSnd)
+	pairH, ok4 := m.Sigma.SigmaHash(GRolePair)
+	i0h, ok5 := m.Interval.IntervalHash(IRoleI0)
+	i1h, ok6 := m.Interval.IntervalHash(IRoleI1)
 	if !ok1 || !ok2 || !ok3 || !ok4 || !ok5 || !ok6 {
 		return nil, false
 	}
@@ -5382,14 +5383,14 @@ func (m *Machine) compSigma(args []Val) (Val, bool) {
 // is the heterogeneous counterpart of hfill's constant carrier. Returns a `λr. …`
 // Val. See hfill and ref_docs/wootz/RBOX-DESIGN.md.
 func (m *Machine) compFill(A, phi, u, u0 Val) (Val, bool) {
-	if m.Kn == nil || m.Fc == nil || m.Iv == nil || m.Fs == nil {
+	if m.Kan == nil || m.Face == nil || m.Interval == nil || m.Fsplit == nil {
 		return nil, false
 	}
-	compH, ok1 := m.Kn.KanHash(KRoleComp)
-	orH, ok2 := m.Fc.FaceHash(CRoleOr)
-	eq0H, ok3 := m.Fc.FaceHash(CRoleEq0)
-	iminH, ok4 := m.Iv.IntervalHash(IRoleMin)
-	fsH, ok5 := m.Fs.FsplitHash()
+	compH, ok1 := m.Kan.KanHash(KRoleComp)
+	orH, ok2 := m.Face.FaceHash(CRoleOr)
+	eq0H, ok3 := m.Face.FaceHash(CRoleEq0)
+	iminH, ok4 := m.Interval.IntervalHash(IRoleMin)
+	fsH, ok5 := m.Fsplit.FsplitHash()
 	if !(ok1 && ok2 && ok3 && ok4 && ok5) {
 		return nil, false
 	}

@@ -213,7 +213,7 @@ func newAccelFixture() (*Machine, accelFixture) {
 			Arg: Ref{Hash: f.zero}}, Arg: mulSucc}, Arg: Var{Idx: 1}}}}}}
 	f.g.bodies[f.add] = addBody
 	f.g.bodies[f.mul] = mulBody
-	m.Na = f
+	m.NatAccel = f
 	return m, f
 }
 
@@ -223,12 +223,12 @@ func (f accelFixture) call(h Hash, a, b int) Tm {
 
 // TestNatAccelAgreesWithUnfolding is the differential soundness gate: for several
 // (a,b), the accelerated op (bigint, fires on two literals) equals the def's
-// UNFOLDED recursive result (the unary peeling). The accel Machine has m.Na set;
-// a second Machine WITHOUT m.Na runs the same call by the ordinary body. Both
+// UNFOLDED recursive result (the unary peeling). The accel Machine has m.NatAccel set;
+// a second Machine WITHOUT m.NatAccel runs the same call by the ordinary body. Both
 // must converge to the same number.
 func TestNatAccelAgreesWithUnfolding(t *testing.T) {
 	mAcc, f := newAccelFixture()
-	mSlow := NewMachine(f.g) // no m.Na: runs add/mul by their bodies
+	mSlow := NewMachine(f.g) // no m.NatAccel: runs add/mul by their bodies
 	mSlow.Data = f.natFixture
 	cases := []struct{ a, b int }{{0, 0}, {0, 5}, {5, 0}, {3, 4}, {7, 9}, {12, 11}}
 	for _, h := range []struct {

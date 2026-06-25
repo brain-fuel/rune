@@ -13,17 +13,17 @@ import (
 // mirroring NormalizeExpr — for tests that drive core operations directly.
 func (s *Session) wiredMachine() *core.Machine {
 	m := core.NewMachine(s.st)
-	m.EqS = equality.Default()
-	m.Data, m.Quot, m.Fib, m.Iv, m.Pa = s.st, s.st, s.st, s.st, s.st
-	m.Fc, m.Sy, m.Kn, m.Si, m.Cn = s.st, s.st, s.st, s.st, s.st
-	m.Gl, m.Fs, m.Fa, m.Pt = s.st, s.st, s.st, s.st
-	m.SyU = s.st
-	m.PpU = s.st
-	m.FsD = s.st
-	m.Pu, m.Hi, m.Su, m.Qh = s.st, s.st, s.st, s.st
-	m.Pp, m.Ci, m.SuI, m.QuI = s.st, s.st, s.st, s.st
-	m.Tr = s.st
-	m.Gd = s.st
+	m.Equality = equality.Default()
+	m.Data, m.Quot, m.Fibrant, m.Interval, m.Path = s.st, s.st, s.st, s.st, s.st
+	m.Face, m.System, m.Kan, m.Sigma, m.Coind = s.st, s.st, s.st, s.st, s.st
+	m.Glue, m.Fsplit, m.Forall, m.Partial = s.st, s.st, s.st, s.st
+	m.SystemU = s.st
+	m.PappU = s.st
+	m.FsplitD = s.st
+	m.PabsU, m.Hit, m.Susp, m.QuotHit = s.st, s.st, s.st, s.st
+	m.PathP, m.CircInd, m.SuspInd, m.QuotInd = s.st, s.st, s.st, s.st
+	m.Trunc = s.st
+	m.Guard = s.st
 	return m
 }
 
