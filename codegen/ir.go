@@ -306,6 +306,12 @@ type Program struct {
 	// IBounce; the backends wrap each partial def's body in a driver loop. Nil/
 	// empty means no trampolining (every def emitted as today).
 	Partials map[string]bool
+	// PartialGroups lists the MUTUAL-recursion groups (each a set of member names)
+	// of `partial` defs declared together in a `mutual` block. The trampoline pass
+	// (T4) bounces a saturated tail call to ANY sibling in the same group, so a deep
+	// mutual cycle runs flat under one driver. A self-only partial needs no entry
+	// (its group is implicitly itself).
+	PartialGroups [][]string
 }
 
 // Erase lowers elaborated, meta-free core to the erased IR. names maps a

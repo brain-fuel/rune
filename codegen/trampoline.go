@@ -40,11 +40,29 @@ func MarkTailBounces(p *Program) {
 	if p.Nat != nil {
 		tc.natElim = p.Nat.ElimName
 	}
+	// groupOf maps a partial to its recursion group: the whole SCC for a `mutual
+	// partial` member (T4 — a tail call to any sibling bounces), else just itself
+	// (v1 self-recursion). One driver then flattens the entire mutual cycle.
+	groupOf := make(map[string]map[string]bool, len(p.Defs))
+	for _, grp := range p.PartialGroups {
+		set := make(map[string]bool, len(grp))
+		for _, n := range grp {
+			set[n] = true
+		}
+		for _, n := range grp {
+			groupOf[n] = set
+		}
+	}
 	for i := range p.Defs {
-		if !p.Partials[p.Defs[i].Name] {
+		name := p.Defs[i].Name
+		if !p.Partials[name] {
 			continue
 		}
-		tc.group = map[string]bool{p.Defs[i].Name: true} // self-recursion (v1)
+		if g, ok := groupOf[name]; ok {
+			tc.group = g // mutual SCC group (T4)
+		} else {
+			tc.group = map[string]bool{name: true} // self-recursion (v1)
+		}
 		p.Defs[i].Body = markTailLams(p.Defs[i].Body, tc)
 	}
 }

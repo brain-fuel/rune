@@ -107,6 +107,11 @@ type Store struct {
 	// permanently neutral in eval/conversion (the firewall), bodies reachable
 	// only through codegen's direct Unfold.
 	partial map[core.Hash]bool
+	// partialGroup maps each member of a MUTUALLY-recursive `partial` group to the
+	// full set of the group's member hashes (incl itself), so codegen's mutual-tail
+	// trampoline (T4) knows which siblings a tail call may bounce to. A self-only
+	// `partial` (AddPartial) is absent — its group is implicitly itself.
+	partialGroup map[core.Hash][]core.Hash
 	// assumed marks `foreign` axioms (R-FFI / B4): bodiless typed constants whose
 	// meaning is supplied by the host. They are trusted, not proven — `rune
 	// assumptions` reports them.
@@ -123,8 +128,9 @@ func New() *Store {
 		dataByHash: map[core.Hash]dataEntry{},
 		ctorRole:   map[core.Hash]ctorRole{},
 		elimRole:   map[core.Hash]core.Hash{},
-		partial:    map[core.Hash]bool{},
-		assumed:    map[core.Hash]bool{},
+		partial:      map[core.Hash]bool{},
+		partialGroup: map[core.Hash][]core.Hash{},
+		assumed:      map[core.Hash]bool{},
 	}
 }
 
@@ -200,11 +206,22 @@ func (s *Store) AddPartialGroup(names []string, tys, bodies []core.Tm) []core.Ha
 		s.names[names[i]] = hs[i]
 		s.partial[hs[i]] = true
 	}
+	for i := range hs {
+		s.partialGroup[hs[i]] = hs // the full SCC group (T4 mutual-tail)
+	}
 	return hs
 }
 
 // IsPartial implements core.PartialInfo.
 func (s *Store) IsPartial(h core.Hash) bool { return s.partial[h] }
+
+// PartialGroupOf returns the hashes of a partial's MUTUAL-recursion group (incl
+// itself) when it was declared in a `mutual` block; ok is false for a self-only
+// `partial` (its group is implicitly just itself).
+func (s *Store) PartialGroupOf(h core.Hash) ([]core.Hash, bool) {
+	g, ok := s.partialGroup[h]
+	return g, ok
+}
 
 // HashDef computes the content hash a definition (ty, body) would be stored
 // under, without storing it. Identity is syntax (core.HashTerm); never modulo

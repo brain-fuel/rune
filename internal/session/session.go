@@ -1317,9 +1317,32 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 		}
 		p.Defs = append(p.Defs, codegen.DefSpec{Name: name, Body: ir, Arity: codegen.LeadingLamCount(ir)})
 	}
-	// Trampoline: mark tail-position self-calls in partial defs so the backends
-	// with a driver flatten deep tail recursion onto the heap (no host-stack
-	// overflow). A no-op when nothing is partial; byte-identical on every backend.
+	// Record the MUTUAL-recursion groups (T4): a `mutual partial` group's members,
+	// so the trampoline bounces a tail call to ANY emitted sibling, not just self.
+	// Each group is recorded once; only members actually emitted as partials count.
+	seenGroup := map[core.Hash]bool{}
+	for _, h := range s.order {
+		if !s.st.IsPartial(h) || !p.Partials[emitNames[h]] {
+			continue
+		}
+		grp, ok := s.st.PartialGroupOf(h)
+		if !ok || seenGroup[grp[0]] {
+			continue
+		}
+		seenGroup[grp[0]] = true
+		var members []string
+		for _, gh := range grp {
+			if n := emitNames[gh]; n != "" && p.Partials[n] {
+				members = append(members, n)
+			}
+		}
+		if len(members) >= 2 {
+			p.PartialGroups = append(p.PartialGroups, members)
+		}
+	}
+	// Trampoline: mark tail-position calls to a partial's recursion group (self in
+	// v1, the whole SCC group in T4) so the backends with a driver flatten deep
+	// (mutual) tail recursion onto the heap. A no-op when nothing is partial.
 	codegen.MarkTailBounces(&p)
 	return p, emitEnv{eraseNames: eraseNames, typeRefs: typeRefs, tainted: tainted, eraser: eraser}, nil
 }

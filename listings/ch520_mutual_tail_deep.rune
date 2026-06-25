@@ -1,0 +1,45 @@
+-- Chapter 520 — deep MUTUAL-tail recursion flattened by the trampoline (T4).
+--
+-- isEven/isOdd are a `mutual partial` group whose recursive calls are CROSS-SIBLING
+-- and in TAIL position (the succ arm). T4 generalises the trampoline's tail-call
+-- marking from self-recursion to the whole SCC group: a saturated tail call to ANY
+-- group member bounces, so the entire mutual cycle runs flat under ONE driver — the
+-- public entry that was called first drives the bounces of both members.
+--
+-- main computes isEven of two MILLION (= true). Without T4 the cross-sibling call is
+-- a direct call and 2,000,000 nested frames overflow the host stack; with T4 it runs
+-- in O(1) host stack on every backend with a driver. Observable "1\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+boolToNat : Bool -> Nat is fn (b : Bool) is case b of | true -> 1 | false -> 0 end end end
+
+mutual
+  partial isEven : Nat -> Bool is
+    fn (n : Nat) is case n of | zero -> true | succ k -> isOdd k end end
+  end
+  partial isOdd : Nat -> Bool is
+    fn (n : Nat) is case n of | zero -> false | succ k -> isEven k end end
+  end
+end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (boolToNat (isEven 2000000))) (fn (a : Nat) is
+    pureIO Unit unit
+  end)
+end

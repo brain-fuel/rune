@@ -134,6 +134,40 @@ func TestTrampolineDeep(t *testing.T) {
 	}
 }
 
+// TestMutualTailDeep is the T4 gate: a `mutual partial` isEven/isOdd whose recursive
+// calls are CROSS-SIBLING and in tail position, run to a depth of two MILLION. The
+// trampoline now marks a tail call to ANY member of the recursion group (not just
+// self), so isEven_step bounces to isOdd_step and vice versa — one driver flattens
+// the whole mutual cycle. Without T4 the cross-sibling call is direct and overflows
+// the host stack at this depth. Byte-identical "1\nunit" on every backend with a
+// driver (+ erl via native TCO); fingerprint-gated (2M x 8 is slow).
+func TestMutualTailDeep(t *testing.T) {
+	if testing.Short() {
+		t.Skip("ch520 deep mutual tail is slow; -short skips it")
+	}
+	skip, commit := gateUnchanged(t, "mutualtaildeep", "../listings/ch520_mutual_tail_deep.rune", "phase_tails_test.go")
+	if skip {
+		t.Skip("ch520_mutual_tail_deep.rune + its test unchanged since last pass; skipping the slow run")
+	}
+	const want = "1\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch520_mutual_tail_deep.rune", "main", ""); got != want {
+				t.Fatalf("[%s] deep mutual tail gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch520_mutual_tail_deep.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch520_mutual_tail_deep.rune", want) })
+	if !t.Failed() {
+		commit()
+	}
+}
+
 // TestRand is a Phase-2 tail gate: a seeded LCG PRNG (ch508), deterministic so
 // byte-identical on all 8 backends. The big multiply rides the arithmetic accel.
 func TestRand(t *testing.T) {
