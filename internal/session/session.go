@@ -452,6 +452,12 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 				return added, err
 			}
 			added = append(added, names...)
+		case surface.DataGroup:
+			names, err := s.AddDataGroup(d)
+			if err != nil {
+				return added, err
+			}
+			added = append(added, names...)
 		case surface.BuiltinNat:
 			if err := s.AddBuiltinNat(d); err != nil {
 				return added, err
@@ -944,6 +950,33 @@ func (s *Session) AddData(d surface.DataDef) ([]string, error) {
 	elimName := decl.Name + "Elim"
 	s.bindName(elimName, eh)
 	names = append(names, elimName)
+	return names, nil
+}
+
+// AddDataGroup elaborates and stores a MUTUALLY-recursive `mutual data … end` group
+// (MB1). The members are elaborated together (each former in scope in every member's
+// constructors), content-addressed as one group (store.AddDataGroup, tag 'G'), and
+// every former/constructor/eliminator is bound in declaration order — so codegen
+// emits each member's eliminator (same-type IH) and constructors like any datatype.
+func (s *Session) AddDataGroup(g surface.DataGroup) ([]string, error) {
+	el := s.elaborator()
+	decls, err := el.ElabDataGroup(g)
+	if err != nil {
+		return nil, err
+	}
+	datas, ctorsPer, elims := s.st.AddDataGroup(decls)
+	var names []string
+	for m, decl := range decls {
+		s.bindName(decl.Name, datas[m])
+		names = append(names, decl.Name)
+		for j, ch := range ctorsPer[m] {
+			s.bindName(decl.CtorNames[j], ch)
+			names = append(names, decl.CtorNames[j])
+		}
+		elimName := decl.Name + "Elim"
+		s.bindName(elimName, elims[m])
+		names = append(names, elimName)
+	}
 	return names, nil
 }
 

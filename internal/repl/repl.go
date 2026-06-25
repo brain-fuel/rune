@@ -190,6 +190,12 @@ func addItem(s *session.Session, it surface.Item, out io.Writer) error {
 			return err
 		}
 		fmt.Fprintf(out, "defined %s\n", strings.Join(names, " "))
+	case surface.DataGroup:
+		names, err := s.AddDataGroup(d)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "declared %s\n", strings.Join(names, " "))
 	case surface.BuiltinNat:
 		if err := s.AddBuiltinNat(d); err != nil {
 			return err

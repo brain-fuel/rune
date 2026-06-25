@@ -1,0 +1,90 @@
+-- Chapter 519 — mutual datatypes for JSON: JVal / JList (MB1).
+--
+-- The canonical motivating mutual datatype: a JSON value is null, a number, or an
+-- array; an array is a list of JSON values. JVal and JList are mutually recursive,
+-- so they form ONE `mutual data` group (store tag 'G', strict positivity checked
+-- across the group). `jarr` holds a `JList` (cross-member) and `jcons` holds a
+-- `JVal` head (cross-member) + a `JList` tail (self-recursive).
+--
+-- Two views of the same data:
+--   * jlistLen : a TOTAL function via JListElim — the same-type IH is over the tail
+--     only, so it counts the elements regardless of their contents.
+--   * sumVal / sumList : MUTUALLY-RECURSIVE `partial` functions that DESCEND into the
+--     values (sum every jnum). A JVal's array is summed by sumList; a JList's head is
+--     summed by sumVal — the cross-member recursion same-type-IH eliminators cannot
+--     express, supplied here by the `mutual partial` group (general recursion), which
+--     runs through codegen.
+--
+-- main: jlistLen items (= 3) and sumVal (jarr items) (= 1+2+3 = 6). Observable "3\n6\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end
+end
+builtin natAdd add
+
+foreign printNat : Nat -> IO Nat end
+
+mutual
+  data JVal : U is
+    jnull : JVal
+  | jnum  : Nat -> JVal
+  | jarr  : JList -> JVal
+  end
+  data JList : U is
+    jnil  : JList
+  | jcons : JVal -> JList -> JList
+  end
+end
+
+-- jlistLen : number of elements in a JList, via JListElim (IH over the tail).
+jlistLen : JList -> Nat is
+  fn (xs : JList) is
+    JListElim (fn (x : JList) is Nat end)
+      zero
+      (fn (v : JVal) is fn (rest : JList) is fn (ih : Nat) is succ ih end end end)
+      xs
+  end
+end
+
+-- sumVal / sumList : descend the whole value, summing every jnum. The cross-member
+-- recursion (a JVal summing its JList, a JList summing its JVal head) is exactly what
+-- a single same-type-IH eliminator cannot do — so they are a `mutual partial` group.
+mutual
+  partial sumVal : JVal -> Nat is
+    fn (v : JVal) is
+      JValElim (fn (x : JVal) is Nat end)
+        zero
+        (fn (n : Nat) is n end)
+        (fn (xs : JList) is sumList xs end)
+        v
+    end
+  end
+  partial sumList : JList -> Nat is
+    fn (xs : JList) is
+      JListElim (fn (x : JList) is Nat end)
+        zero
+        (fn (v : JVal) is fn (rest : JList) is fn (ih : Nat) is add (sumVal v) (sumList rest) end end end)
+        xs
+    end
+  end
+end
+
+items : JList is jcons (jnum 1) (jcons (jnum 2) (jcons (jnum 3) jnil)) end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (jlistLen items)) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (sumVal (jarr items))) (fn (b : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end

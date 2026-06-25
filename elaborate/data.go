@@ -23,6 +23,38 @@ import (
 // construction: the eliminator is the only recursion principle, so there is
 // nothing for a termination checker to reject.
 
+// copyStrata threads every elaboration stratum (equality, datatypes, quotients, the
+// cubical/guarded/sigma builtin groups, …) from e into a freshly-made inner
+// elaborator, so a datatype declaration's constructor types may mention any of them.
+func (e *Elaborator) copyStrata(inner *Elaborator) {
+	inner.M.EqS = e.M.EqS
+	inner.M.Data = e.M.Data
+	inner.M.Quot = e.M.Quot
+	inner.M.Fib = e.M.Fib
+	inner.M.Iv = e.M.Iv
+	inner.M.Pa = e.M.Pa
+	inner.M.Fc = e.M.Fc
+	inner.M.Sy = e.M.Sy
+	inner.M.Kn = e.M.Kn
+	inner.M.Si = e.M.Si
+	inner.M.Cn = e.M.Cn
+	inner.M.Gl = e.M.Gl
+	inner.M.Fs = e.M.Fs
+	inner.M.SyU = e.M.SyU
+	inner.M.FsD = e.M.FsD
+	inner.M.Fa = e.M.Fa
+	inner.M.Pu = e.M.Pu
+	inner.M.PpU = e.M.PpU
+	inner.M.Hi = e.M.Hi
+	inner.M.Su = e.M.Su
+	inner.M.Qh = e.M.Qh
+	inner.M.Pp = e.M.Pp
+	inner.M.Ci = e.M.Ci
+	inner.M.SuI = e.M.SuI
+	inner.M.QuI = e.M.QuI
+	inner.M.Tr = e.M.Tr
+}
+
 // ElabData elaborates one surface datatype declaration.
 func (e *Elaborator) ElabData(d surface.DataDef) (store.DataDecl, error) {
 	fail := func(format string, args ...any) (store.DataDecl, error) {
@@ -53,32 +85,7 @@ func (e *Elaborator) ElabData(d surface.DataDef) (store.DataDecl, error) {
 	refs := overlayRefs(e.Refs, d.Name, ph)
 	g := overlayGlobals{base: e.M.G, hash: ph, ty: ty}
 	inner := New(g, refs, e.RefNames)
-	inner.M.EqS = e.M.EqS
-	inner.M.Data = e.M.Data
-	inner.M.Quot = e.M.Quot
-	inner.M.Fib = e.M.Fib
-	inner.M.Iv = e.M.Iv
-	inner.M.Pa = e.M.Pa
-	inner.M.Fc = e.M.Fc
-	inner.M.Sy = e.M.Sy
-	inner.M.Kn = e.M.Kn
-	inner.M.Si = e.M.Si
-	inner.M.Cn = e.M.Cn
-	inner.M.Gl = e.M.Gl
-	inner.M.Fs = e.M.Fs
-	inner.M.SyU = e.M.SyU
-	inner.M.FsD = e.M.FsD
-	inner.M.Fa = e.M.Fa
-	inner.M.Pu = e.M.Pu
-	inner.M.PpU = e.M.PpU
-	inner.M.Hi = e.M.Hi
-	inner.M.Su = e.M.Su
-	inner.M.Qh = e.M.Qh
-	inner.M.Pp = e.M.Pp
-	inner.M.Ci = e.M.Ci
-	inner.M.SuI = e.M.SuI
-	inner.M.QuI = e.M.QuI
-	inner.M.Tr = e.M.Tr
+	e.copyStrata(inner)
 
 	decl := store.DataDecl{Name: d.Name, Ty: ty, NumParams: k}
 	for _, ctor := range d.Ctors {
@@ -124,8 +131,158 @@ func (e *Elaborator) ElabData(d surface.DataDef) (store.DataDecl, error) {
 		return fail("a datatype needs at least one constructor (the empty type arrives when a listing needs it)")
 	}
 
-	decl.ElimTy = elimType(decl, ph)
+	// Single datatype: the former is Placeholder(0) and its constructors follow at
+	// Placeholder(1..n), the layout AddData expects (unchanged hashing).
+	ctorPHs := make([]core.Hash, len(decl.CtorTys))
+	for i := range ctorPHs {
+		ctorPHs[i] = ctorPlaceholder(i)
+	}
+	decl.ElimTy = elimType(decl, ph, ctorPHs)
 	return decl, nil
+}
+
+// ElabDataGroup elaborates a MUTUALLY-recursive datatype group (MB1): N formers all
+// in scope in every member's constructor types, so Tree may mention Forest and vice
+// versa. The group placeholder layout (shared with store.AddDataGroup) is
+// Placeholder(m) = the m-th former, Placeholder(N + g) = the g-th constructor
+// (flattened). STRICT POSITIVITY is generalised across the group: a constructor
+// argument is either a SELF occurrence `selfFormer params` (recursive — gets a
+// same-type IH), a CROSS-member occurrence `otherFormer params` (allowed, strictly
+// positive, but NO IH — recurse it with that member's own eliminator), or mentions no
+// group member at all. Each member gets its own SAME-TYPE-IH eliminator.
+func (e *Elaborator) ElabDataGroup(grp surface.DataGroup) ([]store.DataDecl, error) {
+	n := len(grp.Members)
+	formerPH := func(m int) core.Hash { return store.Placeholder(m) }
+
+	// 1. Each former's type: a closed explicit Pi telescope ending in U.
+	tys := make([]core.Tm, n)
+	doms := make([][]binder, n)
+	ks := make([]int, n)
+	for m, d := range grp.Members {
+		ty, _, err := e.checkType(&Ctx{}, d.Ty)
+		if err != nil {
+			return nil, fmt.Errorf("data %s: %v", d.Name, err)
+		}
+		ty = e.Zonk(0, ty)
+		dms, ret := telescope(ty)
+		if _, ok := ret.(core.Univ); !ok {
+			return nil, fmt.Errorf("data %s: the former's type must end in U, not %s", d.Name, e.prettyTm(ret))
+		}
+		for _, dm := range dms {
+			if dm.icit != core.Expl {
+				return nil, fmt.Errorf("data %s: implicit datatype parameters are not supported", d.Name)
+			}
+		}
+		tys[m], doms[m], ks[m] = ty, dms, len(dms)
+	}
+
+	// 2. Make every member former visible (at its placeholder) for constructor
+	//    elaboration — so a constructor type may reference any group member.
+	refs := make(map[string]core.Hash, len(e.Refs)+n)
+	for k, v := range e.Refs {
+		refs[k] = v
+	}
+	gtys := make(map[core.Hash]core.Tm, n)
+	for m, d := range grp.Members {
+		refs[d.Name] = formerPH(m)
+		gtys[formerPH(m)] = tys[m]
+	}
+	inner := New(groupGlobals{base: e.M.G, tys: gtys}, refs, e.RefNames)
+	e.copyStrata(inner)
+
+	// 3. Per member: elaborate constructors, check generalised strict positivity.
+	decls := make([]store.DataDecl, n)
+	for m, d := range grp.Members {
+		k := ks[m]
+		decl := store.DataDecl{Name: d.Name, Ty: tys[m], NumParams: k}
+		for _, ctor := range d.Ctors {
+			cty, _, err := inner.checkType(&Ctx{}, ctor.Ty)
+			if err != nil {
+				return nil, fmt.Errorf("data %s: constructor %s: %v", d.Name, ctor.Name, err)
+			}
+			cty = inner.Zonk(0, cty)
+			if err := inner.ErrUnsolved("constructor " + ctor.Name); err != nil {
+				return nil, fmt.Errorf("data %s: %v", d.Name, err)
+			}
+			cdoms, cret := telescope(cty)
+			if len(cdoms) < k {
+				return nil, fmt.Errorf("data %s: constructor %s must repeat the %d parameter binder(s)", d.Name, ctor.Name, k)
+			}
+			for i := 0; i < k; i++ {
+				if core.HashTerm(cdoms[i].dom) != core.HashTerm(doms[m][i].dom) {
+					return nil, fmt.Errorf("data %s: constructor %s: parameter %d differs from the former's telescope", d.Name, ctor.Name, i+1)
+				}
+			}
+			arity := len(cdoms) - k
+			rec := make([]bool, arity)
+			for j := 0; j < arity; j++ {
+				dom := cdoms[k+j].dom
+				if core.HashTerm(dom) == core.HashTerm(selfApplied(formerPH(m), k, j)) {
+					rec[j] = true // self occurrence: a same-type induction hypothesis
+					continue
+				}
+				cross := false
+				for m2 := 0; m2 < n; m2++ {
+					if m2 != m && core.HashTerm(dom) == core.HashTerm(selfApplied(formerPH(m2), ks[m2], j)) {
+						cross = true // cross-member occurrence: positive, no IH
+						break
+					}
+				}
+				if cross {
+					continue
+				}
+				for m2 := 0; m2 < n; m2++ {
+					if mentionsRef(dom, formerPH(m2)) {
+						return nil, fmt.Errorf("data %s: constructor %s: argument %d violates strict positivity (a group member may appear only as exactly its own former applied to the parameters)", d.Name, ctor.Name, j+1)
+					}
+				}
+			}
+			if core.HashTerm(cret) != core.HashTerm(selfApplied(formerPH(m), k, arity)) {
+				return nil, fmt.Errorf("data %s: constructor %s must return `%s` applied to the parameters in order", d.Name, ctor.Name, d.Name)
+			}
+			decl.CtorNames = append(decl.CtorNames, ctor.Name)
+			decl.CtorTys = append(decl.CtorTys, cty)
+			decl.Sigs = append(decl.Sigs, core.CtorSig{Arity: arity, Rec: rec})
+		}
+		if len(decl.CtorTys) == 0 {
+			return nil, fmt.Errorf("data %s: a datatype needs at least one constructor", d.Name)
+		}
+		decls[m] = decl
+	}
+
+	// 4. Build each member's eliminator type over the group's ctor placeholders
+	//    (Placeholder(N + base_m + j)), the layout store.AddDataGroup resolves.
+	base := 0
+	for m := range decls {
+		ctorPHs := make([]core.Hash, len(decls[m].CtorTys))
+		for j := range ctorPHs {
+			ctorPHs[j] = store.Placeholder(n + base + j)
+		}
+		decls[m].ElimTy = elimType(decls[m], formerPH(m), ctorPHs)
+		base += len(decls[m].CtorTys)
+	}
+	return decls, nil
+}
+
+// groupGlobals exposes the bodiless member formers of a `mutual data` group (each at
+// its positional placeholder) over a base Globals, for constructor-type elaboration.
+type groupGlobals struct {
+	base core.Globals
+	tys  map[core.Hash]core.Tm
+}
+
+func (o groupGlobals) TypeOf(h core.Hash) (core.Tm, bool) {
+	if ty, ok := o.tys[h]; ok {
+		return ty, true
+	}
+	return o.base.TypeOf(h)
+}
+
+func (o groupGlobals) Unfold(h core.Hash) (core.Tm, bool) {
+	if _, ok := o.tys[h]; ok {
+		return nil, false // formers are canonical (permanently neutral heads)
+	}
+	return o.base.Unfold(h)
 }
 
 // binder is one telescope entry.
@@ -220,7 +377,7 @@ func mentionsRef(t core.Tm, h core.Hash) bool {
 //
 // All index arithmetic is explicit; the motive lands in U, and Prop-valued
 // motives are admitted by Prop <: U cumulativity at the use site.
-func elimType(d store.DataDecl, ph core.Hash) core.Tm {
+func elimType(d store.DataDecl, ph core.Hash, ctorPHs []core.Hash) core.Tm {
 	doms, _ := telescope(d.Ty)
 	k := d.NumParams
 	n := len(d.CtorTys)
@@ -242,7 +399,7 @@ func elimType(d store.DataDecl, ph core.Hash) core.Tm {
 	// Wrap constructor cases, LAST first.
 	body := core.Tm(end)
 	for i := n - 1; i >= 0; i-- {
-		caseTy := caseType(d, ph, i)
+		caseTy := caseType(d, ph, ctorPHs, i)
 		// At case i's binder, the binders inside between it and the motive are
 		// the LATER cases (i+1..n-1)? No: cases are wrapped outside-in, so at
 		// case i's position the in-scope binders are params + motive + cases
@@ -273,7 +430,7 @@ func elimType(d store.DataDecl, ph core.Hash) core.Tm {
 // k params + 1 motive + i earlier cases:
 //
 //	(a1:T1) … (an:Tn) -> [IH: m a_r ->]* -> m (C_i p* a*)
-func caseType(d store.DataDecl, ph core.Hash, i int) core.Tm {
+func caseType(d store.DataDecl, ph core.Hash, ctorPHs []core.Hash, i int) core.Tm {
 	k := d.NumParams
 	sig := d.Sigs[i]
 	cdoms, _ := telescope(d.CtorTys[i])
@@ -295,7 +452,7 @@ func caseType(d store.DataDecl, ph core.Hash, i int) core.Tm {
 
 	// The result: m (C_i p* a*). Params: param j (outermost first) has index
 	// k-1-j + pre + depthInside. Args: arg j has index (arity-1-j) + nIH.
-	var capp core.Tm = core.Ref{Hash: ctorPlaceholder(i)}
+	var capp core.Tm = core.Ref{Hash: ctorPHs[i]}
 	for j := 0; j < k; j++ {
 		capp = core.App{Fn: capp, Arg: core.Var{Idx: k - 1 - j + pre + depthInside}, Icit: core.Expl}
 	}

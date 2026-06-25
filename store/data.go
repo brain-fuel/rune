@@ -96,6 +96,97 @@ func (s *Store) AddData(d DataDecl) (data core.Hash, ctors []core.Hash, elim cor
 	return data, ctors, elim
 }
 
+// AddDataGroup stores a MUTUALLY-recursive datatype group (MB1): N formers whose
+// constructors reference each other (e.g. Tree/Forest, JVal/JList). The whole group
+// is content-addressed as a unit (tag 'G') with the placeholder layout
+//
+//	Placeholder(m)          = the m-th former            (m in 0..N-1)
+//	Placeholder(N + g)      = the g-th constructor       (g flattened across members)
+//
+// so a constructor type's cross-member reference (Tree mentioning Forest) hashes
+// positionally, exactly as HashSCC does for a `partial` group. Each member's hashes
+// derive from the group hash + role + index; the per-member eliminator computes by
+// the same ι-rule as a single datatype (SAME-TYPE induction hypotheses only — a
+// cross-member recursive argument carries no IH, you recurse it with that member's
+// own eliminator). A singleton group delegates to AddData (zero hash churn).
+func (s *Store) AddDataGroup(decls []DataDecl) (datas []core.Hash, ctorsPer [][]core.Hash, elims []core.Hash) {
+	if len(decls) == 1 {
+		d, c, e := s.AddData(decls[0])
+		return []core.Hash{d}, [][]core.Hash{c}, []core.Hash{e}
+	}
+	n := len(decls)
+	g := newHasher()
+	g.Write([]byte{defFormatVersion, 'G'})
+	writeUint(g, uint64(n))
+	for _, d := range decls {
+		th := core.HashTerm(d.Ty)
+		g.Write(th[:])
+		writeUint(g, uint64(d.NumParams))
+		writeUint(g, uint64(len(d.CtorTys)))
+		for _, ct := range d.CtorTys {
+			ch := core.HashTerm(ct)
+			g.Write(ch[:])
+		}
+	}
+	var group core.Hash
+	copy(group[:], g.Sum(nil))
+
+	derive := func(role byte, i int) core.Hash {
+		h := newHasher()
+		h.Write([]byte{defFormatVersion, role})
+		h.Write(group[:])
+		writeUint(h, uint64(i))
+		var out core.Hash
+		copy(out[:], h.Sum(nil))
+		return out
+	}
+	datas = make([]core.Hash, n)
+	elims = make([]core.Hash, n)
+	ctorsPer = make([][]core.Hash, n)
+	gIdx := 0
+	for m := range decls {
+		datas[m] = derive('d', m)
+		elims[m] = derive('e', m)
+		ctorsPer[m] = make([]core.Hash, len(decls[m].CtorTys))
+		for j := range decls[m].CtorTys {
+			ctorsPer[m][j] = derive('c', gIdx)
+			gIdx++
+		}
+	}
+	// Substitute every group placeholder with its derived content hash.
+	subst := func(t core.Tm) core.Tm {
+		for m := 0; m < n; m++ {
+			t = replaceRef(t, Placeholder(m), datas[m])
+		}
+		g2 := 0
+		for m := 0; m < n; m++ {
+			for j := range ctorsPer[m] {
+				t = replaceRef(t, Placeholder(n+g2), ctorsPer[m][j])
+				g2++
+			}
+		}
+		return t
+	}
+	for m, d := range decls {
+		s.defs[datas[m]] = Def{Type: subst(d.Ty)}
+		s.names[d.Name] = datas[m]
+		for j, ct := range d.CtorTys {
+			s.defs[ctorsPer[m][j]] = Def{Type: subst(ct)}
+			s.names[d.CtorNames[j]] = ctorsPer[m][j]
+		}
+		s.defs[elims[m]] = Def{Type: subst(d.ElimTy)}
+		s.names[d.Name+"Elim"] = elims[m]
+
+		e := dataEntry{decl: d, data: datas[m], ctors: ctorsPer[m], elim: elims[m]}
+		s.dataByHash[datas[m]] = e
+		for j, ch := range ctorsPer[m] {
+			s.ctorRole[ch] = ctorRole{data: datas[m], idx: j}
+		}
+		s.elimRole[elims[m]] = datas[m]
+	}
+	return datas, ctorsPer, elims
+}
+
 type ctorRole struct {
 	data core.Hash
 	idx  int

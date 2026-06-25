@@ -53,6 +53,50 @@ func TestMutualPartial(t *testing.T) {
 	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch516_mutual_partial.rune", want) })
 }
 
+// TestMutualData gates mutually-recursive DATATYPES (MB1): a `mutual data … end`
+// group whose members reference each other, content-addressed as one group, each
+// with a SAME-TYPE-IH eliminator. ch518 is a rose tree (Tree/Forest): forestLen via
+// ForestElim (IH over the tail), unTree via TreeElim (no IH) -> "2\nunit". Byte-
+// identical on all 8 backends; the listing also elaborates + kernel-checks (totality
+// by construction) in the listings suite.
+func TestMutualData(t *testing.T) {
+	const want = "2\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch518_mutual_data.rune", "main", ""); got != want {
+				t.Fatalf("[%s] mutual data gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch518_mutual_data.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch518_mutual_data.rune", want) })
+}
+
+// TestMutualJSON gates the canonical mutual datatype (MB1): JVal/JList, a JSON value
+// AST. ch519 combines the mutual DATA group with a `mutual partial` sumVal/sumList
+// that DESCENDS the values (the cross-member recursion a same-type-IH eliminator
+// cannot express) plus a total jlistLen via JListElim -> "3\n6\nunit". All 8 backends.
+func TestMutualJSON(t *testing.T) {
+	const want = "3\n6\nunit"
+	for _, bk := range ioOSBackends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch519_mutual_json.rune", "main", ""); got != want {
+				t.Fatalf("[%s] mutual json gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	t.Run("native", func(t *testing.T) { runBytesNative(t, "ch519_mutual_json.rune", want) })
+	t.Run("jvm", func(t *testing.T) { runBytesJVM(t, "ch519_mutual_json.rune", want) })
+}
+
 // TestTrampolineDeep is the T3 byte-identical cross-backend gate for the shared-IR
 // trampoline: a self-recursive `partial` counting down from two MILLION runs FLAT on
 // EVERY backend and yields the same "0\nunit". The tail self-call (through the NatElim

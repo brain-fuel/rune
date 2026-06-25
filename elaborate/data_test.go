@@ -203,6 +203,91 @@ func TestCtorDisjointness(t *testing.T) {
 	}
 }
 
+// treeForest is a mutually-recursive datatype group (MB1): a rose tree over a forest.
+const treeForest = natOps + `
+mutual
+  data Tree : U is
+    node : Forest -> Tree
+  end
+  data Forest : U is
+    fnil  : Forest
+  | fcons : Tree -> Forest -> Forest
+  end
+end
+forestLen : Forest -> Nat is
+  fn (f : Forest) is
+    ForestElim (fn (x : Forest) is Nat end)
+      zero
+      (fn (t : Tree) is fn (rest : Forest) is fn (ih : Nat) is succ ih end end end)
+      f
+  end
+end
+`
+
+// TestMutualDataIota: the per-member SAME-TYPE-IH eliminator computes by ι over a
+// mutual datatype — forestLen folds a Forest (self-recursive tail IH) while the
+// cross-member Tree heads ride along untouched.
+func TestMutualDataIota(t *testing.T) {
+	evalTo(t, treeForest, `forestLen (fcons (node fnil) (fcons (node fnil) fnil))`,
+		"succ (succ zero)")
+	evalTo(t, treeForest, `forestLen fnil`, "zero")
+	// TreeElim projects a tree's forest (no IH on the cross-member argument).
+	evalTo(t, treeForest+`
+unTree : Tree -> Forest is fn (t : Tree) is TreeElim (fn (x : Tree) is Forest end) (fn (f : Forest) is f end) t end end
+`, `forestLen (unTree (node (fcons (node fnil) fnil)))`, "succ zero")
+}
+
+// TestMutualDataContentAddressed: an identical `mutual data` group hashes identically
+// (group identity is content), and the two members get DISTINCT hashes.
+func TestMutualDataContentAddressed(t *testing.T) {
+	s := session.New()
+	if _, err := s.LoadSource(treeForest); err != nil {
+		t.Fatal(err)
+	}
+	tree1, _ := s.Lookup("Tree")
+	forest1, _ := s.Lookup("Forest")
+	if tree1 == forest1 {
+		t.Fatal("Tree and Forest collided on one hash")
+	}
+	s2 := session.New()
+	if _, err := s2.LoadSource(treeForest); err != nil {
+		t.Fatal(err)
+	}
+	tree2, _ := s2.Lookup("Tree")
+	if tree1 != tree2 {
+		t.Fatal("identical mutual data groups got different hashes")
+	}
+}
+
+// TestMutualDataErrors: generalised strict positivity is checked ACROSS the group —
+// a group member in a negative position (a function-argument domain) is rejected,
+// just as for a single datatype.
+func TestMutualDataErrors(t *testing.T) {
+	cases := []struct{ src, want string }{
+		// Forest appears negatively (as a function domain) in Tree's constructor.
+		{`mutual
+  data Tree : U is node : (Forest -> Tree) -> Tree end
+  data Forest : U is fnil : Forest | fcons : Tree -> Forest -> Forest end
+end`, "positivity"},
+		// A member constructor returning the wrong member.
+		{`mutual
+  data A : U is mka : A end
+  data B : U is mkb : A end
+end`, "must return"},
+	}
+	for i, c := range cases {
+		s := session.New()
+		_, err := s.LoadSource(natDecl + c.src)
+		if err == nil {
+			t.Errorf("case %d: expected error containing %q, got none", i, c.want)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.want) {
+			t.Errorf("case %d: error %q does not contain %q", i, err, c.want)
+		}
+	}
+}
+
 // Same declaration twice: same content hashes (datatype identity is content).
 func TestDataContentAddressed(t *testing.T) {
 	s := session.New()

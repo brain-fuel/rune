@@ -141,6 +141,39 @@ func TestREPLDeclParity(t *testing.T) {
 	}
 }
 
+// TestREPLMutualData checks a `mutual data` group (MB1) declares in the REPL and its
+// per-member eliminator computes — a feature isn't done until it works in `rune repl`.
+func TestREPLMutualData(t *testing.T) {
+	script := []string{
+		"data Nat : U is",
+		"  zero : Nat",
+		"| succ : Nat -> Nat",
+		"end",
+		"mutual",
+		"  data Tree : U is node : Forest -> Tree end",
+		"  data Forest : U is fnil : Forest | fcons : Tree -> Forest -> Forest end",
+		"end",
+		"forestLen : Forest -> Nat is fn (f : Forest) is ForestElim (fn (x : Forest) is Nat end) zero (fn (t : Tree) is fn (rest : Forest) is fn (ih : Nat) is succ ih end end end) f end end",
+		"forestLen (fcons (node fnil) (fcons (node fnil) fnil))",
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"declared Tree node TreeElim Forest fnil fcons ForestElim", // the whole group
+		"succ (succ zero)",                                         // forestLen of a 2-tree forest
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
+		}
+	}
+}
+
 // TestREPLPrelude checks the default REPL behaves like a calculator: the prelude
 // binds numerals and the five operators, results print as digits, definitions on
 // top of the prelude work, and :reset brings the prelude back.

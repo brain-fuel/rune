@@ -1,0 +1,64 @@
+-- Chapter 518 — mutually-recursive DATATYPES (MB1).
+--
+-- A `mutual … end` block may hold two or more `data` declarations whose
+-- constructors reference each other: a rose tree is a `node` over a `Forest`, and a
+-- `Forest` is a list of `Tree`s. The group is one content-addressed unit (store tag
+-- 'G'); strict positivity is checked across the whole group (a member may appear
+-- only as exactly its own former applied to the parameters), and each member gets
+-- its own SAME-TYPE-IH eliminator — a cross-member recursive argument (the `Tree`
+-- inside `fcons`) carries no induction hypothesis, so you recurse it with that
+-- member's own eliminator.
+--
+-- `forestLen` counts the trees in a forest via ForestElim (the IH is over the
+-- self-recursive tail only); `unTree` projects a tree's forest via TreeElim (no IH).
+-- main: forestLen (unTree sampleTree) over a 2-tree forest. Observable "2\nunit".
+
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+mutual
+  data Tree : U is
+    node : Forest -> Tree
+  end
+  data Forest : U is
+    fnil  : Forest
+  | fcons : Tree -> Forest -> Forest
+  end
+end
+
+-- forestLen : count the trees in a forest. ForestElim's fcons case binds the head
+-- Tree (no IH — cross-member), the tail Forest, and the IH over that tail.
+forestLen : Forest -> Nat is
+  fn (f : Forest) is
+    ForestElim (fn (x : Forest) is Nat end)
+      zero
+      (fn (t : Tree) is fn (rest : Forest) is fn (ih : Nat) is succ ih end end end)
+      f
+  end
+end
+
+-- unTree : project a tree's immediate forest. TreeElim's node case binds the
+-- Forest argument (no IH) and the motive is constant Forest.
+unTree : Tree -> Forest is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Forest end) (fn (f : Forest) is f end) t
+  end
+end
+
+sampleForest : Forest is fcons (node fnil) (fcons (node fnil) fnil) end
+sampleTree : Tree is node sampleForest end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (forestLen (unTree sampleTree))) (fn (a : Nat) is
+    pureIO Unit unit
+  end)
+end
