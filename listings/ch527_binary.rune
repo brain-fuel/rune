@@ -1,0 +1,176 @@
+-- Chapter 527 — the `encoding/binary` package: big-endian fixed-width integer
+-- codecs over Bin (Go-stdlib parity, Phase 2). Go's binary.BigEndian.PutUint16/
+-- Uint16/PutUint32/Uint32: a uint splits into bytes most-significant-first, and
+-- decoding folds them back by Horner's rule (acc*256 + byte). Pure wootz over the
+-- ch483 Bin carrier; the byte split is div/mod by 256, kernel-accelerated (builtin
+-- natDiv/natMod) so a 32-bit value splits in O(1) host arithmetic at runtime.
+--
+-- Bin's ops are FOREIGN (opaque to the type-checker), so the Bin-level round trip
+-- is shown at RUNTIME in main; the DECODE ARITHMETIC is proven pure-Nat by refl
+-- (the part that does not touch the foreign carrier). main's observable: a uint16
+-- round trip (513), the high byte of a split (700 -> 2), and a uint32 round trip
+-- (70000) — byte-identical on all 8 backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binAt    : Bin -> Nat -> Nat end
+
+-- arithmetic kit (ch484) incl. fuel-bounded div/mod, registered as the kernel
+-- accel so the byte split is O(1) at runtime.
+and2 : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end
+end
+
+boolToNat : Bool -> Nat is
+  fn (b : Bool) is case b of | true -> 1 | false -> 0 end end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is case n of | zero -> zero | succ m -> m end end
+end
+
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a
+  end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end)
+      b a
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end
+end
+
+isZeroN : Nat -> Bool is
+  fn (n : Nat) is case n of | zero -> true | succ k -> false end end
+end
+
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end)
+      (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is
+           case leb b a of
+           | true  -> succ (ih (monus a b) b)
+           | false -> 0
+           end
+         end
+      end)
+      fuel
+  end
+end
+
+divN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    case isZeroN b of | true -> 0 | false -> divModGo a a b end
+  end
+end
+
+modN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end
+end
+
+builtin natDiv divN
+builtin natMod modN
+
+-- ============================================================================
+-- encoding/binary, big-endian
+-- ============================================================================
+
+-- the radix: 2^8 = 256.
+b256 : Nat is 256 end
+
+-- binary.BigEndian.PutUint16: high byte first.
+putUint16BE : Nat -> Bin is
+  fn (n : Nat) is binCons (divN n b256) (binCons (modN n b256) binEmpty) end
+end
+
+-- binary.BigEndian.Uint16: Horner fold of the two bytes.
+uint16BE : Bin -> Nat is
+  fn (b : Bin) is addN (mulN (binAt b 0) b256) (binAt b 1) end
+end
+
+-- binary.BigEndian.PutUint32: four bytes, most significant first.
+putUint32BE : Nat -> Bin is
+  fn (n : Nat) is
+    binCons (modN (divN n 16777216) b256)
+      (binCons (modN (divN n 65536) b256)
+        (binCons (modN (divN n b256) b256)
+          (binCons (modN n b256) binEmpty)))
+  end
+end
+
+-- binary.BigEndian.Uint32: Horner fold of the four bytes.
+uint32BE : Bin -> Nat is
+  fn (b : Bin) is
+    addN (mulN (addN (mulN (addN (mulN (binAt b 0) b256) (binAt b 1)) b256)
+      (binAt b 2)) b256) (binAt b 3)
+  end
+end
+
+-- ============================================================================
+-- decode-arithmetic laws, by refl (pure-Nat; the part not touching foreign Bin)
+-- ============================================================================
+
+-- the Horner decode of bytes (2,1) is 2*256+1 = 513.
+uint16Decode : Nat -> Nat -> Nat is
+  fn (hi : Nat) (lo : Nat) is addN (mulN hi b256) lo end
+end
+
+decode513 : Eq Nat (uint16Decode 2 1) 513 is refl 513 end
+
+-- the Horner decode of bytes (0,1,17,112) is 70000  (70000 = 0x0001_1170).
+uint32Decode : Nat -> Nat -> Nat -> Nat -> Nat is
+  fn (b0 : Nat) (b1 : Nat) (b2 : Nat) (b3 : Nat) is
+    addN (mulN (addN (mulN (addN (mulN b0 b256) b1) b256) b2) b256) b3
+  end
+end
+
+decode70000 : Eq Nat (uint32Decode 0 1 17 112) 70000 is refl 70000 end
+
+-- ============================================================================
+-- main — the cross-backend observable (Bin round trip, at runtime)
+-- ============================================================================
+--   uint16BE (putUint16BE 513)   -> 513   (PutUint16 then Uint16 is identity)
+--   binAt (putUint16BE 700) 0    -> 2     (the high byte: 700 / 256 = 2)
+--   uint32BE (putUint32BE 70000) -> 70000 (PutUint32 then Uint32 is identity)
+main : IO Unit is
+  bindIO Nat Unit (printNat (uint16BE (putUint16BE 513))) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (binAt (putUint16BE 700) 0)) (fn (b : Nat) is
+      bindIO Nat Unit (printNat (uint32BE (putUint32BE 70000))) (fn (c : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

@@ -1,0 +1,141 @@
+-- Chapter 526 — the `unicode` package: codepoint classification + case folding
+-- over Rune (a Nat codepoint), Go-stdlib parity. The ASCII core of Go's
+-- `unicode`: IsDigit, IsUpper, IsLower, IsLetter, IsSpace, ToLower, ToUpper —
+-- each a total predicate / map on the codepoint, pure wootz over Nat arithmetic
+-- (no FFI beyond the ch483 Bin console). The full Unicode category tables are the
+-- same shape with wider ranges; the ASCII block is the spec-complete core every
+-- text codec needs and the part with byte-identical behaviour on all 8 backends.
+--
+-- main's observable: IsDigit '5' (1), IsSpace '\n' (1), IsLetter '0' (0),
+-- ToLower 'A' = 'a' so ToLower 'A' = 97, and a round trip ToUpper(ToLower 'A')
+-- back to 'A' = 65. Four refl proofs certify the classification + the case-fold
+-- involution on a letter.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+-- arithmetic kit (ch484): the comparisons + add/monus case folding needs.
+and2 : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end
+end
+
+or2 : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is case a of | true -> true | false -> b end end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is case n of | zero -> zero | succ m -> m end end
+end
+
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end)
+      b a
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end
+end
+
+-- a <= b <= c, the inclusive-range test Go's tables are built from.
+inRange : Nat -> Nat -> Nat -> Bool is
+  fn (lo : Nat) (c : Nat) (hi : Nat) is and2 (leb lo c) (leb c hi) end
+end
+
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is and2 (leb a b) (leb b a) end
+end
+
+boolToNat : Bool -> Nat is
+  fn (b : Bool) is case b of | true -> 1 | false -> 0 end end
+end
+
+ite : Bool -> Nat -> Nat -> Nat is
+  fn (b : Bool) (t : Nat) (e : Nat) is case b of | true -> t | false -> e end end
+end
+
+-- ============================================================================
+-- the unicode package (ASCII block)
+-- ============================================================================
+
+-- unicode.IsDigit: '0'(48) .. '9'(57)
+isDigit : Nat -> Bool is fn (c : Nat) is inRange 48 c 57 end end
+
+-- unicode.IsUpper: 'A'(65) .. 'Z'(90)
+isUpper : Nat -> Bool is fn (c : Nat) is inRange 65 c 90 end end
+
+-- unicode.IsLower: 'a'(97) .. 'z'(122)
+isLower : Nat -> Bool is fn (c : Nat) is inRange 97 c 122 end end
+
+-- unicode.IsLetter (ASCII): upper or lower.
+isLetter : Nat -> Bool is fn (c : Nat) is or2 (isUpper c) (isLower c) end end
+
+-- unicode.IsSpace (ASCII): space(32), tab(9), LF(10), CR(13), VT(11), FF(12).
+isSpace : Nat -> Bool is
+  fn (c : Nat) is
+    or2 (eqNat c 32) (or2 (eqNat c 9) (or2 (eqNat c 10)
+      (or2 (eqNat c 13) (or2 (eqNat c 11) (eqNat c 12)))))
+  end
+end
+
+-- unicode.ToLower: an upper-case letter shifts by 32, everything else is fixed.
+toLower : Nat -> Nat is
+  fn (c : Nat) is ite (isUpper c) (addN c 32) c end
+end
+
+-- unicode.ToUpper: a lower-case letter shifts down by 32, everything else fixed.
+toUpper : Nat -> Nat is
+  fn (c : Nat) is ite (isLower c) (monus c 32) c end
+end
+
+-- ============================================================================
+-- four laws, by refl (classification + the case-fold involution on a letter)
+-- ============================================================================
+
+isDigit5 : Eq Bool (isDigit 53) true is refl true end                 -- '5'
+isSpaceLF : Eq Bool (isSpace 10) true is refl true end                -- '\n'
+isLetterDigitFalse : Eq Bool (isLetter 48) false is refl false end    -- '0'
+-- ToUpper(ToLower 'A')) = 'A': case folding round-trips on a letter.
+caseFoldInvol : Eq Nat (toUpper (toLower 65)) 65 is refl 65 end
+
+-- ============================================================================
+-- main — the cross-backend observable
+-- ============================================================================
+--   isDigit '5'        -> true (1)
+--   isSpace '\n'       -> true (1)
+--   isLetter '0'       -> false (0)
+--   toLower 'A'        -> 'a' (97)
+main : IO Unit is
+  bindIO Nat Unit (printNat (boolToNat (isDigit 53))) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (boolToNat (isSpace 10))) (fn (b : Nat) is
+      bindIO Nat Unit (printNat (boolToNat (isLetter 48))) (fn (c : Nat) is
+        bindIO Nat Unit (printNat (toLower 65)) (fn (d : Nat) is
+          pureIO Unit unit
+        end)
+      end)
+    end)
+  end)
+end

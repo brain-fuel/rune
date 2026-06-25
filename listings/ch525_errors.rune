@@ -1,0 +1,178 @@
+-- Chapter 525 — the `errors` package over a wrap chain (Go-stdlib parity, Phase 0
+-- tail). Go's `errors` is operations on a linked chain of causes:
+--   errors.New(msg)        a leaf error with an identity
+--   fmt.Errorf("…: %w", e) WRAP: a new frame whose cause is e
+--   errors.Unwrap(e)       peel one frame (the cause, or nil)
+--   errors.Is(e, target)   walk the Unwrap chain, true if any frame IS target
+--
+-- The chain IS the data: an error is the list of its frame identities, innermost
+-- last (`wrap` conses a new outer frame). Each leaf error gets a distinct Nat
+-- code — the role errors.New's pointer identity plays in Go, a sentinel you
+-- compare against. `errIs` is exactly errors.Is: membership of the target code in
+-- the chain. `errUnwrap` is errors.Unwrap (the cause, or none).
+--
+-- Pure wootz: the chain is a `List Nat` and every walk is structural recursion
+-- through the generated `ListElim` (the only recursion principle — totality by
+-- construction; no fuel needed, the eliminator IS the bound). main's observable
+-- (byte-identical on all 8 backends): errors.Is finds a wrapped cause (1),
+-- rejects an unrelated sentinel (0), reports the chain depth (3). Two refl proofs
+-- certify the errors.New / errors.Is / errors.Unwrap leaf laws.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+data List : U -> U is
+  nil  : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+
+foreign printNat : Nat -> IO Nat end
+
+-- the arithmetic kit (ch484), the minimum the walk needs.
+and2 : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end
+end
+
+or2 : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is case a of | true -> true | false -> b end end
+end
+
+pred : Nat -> Nat is
+  fn (n : Nat) is case n of | zero -> zero | succ m -> m end end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end)
+      b a
+  end
+end
+
+leb : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end
+end
+
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is and2 (leb a b) (leb b a) end
+end
+
+boolToNat : Bool -> Nat is
+  fn (b : Bool) is case b of | true -> 1 | false -> 0 end end
+end
+
+-- ============================================================================
+-- the errors package — an error code is a Nat, a chain is a List Nat
+-- ============================================================================
+
+-- errors.New(msg): a leaf error is a one-frame chain.
+errNew : Nat -> List Nat is
+  fn (e : Nat) is cons Nat e (nil Nat) end
+end
+
+-- fmt.Errorf("…: %w", cause): push an outer frame onto an existing chain.
+wrap : Nat -> List Nat -> List Nat is
+  fn (e : Nat) (c : List Nat) is cons Nat e c end
+end
+
+-- errors.Unwrap: peel the outermost frame, yielding the cause chain — or none
+-- when only the leaf remains (Go returns nil for a non-wrapping error).
+errUnwrap : List Nat -> Option (List Nat) is
+  fn (c : List Nat) is
+    case c of
+    | nil        -> none (List Nat)
+    | cons x xs  ->
+        case xs of
+        | nil       -> none (List Nat)
+        | cons y ys -> some (List Nat) xs
+        end
+    end
+  end
+end
+
+-- depth of the chain (number of Unwrap steps to nil): the list length, via the
+-- structural eliminator.
+chainLen : List Nat -> Nat is
+  fn (c : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (x : Nat) (rest : List Nat) (ih : Nat) is succ ih end)
+      c
+  end
+end
+
+-- errors.Is(e, target): walk the chain, true if any frame's code equals target.
+-- Structural recursion through ListElim (the target rides the ambient context).
+errIs : List Nat -> Nat -> Bool is
+  fn (c : List Nat) (target : Nat) is
+    ListElim Nat (fn (w : List Nat) is Bool end)
+      false
+      (fn (x : Nat) (rest : List Nat) (ih : Bool) is or2 (eqNat x target) ih end)
+      c
+  end
+end
+
+-- ============================================================================
+-- concrete sentinels + a wrapped chain (the errors.Is worked example)
+-- ============================================================================
+
+errNotFound : Nat is 1 end
+errClosed   : Nat is 2 end
+errTimeout  : Nat is 3 end
+errOther    : Nat is 9 end
+
+-- fmt.Errorf("read: %w", fmt.Errorf("conn: %w", errors.New(timeout)))
+wrapped : List Nat is wrap errClosed (wrap errNotFound (errNew errTimeout)) end
+
+-- ============================================================================
+-- three leaf laws, by refl (the errors.New / errors.Is / errors.Unwrap contract)
+-- ============================================================================
+
+-- errors.Is(errors.New(e), e) is true: a leaf error IS itself.
+isLeafRefl : Eq Bool (errIs (errNew errTimeout) errTimeout) true is
+  refl true
+end
+
+-- errors.Is(errors.New(e), other) is false: distinct sentinels do not match.
+isLeafMiss : Eq Bool (errIs (errNew errTimeout) errOther) false is
+  refl false
+end
+
+-- errors.Unwrap(errors.New(e)) is none: a leaf has no cause.
+unwrapLeafNone : Eq (Option (List Nat)) (errUnwrap (errNew errTimeout)) (none (List Nat)) is
+  refl (none (List Nat))
+end
+
+-- ============================================================================
+-- main — the cross-backend observable
+-- ============================================================================
+--   errIs wrapped errTimeout  -> true  (1): the innermost wrapped cause is found
+--   errIs wrapped errOther    -> false (0): an unrelated sentinel is rejected
+--   chainLen wrapped          -> 3        : three frames (read / conn / leaf)
+main : IO Unit is
+  bindIO Nat Unit (printNat (boolToNat (errIs wrapped errTimeout))) (fn (a : Nat) is
+    bindIO Nat Unit (printNat (boolToNat (errIs wrapped errOther))) (fn (b : Nat) is
+      bindIO Nat Unit (printNat (chainLen wrapped)) (fn (c : Nat) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
