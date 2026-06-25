@@ -1,0 +1,315 @@
+-- Chapter 523 — compress/flate: real DEFLATE (RFC 1951), fixed-Huffman + LZ77.
+--
+-- ch506 was run-length encoding; this is the real thing. encode emits a single
+-- FIXED-Huffman DEFLATE block (BFINAL=1, BTYPE=01): LZ77 greedy matching produces
+-- literals and <length,distance> back-references, each written with the fixed
+-- literal/length and distance Huffman codes + their extra bits, then the
+-- end-of-block symbol 256. The bitstream follows the DEFLATE bit order — data
+-- elements pack LSB-first into bytes, Huffman codes MSB-first — so a real inflater
+-- (Go's compress/flate, the harness oracle) decompresses it back to the input: a
+-- reference round trip, stronger than self-decode. Pure wootz over Bin; the encoder
+-- is pure Bin arithmetic so the emitted bytes are identical on every backend. (A
+-- matching wootz inflater for the self-contained round trip is the documented
+-- follow-up; the compression direction — LZ77 match-finding + the code tables — is
+-- the substance, and it is verified against the gold-standard inflater here.)
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+foreign printNat : Nat -> IO Nat end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+ltN : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is leb (succ a) b end end
+and2 : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> false | true -> b end end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
+builtin natDiv divN
+builtin natMod modN
+pw2 : Nat -> Nat is fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is mulN 2 ih end) n end end
+
+-- A bit list, low-significance bit FIRST in DEFLATE's byte packing order.
+data Bits : U is
+  bnil  : Bits
+| bcons : Nat -> Bits -> Bits
+end
+bapp : Bits -> Bits -> Bits is
+  BitsElim (fn (x : Bits) is Bits -> Bits end)
+    (fn (ys : Bits) is ys end)
+    (fn (b : Nat) (tl : Bits) (ih : Bits -> Bits) is fn (ys : Bits) is bcons b (ih ys) end end)
+end
+blen : Bits -> Nat is BitsElim (fn (x : Bits) is Nat end) zero (fn (b : Nat) (tl : Bits) (ih : Nat) is succ ih end) end
+
+-- emit N bits of v, LSB FIRST (data elements: header bits, extra bits).
+lsbGo : Nat -> Nat -> Nat -> Bits is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Bits end) (fn (v : Nat) (n : Nat) is bnil end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Bits) is
+         fn (v : Nat) (n : Nat) is
+           case n of | zero -> bnil | succ m -> bcons (modN v 2) (ih (divN v 2) m) end
+         end
+      end)
+      fuel
+  end
+end
+lsbBits : Nat -> Nat -> Bits is fn (v : Nat) (n : Nat) is lsbGo n v n end end
+-- emit N bits of code, MSB FIRST (Huffman codes): bit (code >> (n-1-i)) for i=0..n-1.
+msbGo : Nat -> Nat -> Nat -> Nat -> Bits is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat -> Bits end) (fn (code : Nat) (n : Nat) (i : Nat) is bnil end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat -> Bits) is
+         fn (code : Nat) (n : Nat) (i : Nat) is
+           case ltN i n of
+           | false -> bnil
+           | true  -> bcons (modN (divN code (pw2 (monus (monus n 1) i))) 2) (ih code n (succ i))
+           end
+         end
+      end)
+      fuel
+  end
+end
+msbBits : Nat -> Nat -> Bits is fn (code : Nat) (n : Nat) is msbGo n code n 0 end end
+
+-- the fixed literal/length Huffman code (MSB-first value) + bit count for symbol s.
+litCode : Nat -> Bits is
+  fn (s : Nat) is
+    case ltN s 144 of
+    | true  -> msbBits (addN 48 s) 8
+    | false -> case ltN s 256 of
+               | true  -> msbBits (addN 400 (monus s 144)) 9
+               | false -> case ltN s 280 of
+                          | true  -> msbBits (monus s 256) 7
+                          | false -> msbBits (addN 192 (monus s 280)) 8
+                          end
+               end
+    end
+  end
+end
+
+bitAt : Bits -> Nat -> Nat is
+  BitsElim (fn (x : Bits) is Nat -> Nat end)
+    (fn (n : Nat) is 0 end)
+    (fn (b : Nat) (tl : Bits) (ih : Nat -> Nat) is fn (n : Nat) is case n of | zero -> b | succ k -> ih k end end end)
+end
+btail : Bits -> Bits is BitsElim (fn (x : Bits) is Bits end) bnil (fn (b : Nat) (tl : Bits) (ih : Bits) is tl end) end
+bdrop : Bits -> Nat -> Bits is
+  fn (bs : Bits) (n : Nat) is
+    NatElim (fn (x : Nat) is Bits -> Bits end) (fn (xs : Bits) is xs end)
+      (fn (k : Nat) (ih : Bits -> Bits) is fn (xs : Bits) is ih (btail xs) end end) n bs
+  end
+end
+-- pack a bit list (LSB-first) into bytes, padding the last byte with zero bits.
+packGo : Nat -> Bits -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bits -> Bin end) (fn (bs : Bits) is binEmpty end)
+      (fn (f : Nat) (ih : Bits -> Bin) is
+         fn (bs : Bits) is
+           case bs of
+           | bnil -> binEmpty
+           | bcons b0 r0 ->
+               binCons
+                 (addN b0 (addN (mulN 2 (bitAt r0 0)) (addN (mulN 4 (bitAt r0 1)) (addN (mulN 8 (bitAt r0 2))
+                  (addN (mulN 16 (bitAt r0 3)) (addN (mulN 32 (bitAt r0 4)) (addN (mulN 64 (bitAt r0 5)) (mulN 128 (bitAt r0 6)))))))))
+                 (ih (bdrop r0 7))
+           end
+         end
+      end)
+      fuel
+  end
+end
+pack : Bits -> Bin is fn (bs : Bits) is packGo (addN (divN (blen bs) 8) 1) bs end end
+
+-- DEFLATE length/distance code tables (RFC 1951 §3.2.5), as Nat lists.
+lenBaseTbl : Bits is bcons 3 (bcons 4 (bcons 5 (bcons 6 (bcons 7 (bcons 8 (bcons 9 (bcons 10 (bcons 11 (bcons 13 (bcons 15 (bcons 17 (bcons 19 (bcons 23 (bcons 27 (bcons 31 (bcons 35 (bcons 43 (bcons 51 (bcons 59 (bcons 67 (bcons 83 (bcons 99 (bcons 115 (bcons 131 (bcons 163 (bcons 195 (bcons 227 (bcons 258 (bnil))))))))))))))))))))))))))))) end
+lenExtraTbl : Bits is bcons 0 (bcons 0 (bcons 0 (bcons 0 (bcons 0 (bcons 0 (bcons 0 (bcons 0 (bcons 1 (bcons 1 (bcons 1 (bcons 1 (bcons 2 (bcons 2 (bcons 2 (bcons 2 (bcons 3 (bcons 3 (bcons 3 (bcons 3 (bcons 4 (bcons 4 (bcons 4 (bcons 4 (bcons 5 (bcons 5 (bcons 5 (bcons 5 (bcons 0 (bnil))))))))))))))))))))))))))))) end
+distBaseTbl : Bits is bcons 1 (bcons 2 (bcons 3 (bcons 4 (bcons 5 (bcons 7 (bcons 9 (bcons 13 (bcons 17 (bcons 25 (bcons 33 (bcons 49 (bcons 65 (bcons 97 (bcons 129 (bcons 193 (bcons 257 (bcons 385 (bcons 513 (bcons 769 (bcons 1025 (bcons 1537 (bcons 2049 (bcons 3073 (bcons 4097 (bcons 6145 (bcons 8193 (bcons 12289 (bcons 16385 (bcons 24577 (bnil)))))))))))))))))))))))))))))) end
+distExtraTbl : Bits is bcons 0 (bcons 0 (bcons 0 (bcons 0 (bcons 1 (bcons 1 (bcons 2 (bcons 2 (bcons 3 (bcons 3 (bcons 4 (bcons 4 (bcons 5 (bcons 5 (bcons 6 (bcons 6 (bcons 7 (bcons 7 (bcons 8 (bcons 8 (bcons 9 (bcons 9 (bcons 10 (bcons 10 (bcons 11 (bcons 11 (bcons 12 (bcons 12 (bcons 13 (bcons 13 (bnil)))))))))))))))))))))))))))))) end
+
+-- largest table index whose base value is <= x (the bucket for x). The recursion is
+-- in the succ-arm (a `case <guard> of zero -> i | succ k -> recurse`), so it stays
+-- lazy; bounded by the table length anyway.
+srchGo : Nat -> Bits -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bits -> Nat -> Nat -> Nat end) (fn (tbl : Bits) (x : Nat) (i : Nat) is i end)
+      (fn (f : Nat) (ih : Bits -> Nat -> Nat -> Nat) is
+         fn (tbl : Bits) (x : Nat) (i : Nat) is
+           case ltN (succ i) (blen tbl) of
+           | false -> i
+           | true  -> case monus 1 (monus (bitAt tbl (succ i)) x) of  -- 1 iff base[i+1] <= x
+                      | zero   -> i
+                      | succ k -> ih tbl x (succ i)
+                      end
+           end
+         end
+      end)
+      fuel
+  end
+end
+srch : Bits -> Nat -> Nat is fn (tbl : Bits) (x : Nat) is srchGo (blen tbl) tbl x 0 end end
+
+-- a length (3..258) as its fixed length-symbol code + extra bits.
+lenCode : Nat -> Bits is
+  fn (len : Nat) is
+    bapp (litCode (addN 257 (srch lenBaseTbl len)))
+         (lsbBits (monus len (bitAt lenBaseTbl (srch lenBaseTbl len))) (bitAt lenExtraTbl (srch lenBaseTbl len)))
+  end
+end
+-- a distance (1..32768) as its 5-bit distance code + extra bits.
+distCode : Nat -> Bits is
+  fn (dist : Nat) is
+    bapp (msbBits (srch distBaseTbl dist) 5)
+         (lsbBits (monus dist (bitAt distBaseTbl (srch distBaseTbl dist))) (bitAt distExtraTbl (srch distBaseTbl dist)))
+  end
+end
+
+-- LZ77 greedy matcher. matchAt = run-length of s[i..]==s[j..], capped at 258.
+matchGo : Nat -> Bin -> Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Nat -> Nat end) (fn (s : Bin) (i : Nat) (j : Nat) (k : Nat) is k end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Nat -> Nat) is
+         fn (s : Bin) (i : Nat) (j : Nat) (k : Nat) is
+           case monus 258 k of                                 -- 0 iff k=258 (cap)
+           | zero   -> k
+           | succ c -> case monus (binLen s) (addN i k) of      -- 0 iff i+k past end
+                       | zero   -> k
+                       | succ d -> case monus 1 (addN (monus (binAt s (addN i k)) (binAt s (addN j k))) (monus (binAt s (addN j k)) (binAt s (addN i k)))) of  -- 1 iff bytes equal
+                                   | zero   -> k
+                                   | succ e -> ih s i j (succ k)
+                                   end
+                       end
+           end
+         end
+      end)
+      fuel
+  end
+end
+matchAt : Bin -> Nat -> Nat -> Nat is fn (s : Bin) (i : Nat) (j : Nat) is matchGo (binLen s) s i j 0 end end
+
+data Match : U is mkM : Nat -> Nat -> Match end
+mLen  : Match -> Nat is MatchElim (fn (x : Match) is Nat end) (fn (l : Nat) (d : Nat) is l end) end
+mDist : Match -> Nat is MatchElim (fn (x : Match) is Nat end) (fn (l : Nat) (d : Nat) is d end) end
+-- the better of `best` and the match at j (typed, so the Bool case has a motive).
+nextBest : Bin -> Nat -> Nat -> Match -> Match is
+  fn (s : Bin) (i : Nat) (j : Nat) (best : Match) is
+    case and2 (leb 3 (matchAt s i j)) (ltN (mLen best) (matchAt s i j)) of
+    | true  -> mkM (matchAt s i j) (monus i j)
+    | false -> best
+    end
+  end
+end
+-- scan all earlier positions j in [0,i) for the longest match at i (>= 3). The single
+-- recursive ih is in the succ-arm; the choice is folded into nextBest (no spurious arm).
+bestGo : Nat -> Bin -> Nat -> Nat -> Match -> Match is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Nat -> Match -> Match end) (fn (s : Bin) (i : Nat) (j : Nat) (best : Match) is best end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Nat -> Match -> Match) is
+         fn (s : Bin) (i : Nat) (j : Nat) (best : Match) is
+           case monus i j of                                   -- 0 iff j has reached i
+           | zero   -> best
+           | succ c -> ih s i (succ j) (nextBest s i j best)
+           end
+         end
+      end)
+      fuel
+  end
+end
+bestMatch : Bin -> Nat -> Match is fn (s : Bin) (i : Nat) is bestGo i s i 0 (mkM 0 0) end end
+-- emitted bits for position i given its best match (a back-reference if len>=3, else
+-- a literal); and how far to advance. Typed helpers so the Bool case has a motive.
+emitOf : Bin -> Nat -> Match -> Bits is
+  fn (s : Bin) (i : Nat) (m : Match) is
+    case leb 3 (mLen m) of
+    | true  -> bapp (lenCode (mLen m)) (distCode (mDist m))
+    | false -> litCode (binAt s i)
+    end
+  end
+end
+advOf : Match -> Nat is fn (m : Match) is case leb 3 (mLen m) of | true -> mLen m | false -> 1 end end end
+
+-- the LZ77 + fixed-Huffman symbol stream: literals and back-references, then EOB. The
+-- single recursive ih is in the succ-arm (in-range); the match/literal choice is in
+-- the typed emitOf/advOf (the strict-case-arm discipline).
+lzGo : Nat -> Bin -> Nat -> Bits is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bits end) (fn (s : Bin) (i : Nat) is bnil end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bits) is
+         fn (s : Bin) (i : Nat) is
+           case monus (binLen s) i of
+           | zero   -> bnil
+           | succ c -> let m = bestMatch s i in bapp (emitOf s i m) (ih s (addN i (advOf m)))
+           end
+         end
+      end)
+      fuel
+  end
+end
+hdr : Bits is bapp (lsbBits 1 1) (lsbBits 1 2) end  -- BFINAL=1, BTYPE=01 (fixed Huffman)
+encode : Bin -> Bin is
+  fn (s : Bin) is pack (bapp hdr (bapp (lzGo (binLen s) s 0) (litCode 256))) end
+end
+
+-- hex dump of the encoded bytes (so the harness oracle can inflate it).
+hexChar : Nat -> Nat is fn (d : Nat) is case leb d 9 of | true -> addN 48 d | false -> addN 87 d end end end
+hexGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case ltN i (binLen s) of
+           | false -> binEmpty
+           | true  -> binCons (hexChar (divN (binAt s i) 16)) (binCons (hexChar (modN (binAt s i) 16)) (ih s (succ i)))
+           end
+         end
+      end)
+      fuel
+  end
+end
+hexDump : Bin -> Bin is fn (s : Bin) is hexGo (binLen s) s 0 end end
+
+doc : Bin is b"abcabcabcabc" end
+main : IO Unit is
+  bindIO Unit Unit (printBin (hexDump (encode doc))) (fn (a : Unit) is pureIO Unit unit end)
+end
