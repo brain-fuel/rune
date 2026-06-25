@@ -42,7 +42,7 @@ func Default() Backend { return JS{} }
 // All returns every backend the codegen stratum ships, in registration order.
 // C is the first NATIVE backend (telos-2 / M4): it emits portable C over the
 // closure-converted IR + an embedded closure runtime, compiled by the system cc.
-func All() []Backend { return []Backend{JS{}, Py{}, Go{}, Rust{}, Beam{}, JVM{}, C{}, LL{}} }
+func All() []Backend { return []Backend{JS{}, Py{}, Go{}, Rust{}, Beam{}, JVM{}, C{}, LL{}, Wasm{}} }
 
 // targetAliases maps friendly names to the canonical Target() of a backend, so
 // `--target python` and `--target rust` work alongside `py`/`rs`.
@@ -55,6 +55,7 @@ var targetAliases = map[string]string{
 	"java": "jvm", "java25": "jvm", "javac": "jvm",
 	"native": "c", "cc": "c", "gcc": "c",
 	"llvm": "ll", "clang": "ll", "ir": "ll",
+	"wat": "wasm", "webassembly": "wasm", "wasmtime": "wasm",
 }
 
 // ByTarget returns the backend selected by a target name (canonical Target() or
