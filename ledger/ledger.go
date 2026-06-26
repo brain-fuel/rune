@@ -74,8 +74,11 @@ func Build(s *session.Session) []Entry {
 	return out
 }
 
-// classify picks the tier from the facts available so far. Later tasks extend
-// this (guard in Task 5).
+// classify picks the tier from the facts available so far.
+//
+// Order: bodiless -> Postulate/Assume; body + UsesGuard -> Guard (a runtime
+// contract, even if the wrapper elaborated cleanly); body + Certified -> Proven;
+// else Unproven.
 func classify(s *session.Session, d session.Def) Tier {
 	if d.Body == nil {
 		// bodiless: a postulate (an asserted debt) if written as one, else a
@@ -84,6 +87,9 @@ func classify(s *session.Session, d session.Def) Tier {
 			return Postulate
 		}
 		return Assume
+	}
+	if d.UsesGuard {
+		return Guard
 	}
 	if s.Certified(d.Name) {
 		return Proven

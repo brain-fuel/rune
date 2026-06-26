@@ -72,3 +72,27 @@ func TestPostulateTier(t *testing.T) {
 		t.Fatalf("why not carried: %q", e.Why)
 	}
 }
+
+func TestGuardTier(t *testing.T) {
+	// A definition whose body uses the with-post-guard contract sugar.
+	// The guard sugar requires Bool/true/false and Result/ok/err in scope.
+	src := `data Bool : U is
+  true  : Bool
+| false : Bool
+end
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+data Result : (A : U) -> (E : U) -> U is
+  ok  : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+foreign fast : Nat end
+checked : Result Nat Nat is fast with post r guard true blame zero end`
+	es := buildFrom(t, src)
+	e, ok := find(es, "checked")
+	if !ok || e.Tier != Guard {
+		t.Fatalf("checked want Guard, got %v ok=%v", e.Tier, ok)
+	}
+}

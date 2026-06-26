@@ -183,6 +183,10 @@ type Def struct {
 	// Why is the postulate's stated reason (the debt to be paid by a later proof
 	// of the same proposition). Empty for non-postulates.
 	Why string
+	// UsesGuard reports that the definition's body used the `with post ... guard
+	// ... blame ...` contract-sugar at parse time. Session metadata only - never
+	// part of the def's content hash.
+	UsesGuard bool
 }
 
 // Ctor is one constructor of a datatype declaration: Name : Ty.

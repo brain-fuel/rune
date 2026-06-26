@@ -26,19 +26,25 @@ type Def struct {
 	Ty   core.Tm
 	Body core.Tm
 	Hash core.Hash
-	// Postulate reports the def was written as `postulate … because "…" end`
+	// Postulate reports the def was written as `postulate ... because "..." end`
 	// (an asserted debt), not `foreign`. Session metadata only - never hashed.
 	Postulate bool
 	// Why is the postulate's stated reason. Session metadata only - never hashed.
 	Why string
+	// UsesGuard reports that the definition's body used the `with post ... guard
+	// ... blame ...` contract sugar at parse time. Session metadata only - never
+	// part of the def's content hash.
+	UsesGuard bool
 }
 
 // defMeta is per-name metadata the ledger needs but the store does NOT hash: it
-// records how a def was WRITTEN at the surface (postulate-ness + reason), kept
-// session-side so the kernel's content addressing stays untouched.
+// records how a def was WRITTEN at the surface (postulate-ness + reason +
+// guard-sugar usage), kept session-side so the kernel's content addressing stays
+// untouched.
 type defMeta struct {
 	postulate bool
 	why       string
+	usesGuard bool
 }
 
 // Session holds the store, the name->hash reference map that resolution consults, and
@@ -358,6 +364,11 @@ func (s *Session) AddDef(d surface.Def) (Def, error) {
 	}
 	h := s.st.Add(d.Name, ty, body)
 	rd := Def{Name: d.Name, Ty: ty, Body: body, Hash: h}
+	// Record guard-sugar metadata for the ledger. Read-modify-write because Go
+	// map values are not addressable directly.
+	m := s.meta[d.Name]
+	m.usesGuard = d.UsesGuard
+	s.meta[d.Name] = m
 	if _, exists := s.byHash[h]; !exists {
 		s.order = append(s.order, h)
 	}
@@ -795,6 +806,7 @@ func (s *Session) Defs() []Def {
 		m := s.meta[d.Name]
 		d.Postulate = m.postulate
 		d.Why = m.why
+		d.UsesGuard = m.usesGuard
 		out = append(out, d)
 	}
 	return out

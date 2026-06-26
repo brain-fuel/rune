@@ -23,9 +23,13 @@ type parser struct {
 	noEq bool
 	// stopBecause makes the contextual word `because` end an application spine
 	// rather than be consumed as an argument. Set only while parsing a postulate's
-	// type, so `postulate p : U because "…"` reads the type as `U`, not `U because`.
+	// type, so `postulate p : U because "..."` reads the type as `U`, not `U because`.
 	// Reset inside bracketed groups (a real identifier `because` is reachable there).
 	stopBecause bool
+	// guardSeen is set to true inside parseGuard whenever the with-post-guard
+	// contract sugar fires during a definition body parse. parseDefHeadBody resets
+	// it before parsing the body and reads it after to populate Def.UsesGuard.
+	guardSeen bool
 }
 
 // skipNL advances past tNewline tokens. Newlines are insignificant everywhere the
@@ -541,11 +545,13 @@ func (p *parser) parseDefHeadBody(isInstance, isPartial bool) (Def, error) {
 	if _, err := p.expect(tIs); err != nil {
 		return Def{}, err
 	}
+	p.guardSeen = false
 	body, err := p.parseExpr()
 	if err != nil {
 		return Def{}, err
 	}
-	return Def{Name: id.text, Ty: ty, Body: body, IsInstance: isInstance, IsPartial: isPartial}, nil
+	usesGuard := p.guardSeen
+	return Def{Name: id.text, Ty: ty, Body: body, IsInstance: isInstance, IsPartial: isPartial, UsesGuard: usesGuard}, nil
 }
 
 func (p *parser) parseDef() (Def, error) {
@@ -608,6 +614,7 @@ func (p *parser) parseExpr() (Exp, error) {
 // compound form. The desugaring assumes the ambient `Result`/`ok`/`err` and
 // `Bool`/`true`/`false` vocabulary (the contract-guard tier's types).
 func (p *parser) parseGuard(call Exp) (Exp, error) {
+	p.guardSeen = true
 	p.next() // 'with'
 	if w := p.next(); w.kind != tIdent || w.text != "post" {
 		return nil, fmt.Errorf("expected 'post' after 'with' in a guard clause at offset %d", w.pos)
