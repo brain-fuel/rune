@@ -902,6 +902,36 @@ func (p *parser) parseAtom() (Exp, error) {
 		}
 		return ESnd{P: p.projTail(a)}, nil
 	case tIdent:
+		// `do` is a CONTEXTUAL keyword: it opens a `do … end` block only when
+		// the token immediately after `do` can start an atom expression or is
+		// `end` (the block closer). In all other positions — e.g. used as a
+		// plain variable (`f do`, `let do = …`) — `do` is an ordinary identifier.
+		// This mirrors how `protocol` is handled at the top-level parse loop.
+		if t.text == "do" {
+			next1 := p.peekAt(1)
+			blocky := next1.kind == tEnd ||
+				next1.kind == tIdent ||
+				next1.kind == tU ||
+				next1.kind == tLParen ||
+				next1.kind == tFn ||
+				next1.kind == tSeq ||
+				next1.kind == tHole ||
+				next1.kind == tProp ||
+				next1.kind == tEq ||
+				next1.kind == tRefl ||
+				next1.kind == tCast ||
+				next1.kind == tSubst ||
+				next1.kind == tNum ||
+				next1.kind == tDec ||
+				next1.kind == tStr ||
+				next1.kind == tBytes ||
+				next1.kind == tCase ||
+				next1.kind == tCalc ||
+				next1.kind == tLBrace
+			if blocky {
+				return p.parseDo()
+			}
+		}
 		p.next()
 		return EVar{Name: t.text}, nil
 	case tNum:
@@ -1410,6 +1440,107 @@ func (p *parser) parseSeq() (Exp, error) {
 			depth--
 		}
 	}
+}
+
+// parseDo parses `"do" Atom+ "end"` and desugars it to right-nested `par`
+// applications (E4 / M7 surface sugar). The combinator is:
+//
+//	par : (A : U) -> (B : U) -> IO A -> IO B -> IO B
+//
+// Desugaring rule:
+//   - `do a end`          => a          (single item, no par wrapping)
+//   - `do a1 a2 ... an end` => par _ _ a1 (par _ _ a2 (... (par _ _ a(n-1) an)))
+//
+// The `_` holes are filled by the elaborator (the implicit A and B types). Items
+// are collected as space-separated atom expressions until the matching `end`,
+// tracking nesting of inner fn/seq/case/calc/do-like blocks so that nested `end`
+// tokens are not mistaken for the outer close.
+//
+// `do` is a CONTEXTUAL keyword: it only opens a block here, at the expression
+// atom level. In all other positions `do` is an ordinary identifier (EVar).
+func (p *parser) parseDo() (Exp, error) {
+	// p.peek() is the `do` identifier token; consume it.
+	p.next() // `do`
+	start := p.pos
+	depth := 0
+	// Scan for the matching `end`, tracking nesting.
+	for i := p.pos; ; i++ {
+		if i >= len(p.toks) || p.toks[i].kind == tEOF {
+			return nil, fmt.Errorf("%w: unterminated do (missing 'end')", ErrIncomplete)
+		}
+		switch p.toks[i].kind {
+		case tFn, tSeq, tCase, tCalc:
+			depth++
+		case tIdent:
+			if p.toks[i].text == "do" {
+				depth++
+			}
+		case tEnd:
+			if depth == 0 {
+				body := p.toks[start:i]
+				p.pos = i + 1
+				return desugarDo(body)
+			}
+			depth--
+		}
+	}
+}
+
+// desugarDo parses a sequence of atom expressions from toks and folds them
+// right into nested `par _ _ a1 (par _ _ a2 (... an))` applications.
+//
+// Items are collected by re-parsing each atom expression using a sub-parser
+// that consumes one atom at a time (left-to-right), stopping when the token
+// stream is exhausted. An empty body is rejected. A single item is returned
+// as-is. Two or more items fold right with `par`.
+func desugarDo(toks []token) (Exp, error) {
+	// Skip leading/trailing newlines; newlines between items are insignificant
+	// (unlike seq, where they are separators). Collect all atom expressions.
+	if len(toks) == 0 {
+		return nil, fmt.Errorf("a do block must contain at least one action: empty do")
+	}
+	sub := &parser{toks: appendEOF(toks)}
+	var items []Exp
+	for sub.peek().kind != tEOF {
+		// Skip insignificant newlines between items.
+		for sub.peek().kind == tNewline {
+			sub.next()
+		}
+		if sub.peek().kind == tEOF {
+			break
+		}
+		item, err := sub.parseAtom()
+		if err != nil {
+			return nil, fmt.Errorf("in do block, expected an action expression: %v", err)
+		}
+		items = append(items, item)
+	}
+	if len(items) == 0 {
+		return nil, fmt.Errorf("a do block must contain at least one action: empty do")
+	}
+	if len(items) == 1 {
+		return items[0], nil
+	}
+	// Right-fold: par _ _ a(n-1) an, then par _ _ a(n-2) that, ...
+	// par is applied as: EApp (EApp (EApp (EApp (EVar "par") EHole) EHole) left) right
+	hole := func() Exp { return EHole{} }
+	parApp := func(left, right Exp) Exp {
+		return EApp{
+			Fn: EApp{
+				Fn: EApp{
+					Fn:  EApp{Fn: EVar{Name: "par"}, Arg: hole()},
+					Arg: hole(),
+				},
+				Arg: left,
+			},
+			Arg: right,
+		}
+	}
+	acc := items[len(items)-1]
+	for i := len(items) - 2; i >= 0; i-- {
+		acc = parApp(items[i], acc)
+	}
+	return acc, nil
 }
 
 // desugarSeq splits a seq body into items on top-level separators (newline or ';'),
