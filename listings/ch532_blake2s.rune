@@ -1,0 +1,328 @@
+-- Chapter 532 — crypto/blake2s (BLAKE2s-256), pure wootz over Bin.
+--
+-- BLAKE2s is the 32-bit member of the BLAKE2 family (RFC 7693): 32-bit words,
+-- LITTLE-ENDIAN throughout (the opposite endianness of SHA-256, which it otherwise
+-- shares its IV and word-kit with). This reuses ch522's 32-bit word kit verbatim —
+-- the accel'd div/mod, mod32/add32, the bitwise xor/and/or/not over the bignum, the
+-- shifts — and adds `rotr32 x n = or32 (shr x n) (shl32 x (32 - n))`.
+--
+-- The compression function F runs over a 16-word LITTLE-ENDIAN message block m and a
+-- 64-bit counter t (bytes hashed so far). It sets v[0..15] = h[0..7] ++ IV[0..7],
+-- mixes the counter (v[12] ^= t_lo, v[13] ^= t_hi) and, for the LAST block, the
+-- finalization flag (v[14] ^= 0xFFFFFFFF). Then 10 rounds: each applies the G mixing
+-- function to the four COLUMNS then the four DIAGONALS, picking message words by the
+-- 10x16 SIGMA permutation. After the rounds the state folds back: h[i] ^= v[i] ^
+-- v[i+8]. For the unkeyed 32-byte digest the parameter block gives h[0] = IV[0] XOR
+-- 0x01010020 (depth/fanout 01 01, key length 00, digest length 20). The digest is
+-- h[0..7] little-endian = 64 lowercase hex chars.
+--
+-- main prints the two RFC/reference vectors (one block each; the message is padded
+-- with zeros to 64 bytes, the counter t = the real byte length, f0 set):
+--   blake2s-256("")    = 69217a3079908094e11121d042354a7c1f55b6482ca1a51e1b250dfd1ed0eef9
+--   blake2s-256("abc") = 508c5e8c327c14e2e1a72ba34eeb452f37458b209ed63a294d999b4c86675982
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
+builtin natDiv divN
+builtin natMod modN
+
+pw : Nat -> Nat is fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is mulN 2 ih end) n end end
+mod32 : Nat -> Nat is fn (x : Nat) is modN x 4294967296 end end
+add32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is mod32 (addN a b) end end
+
+xorGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (modN (addN (modN a 2) (modN b 2)) 2) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+xor32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is xorGo 32 a b end end
+andGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (mulN (modN a 2) (modN b 2)) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+and32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is andGo 32 a b end end
+orGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (monus (addN (modN a 2) (modN b 2)) (mulN (modN a 2) (modN b 2))) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+or32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is orGo 32 a b end end
+not32 : Nat -> Nat is fn (x : Nat) is monus 4294967295 x end end
+
+shr : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is divN x (pw n) end end
+shl32 : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is mod32 (mulN x (pw n)) end end
+rotr32 : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is or32 (shr x n) (shl32 x (monus 32 n)) end end
+
+-- ── Lists of Nats: indexed access + functional update ──────────────────────────
+data List : U is
+  lnil  : List
+| lcons : Nat -> List -> List
+end
+nthL : List -> Nat -> Nat is
+  ListElim (fn (x : List) is Nat -> Nat end)
+    (fn (n : Nat) is 0 end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> Nat) is fn (n : Nat) is case n of | zero -> hd | succ k -> ih k end end end)
+end
+-- setL xs i v : the list xs with index i replaced by v (out-of-range leaves xs).
+setL : List -> Nat -> Nat -> List is
+  ListElim (fn (x : List) is Nat -> Nat -> List end)
+    (fn (i : Nat) (v : Nat) is lnil end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> Nat -> List) is
+       fn (i : Nat) (v : Nat) is case i of | zero -> lcons v tl | succ k -> lcons hd (ih k v) end end
+     end)
+end
+
+-- ── BLAKE2s IV (= the SHA-256 IV) and the SIGMA message-permutation table ───────
+-- iv k for k = 0..7.
+ivT : List is
+  lcons 1779033703 (lcons 3144134277 (lcons 1013904242 (lcons 2773480762
+    (lcons 1359893119 (lcons 2600822924 (lcons 528734635 (lcons 1541459225 lnil)))))))
+end
+ivAt : Nat -> Nat is fn (k : Nat) is nthL ivT k end end
+
+-- SIGMA[round mod 10] is a 16-entry permutation; the table is flattened to 160 entries.
+sigmaT : List is
+  (lcons 0 (lcons 1 (lcons 2 (lcons 3 (lcons 4 (lcons 5 (lcons 6 (lcons 7 (lcons 8 (lcons 9 (lcons 10 (lcons 11 (lcons 12 (lcons 13 (lcons 14 (lcons 15
+  (lcons 14 (lcons 10 (lcons 4 (lcons 8 (lcons 9 (lcons 15 (lcons 13 (lcons 6 (lcons 1 (lcons 12 (lcons 0 (lcons 2 (lcons 11 (lcons 7 (lcons 5 (lcons 3
+  (lcons 11 (lcons 8 (lcons 12 (lcons 0 (lcons 5 (lcons 2 (lcons 15 (lcons 13 (lcons 10 (lcons 14 (lcons 3 (lcons 6 (lcons 7 (lcons 1 (lcons 9 (lcons 4
+  (lcons 7 (lcons 9 (lcons 3 (lcons 1 (lcons 13 (lcons 12 (lcons 11 (lcons 14 (lcons 2 (lcons 6 (lcons 5 (lcons 10 (lcons 4 (lcons 0 (lcons 15 (lcons 8
+  (lcons 9 (lcons 0 (lcons 5 (lcons 7 (lcons 2 (lcons 4 (lcons 10 (lcons 15 (lcons 14 (lcons 1 (lcons 11 (lcons 12 (lcons 6 (lcons 8 (lcons 3 (lcons 13
+  (lcons 2 (lcons 12 (lcons 6 (lcons 10 (lcons 0 (lcons 11 (lcons 8 (lcons 3 (lcons 4 (lcons 13 (lcons 7 (lcons 5 (lcons 15 (lcons 14 (lcons 1 (lcons 9
+  (lcons 12 (lcons 5 (lcons 1 (lcons 15 (lcons 14 (lcons 13 (lcons 4 (lcons 10 (lcons 0 (lcons 7 (lcons 6 (lcons 3 (lcons 9 (lcons 2 (lcons 8 (lcons 11
+  (lcons 13 (lcons 11 (lcons 7 (lcons 14 (lcons 12 (lcons 1 (lcons 3 (lcons 9 (lcons 5 (lcons 0 (lcons 15 (lcons 4 (lcons 8 (lcons 6 (lcons 2 (lcons 10
+  (lcons 6 (lcons 15 (lcons 14 (lcons 9 (lcons 11 (lcons 3 (lcons 0 (lcons 8 (lcons 12 (lcons 2 (lcons 13 (lcons 7 (lcons 1 (lcons 4 (lcons 10 (lcons 5
+  (lcons 10 (lcons 2 (lcons 8 (lcons 4 (lcons 7 (lcons 6 (lcons 1 (lcons 5 (lcons 15 (lcons 11 (lcons 9 (lcons 14 (lcons 3 (lcons 12 (lcons 13 (lcons 0
+  lnil))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))
+end
+-- sigma r j : message-word index for round r (0..9), position j (0..15).
+sigmaAt : Nat -> Nat -> Nat is fn (r : Nat) (j : Nat) is nthL sigmaT (addN (mulN 16 r) j) end end
+
+-- ── The G mixing function, in place on the 16-word state list v ─────────────────
+-- gMix v a b c d x y : apply G(v[a],v[b],v[c],v[d]) with message words x, y.
+gMix : List -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> List is
+  fn (v : List) (a : Nat) (b : Nat) (c : Nat) (d : Nat) (x : Nat) (y : Nat) is
+    seq
+      let va0 = add32 (add32 (nthL v a) (nthL v b)) x
+      let vd0 = rotr32 (xor32 (nthL v d) va0) 16
+      let vc0 = add32 (nthL v c) vd0
+      let vb0 = rotr32 (xor32 (nthL v b) vc0) 12
+      let va1 = add32 (add32 va0 vb0) y
+      let vd1 = rotr32 (xor32 vd0 va1) 8
+      let vc1 = add32 vc0 vd1
+      let vb1 = rotr32 (xor32 vb0 vc1) 7
+      setL (setL (setL (setL v a va1) b vb1) c vc1) d vd1
+    end
+  end
+end
+
+-- One full round r over state v with message m (a 16-word list): four columns then
+-- four diagonals, picking message words via SIGMA[r].
+mAt : List -> Nat -> Nat -> Nat is fn (m : List) (r : Nat) (j : Nat) is nthL m (sigmaAt r j) end end
+roundB : List -> List -> Nat -> List is
+  fn (v0 : List) (m : List) (r : Nat) is
+    seq
+      let v1 = gMix v0 0 4 8  12 (mAt m r 0)  (mAt m r 1)
+      let v2 = gMix v1 1 5 9  13 (mAt m r 2)  (mAt m r 3)
+      let v3 = gMix v2 2 6 10 14 (mAt m r 4)  (mAt m r 5)
+      let v4 = gMix v3 3 7 11 15 (mAt m r 6)  (mAt m r 7)
+      let v5 = gMix v4 0 5 10 15 (mAt m r 8)  (mAt m r 9)
+      let v6 = gMix v5 1 6 11 12 (mAt m r 10) (mAt m r 11)
+      let v7 = gMix v6 2 7 8  13 (mAt m r 12) (mAt m r 13)
+      gMix v7 3 4 9 14 (mAt m r 14) (mAt m r 15)
+    end
+  end
+end
+-- 10 rounds (r = 0..9) over the message m.
+roundsB : List -> List -> List is
+  fn (v0 : List) (m : List) is
+    NatElim (fn (x : Nat) is List end) v0 (fn (r : Nat) (ih : List) is roundB ih m r end) 10
+  end
+end
+
+-- ── State: the running 8-word hash h ────────────────────────────────────────────
+data St8 : U is
+  mk8 : Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> St8
+end
+g0 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is a end) end
+g1 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is b end) end
+g2 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is c end) end
+g3 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is d end) end
+g4 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is e end) end
+g5 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is f end) end
+g6 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is g end) end
+g7 : St8 -> Nat is St8Elim (fn (x : St8) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat)(e : Nat)(f : Nat)(g : Nat)(h : Nat) is h end) end
+
+-- parameter block for unkeyed 32-byte output: h[0] = IV[0] XOR 0x01010020.
+initSt : St8 is
+  mk8 (xor32 (ivAt 0) 16842784) (ivAt 1) (ivAt 2) (ivAt 3) (ivAt 4) (ivAt 5) (ivAt 6) (ivAt 7)
+end
+
+-- v[0..15] from the running hash h ++ IV, then mix the counter and the final flag.
+-- tlo / thi : low / high 32 bits of the 64-bit byte counter t.  f0 : 1 for the last
+-- block (here always, single-block messages), giving v[14] ^= 0xFFFFFFFF.
+mkV : St8 -> Nat -> Nat -> Nat -> List is
+  fn (h : St8) (tlo : Nat) (thi : Nat) (f0 : Nat) is
+    lcons (g0 h) (lcons (g1 h) (lcons (g2 h) (lcons (g3 h)
+      (lcons (g4 h) (lcons (g5 h) (lcons (g6 h) (lcons (g7 h)
+        (lcons (ivAt 0) (lcons (ivAt 1) (lcons (ivAt 2) (lcons (ivAt 3)
+          (lcons (xor32 (ivAt 4) tlo) (lcons (xor32 (ivAt 5) thi)
+            (lcons (xor32 (ivAt 6) (mulN f0 4294967295)) (lcons (ivAt 7) lnil)))))))))))))))
+  end
+end
+
+-- fold the mixed state v back into h: h[i] ^= v[i] ^ v[i+8].
+foldBack : St8 -> List -> St8 is
+  fn (h : St8) (v : List) is
+    mk8
+      (xor32 (xor32 (g0 h) (nthL v 0)) (nthL v 8))
+      (xor32 (xor32 (g1 h) (nthL v 1)) (nthL v 9))
+      (xor32 (xor32 (g2 h) (nthL v 2)) (nthL v 10))
+      (xor32 (xor32 (g3 h) (nthL v 3)) (nthL v 11))
+      (xor32 (xor32 (g4 h) (nthL v 4)) (nthL v 12))
+      (xor32 (xor32 (g5 h) (nthL v 5)) (nthL v 13))
+      (xor32 (xor32 (g6 h) (nthL v 6)) (nthL v 14))
+      (xor32 (xor32 (g7 h) (nthL v 7)) (nthL v 15))
+  end
+end
+-- compress one block: fold the 10 rounds, then fold back into h.
+compress1 : St8 -> List -> Nat -> Nat -> Nat -> St8 is
+  fn (h : St8) (m : List) (tlo : Nat) (thi : Nat) (f0 : Nat) is
+    foldBack h (roundsB (mkV h tlo thi f0) m)
+  end
+end
+
+-- ── Loading the message block (one block, zero-padded to 64 bytes) ──────────────
+-- the i-th byte of the message, 0 past the real length (the zero pad).
+padByte : Bin -> Nat -> Nat is
+  fn (msg : Bin) (i : Nat) is case leb (binLen msg) i of | true -> 0 | false -> binAt msg i end end
+end
+-- the j-th LITTLE-ENDIAN 32-bit word of the padded block.
+wordAt : Bin -> Nat -> Nat is
+  fn (msg : Bin) (j : Nat) is
+    addN (padByte msg (mulN 4 j))
+      (addN (mulN (padByte msg (addN (mulN 4 j) 1)) 256)
+        (addN (mulN (padByte msg (addN (mulN 4 j) 2)) 65536)
+          (mulN (padByte msg (addN (mulN 4 j) 3)) 16777216)))
+  end
+end
+-- append v to the end of xs.
+snocL : List -> Nat -> List is
+  ListElim (fn (x : List) is Nat -> List end)
+    (fn (v : Nat) is lcons v lnil end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> List) is fn (v : Nat) is lcons hd (ih v) end end)
+end
+-- the 16 little-endian words of the single padded block (word 0 first).
+words16 : Bin -> List is
+  fn (msg : Bin) is
+    NatElim (fn (x : Nat) is List end) lnil
+      (fn (j : Nat) (ih : List) is snocL ih (wordAt msg j) end) 16
+  end
+end
+
+-- BLAKE2s of a one-block message: counter t = real byte length, final flag set.
+hashOf : Bin -> St8 is
+  fn (msg : Bin) is compress1 initSt (words16 msg) (binLen msg) 0 1 end
+end
+
+-- ── Little-endian hex output (64 chars) ─────────────────────────────────────────
+hexChar : Nat -> Nat is fn (d : Nat) is case leb d 9 of | true -> addN 48 d | false -> addN 87 d end end end
+-- byte b as two hex digits (high nibble then low).
+hexByte : Nat -> Bin is
+  fn (b : Nat) is binCons (hexChar (divN b 16)) (binCons (hexChar (modN b 16)) binEmpty) end
+end
+appGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (xs : Bin) (ys : Bin) (i : Nat) is ys end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is case leb (binLen xs) i of | true -> ys | false -> binCons (binAt xs i) (ih xs ys (succ i)) end end
+      end)
+      fuel
+  end
+end
+binApp : Bin -> Bin -> Bin is fn (xs : Bin) (ys : Bin) is appGo (binLen xs) xs ys 0 end end
+-- a 32-bit word w as four LITTLE-ENDIAN bytes, each two hex digits (byte0 first).
+hexWord : Nat -> Bin is
+  fn (w : Nat) is
+    binApp (hexByte (modN w 256))
+      (binApp (hexByte (modN (divN w 256) 256))
+        (binApp (hexByte (modN (divN w 65536) 256))
+          (hexByte (modN (divN w 16777216) 256))))
+  end
+end
+digestOf : St8 -> Bin is
+  fn (h : St8) is
+    binApp (hexWord (g0 h)) (binApp (hexWord (g1 h)) (binApp (hexWord (g2 h)) (binApp (hexWord (g3 h))
+      (binApp (hexWord (g4 h)) (binApp (hexWord (g5 h)) (binApp (hexWord (g6 h)) (hexWord (g7 h))))))))
+  end
+end
+digestHex : Bin -> Bin is fn (msg : Bin) is digestOf (hashOf msg) end end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin (digestHex b"")) (fn (a : Unit) is
+    bindIO Unit Unit (printBin (digestHex b"abc")) (fn (b : Unit) is
+      pureIO Unit unit
+    end)
+  end)
+end

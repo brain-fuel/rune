@@ -1,0 +1,280 @@
+-- Chapter 528 — crypto/md5 over an ARBITRARY-length message (the little-endian sibling).
+--
+-- ch522 hashed any `Bin` with SHA-256 (big-endian, 64 rounds, Σ-functions). This is
+-- the mechanical little-endian counterpart: RFC 1321 MD5. The 32-bit word kit is reused
+-- VERBATIM from ch522 (mod32/add32/xor32/and32/or32/not32/shl32/shr, the accel div/mod
+-- arithmetic, hexChar/hexNib/binApp) — only the wiring changes for the four MD5 quirks:
+--   (1) words are read LITTLE-endian (byte 0 is the LOW byte of the word);
+--   (2) the 64-bit message bit-length is appended LITTLE-endian;
+--   (3) the per-round mix LEFT-rotates: rotl x n = or32 (shl32 x n) (shr x (32-n));
+--   (4) the digest is the four state words A,B,C,D each emitted LITTLE-endian.
+-- Per round t: f = (F|G|H|I)(B,C,D) by quarter, then
+--   B' = B + rotl(A + f + K[t] + M[g(t)], S[t]); A,B,C,D rotate D,B',B,C.
+-- K[t] = floor(2^32 * |sin(t+1)|); S[t] the RFC shift table; g(t) the message word index.
+-- Pure wootz over the builtin bignum, so correct on all 8 by construction. Recursion only
+-- via NatElim/ListElim + fuel — totality by construction, no termination checker.
+--
+-- main hashes the empty string and "abc"; the observable is the two RFC 1321 test
+-- vectors, byte-identical on every backend:
+--   md5("")    = d41d8cd98f00b204e9800998ecf8427e
+--   md5("abc") = 900150983cd24fb0d6963f7d28e17f72
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
+builtin natDiv divN
+builtin natMod modN
+
+pw : Nat -> Nat is fn (n : Nat) is NatElim (fn (x : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is mulN 2 ih end) n end end
+mod32 : Nat -> Nat is fn (x : Nat) is modN x 4294967296 end end
+add32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is mod32 (addN a b) end end
+
+xorGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (modN (addN (modN a 2) (modN b 2)) 2) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+xor32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is xorGo 32 a b end end
+andGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (mulN (modN a 2) (modN b 2)) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+and32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is andGo 32 a b end end
+orGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is addN (monus (addN (modN a 2) (modN b 2)) (mulN (modN a 2) (modN b 2))) (mulN 2 (ih (divN a 2) (divN b 2))) end
+      end)
+      fuel
+  end
+end
+or32 : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is orGo 32 a b end end
+not32 : Nat -> Nat is fn (x : Nat) is monus 4294967295 x end end
+
+shr : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is divN x (pw n) end end
+shl32 : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is mod32 (mulN x (pw n)) end end
+rotl : Nat -> Nat -> Nat is fn (x : Nat) (n : Nat) is or32 (shl32 x n) (shr x (monus 32 n)) end end
+
+-- MD5 round functions, one per quarter.
+fF : Nat -> Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) (z : Nat) is or32 (and32 x y) (and32 (not32 x) z) end end
+gF : Nat -> Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) (z : Nat) is or32 (and32 x z) (and32 y (not32 z)) end end
+hF : Nat -> Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) (z : Nat) is xor32 (xor32 x y) z end end
+iF : Nat -> Nat -> Nat -> Nat is fn (x : Nat) (y : Nat) (z : Nat) is xor32 y (or32 x (not32 z)) end end
+
+data List : U is
+  lnil  : List
+| lcons : Nat -> List -> List
+end
+nthL : List -> Nat -> Nat is
+  ListElim (fn (x : List) is Nat -> Nat end)
+    (fn (n : Nat) is 0 end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> Nat) is fn (n : Nat) is case n of | zero -> hd | succ k -> ih k end end end)
+end
+
+-- K[t] = floor(2^32 * |sin(t+1)|), the 64 sine constants.
+kK : List is lcons 3614090360 (lcons 3905402710 (lcons 606105819 (lcons 3250441966 (lcons 4118548399 (lcons 1200080426 (lcons 2821735955 (lcons 4249261313 (lcons 1770035416 (lcons 2336552879 (lcons 4294925233 (lcons 2304563134 (lcons 1804603682 (lcons 4254626195 (lcons 2792965006 (lcons 1236535329 (lcons 4129170786 (lcons 3225465664 (lcons 643717713 (lcons 3921069994 (lcons 3593408605 (lcons 38016083 (lcons 3634488961 (lcons 3889429448 (lcons 568446438 (lcons 3275163606 (lcons 4107603335 (lcons 1163531501 (lcons 2850285829 (lcons 4243563512 (lcons 1735328473 (lcons 2368359562 (lcons 4294588738 (lcons 2272392833 (lcons 1839030562 (lcons 4259657740 (lcons 2763975236 (lcons 1272893353 (lcons 4139469664 (lcons 3200236656 (lcons 681279174 (lcons 3936430074 (lcons 3572445317 (lcons 76029189 (lcons 3654602809 (lcons 3873151461 (lcons 530742520 (lcons 3299628645 (lcons 4096336452 (lcons 1126891415 (lcons 2878612391 (lcons 4237533241 (lcons 1700485571 (lcons 2399980690 (lcons 4293915773 (lcons 2240044497 (lcons 1873313359 (lcons 4264355552 (lcons 2734768916 (lcons 1309151649 (lcons 4149444226 (lcons 3174756917 (lcons 718787259 (lcons 3951481745 (lnil)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) end
+-- S[t], the per-round left-rotate amounts.
+sS : List is lcons 7 (lcons 12 (lcons 17 (lcons 22 (lcons 7 (lcons 12 (lcons 17 (lcons 22 (lcons 7 (lcons 12 (lcons 17 (lcons 22 (lcons 7 (lcons 12 (lcons 17 (lcons 22 (lcons 5 (lcons 9 (lcons 14 (lcons 20 (lcons 5 (lcons 9 (lcons 14 (lcons 20 (lcons 5 (lcons 9 (lcons 14 (lcons 20 (lcons 5 (lcons 9 (lcons 14 (lcons 20 (lcons 4 (lcons 11 (lcons 16 (lcons 23 (lcons 4 (lcons 11 (lcons 16 (lcons 23 (lcons 4 (lcons 11 (lcons 16 (lcons 23 (lcons 4 (lcons 11 (lcons 16 (lcons 23 (lcons 6 (lcons 10 (lcons 15 (lcons 21 (lcons 6 (lcons 10 (lcons 15 (lcons 21 (lcons 6 (lcons 10 (lcons 15 (lcons 21 (lcons 6 (lcons 10 (lcons 15 (lcons 21 (lnil)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) end
+-- g(t), the message-word index used at round t.
+gG : List is lcons 0 (lcons 1 (lcons 2 (lcons 3 (lcons 4 (lcons 5 (lcons 6 (lcons 7 (lcons 8 (lcons 9 (lcons 10 (lcons 11 (lcons 12 (lcons 13 (lcons 14 (lcons 15 (lcons 1 (lcons 6 (lcons 11 (lcons 0 (lcons 5 (lcons 10 (lcons 15 (lcons 4 (lcons 9 (lcons 14 (lcons 3 (lcons 8 (lcons 13 (lcons 2 (lcons 7 (lcons 12 (lcons 5 (lcons 8 (lcons 11 (lcons 14 (lcons 1 (lcons 4 (lcons 7 (lcons 10 (lcons 13 (lcons 0 (lcons 3 (lcons 6 (lcons 9 (lcons 12 (lcons 15 (lcons 2 (lcons 0 (lcons 7 (lcons 14 (lcons 5 (lcons 12 (lcons 3 (lcons 10 (lcons 1 (lcons 8 (lcons 15 (lcons 6 (lcons 13 (lcons 4 (lcons 11 (lcons 2 (lcons 9 (lnil)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))) end
+
+-- THE MESSAGE + ITS PADDED-BYTE VIEW (length appended LITTLE-endian).
+msgFor : Bin -> Nat -> Nat is fn (m : Bin) (i : Nat) is binAt m i end end
+
+-- the i-th byte of the conceptually padded message for a `Bin` of length mlen.
+paddedByteOf : Bin -> Nat -> Nat -> Nat is
+  fn (m : Bin) (totBytes : Nat) (i : Nat) is
+    case leb (binLen m) i of
+    | false -> binAt m i
+    | true  -> case eqNat i (binLen m) of
+               | true  -> 128
+               | false -> case leb (monus totBytes 8) i of
+                          | true  -> modN (divN (mulN (binLen m) 8) (pw (mulN 8 (monus i (monus totBytes 8))))) 256
+                          | false -> 0
+                          end
+               end
+    end
+  end
+end
+
+-- the j-th LITTLE-endian 32-bit word of the padded message.
+wordAtOf : Bin -> Nat -> Nat -> Nat is
+  fn (m : Bin) (totBytes : Nat) (j : Nat) is
+    addN (paddedByteOf m totBytes (mulN 4 j))
+      (addN (mulN (paddedByteOf m totBytes (addN (mulN 4 j) 1)) 256)
+        (addN (mulN (paddedByteOf m totBytes (addN (mulN 4 j) 2)) 65536)
+          (mulN (paddedByteOf m totBytes (addN (mulN 4 j) 3)) 16777216)))
+  end
+end
+
+data St4 : U is
+  mk4 : Nat -> Nat -> Nat -> Nat -> St4
+end
+q0 : St4 -> Nat is St4Elim (fn (x : St4) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat) is a end) end
+q1 : St4 -> Nat is St4Elim (fn (x : St4) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat) is b end) end
+q2 : St4 -> Nat is St4Elim (fn (x : St4) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat) is c end) end
+q3 : St4 -> Nat is St4Elim (fn (x : St4) is Nat end) (fn (a : Nat)(b : Nat)(c : Nat)(d : Nat) is d end) end
+
+-- the round function f(B,C,D) selected by quarter (t<16 F, t<32 G, t<48 H, else I).
+roundFn : Nat -> Nat -> Nat -> Nat -> Nat is
+  fn (t : Nat) (b : Nat) (c : Nat) (d : Nat) is
+    case leb t 15 of
+    | true  -> fF b c d
+    | false -> case leb t 31 of
+               | true  -> gF b c d
+               | false -> case leb t 47 of
+                          | true  -> hF b c d
+                          | false -> iF b c d
+                          end
+               end
+    end
+  end
+end
+
+-- one MD5 round at index t over the 16-word block `blk` (a List). State rotates.
+roundF : List -> Nat -> St4 -> St4 is
+  fn (blk : List) (t : Nat) (st : St4) is
+    mk4
+      (q3 st)
+      (add32 (q1 st)
+        (rotl (add32 (add32 (add32 (q0 st) (roundFn t (q1 st) (q2 st) (q3 st)))
+                             (nthL kK t))
+                     (nthL blk (nthL gG t)))
+              (nthL sS t)))
+      (q1 st)
+      (q2 st)
+  end
+end
+
+-- 64 rounds from st0 over block `blk`.
+roundsB : St4 -> List -> St4 is
+  fn (st0 : St4) (blk : List) is
+    NatElim (fn (x : Nat) is St4 end) st0 (fn (k : Nat) (ih : St4) is roundF blk k ih end) 64
+  end
+end
+
+-- the 16 little-endian words of block b (word-indices 16b .. 16b+15).
+snocL : List -> Nat -> List is
+  ListElim (fn (x : List) is Nat -> List end)
+    (fn (v : Nat) is lcons v lnil end)
+    (fn (hd : Nat) (tl : List) (ih : Nat -> List) is fn (v : Nat) is lcons hd (ih v) end end)
+end
+words16Of : Bin -> Nat -> Nat -> List is
+  fn (m : Bin) (totBytes : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is List end) lnil
+      (fn (j : Nat) (ih : List) is snocL ih (wordAtOf m totBytes (addN (mulN 16 b) j)) end) 16
+  end
+end
+
+-- feed-forward: H + compress(H, block).
+feed : St4 -> St4 -> St4 is
+  fn (st : St4) (r : St4) is
+    mk4 (add32 (q0 st) (q0 r)) (add32 (q1 st) (q1 r)) (add32 (q2 st) (q2 r)) (add32 (q3 st) (q3 r))
+  end
+end
+compress1Of : Bin -> Nat -> St4 -> Nat -> St4 is
+  fn (m : Bin) (totBytes : Nat) (st : St4) (b : Nat) is feed st (roundsB st (words16Of m totBytes b)) end
+end
+initSt : St4 is mk4 1732584193 4023233417 2562383102 271733878 end
+
+-- fold over all blocks, threading the running digest.
+md5Of : Bin -> St4 is
+  fn (m : Bin) is
+    NatElim (fn (x : Nat) is St4 end) initSt
+      (fn (b : Nat) (ih : St4) is compress1Of m (mulN 64 (divN (addN (binLen m) 72) 64)) ih b end)
+      (divN (addN (binLen m) 72) 64)
+  end
+end
+
+hexChar : Nat -> Nat is fn (d : Nat) is case leb d 9 of | true -> addN 48 d | false -> addN 87 d end end end
+hexNib : Nat -> Nat -> Bin is fn (w : Nat) (i : Nat) is binCons (hexChar (modN (divN w (pw (mulN 4 i))) 16)) binEmpty end end
+appGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (xs : Bin) (ys : Bin) (i : Nat) is ys end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (xs : Bin) (ys : Bin) (i : Nat) is case leb (binLen xs) i of | true -> ys | false -> binCons (binAt xs i) (ih xs ys (succ i)) end end
+      end)
+      fuel
+  end
+end
+binApp : Bin -> Bin -> Bin is fn (xs : Bin) (ys : Bin) is appGo (binLen xs) xs ys 0 end end
+-- one state word emitted LITTLE-endian = 8 hex chars (low byte first, high nibble of each byte first).
+hexByteLE : Nat -> Nat -> Bin is fn (w : Nat) (k : Nat) is binApp (hexNib (modN (divN w (pw (mulN 8 k))) 256) 1) (hexNib (modN (divN w (pw (mulN 8 k))) 256) 0) end end
+hexWordLE : Nat -> Bin is
+  fn (w : Nat) is
+    binApp (hexByteLE w 0) (binApp (hexByteLE w 1) (binApp (hexByteLE w 2) (hexByteLE w 3)))
+  end
+end
+digestHexOf : Bin -> Bin is
+  fn (m : Bin) is
+    binApp (hexWordLE (q0 (md5Of m)))
+      (binApp (hexWordLE (q1 (md5Of m)))
+        (binApp (hexWordLE (q2 (md5Of m))) (hexWordLE (q3 (md5Of m)))))
+  end
+end
+
+main : IO Unit is
+  bindIO Unit Unit (printBin (digestHexOf b"")) (fn (a : Unit) is
+    bindIO Unit Unit (printBin (digestHexOf b"abc")) (fn (z : Unit) is
+      pureIO Unit unit
+    end)
+  end)
+end
