@@ -105,10 +105,7 @@ func main() {
 			fatal(err)
 		}
 	case "ledger":
-		if len(os.Args) < 3 {
-			fatal(fmt.Errorf("usage: rune ledger <file>"))
-		}
-		if err := runLedger(os.Args[2], os.Stdout); err != nil {
+		if err := runLedger(os.Args[2:], os.Stdout); err != nil {
 			fatal(err)
 		}
 	case "deploy":
@@ -128,11 +125,35 @@ func main() {
 // network is cut in half) so divergence is visible, then a HEALED gossip round; the
 // rendered trace shows whether the protocol re-converges. Full scenario/`protocol`
 // surface sugar is a later contained pass.
-// runLedger type-checks a file and renders the assurance ledger as a text table.
-// It reads the file at path, loads it, then calls BuildWithSource so each entry
-// carries a 1-based source line and git-blame provenance where available.
-func runLedger(path string, w io.Writer) error {
-	src, err := os.ReadFile(path)
+// runLedger type-checks a file and renders the assurance ledger. It parses
+// --json/--check/--baseline flags from args; the first non-flag argument is the
+// file path. Default (no flags) renders a text table.
+func runLedger(args []string, w io.Writer) error {
+	var (
+		file     string
+		asJSON   bool
+		check    bool
+		baseline string
+	)
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
+			asJSON = true
+		case "--check":
+			check = true
+		case "--baseline":
+			i++
+			if i < len(args) {
+				baseline = args[i]
+			}
+		default:
+			file = args[i]
+		}
+	}
+	if file == "" {
+		return fmt.Errorf("usage: rune ledger <file> [--json] [--check] [--baseline <ledger.json>]")
+	}
+	src, err := os.ReadFile(file)
 	if err != nil {
 		return err
 	}
@@ -140,7 +161,23 @@ func runLedger(path string, w io.Writer) error {
 	if _, err := s.LoadSource(string(src)); err != nil {
 		return err
 	}
-	ledger.RenderText(ledger.BuildWithSource(s, path, string(src)), w)
+	es := ledger.BuildWithSource(s, file, string(src))
+
+	if check {
+		violations := ledger.Gate(es, nil, ledger.GateConfig{})
+		for _, v := range violations {
+			fmt.Fprintln(os.Stderr, v.Error())
+		}
+		if len(violations) > 0 {
+			return fmt.Errorf("assurance gate failed: %d violation(s)", len(violations))
+		}
+		return nil
+	}
+	if asJSON {
+		return ledger.RenderJSON(es, w)
+	}
+	ledger.RenderText(es, w)
+	_ = baseline // reserved for --baseline upgrade reporting
 	return nil
 }
 
