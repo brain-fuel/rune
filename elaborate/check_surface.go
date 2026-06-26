@@ -189,6 +189,10 @@ func (e *Elaborator) Infer(c *Ctx, x surface.Exp) (core.Tm, core.Val, error) {
 		delete(e.uses, inner.Lvl()-1) // let binders are ω; clear the level
 		tm.Body = core.Scope{Name: s.Name, Body: body}
 		return tm, bodyTy, nil
+	case surface.ESeqBind:
+		return e.elabSeqBind(c, s, func(inner *Ctx) (core.Tm, core.Val, error) {
+			return e.Infer(inner, s.Body)
+		})
 	case surface.EAnn:
 		ty, _, err := e.checkType(c, s.Ty)
 		if err != nil {
@@ -665,6 +669,18 @@ func (e *Elaborator) Check(c *Ctx, x surface.Exp, want core.Val) (core.Tm, error
 		delete(e.uses, inner.Lvl()-1) // let binders are ω; clear the level
 		tm.Body = core.Scope{Name: s.Name, Body: body}
 		return tm, nil
+	case surface.ESeqBind:
+		tm, _, err := e.elabSeqBind(c, s, func(inner *Ctx) (core.Tm, core.Val, error) {
+			body, err := e.Check(inner, s.Body, want)
+			if err != nil {
+				return nil, nil, err
+			}
+			return body, want, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return tm, nil
 	default:
 		tm, got, err := e.Infer(c, x)
 		if err != nil {
@@ -1086,6 +1102,107 @@ func (e *Elaborator) elabLet(c *Ctx, s surface.ELet) (core.Let, core.Val, *Ctx, 
 	}
 	inner := c.define(s.Name, vty, e.Eval(c, val))
 	return core.Let{Ty: tyTm, Val: val}, vty, inner, nil
+}
+
+// ioArg reports whether ty (a type value) is headed by the IO former, returning
+// the argument A from `IO A`. The IO former's hash is e.Refs["IO"], registered
+// ambiently by every session (store.AddIO). The type value is forced first so a
+// glued/neutral IO application is seen through; a non-IO type returns ok=false.
+func (e *Elaborator) ioArg(ty core.Val) (a core.Val, ok bool) {
+	ioHash, hasIO := e.Refs["IO"]
+	if !hasIO {
+		return nil, false
+	}
+	forced := e.M.Force(ty)
+	neu, isNeu := forced.(core.VNeu)
+	if !isNeu {
+		return nil, false
+	}
+	app, isApp := neu.Spine.(core.NApp)
+	if !isApp {
+		return nil, false
+	}
+	ref, isRef := app.Fn.(core.NRef)
+	if !isRef || ref.Hash != ioHash {
+		return nil, false
+	}
+	return app.Arg, true
+}
+
+// elabSeqBind elaborates a seq-origin binding (surface.ESeqBind) TYPE-AWARELY.
+// It infers the binding's value, honours an optional annotation, then:
+//   - if the value's type is IO A, lowers the binding to a bindIO application
+//     `bindIO A B Val (fn Name is Body end)` (an ORDERED effect) where B is the
+//     body's inferred type; the body is elaborated under a fresh binder Name : A;
+//   - otherwise lowers exactly like a plain let (a lazy value binding).
+//
+// elabBody elaborates the seq body in the given extended context (it is the
+// caller's Infer/Check closure so the same routine serves both directions). It
+// returns the body's core term and its type. The returned term is the whole
+// binding's core; bodyTy is its type.
+func (e *Elaborator) elabSeqBind(c *Ctx, s surface.ESeqBind, elabBody func(inner *Ctx) (core.Tm, core.Val, error)) (core.Tm, core.Val, error) {
+	var val core.Tm
+	var valTy core.Val
+	if s.Ty != nil {
+		// With an annotation, CHECK the value against it (as elabLet does), so a
+		// checking-only value form (a bare `case`, which needs its motive from the
+		// expected type) elaborates. The annotation is the binding's type.
+		tyTm, _, err := e.checkType(c, s.Ty)
+		if err != nil {
+			return nil, nil, err
+		}
+		valTy = e.Eval(c, tyTm)
+		v, err := e.Check(c, s.Val, valTy)
+		if err != nil {
+			return nil, nil, err
+		}
+		val = v
+	} else {
+		v, ty, err := e.Infer(c, s.Val)
+		if err != nil {
+			return nil, nil, err
+		}
+		val, valTy = v, ty
+	}
+	// IO item: lower to bindIO so the effect is sequenced.
+	if aTy, ok := e.ioArg(valTy); ok {
+		inner := c.bind(s.Name, aTy)
+		bodyTm, bodyTy, err := elabBody(inner)
+		if err != nil {
+			return nil, nil, err
+		}
+		delete(e.uses, inner.Lvl()-1) // the bindIO continuation Pi is ω; clear the level
+		aTyTm := e.M.Quote(c.Lvl(), aTy)
+		bTyTm := e.M.Quote(c.Lvl(), bodyTy)
+		bindIOHash := e.Refs["bindIO"]
+		result := core.App{
+			Fn: core.App{
+				Fn: core.App{
+					Fn:   core.App{Fn: core.Ref{Hash: bindIOHash}, Arg: aTyTm, Icit: core.Expl},
+					Arg:  bTyTm,
+					Icit: core.Expl,
+				},
+				Arg:  val,
+				Icit: core.Expl,
+			},
+			Arg: core.Lam{
+				Icit: core.Expl,
+				Qty:  core.QMany,
+				Body: core.Scope{Name: s.Name, Body: bodyTm},
+			},
+			Icit: core.Expl,
+		}
+		return result, bodyTy, nil
+	}
+	// Pure item: a plain (lazy) let binding.
+	inner := c.define(s.Name, valTy, e.Eval(c, val))
+	bodyTm, bodyTy, err := elabBody(inner)
+	if err != nil {
+		return nil, nil, err
+	}
+	delete(e.uses, inner.Lvl()-1) // let binders are ω; clear the level
+	let := core.Let{Val: val, Body: core.Scope{Name: s.Name, Body: bodyTm}}
+	return let, bodyTy, nil
 }
 
 // ElabDef elaborates one surface definition (type and body) to core, ZONKED and

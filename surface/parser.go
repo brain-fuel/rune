@@ -1616,17 +1616,17 @@ func parseGroupExpr(toks []token) (Exp, error) {
 // parseSeqBind parses one non-final seq item: `"let" Ident [":" Expr] "=" Expr` with
 // NO `in` (§5.3). The bound body is filled in by desugarSeq. Encountering `in` here is
 // an error: seq bindings scope over the rest of the block, they do not take `in`.
-func parseSeqBind(toks []token) (ELet, error) {
+func parseSeqBind(toks []token) (ESeqBind, error) {
 	sub := &parser{toks: appendEOF(toks)}
 	if sub.peek().kind != tLet {
-		return ELet{}, fmt.Errorf("a non-final seq item must be a binding 'let x = e', found %s at offset %d", sub.peek().kind, sub.peek().pos)
+		return ESeqBind{}, fmt.Errorf("a non-final seq item must be a binding 'let x = e', found %s at offset %d", sub.peek().kind, sub.peek().pos)
 	}
 	sub.next() // 'let'
 	id, err := sub.expect(tIdent)
 	if err != nil {
-		return ELet{}, err
+		return ESeqBind{}, err
 	}
-	let := ELet{Name: id.text}
+	bind := ESeqBind{Name: id.text}
 	if sub.peek().kind == tColon {
 		sub.next()
 		// The annotation's spine-level '=' belongs to the binding (§5.4).
@@ -1634,23 +1634,23 @@ func parseSeqBind(toks []token) (ELet, error) {
 		ty, err := sub.parseExpr()
 		sub.noEq = false
 		if err != nil {
-			return ELet{}, err
+			return ESeqBind{}, err
 		}
-		let.Ty = ty
+		bind.Ty = ty
 	}
 	if _, err := sub.expect(tEquals); err != nil {
-		return ELet{}, err
+		return ESeqBind{}, err
 	}
 	val, err := sub.parseExpr()
 	if err != nil {
-		return ELet{}, err
+		return ESeqBind{}, err
 	}
-	let.Val = val
+	bind.Val = val
 	if sub.peek().kind == tIn {
-		return ELet{}, fmt.Errorf("a seq binding does not take 'in' (offset %d); it scopes over the rest of the seq", sub.peek().pos)
+		return ESeqBind{}, fmt.Errorf("a seq binding does not take 'in' (offset %d); it scopes over the rest of the seq", sub.peek().pos)
 	}
 	if sub.peek().kind != tEOF {
-		return ELet{}, fmt.Errorf("unexpected %s at offset %d after a seq binding", sub.peek().kind, sub.peek().pos)
+		return ESeqBind{}, fmt.Errorf("unexpected %s at offset %d after a seq binding", sub.peek().kind, sub.peek().pos)
 	}
-	return let, nil
+	return bind, nil
 }

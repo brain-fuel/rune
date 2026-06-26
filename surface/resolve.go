@@ -214,6 +214,27 @@ func (r *Resolver) resolve(e Exp, ctx []string) (core.Tm, error) {
 			return nil, err
 		}
 		return core.Let{Ty: ty, Val: val, Body: core.Scope{Name: x.Name, Body: body}}, nil
+	case ESeqBind:
+		// Structural resolution only: the resolver has no type information, so it
+		// cannot tell IO items from pure ones. It lowers a seq binding to a plain
+		// core.Let; the IO-vs-bindIO decision is the elaborator's (check_surface.go).
+		var ty core.Tm
+		if x.Ty != nil {
+			t, err := r.resolve(x.Ty, ctx)
+			if err != nil {
+				return nil, err
+			}
+			ty = t
+		}
+		val, err := r.resolve(x.Val, ctx)
+		if err != nil {
+			return nil, err
+		}
+		body, err := r.resolve(x.Body, push(x.Name, ctx))
+		if err != nil {
+			return nil, err
+		}
+		return core.Let{Ty: ty, Val: val, Body: core.Scope{Name: x.Name, Body: body}}, nil
 	case EAnn:
 		term, err := r.resolve(x.Term, ctx)
 		if err != nil {
@@ -283,6 +304,12 @@ func FreeIdents(e Exp) []string {
 			walk(x.Dom, bound)
 			walk(x.Cod, with(bound, x.Param))
 		case ELet:
+			if x.Ty != nil {
+				walk(x.Ty, bound)
+			}
+			walk(x.Val, bound)
+			walk(x.Body, with(bound, x.Name))
+		case ESeqBind:
 			if x.Ty != nil {
 				walk(x.Ty, bound)
 			}

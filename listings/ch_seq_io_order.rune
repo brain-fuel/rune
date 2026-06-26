@@ -1,0 +1,26 @@
+-- seq with bare IO actions (no manual bindIO): tests type-aware IO lowering.
+-- A non-final seq item whose value has type IO A must lower to bindIO so the
+-- effect runs in order; a lazy let would not run the bound print at all.
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+main : IO Unit is
+  seq
+    let h : IO Unit = printBin b"hello\n"
+    printBin b"world\n"
+  end
+end

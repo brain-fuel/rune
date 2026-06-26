@@ -104,6 +104,19 @@ type ELet struct {
 	Body Exp
 }
 
+// ESeqBind is a seq-origin binding: `let Name (: Ty)? = Val` inside a seq block.
+// It is distinct from ELet so the elaborator can lower it TYPE-AWARELY: if Val's
+// type is IO A, the binding becomes a bindIO application (a monadic, ordered
+// effect), otherwise it lowers exactly like an ordinary let. The parser stays
+// type-agnostic and only tags the node as seq-origin; the IO decision is the
+// elaborator's. Ty is nil when the annotation is absent.
+type ESeqBind struct {
+	Name string
+	Ty   Exp
+	Val  Exp
+	Body Exp
+}
+
 // EAnn is a type annotation (Term : Ty).
 type EAnn struct {
 	Term Exp
@@ -144,8 +157,9 @@ func (EUniv) isExp() {}
 func (ELam) isExp()  {}
 func (EApp) isExp()  {}
 func (EPi) isExp()   {}
-func (ELet) isExp()  {}
-func (EAnn) isExp()  {}
+func (ELet) isExp()     {}
+func (ESeqBind) isExp() {}
+func (EAnn) isExp()     {}
 
 // Def is one top-level definition: Name (: Ty)? = Body. The file is a flat list of
 // these (no modules in Phase 0). Ty is nil when omitted.
