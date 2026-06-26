@@ -108,11 +108,7 @@ func main() {
 		if len(os.Args) < 3 {
 			fatal(fmt.Errorf("usage: rune ledger <file>"))
 		}
-		src, err := os.ReadFile(os.Args[2])
-		if err != nil {
-			fatal(err)
-		}
-		if err := runLedger(string(src), os.Stdout); err != nil {
+		if err := runLedger(os.Args[2], os.Stdout); err != nil {
 			fatal(err)
 		}
 	case "deploy":
@@ -133,12 +129,18 @@ func main() {
 // rendered trace shows whether the protocol re-converges. Full scenario/`protocol`
 // surface sugar is a later contained pass.
 // runLedger type-checks a file and renders the assurance ledger as a text table.
-func runLedger(src string, w io.Writer) error {
-	s := session.New()
-	if _, err := s.LoadSource(src); err != nil {
+// It reads the file at path, loads it, then calls BuildWithSource so each entry
+// carries a 1-based source line and git-blame provenance where available.
+func runLedger(path string, w io.Writer) error {
+	src, err := os.ReadFile(path)
+	if err != nil {
 		return err
 	}
-	ledger.RenderText(ledger.Build(s), w)
+	s := session.New()
+	if _, err := s.LoadSource(string(src)); err != nil {
+		return err
+	}
+	ledger.RenderText(ledger.BuildWithSource(s, path, string(src)), w)
 	return nil
 }
 

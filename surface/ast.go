@@ -167,6 +167,10 @@ type Def struct {
 	Name string
 	Ty   Exp
 	Body Exp
+	// Pos is the byte offset of the definition's NAME token in the source text.
+	// It is used by the ledger to compute the 1-based source line for git blame.
+	// Zero-valued when the source position is unknown.
+	Pos int
 	// IsInstance marks a typeclass instance (C2): the def is additionally
 	// registered in the session instance table and resolved by implicit search.
 	IsInstance bool

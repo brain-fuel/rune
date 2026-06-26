@@ -288,6 +288,7 @@ func (p *parser) parseForeign() (Def, error) {
 	if id.kind != tIdent && id.kind != tOp {
 		return Def{}, fmt.Errorf("expected a foreign name, found %s at offset %d", id.kind, id.pos)
 	}
+	namePos := id.pos
 	p.next()
 	if _, err := p.expect(tColon); err != nil {
 		return Def{}, err
@@ -299,7 +300,7 @@ func (p *parser) parseForeign() (Def, error) {
 	if _, err := p.expect(tEnd); err != nil {
 		return Def{}, err
 	}
-	return Def{Name: id.text, Ty: ty, IsForeign: true}, nil
+	return Def{Name: id.text, Pos: namePos, Ty: ty, IsForeign: true}, nil
 }
 
 // parsePostulate parses `postulate NAME : TYPE because "REASON" end`. Like a
@@ -313,6 +314,7 @@ func (p *parser) parsePostulate() (Def, error) {
 	if id.kind != tIdent && id.kind != tOp {
 		return Def{}, fmt.Errorf("expected a postulate name, found %s at offset %d", id.kind, id.pos)
 	}
+	namePos := id.pos
 	p.next()
 	if _, err := p.expect(tColon); err != nil {
 		return Def{}, err
@@ -343,7 +345,7 @@ func (p *parser) parsePostulate() (Def, error) {
 	if _, err := p.expect(tEnd); err != nil {
 		return Def{}, err
 	}
-	return Def{Name: id.text, Ty: ty, IsForeign: true, IsPostulate: true, Why: reason.text}, nil
+	return Def{Name: id.text, Pos: namePos, Ty: ty, IsForeign: true, IsPostulate: true, Why: reason.text}, nil
 }
 
 // parseModule parses `module Name is <Def>* end` (C6): a namespace block. Each
@@ -534,6 +536,7 @@ func (p *parser) parseDefHeadBody(isInstance, isPartial bool) (Def, error) {
 		}
 		return Def{}, fmt.Errorf("expected a definition name (identifier or operator), found %s at offset %d", id.kind, id.pos)
 	}
+	namePos := id.pos
 	p.next()
 	if _, err := p.expect(tColon); err != nil {
 		return Def{}, err
@@ -551,7 +554,7 @@ func (p *parser) parseDefHeadBody(isInstance, isPartial bool) (Def, error) {
 		return Def{}, err
 	}
 	usesGuard := p.guardSeen
-	return Def{Name: id.text, Ty: ty, Body: body, IsInstance: isInstance, IsPartial: isPartial, UsesGuard: usesGuard}, nil
+	return Def{Name: id.text, Pos: namePos, Ty: ty, Body: body, IsInstance: isInstance, IsPartial: isPartial, UsesGuard: usesGuard}, nil
 }
 
 func (p *parser) parseDef() (Def, error) {

@@ -35,16 +35,21 @@ type Def struct {
 	// ... blame ...` contract sugar at parse time. Session metadata only - never
 	// part of the def's content hash.
 	UsesGuard bool
+	// Pos is the byte offset of the definition's name token in the source text.
+	// Used by the ledger to compute the 1-based source line for git blame.
+	// Zero when the source position is unknown (builtin group members, etc.).
+	Pos int
 }
 
 // defMeta is per-name metadata the ledger needs but the store does NOT hash: it
 // records how a def was WRITTEN at the surface (postulate-ness + reason +
-// guard-sugar usage), kept session-side so the kernel's content addressing stays
-// untouched.
+// guard-sugar usage + source position), kept session-side so the kernel's
+// content addressing stays untouched.
 type defMeta struct {
 	postulate bool
 	why       string
 	usesGuard bool
+	pos       int // byte offset of the name token in the source text
 }
 
 // Session holds the store, the name->hash reference map that resolution consults, and
@@ -364,10 +369,11 @@ func (s *Session) AddDef(d surface.Def) (Def, error) {
 	}
 	h := s.st.Add(d.Name, ty, body)
 	rd := Def{Name: d.Name, Ty: ty, Body: body, Hash: h}
-	// Record guard-sugar metadata for the ledger. Read-modify-write because Go
-	// map values are not addressable directly.
+	// Record guard-sugar metadata and source position for the ledger.
+	// Read-modify-write because Go map values are not addressable directly.
 	m := s.meta[d.Name]
 	m.usesGuard = d.UsesGuard
+	m.pos = d.Pos
 	s.meta[d.Name] = m
 	if _, exists := s.byHash[h]; !exists {
 		s.order = append(s.order, h)
@@ -396,10 +402,11 @@ func (s *Session) addForeignDef(d surface.Def) (Def, error) {
 		return Def{}, err
 	}
 	h := s.st.AddForeign(d.Name, ty)
-	// Record how the def was written (postulate + reason) as session-side
-	// metadata. A `postulate` registers through this same bodiless/assumed path;
-	// only the metadata distinguishes it from a `foreign`. Never hashed.
-	s.meta[d.Name] = defMeta{postulate: d.IsPostulate, why: d.Why}
+	// Record how the def was written (postulate + reason + source position) as
+	// session-side metadata. A `postulate` registers through this same
+	// bodiless/assumed path; only the metadata distinguishes it from a `foreign`.
+	// Never hashed.
+	s.meta[d.Name] = defMeta{postulate: d.IsPostulate, why: d.Why, pos: d.Pos}
 	rd := Def{Name: d.Name, Ty: ty, Hash: h, Postulate: d.IsPostulate, Why: d.Why}
 	if _, exists := s.byHash[h]; !exists {
 		s.order = append(s.order, h)
@@ -807,6 +814,7 @@ func (s *Session) Defs() []Def {
 		d.Postulate = m.postulate
 		d.Why = m.why
 		d.UsesGuard = m.usesGuard
+		d.Pos = m.pos
 		out = append(out, d)
 	}
 	return out
