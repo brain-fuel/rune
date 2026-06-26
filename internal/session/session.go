@@ -1070,7 +1070,7 @@ func (s *Session) isIOType(ty core.Tm) bool {
 // definition. This is the REPL's `:run` seam: the kernel evaluator proves, the
 // erased shadow performs.
 func (s *Session) EmitExpr(e surface.Exp) (codegen.Program, error) {
-	tm, _, err := s.ElabExpr(e)
+	tm, ty, err := s.ElabExpr(e)
 	if err != nil {
 		return codegen.Program{}, err
 	}
@@ -1094,6 +1094,10 @@ func (s *Session) EmitExpr(e surface.Exp) (codegen.Program, error) {
 	const entry = "$it"
 	p.Defs = append(p.Defs, codegen.DefSpec{Name: entry, Body: ir})
 	p.Main = entry
+	// An IO-typed expression is RUN (its world thunk forced), not printed as a
+	// neutral value — so `:run do ... end` (and `:run printNat 1`) performs its
+	// effects rather than showing the unforced thunk.
+	p.IOMain = s.isIOType(ty)
 	return p, nil
 }
 
