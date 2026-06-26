@@ -1,0 +1,36 @@
+-- A seq block as a single do-item: internal order is preserved regardless of
+-- the frontier seed. bindIO sequences the two prints inside the seq block;
+-- the seq desugars to a single opaque IO Unit value, so par's scheduler sees
+-- ONE frontier action and cannot reorder the internal steps.
+-- Exercises Task 5: seq inside do linearizes (guards the desugar-isn't-flattening
+-- invariant of the par frontier scheduler).
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+-- ordered is a single IO Unit value that always prints hello then world.
+-- The seq block binds the two IO actions then sequences them with bindIO,
+-- yielding one opaque action. When placed as the sole item in a do block the
+-- frontier scheduler cannot interleave the two prints.
+ordered : IO Unit is
+  seq
+    let h = printBin b"hello\n"
+    let w = printBin b"world\n"
+    bindIO Unit Unit h (fn (u : Unit) is w end)
+  end
+end
+
+main : IO Unit is do ordered end end
