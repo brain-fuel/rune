@@ -23,11 +23,24 @@ type parEntry struct {
 // AddPar registers the par builtin, binding its name and returning the single
 // member hash. ioHashes must be the result of AddIO (the IO group hashes in
 // IONames order).
+//
+// Tag pair '1'/'1': all A-Z and a-z are claimed by other builtin groups, so par
+// uses the first available digit pair. '1' is the group discriminator and '1' is
+// the member discriminator; they are separate BLAKE3 computations so sharing the
+// byte value is fine.
+//
+// No replaceRef/Placeholder substitution is performed here. The canonical pattern
+// (AddIO, AddQuot, AddPathP, ...) substitutes intra-group self-references because
+// those types refer to group members BY POSITION (e.g. IO refers to itself).
+// par's type (A:U)->(B:U)->IO A->IO B->IO B contains NO intra-group
+// self-reference: it refers only to the already-resolved IO former (ioHashes[1]),
+// which is an external, stable content hash, not a placeholder. There is nothing
+// to substitute, so AddPar correctly omits the substitution step.
 func (s *Store) AddPar(ioHashes [4]core.Hash) [1]core.Hash {
 	ty := parType(ioHashes)
 
 	g := newHasher()
-	g.Write([]byte{defFormatVersion, 'R'})
+	g.Write([]byte{defFormatVersion, '1'})
 	th := core.HashTerm(ty)
 	g.Write(th[:])
 	var group core.Hash
@@ -35,7 +48,7 @@ func (s *Store) AddPar(ioHashes [4]core.Hash) [1]core.Hash {
 
 	var hs [1]core.Hash
 	h := newHasher()
-	h.Write([]byte{defFormatVersion, 'r'})
+	h.Write([]byte{defFormatVersion, '1'})
 	h.Write(group[:])
 	writeUint(h, uint64(0))
 	copy(hs[0][:], h.Sum(nil))
