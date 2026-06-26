@@ -61,3 +61,14 @@ func TestTierClassification(t *testing.T) {
 		t.Fatalf("a bodiless assume must have a zero proof hash")
 	}
 }
+
+func TestPostulateTier(t *testing.T) {
+	es := buildFrom(t, `postulate inRegion : U because "cloud API not yet modeled" end`)
+	e, ok := find(es, "inRegion")
+	if !ok || e.Tier != Postulate {
+		t.Fatalf("inRegion want Postulate, got %v ok=%v", e.Tier, ok)
+	}
+	if e.Why != "cloud API not yet modeled" {
+		t.Fatalf("why not carried: %q", e.Why)
+	}
+}

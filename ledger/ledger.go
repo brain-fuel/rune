@@ -68,16 +68,21 @@ func Build(s *session.Session) []Entry {
 			e.ProofHash = core.HashTerm(d.Body)
 		}
 		e.Tier = classify(s, d)
+		e.Why = d.Why
 		out = append(out, e)
 	}
 	return out
 }
 
 // classify picks the tier from the facts available so far. Later tasks extend
-// this (postulate vs assume in Task 4, guard in Task 5).
+// this (guard in Task 5).
 func classify(s *session.Session, d session.Def) Tier {
 	if d.Body == nil {
-		// bodiless: an assumption (foreign) for now; Task 4 splits out postulate.
+		// bodiless: a postulate (an asserted debt) if written as one, else a
+		// trusted foreign/host binding.
+		if d.Postulate {
+			return Postulate
+		}
 		return Assume
 	}
 	if s.Certified(d.Name) {

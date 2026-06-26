@@ -21,6 +21,11 @@ type parser struct {
 	// let/seq type annotation, where '=' belongs to the binding (GRAMMAR §5.4). It
 	// is inherited through arrows and operators and reset inside bracketed groups.
 	noEq bool
+	// stopBecause makes the contextual word `because` end an application spine
+	// rather than be consumed as an argument. Set only while parsing a postulate's
+	// type, so `postulate p : U because "…"` reads the type as `U`, not `U because`.
+	// Reset inside bracketed groups (a real identifier `because` is reachable there).
+	stopBecause bool
 }
 
 // skipNL advances past tNewline tokens. Newlines are insignificant everywhere the
@@ -116,6 +121,18 @@ func ParseProgram(src string) ([]Item, error) {
 				return nil, err
 			}
 			items = append(items, proto...)
+			continue
+		}
+		// `postulate` is a CONTEXTUAL keyword: a declaration only in the form
+		// `postulate Name : …` (an identifier follows). Otherwise `postulate` is an
+		// ordinary identifier and falls through to parseItem. `because` is likewise
+		// contextual (handled inside parsePostulate), so neither word is reserved.
+		if p.peek().kind == tIdent && p.peek().text == "postulate" && p.peekAt(1).kind == tIdent {
+			d, err := p.parsePostulate()
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, d)
 			continue
 		}
 		it, err := p.parseItem()
@@ -279,6 +296,50 @@ func (p *parser) parseForeign() (Def, error) {
 		return Def{}, err
 	}
 	return Def{Name: id.text, Ty: ty, IsForeign: true}, nil
+}
+
+// parsePostulate parses `postulate NAME : TYPE because "REASON" end`. Like a
+// foreign axiom (bodiless, assumed) but tagged as a postulate with a stated
+// reason: the ledger shows it as a debt to be paid down by a later proof of the
+// same proposition. `because` is a CONTEXTUAL keyword (an ordinary identifier
+// matched by text, not a reserved token) and the reason is a string literal.
+func (p *parser) parsePostulate() (Def, error) {
+	p.next() // consume the contextual `postulate`
+	id := p.peek()
+	if id.kind != tIdent && id.kind != tOp {
+		return Def{}, fmt.Errorf("expected a postulate name, found %s at offset %d", id.kind, id.pos)
+	}
+	p.next()
+	if _, err := p.expect(tColon); err != nil {
+		return Def{}, err
+	}
+	savedBec := p.stopBecause
+	p.stopBecause = true
+	ty, err := p.parseExpr()
+	p.stopBecause = savedBec
+	if err != nil {
+		return Def{}, err
+	}
+	bec := p.peek()
+	if bec.kind != tIdent || bec.text != "because" {
+		if bec.kind == tEOF {
+			return Def{}, fmt.Errorf("%w: expected 'because' in postulate %q", ErrIncomplete, id.text)
+		}
+		return Def{}, fmt.Errorf("expected 'because' in postulate %q, found %s at offset %d", id.text, bec.kind, bec.pos)
+	}
+	p.next()
+	reason := p.peek()
+	if reason.kind != tStr {
+		if reason.kind == tEOF {
+			return Def{}, fmt.Errorf("%w: expected a string reason after 'because'", ErrIncomplete)
+		}
+		return Def{}, fmt.Errorf("expected a string reason after 'because', found %s at offset %d", reason.kind, reason.pos)
+	}
+	p.next()
+	if _, err := p.expect(tEnd); err != nil {
+		return Def{}, err
+	}
+	return Def{Name: id.text, Ty: ty, IsForeign: true, IsPostulate: true, Why: reason.text}, nil
 }
 
 // parseModule parses `module Name is <Def>* end` (C6): a namespace block. Each
@@ -845,7 +906,11 @@ func (p *parser) parseApp() (Exp, error) {
 }
 
 func (p *parser) atomStarts() bool {
-	switch p.peek().kind {
+	t := p.peek()
+	if p.stopBecause && t.kind == tIdent && t.text == "because" {
+		return false
+	}
+	switch t.kind {
 	case tIdent, tU, tLParen, tFn, tSeq, tHole, tProp, tEq, tRefl, tCast, tSubst, tNum, tDec, tStr, tBytes, tCase, tCalc:
 		return true
 	default:
@@ -1014,10 +1079,13 @@ func (p *parser) parseBinder() (string, core.Icit, core.Qty, Exp, error) {
 	} else if _, err := p.expect(tLParen); err != nil {
 		return "", icit, qty, nil, err
 	}
-	// A bracketed group resets the let-annotation '=' carve-out (§5.4).
+	// A bracketed group resets the let-annotation '=' carve-out (§5.4) and the
+	// postulate `because` stop (inside brackets `because` is an ordinary identifier).
 	saved := p.noEq
 	p.noEq = false
-	defer func() { p.noEq = saved }()
+	savedBec := p.stopBecause
+	p.stopBecause = false
+	defer func() { p.noEq = saved; p.stopBecause = savedBec }()
 	if isQtyTok(p.peek()) {
 		qty = qtyOf(p.next().text)
 	}
@@ -1161,10 +1229,13 @@ func (p *parser) parseParen() (Exp, error) {
 		p.next() // ')'
 		return EVar{Name: op}, nil
 	}
-	// A bracketed group resets the let-annotation '=' carve-out (§5.4).
+	// A bracketed group resets the let-annotation '=' carve-out (§5.4) and the
+	// postulate `because` stop (inside brackets `because` is an ordinary identifier).
 	saved := p.noEq
 	p.noEq = false
-	defer func() { p.noEq = saved }()
+	savedBec := p.stopBecause
+	p.stopBecause = false
+	defer func() { p.noEq = saved; p.stopBecause = savedBec }()
 	if isQtyTok(p.peek()) && p.peekAt(1).kind == tIdent && p.peekAt(2).kind == tColon {
 		// (0 x : A) -> B / (1 x : A) -> B: a quantity-annotated dependent Pi.
 		qty := qtyOf(p.next().text)

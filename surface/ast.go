@@ -176,6 +176,13 @@ type Def struct {
 	// IsForeign marks a `foreign` axiom (R-FFI / B4): a bodiless typed constant
 	// whose TYPE is its contract; tracked as an assumption. Body is nil.
 	IsForeign bool
+	// IsPostulate marks a def written as `postulate` (an asserted debt), not
+	// `foreign`. It registers exactly like a foreign axiom (bodiless, assumed);
+	// only the session metadata records it was a postulate and why.
+	IsPostulate bool
+	// Why is the postulate's stated reason (the debt to be paid by a later proof
+	// of the same proposition). Empty for non-postulates.
+	Why string
 }
 
 // Ctor is one constructor of a datatype declaration: Name : Ty.

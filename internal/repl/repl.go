@@ -251,6 +251,14 @@ func looksLikeDecl(src string) bool {
 	switch t[:i] {
 	case "data", "foreign", "builtin", "instance", "partial", "module", "mutual":
 		return true
+	case "postulate":
+		// `postulate` is a contextual declaration keyword: a decl only in the form
+		// `postulate Name : …` (an identifier follows). Otherwise it is an ordinary
+		// identifier - fall through to the `name :` definition shape.
+		rest := strings.TrimSpace(t[i:])
+		if len(rest) > 0 && isIdentByte(rest[0]) {
+			return true
+		}
 	}
 	return looksLikeDef(src)
 }

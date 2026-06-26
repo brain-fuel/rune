@@ -26,6 +26,19 @@ type Def struct {
 	Ty   core.Tm
 	Body core.Tm
 	Hash core.Hash
+	// Postulate reports the def was written as `postulate … because "…" end`
+	// (an asserted debt), not `foreign`. Session metadata only - never hashed.
+	Postulate bool
+	// Why is the postulate's stated reason. Session metadata only - never hashed.
+	Why string
+}
+
+// defMeta is per-name metadata the ledger needs but the store does NOT hash: it
+// records how a def was WRITTEN at the surface (postulate-ness + reason), kept
+// session-side so the kernel's content addressing stays untouched.
+type defMeta struct {
+	postulate bool
+	why       string
 }
 
 // Session holds the store, the name->hash reference map that resolution consults, and
@@ -56,6 +69,9 @@ type Session struct {
 	// instead of O(a·b) eliminator peeling. It is consulted by every Machine the
 	// session builds (set as m.NatAccel). Empty means no acceleration.
 	natAccel map[core.Hash]core.NatOp
+	// meta is per-name surface metadata the ledger reads but the store never
+	// hashes (postulate-ness + reason). Keyed by def name; absent => zero value.
+	meta map[string]defMeta
 }
 
 // natAccelTable is the session's core.NatAccelInfo: it reports the accelerated
@@ -128,6 +144,7 @@ func (s *Session) resetBuiltins() {
 	s.nat = nil
 	s.natCtors = false
 	s.natAccel = map[core.Hash]core.NatOp{}
+	s.meta = map[string]defMeta{}
 	hs := s.st.AddQuot()
 	for i, n := range store.QuotNames() {
 		s.refs[n] = hs[i]
@@ -368,7 +385,11 @@ func (s *Session) addForeignDef(d surface.Def) (Def, error) {
 		return Def{}, err
 	}
 	h := s.st.AddForeign(d.Name, ty)
-	rd := Def{Name: d.Name, Ty: ty, Hash: h}
+	// Record how the def was written (postulate + reason) as session-side
+	// metadata. A `postulate` registers through this same bodiless/assumed path;
+	// only the metadata distinguishes it from a `foreign`. Never hashed.
+	s.meta[d.Name] = defMeta{postulate: d.IsPostulate, why: d.Why}
+	rd := Def{Name: d.Name, Ty: ty, Hash: h, Postulate: d.IsPostulate, Why: d.Why}
 	if _, exists := s.byHash[h]; !exists {
 		s.order = append(s.order, h)
 	}
@@ -377,6 +398,14 @@ func (s *Session) addForeignDef(d surface.Def) (Def, error) {
 	s.byHash[h] = rd
 	return rd, nil
 }
+
+// Postulate reports whether name was declared as a `postulate` (an asserted
+// debt) rather than a trusted `foreign` axiom. Session metadata only.
+func (s *Session) Postulate(name string) bool { return s.meta[name].postulate }
+
+// Why returns the stated reason of a postulated name (empty otherwise). Session
+// metadata only - never part of the def's content hash.
+func (s *Session) Why(name string) string { return s.meta[name].why }
 
 // addPartialDef elaborates and stores a general-recursive `partial` definition
 // (C4): the body is elaborated with the self-reference at Placeholder(0), then
@@ -762,7 +791,11 @@ func (s *Session) decConfig() surface.DecConfig {
 func (s *Session) Defs() []Def {
 	out := make([]Def, 0, len(s.order))
 	for _, h := range s.order {
-		out = append(out, s.byHash[h])
+		d := s.byHash[h]
+		m := s.meta[d.Name]
+		d.Postulate = m.postulate
+		d.Why = m.why
+		out = append(out, d)
 	}
 	return out
 }
