@@ -95,4 +95,35 @@ checked : Result Nat Nat is fast with post r guard true blame zero end`
 	if !ok || e.Tier != Guard {
 		t.Fatalf("checked want Guard, got %v ok=%v", e.Tier, ok)
 	}
+	// Kernel-generated datatype ctors/formers must be excluded from the ledger.
+	if _, ok := find(es, "false"); ok {
+		t.Fatalf("kernel ctor must be excluded from the ledger")
+	}
+}
+
+func TestBodilessKernelExcluded(t *testing.T) {
+	// Datatype formers, constructors, and eliminators are kernel-generated bodiless
+	// furniture - they must not appear in the ledger. Only assumed bodiless defs
+	// (foreign/postulate) are real control claims.
+	src := `data Nat : U is zero : Nat | succ : Nat -> Nat end
+foreign hostThing : Nat end
+postulate inRegion : U because "not modeled" end`
+	es := buildFrom(t, src)
+
+	// assumed binding must be present with Assume tier
+	host, ok := find(es, "hostThing")
+	if !ok || host.Tier != Assume {
+		t.Fatalf("hostThing want Assume, got %v ok=%v", host.Tier, ok)
+	}
+	// postulate must be present with Postulate tier
+	region, ok := find(es, "inRegion")
+	if !ok || region.Tier != Postulate {
+		t.Fatalf("inRegion want Postulate, got %v ok=%v", region.Tier, ok)
+	}
+	// kernel furniture must be absent from the ledger
+	for _, name := range []string{"Nat", "zero", "succ", "NatElim"} {
+		if _, ok := find(es, name); ok {
+			t.Fatalf("kernel furniture %q must be excluded from the ledger", name)
+		}
+	}
 }

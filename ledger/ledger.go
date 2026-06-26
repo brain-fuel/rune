@@ -56,10 +56,21 @@ type Entry struct {
 }
 
 // Build classifies every definition in the session.
+// Kernel-generated bodiless furniture (datatype formers, constructors,
+// eliminators, and builtin group members) is excluded: these are not
+// control claims and cluttering the ledger with them obscures the real
+// assurance picture. The filter is: skip any def where Body==nil and
+// session.Assumed reports false (assumed == foreign or postulate only).
 func Build(s *session.Session) []Entry {
 	defs := s.Defs()
 	out := make([]Entry, 0, len(defs))
 	for _, d := range defs {
+		// Skip kernel-generated bodiless furniture: datatype formers,
+		// constructors, eliminators, and builtins. Only assumed bodiless defs
+		// (foreign/postulate) are real control claims.
+		if d.Body == nil && !s.Assumed(d.Name) {
+			continue
+		}
 		e := Entry{
 			Name:     d.Name,
 			PropHash: core.HashTerm(d.Ty),
@@ -76,18 +87,27 @@ func Build(s *session.Session) []Entry {
 
 // classify picks the tier from the facts available so far.
 //
-// Order: bodiless -> Postulate/Assume; body + UsesGuard -> Guard (a runtime
-// contract, even if the wrapper elaborated cleanly); body + Certified -> Proven;
-// else Unproven.
+// Order: bodiless -> Postulate/Assume; body + UsesGuard -> Guard; body +
+// Certified -> Proven; else Unproven.
+//
+// Bodiless note: Build filters out all non-assumed bodiless defs (datatype
+// formers/constructors/eliminators/builtins) before calling classify, so the
+// bodiless branch here handles only assumed defs (foreign or postulate).
+//
+// Guard-before-Certified is intentional: a definition resting on a runtime
+// contract (the with-post-guard sugar) is guard-tier even though its own
+// type-check certifies. Because every successfully loaded definition is
+// certified, a Certified-first order would make the Guard tier permanently
+// unreachable. The current order is deliberate, not a bug.
 func classify(s *session.Session, d session.Def) Tier {
 	if d.Body == nil {
-		// bodiless: a postulate (an asserted debt) if written as one, else a
-		// trusted foreign/host binding.
+		// Only assumed defs reach here (non-assumed bodiless filtered by Build).
 		if d.Postulate {
 			return Postulate
 		}
 		return Assume
 	}
+	// Guard checked before Certified: see comment above.
 	if d.UsesGuard {
 		return Guard
 	}
