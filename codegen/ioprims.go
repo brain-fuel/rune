@@ -190,6 +190,40 @@ func usesTLS(p Program) bool { return usesForeign(p, "tlsGet") }
 func UsesCrypto(p Program) bool { return usesCrypto(p) }
 func UsesTLS(p Program) bool    { return usesTLS(p) }
 
+// usesPar reports whether any emitted definition references the ambient `par`
+// combinator (an IGlobal, not an IForeign, because par is a bodiless builtin).
+// When true the Go backend must emit goFrontierRuntime and pull in "os" and "fmt"
+// (already in the default import set) so __schedState can read WAVELET_SEED.
+func usesPar(p Program) bool {
+	var walk func(Ir) bool
+	walk = func(t Ir) bool {
+		switch x := t.(type) {
+		case IGlobal:
+			return x.Name == "par"
+		case ILam:
+			return walk(x.Body)
+		case IApp:
+			return walk(x.Fn) || walk(x.Arg)
+		case ILet:
+			return walk(x.Val) || walk(x.Body)
+		case IPair:
+			return walk(x.A) || walk(x.B)
+		case IFst:
+			return walk(x.P)
+		case ISnd:
+			return walk(x.P)
+		default:
+			return false
+		}
+	}
+	for _, d := range p.Defs {
+		if walk(d.Body) {
+			return true
+		}
+	}
+	return false
+}
+
 // usesForeign reports whether any emitted definition references a `foreign` axiom
 // of the given name (erased to an IForeign accessor). Mirrors usesOTP's walk.
 func usesForeign(p Program, name string) bool {

@@ -47,7 +47,8 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "timeNanos") {
 		addImp("time")
 	}
-	if usesOS(p) {
+	if usesOS(p) || usesPar(p) {
+		// par's frontier runtime reads WAVELET_SEED from the environment.
 		addImp("os")
 	}
 	if usesForeign(p, "fsqrt") || usesForeign(p, "npNorm") || usesForeign(p, "fpow") {
@@ -107,6 +108,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesIO(p) {
 		b.WriteString(goIORuntime)
+	}
+	if usesPar(p) {
+		b.WriteString(goFrontierRuntime)
 	}
 	if usesOTP(p) {
 		b.WriteString(goOTPRuntime)
@@ -427,6 +431,9 @@ func (em *goEmitter) expr(t Ir, env []string) string {
 		if out, ok := em.natDispatch(x, env); ok {
 			return out
 		}
+		if out, ok := em.parDispatch(x, env); ok {
+			return out
+		}
 		return fmt.Sprintf("ap(%s, %s)", em.expr(x.Fn, env), em.expr(x.Arg, env))
 	case ILet:
 		n := freshGo(x.Name, env)
@@ -565,6 +572,72 @@ func (em *goEmitter) natDispatch(app IApp, env []string) (string, bool) {
 		out = fmt.Sprintf("ap(%s, %s)", out, em.expr(extra, env))
 	}
 	return out, true
+}
+
+// parDispatch recognizes a saturated par-headed application spine and emits a
+// compile-time-flattened __frontier call. The par builtin has type
+//
+//	par : (A : U) -> (B : U) -> IO A -> IO B -> IO B
+//
+// After erasure both type arguments become units, so a saturated call is:
+//
+//	IApp(IApp(IApp(IApp(IGlobal "par", IUnit), IUnit), action_a), action_b)
+//
+// do-blocks desugar to right-nested par trees:
+//
+//	par _ _ a1 (par _ _ a2 (... an))
+//
+// This function walks the spine recursively, collecting the IO-action arguments
+// (position 3 and 4 in each par node, 0-indexed from the par head), and emits
+// one __frontier call over all of them. If the current node is not a saturated
+// par application the function returns ("", false) and the caller falls through
+// to the generic ap emit.
+func (em *goEmitter) parDispatch(app IApp, env []string) (string, bool) {
+	actions := em.flattenParSpine(Ir(app))
+	if actions == nil {
+		return "", false
+	}
+	parts := make([]string, len(actions))
+	for i, a := range actions {
+		parts[i] = em.expr(a, env)
+	}
+	// __frontier takes a Go []any of IO action thunks, forces them in
+	// seed-determined order, and returns the last result (IO B = last arg).
+	return fmt.Sprintf("__frontier([]any{%s})", strings.Join(parts, ", ")), true
+}
+
+// flattenParSpine walks a right-nested par spine bottom-up and returns the
+// ordered list of IO-action sub-terms. A saturated par application has the
+// shape: IApp(IApp(IApp(IApp(IGlobal "par", _), _), action_left), rest)
+// where rest may itself be another saturated par (the right-nested case) or a
+// bare IO action (the leaf case). Returns nil when t is not a saturated par.
+func (em *goEmitter) flattenParSpine(t Ir) []Ir {
+	// Unwind the application spine: collect args right-to-left.
+	var args []Ir
+	cur := t
+	for {
+		app, ok := cur.(IApp)
+		if !ok {
+			break
+		}
+		args = append([]Ir{app.Arg}, args...)
+		cur = app.Fn
+	}
+	// Head must be the "par" global; spine must have exactly 4 args
+	// (two erased types + two IO actions).
+	g, ok := cur.(IGlobal)
+	if !ok || g.Name != "par" || len(args) != 4 {
+		return nil
+	}
+	// args[0] = A (erased, IUnit), args[1] = B (erased, IUnit)
+	// args[2] = left IO action, args[3] = right IO action (may be nested par)
+	left := args[2]
+	right := args[3]
+	// If right is itself a saturated par, recurse to flatten it.
+	if nested := em.flattenParSpine(right); nested != nil {
+		return append([]Ir{left}, nested...)
+	}
+	return []Ir{left, right}
 }
 
 func freshGo(hint string, env []string) string {
@@ -741,4 +814,51 @@ const goQuotRuntime = `func qin_d() any { return func(a any) any { return func(r
 func qsound_d() any { return func(a any) any { return func(r any) any { return func(x any) any { return func(y any) any { return func(p any) any { return nil } } } } } }
 func qlift_d() any { return func(a any) any { return func(r any) any { return func(b any) any { return func(f any) any { return func(resp any) any { return func(q any) any { return ap(f, q) } } } } } } }
 func qind_d() any { return func(a any) any { return func(r any) any { return func(p any) any { return func(h any) any { return func(q any) any { return nil } } } } } }
+`
+
+// goFrontierRuntime is the seeded cooperative scheduler for the par combinator
+// (Task 3 / R-EFFECT). The par builtin has observable semantics: run all IO
+// actions in a seed-determined interleaving order and return the last result.
+// The scheduler is single-threaded (no goroutines): the semantics is the
+// INTERLEAVING, not physical parallelism.
+//
+// The LCG parameters match the Knuth MMIX constants so the seed is identical
+// on every backend later:
+//
+//	state = state * 6364136223846793005 + 1442695040888963407  (wrapping uint64)
+//	nextIndex = state mod readyCount
+//
+// WAVELET_SEED (default 0) seeds the scheduler; WAVELET_SEED=0 is fully
+// deterministic and used as the conformance seed in tests. The "os" import is
+// gated by usesPar (added alongside this constant).
+//
+// __frontier receives a pre-flattened []any of IO action thunks (compile-time
+// par-spine flattening by parDispatch/flattenParSpine; no erased-List decoding
+// at runtime). Each action is forced by applying it to nil, exactly as
+// pureIO_d/bindIO_d force their world thunks. __frontier returns an IO-shaped
+// value (a unit-argument closure) so it composes with the surrounding IO monad
+// machinery. The last forced result is returned (par : IO A -> IO B -> IO B).
+const goFrontierRuntime = `var __schedState uint64 = func() uint64 {
+	if s := os.Getenv("WAVELET_SEED"); s != "" {
+		var v uint64
+		fmt.Sscan(s, &v)
+		return v
+	}
+	return 0
+}()
+func __schedNext(n int) int {
+	__schedState = __schedState*6364136223846793005 + 1442695040888963407
+	return int(__schedState % uint64(n))
+}
+func __frontier(xs []any) any {
+	return func(_u any) any {
+		var last any
+		for len(xs) > 0 {
+			i := __schedNext(len(xs))
+			last = ap(xs[i], nil)
+			xs = append(xs[:i], xs[i+1:]...)
+		}
+		return last
+	}
+}
 `

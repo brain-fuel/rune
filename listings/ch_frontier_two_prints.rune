@@ -1,0 +1,20 @@
+-- Two independent prints in a do-block: both run, order is seed-determined.
+-- Exercises the par-spine flattening + cooperative frontier scheduler (Task 3).
+data Unit : U is
+  unit : Unit
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+main : IO Unit is do (printBin b"hello\n") (printBin b"world\n") end end
