@@ -19,6 +19,28 @@
 
 ---
 
+## INTERFACE REVISION (pre-flight, authoritative; overrides any `frontier`/`List` mention below)
+
+`List` is NOT an ambient former (listings define it themselves); only `IO` is ambient
+(`s.st.AddIO()`). So the effect combinator is a binary `par`, not a list-taking `frontier`:
+
+- **Builtin:** `par : (A : U) -> (B : U) -> IO A -> IO B -> IO B` (ambient, IO-only, bodiless,
+  permanently neutral, own hash space).
+- **`do a1 a2 ... an end`** desugars to right-nested `par`: `par _ _ a1 (par _ _ a2 (... an))`;
+  a single-item `do a end` desugars to `a`.
+- **Codegen flattens the `par`-spine.** When the emitter sees a saturated application headed by
+  `par`, it recursively flattens nested `par` on the second IO argument into a compile-time slice
+  `[a1, a2, ..., an]` and emits one `__frontier([a1, ..., an])` call. A bare `par x y` (not inside
+  a `do`) flattens to `__frontier([x, y])`. So the runtime `__frontier` takes a host slice built by
+  the emitter, NOT an erased `List` decoded at runtime.
+
+Everywhere below: read `frontier` (the builtin) as `par`; read "the type `... List (IO A) -> IO A`"
+as `par`'s type above; read "`__frontier` decodes the erased List" as "the emitter passes a
+compile-time slice from the flattened `par`-spine." The LCG, `seq`-linearizes, conformance, and
+order-independence tasks are unchanged.
+
+---
+
 ### Task 1: The `frontier` builtin and its type
 
 **Files:**
