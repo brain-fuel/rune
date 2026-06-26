@@ -69,6 +69,8 @@ type Store struct {
 	cn *coindEntry
 	// The IO/effects group (io.go, R-EFFECT / C3), once registered.
 	io *ioEntry
+	// The par concurrent-effect combinator (par.go, eval-model / M7), once registered.
+	par *parEntry
 	// The equivalence group (equiv.go, §F / R-GLUE / A6), once registered.
 	ev *equivEntry
 	// The inner Glue group (glue.go, §F / R-GLUE / A6), once registered.

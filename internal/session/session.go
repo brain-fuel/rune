@@ -188,6 +188,11 @@ func (s *Session) resetBuiltins() {
 		s.refs[n] = ohs[i]
 		s.refNames[ohs[i]] = n
 	}
+	prhs := s.st.AddPar(ohs)
+	for i, n := range store.ParNames() {
+		s.refs[n] = prhs[i]
+		s.refNames[prhs[i]] = n
+	}
 	evhs := s.st.AddEquiv(fhs, ghs)
 	for i, n := range store.EquivNames() {
 		s.refs[n] = evhs[i]
