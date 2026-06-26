@@ -1388,6 +1388,13 @@ func freshAgainst(hint string, e Exp) string {
 			}
 			walk(x.Val)
 			walk(x.Body)
+		case ESeqBind:
+			used[x.Name] = true
+			if x.Ty != nil {
+				walk(x.Ty)
+			}
+			walk(x.Val)
+			walk(x.Body)
 		case EAnn:
 			walk(x.Term)
 			walk(x.Ty)

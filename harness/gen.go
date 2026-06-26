@@ -126,6 +126,13 @@ func (c *renamer) rename(e surface.Exp, env map[string]string) surface.Exp {
 			out.Ty = c.rename(x.Ty, env)
 		}
 		return out
+	case surface.ESeqBind:
+		nn := c.fresh()
+		out := surface.ESeqBind{Name: nn, Val: c.rename(x.Val, env), Body: c.rename(x.Body, extend(env, x.Name, nn))}
+		if x.Ty != nil {
+			out.Ty = c.rename(x.Ty, env)
+		}
+		return out
 	case surface.EAnn:
 		return surface.EAnn{Term: c.rename(x.Term, env), Ty: c.rename(x.Ty, env)}
 	default:
