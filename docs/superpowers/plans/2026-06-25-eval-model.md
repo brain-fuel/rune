@@ -578,3 +578,35 @@ git commit -m "test(eval): repl acceptance for do blocks"
 
 - The default seed is 0; confirm whether production wants a time-seeded default (nondeterministic by default, with `WAVELET_SEED` to pin) or a fixed default (deterministic by default). The conformance gate needs a pinned seed regardless; this only affects the un-pinned developer run.
 - `printStr`/`Bin` names in the demo listings must match the existing byte-print prim; verify against `ch483_bytes.rune` before writing the listings.
+
+---
+
+### Task 5b: type-aware seq lowering (IO items sequence via bindIO)
+
+Added 2026-06-26 per the human decision on the Task 5 finding (seq=let does not order effects).
+Execution order: after Task 5, before or independent of Task 6.
+
+**Goal.** A `seq` item whose value has type `IO A` lowers to `bindIO` (ordered effect sequencing)
+instead of a lazy `let`; pure items stay `let`. So `seq printHello printWorld end` orders the
+effects with no manual `bindIO`.
+
+**Files:**
+- Modify: `surface/ast.go` (a distinct `ESeqBind{Name, Ty, Val, Body}` node so seq-origin bindings
+  are distinguishable from ordinary `let ... in`)
+- Modify: `surface/parser.go` (`desugarSeq` emits `ESeqBind`, not `ELet`)
+- Modify: the elaborator (`elaborate/check_surface.go` or the resolve/infer path) to handle
+  `ESeqBind`: infer `Val`'s type; if it is `IO A`, elaborate as `bindIO A B Val (fn Name is Body end)`
+  (B = Body's type); otherwise elaborate exactly as the existing `let`.
+- Modify: `surface/pretty.go` and the resolver to handle `ESeqBind` (print as a seq binding; resolve
+  the binder).
+- Test: a Go test that `seq (printBin b"hello\n") (printBin b"world\n") end` (no manual bindIO)
+  prints hello before world under every WAVELET_SEED, and a pure `seq let x = 1 ... end` still
+  behaves as a value let.
+
+**Constraints.** Kernel FROZEN (surface + elaborate only; `bindIO` is the existing ambient builtin).
+The type-aware choice happens at elaboration where `IO`-typedness is known; the parser stays
+type-agnostic (it only tags the node as seq-origin). No em or en dashes.
+
+**Criteria.** `seq` of two IO actions orders the effects with no manual `bindIO`; pure seq bindings
+unchanged; `ch_frontier_seq_order.rune` simplifies to use bare `seq` (drop the manual `bindIO`) and
+its ordering test still passes for every seed; full elaborate gate green.

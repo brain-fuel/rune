@@ -75,7 +75,11 @@ a debt that later commits pay down.
   executors, so independent effects (print Hello, print World) interleave nondeterministically from
   one run to the next. The DAG is implicit from data flow (B consumes A's result implies B after A).
 - **`seq ... end`.** A linearization barrier. Actions inside take a total program order (World always
-  after Hello). This is the only explicit ordering.
+  after Hello). This is the only explicit ordering. IMPLEMENTATION NOTE (2026-06-26 decision): the
+  current `seq` desugars to lazy `let`, which orders value bindings but NOT effects. To meet this
+  spec, an IO-typed `seq` item must lower to `bindIO` (monadic sequencing), decided type-aware at
+  elaboration. Pure items stay `let`. This keeps the two-tier story: `seq` orders effects, `do`
+  runs them concurrently.
 - **`do` (inside `seq`).** Re-opens a concurrent block: its internal effects race on the frontier,
   but the `do` block as a whole is one ordered step of its enclosing `seq`. Layers alternate:
   `async` contains `seq` contains `do(async)`.
