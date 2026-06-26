@@ -1,0 +1,170 @@
+-- Order-independence as a PROOF OBLIGATION (Task 7 / the verification tie-in).
+-- Two replicas of a G-Counter CRDT (the ch72 merge) are gossiped as two
+-- independent frontier effects inside a do-block: under the seeded cooperative
+-- scheduler the two effects run in a seed-determined order, yet the observed
+-- result is identical for every seed. WHY it is identical is not luck: the merge
+-- is COMMUTATIVE (`mergeComm`, proven by induction), so observing replicaA-then-B
+-- or replicaB-then-A yields the same merged value (`mergeValueComm`). The proof
+-- certifies that the printed result CANNOT depend on the frontier's order; the
+-- harness test confirms it operationally under two distinct seeds.
+-- Reuses the proven G-Counter from ch72_replicated_counter.rune.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
+foreign printNat : Nat -> IO Nat end
+
+-- addition (the observed value combines the two replicas' counts).
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) n (fn (k : Nat) (ih : Nat) is succ ih end) m
+  end
+end
+
+-- MAX, the CRDT join on a single slot. All three equations hold definitionally.
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is n end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end)
+             (succ k)
+             (fn (j : Nat) (ihj : Nat) is succ (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- symmetry and a succ-congruence over the ambient Eq, by `subst`.
+symNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat b a is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat z a end) (refl a)
+  end
+end
+
+congSucc : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) (refl (succ a))
+  end
+end
+
+-- max m 0 = m, by induction.
+maxZeroR : (m : Nat) -> Eq Nat (max m zero) m is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k zero) k) is refl (succ k) end)
+      m
+  end
+end
+
+-- MAX IS COMMUTATIVE — the heart of CRDT convergence. Double induction.
+maxComm : (m : Nat) -> (n : Nat) -> Eq Nat (max m n) (max n m) is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Nat (max x n) (max n x) end)
+      (fn (n : Nat) is symNat (max n zero) n (maxZeroR n) end)
+      (fn (k : Nat) (ih : (n : Nat) -> Eq Nat (max k n) (max n k)) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Eq Nat (max (succ k) x) (max x (succ k)) end)
+             (refl (succ k))
+             (fn (j : Nat) (ihj : Eq Nat (max (succ k) j) (max j (succ k))) is
+                congSucc (max k j) (max j k) (ih j) end)
+             n
+         end
+       end)
+      m
+  end
+end
+
+-- A REPLICATED COUNTER: two replicas' local counts. value = their sum; merge = pointwise max.
+data GC : U is
+  gc : Nat -> Nat -> GC
+end
+
+value : GC -> Nat is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is Nat end) (fn (a : Nat) (b : Nat) is add a b end) g
+  end
+end
+
+merge : GC -> GC -> GC is
+  fn (g : GC) (h : GC) is
+    GCElim (fn (x : GC) is GC end)
+      (fn (a : Nat) (b : Nat) is
+         GCElim (fn (y : GC) is GC end)
+           (fn (c : Nat) (d : Nat) is gc (max a c) (max b d) end)
+           h
+       end)
+      g
+  end
+end
+
+-- GC-congruence in both slots, by two `subst`s.
+congGC : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> Eq Nat a c -> Eq Nat b d -> Eq GC (gc a b) (gc c d) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e1 : Eq Nat a c) (e2 : Eq Nat b d) is
+    subst Nat a c e1 (fn (x : Nat) is Eq GC (gc a b) (gc x d) end)
+      (subst Nat b d e2 (fn (y : Nat) is Eq GC (gc a b) (gc a y) end)
+         (refl (gc a b)))
+  end
+end
+
+-- CONVERGENCE: merge is COMMUTATIVE — gossiping in either order reaches the same state.
+mergeComm : (g : GC) -> (h : GC) -> Eq GC (merge g h) (merge h g) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> Eq GC (merge x h) (merge h x) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is Eq GC (merge (gc a b) y) (merge y (gc a b)) end)
+             (fn (c : Nat) (d : Nat) is
+                congGC (max a c) (max b d) (max c a) (max d b)
+                  (maxComm a c) (maxComm b d) end)
+             h
+         end
+       end)
+      g
+  end
+end
+
+-- value respects GC-equality (so a commutative merge gives a commutative observed value).
+congValue : (g : GC) -> (h : GC) -> Eq GC g h -> Eq Nat (value g) (value h) is
+  fn (g : GC) (h : GC) (e : Eq GC g h) is
+    subst GC g h e (fn (z : GC) is Eq Nat (value g) (value z) end) (refl (value g))
+  end
+end
+
+-- THE ORDER-INDEPENDENCE OBLIGATION: the observed value of merging A-then-B equals
+-- merging B-then-A, witnessed by mergeComm lifted through value. This is exactly the
+-- statement that the frontier's gossip order cannot change the result.
+mergeValueComm : (g : GC) -> (h : GC) -> Eq Nat (value (merge g h)) (value (merge h g)) is
+  fn (g : GC) (h : GC) is
+    congValue (merge g h) (merge h g) (mergeComm g h)
+  end
+end
+
+-- THE DEPLOYED SCENARIO: replica A holds (gc 2 0), replica B holds (gc 0 1). Both
+-- converge to (gc 2 1), observed value 3. The two gossip effects observe the merge in
+-- the two orders; mergeValueComm proves they agree, so whichever the scheduler runs
+-- first, the printed values are identical.
+replicaA : GC is gc (succ (succ zero)) zero end
+replicaB : GC is gc zero (succ zero) end
+
+gossipAB : IO Nat is printNat (value (merge replicaA replicaB)) end
+gossipBA : IO Nat is printNat (value (merge replicaB replicaA)) end
+
+-- The order-independence certificate for the concrete replicas.
+convergedOrderInvariant
+  : Eq Nat (value (merge replicaA replicaB)) (value (merge replicaB replicaA)) is
+  mergeValueComm replicaA replicaB
+end
+
+-- two independent frontier effects: the scheduler picks an order by seed, but the
+-- result is seed-invariant (proven by convergedOrderInvariant).
+main : IO Nat is do gossipAB gossipBA end end
