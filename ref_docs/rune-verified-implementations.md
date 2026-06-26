@@ -147,7 +147,8 @@ into the test. Gated by harness/listings_test.go.
 
 This DISCHARGED the proof problem ch13's `//`/`%` at Rat raised (a floor is
 well-defined on a quotient class only by this uniqueness), and those operators
-are now LIVE in ch13. The division algorithm is specialised there to ch13's
+are LIVE in ch13 and, on the canonical QPair representation, in ch203 (`floorQ`
+/ `floorUnique`, the Rule-5 port). The division algorithm is specialised there to ch13's
 arithmetic conventions, and `floorQ : Rat -> Rat` is a `qlift` whose respect
 proof (`floorUnique`) is exactly the uniqueness theorem applied to the two
 representatives' characterizations. The signed Int floor needed no sign-case

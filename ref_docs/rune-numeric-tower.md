@@ -67,7 +67,7 @@ glyph.
 |---|---|---|---|
 | `+` `-` `*` | yes (`-` truncated, as today) | yes (`-` true subtraction) | yes |
 | `/` exact | **absent** | **absent** | yes; `a / 0 = 0`; law: `b ≠ 0 → (a / b) * b = a` |
-| `//` floor quotient | yes (= v3.4.0's `/`) | yes, rounds −∞ | DONE (ch13): floorQ via qlift, respect = Euclidean uniqueness |
+| `//` floor quotient | yes (= v3.4.0's `/`) | yes, rounds −∞ | DONE (ch13 RPair; ch203 QPair `floorQ`): floorQ via qlift, respect = Euclidean uniqueness |
 | `%` floor remainder | yes (= v3.4.0's `%`; F = E = T at Nat) | yes, sign follows divisor | DONE (ch13): `a % 1` = fractional part, certified |
 | `gcd` (named) | yes | via `natAbs` | — |
 

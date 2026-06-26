@@ -3040,7 +3040,7 @@ end
 -- recurs starts the repetend).  Every division here is small (rem < den), so
 -- nothing approaches a fuel wall; the dividend-as-fuel budget suffices exactly.
 -- This is the rep-level computation; the qlift onto Q (well-definedness via
--- floorUnique) is the next rung.
+-- floorUnique) is the floor section near the file tail (floorQ / floorUnique).
 -- ============================================================================
 
 -- Bind digit literals (the chapter declared `data Nat` above; this binds 0,1,…).
@@ -5333,4 +5333,139 @@ radixQHalfWellDefined :
   Eq RDec (toRadixQ (qin QPair QRel (qpair (intOf 1) 1)))
           (toRadixQ (qin QPair QRel (qpair (intOf 2) 3))) is
   cong (fn (x : Q) is toRadixQ x end) sameHalfQ
+end
+
+-- ============================================================================
+-- THE FLOOR ON Q  (floorQ : Q -> Z)  AND ITS WELL-DEFINEDNESS  (floorUnique).
+--
+-- The integer floor of a rational, toward -infinity.  ch13 built this on the
+-- RPair (Nat-pair-difference) representation with a bespoke sign trick; Rule 5
+-- retires RPair for the canonical QPair, so the floor (and its proof that it is
+-- a FUNCTION of the rational value, not of the chosen fraction) is ported here.
+-- This is the rung ch203's to_radix section named as "next" (well-definedness
+-- via floorUnique) and the last theorem that was unique to ch13.
+--
+-- A QPair p denotes (qnum p) / succ (qdenN p), a signed numerator over a
+-- positive denominator.  The floor is determined by THREE quantities, each of
+-- which is already a function of the rational value:
+--   * the sign           qsign p        (signResp)
+--   * the magnitude floor natDiv |num| den   (intPartResp / floorUniqueGeneral)
+--   * whether it divides  natMod |num| den = 0?   (modIndResp, below)
+-- because floor(-a/b) = -(|a| div b)  when b | a  and  -(|a| div b + 1) otherwise
+-- (round toward -infinity), while floor(a/b) = |a| div b for a >= 0.  So floorQ
+-- factors through mkFloor and RESPECTS QRel by congruence in those three slots —
+-- no fresh sign analysis, reusing the canonical division engine wholesale.
+-- ============================================================================
+
+-- the zero/nonzero test on a Nat (matches nzMulSucc's inline case shape).
+nzNat : Nat -> Bool is
+  fn (t : Nat) is case t of | zero -> false | succ k -> true end end
+end
+
+-- does the denominator NOT divide the numerator (is there a nonzero remainder)?
+nzMod : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is nzNat (natMod a b) end
+end
+
+-- assemble the signed floor from (sign, magnitude floor, has-remainder):
+--   non-negative          -> +q
+--   negative, divides      -> -q          (exact: floor is the negation)
+--   negative, has rem      -> -(q+1)      (round toward -infinity)
+mkFloor : Bool -> Nat -> Bool -> Z is
+  fn (s : Bool) (q : Nat) (nz : Bool) is
+    case s of
+    | false -> intOf q
+    | true ->
+        case nz of
+        | false -> zneg (intOf q)
+        | true  -> zneg (intOf (succ q))
+        end
+    end
+  end
+end
+
+-- the floor of a QPair representative.
+floorRep : QPair -> Z is
+  fn (p : QPair) is
+    mkFloor (qsign p) (natDiv (qmagNum p) (qmagDen p)) (nzMod (qmagNum p) (qmagDen p))
+  end
+end
+
+-- the magnitude cross-product the respect proofs share: QRel (cross-mult in Z),
+-- |.|'d through natAbsMulZfrom, becomes the Nat cross-product on |num| and den.
+-- (Same bridge intPartResp/signResp use; named here for reuse by modIndResp.)
+magCross : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Nat (mul (qmagNum p) (succ (qdenN q))) (mul (qmagNum q) (succ (qdenN p))) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    trans (sym (natAbsMulZfrom (qnum p) (succ (qdenN q))))
+      (trans (cong natAbs h)
+             (natAbsMulZfrom (qnum q) (succ (qdenN p))))
+  end
+end
+
+-- DIVISIBILITY-INDICATOR RESPECT: QRel-related QPairs agree on whether the
+-- denominator divides the numerator.  natModCrossStep carries the magnitude
+-- cross-product to the REMAINDERS (rem_p . den_q = rem_q . den_p), and nzMulSucc
+-- says a positive factor never flips a remainder's zero-ness; so the has-remainder
+-- bit is a function of the rational value.  This is the only piece the signed
+-- floor needs beyond the existing magnitude (intPartResp) and sign (signResp).
+modIndResp : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Bool (nzMod (qmagNum p) (qmagDen p)) (nzMod (qmagNum q) (qmagDen q)) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    trans (sym (nzMulSucc (natMod (qmagNum p) (qmagDen p)) (qdenN q)))
+      (trans (cong nzNat
+                (natModCrossStep (qdenN p) (qdenN q) (qmagNum p) (qmagNum q) (magCross p q h)))
+             (nzMulSucc (natMod (qmagNum q) (qmagDen q)) (qdenN p)))
+  end
+end
+
+-- FLOOR IS WELL-DEFINED ON THE QUOTIENT: QRel-related representatives have the
+-- SAME floor.  floorRep factors through mkFloor in three slots, each respecting
+-- QRel, so three substitutions (sign, magnitude floor, has-remainder) rewrite
+-- the representative p into q.  This is ch13's floorUnique on the canonical Q.
+floorUnique : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Z (floorRep p) (floorRep q) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    subst Bool (qsign p) (qsign q) (signResp p q h)
+      (fn (s : Bool) is
+         Eq Z (floorRep p)
+              (mkFloor s (natDiv (qmagNum q) (qmagDen q)) (nzMod (qmagNum q) (qmagDen q))) end)
+      (subst Nat (natDiv (qmagNum p) (qmagDen p)) (natDiv (qmagNum q) (qmagDen q)) (intPartResp p q h)
+        (fn (n : Nat) is
+           Eq Z (floorRep p) (mkFloor (qsign p) n (nzMod (qmagNum q) (qmagDen q))) end)
+        (subst Bool (nzMod (qmagNum p) (qmagDen p)) (nzMod (qmagNum q) (qmagDen q)) (modIndResp p q h)
+          (fn (b : Bool) is
+             Eq Z (floorRep p) (mkFloor (qsign p) (natDiv (qmagNum p) (qmagDen p)) b) end)
+          (refl (floorRep p))))
+  end
+end
+
+-- THE FLOOR ON Q: the lift of floorRep along floorUnique.  floorQ (qin p) computes
+-- to floorRep p, and floorUnique is the proof obligation qlift demands.
+floorQ : Q -> Z is qlift QPair QRel Z floorRep floorUnique end
+
+-- CERTIFICATES (the gated value checks, ch13's answer=105 analogue):
+-- floor(7/2) = 3.
+floorSevenHalves : Eq Z (floorQ (qin QPair QRel (qpair (intOf 7) 1))) (intOf 3) is
+  refl (intOf 3)
+end
+
+-- floor(-7/2) = -4 (rounds toward -infinity; this is FLOOR, not truncation,
+-- which would give -3 -- the semantic witness that distinguishes the two).
+floorNegSevenHalves : Eq Z (floorQ (qin QPair QRel (qpair (zneg (intOf 7)) 1))) (zneg (intOf 4)) is
+  refl (zneg (intOf 4))
+end
+
+-- floor(-4/2) = -2 (exact division: no over-flooring).
+floorNegFourHalves : Eq Z (floorQ (qin QPair QRel (qpair (zneg (intOf 4)) 1))) (zneg (intOf 2)) is
+  refl (zneg (intOf 2))
+end
+
+-- THE PAYOFF: floorQ assigns 1/2 and 2/4 the SAME floor -- the floor is a function
+-- of the rational VALUE, witnessed by cong of the lift over the qsound identity
+-- (reusing sameHalfQ from the to_radix payoff above).
+floorQHalfWellDefined :
+  Eq Z (floorQ (qin QPair QRel (qpair (intOf 1) 1)))
+       (floorQ (qin QPair QRel (qpair (intOf 2) 3))) is
+  cong (fn (x : Q) is floorQ x end) sameHalfQ
 end
