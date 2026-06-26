@@ -1,0 +1,114 @@
+-- Chapter 534 — encoding/base32 (RFC 4648) over Bin (Go-stdlib parity).
+-- base32 packs 5 bytes (40 bits) into 8 chars of 5 bits each, alphabet A-Z then
+-- 2-7, '=' padding for the tail group. Pure wootz over the Bin carrier; the bit
+-- slicing is div/mod by powers of two (kernel-accelerated). Verified against the
+-- RFC 4648 test vectors: "" -> "", "f" -> "MY======", "foo" -> "MZXW6===",
+-- "foobar" -> "MZXW6YTBOI======". Byte-identical on all backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+-- the div/mod kit (ch491), kernel-accelerated so the bit slicing is O(1).
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natDiv divN
+builtin natMod modN
+
+-- the base32 alphabet: 0..25 -> 'A'..'Z' (65..90), 26..31 -> '2'..'7' (50..55).
+b32char : Nat -> Nat is
+  fn (n : Nat) is case leb n 25 of | true -> addN 65 n | false -> addN 24 n end end
+end
+
+-- one 5-byte group -> 8 chars, trailing chars replaced by '=' (61) per the
+-- remaining-byte count. binAt past the end returns 0, so b1..b4 read 0 cleanly.
+b32Go : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false ->
+               let b0 : Nat = binAt s i in
+               let b1 : Nat = binAt s (addN i 1) in
+               let b2 : Nat = binAt s (addN i 2) in
+               let b3 : Nat = binAt s (addN i 3) in
+               let b4 : Nat = binAt s (addN i 4) in
+               let rem : Nat = monus (binLen s) i in
+               let c0 : Nat = b32char (divN b0 8) in
+               let c1 : Nat = b32char (addN (mulN (modN b0 8) 4) (divN b1 64)) in
+               let c2 : Nat = case leb rem 1 of | true -> 61 | false -> b32char (modN (divN b1 2) 32) end in
+               let c3 : Nat = case leb rem 1 of | true -> 61 | false -> b32char (addN (mulN (modN b1 2) 16) (divN b2 16)) end in
+               let c4 : Nat = case leb rem 2 of | true -> 61 | false -> b32char (addN (mulN (modN b2 16) 2) (divN b3 128)) end in
+               let c5 : Nat = case leb rem 3 of | true -> 61 | false -> b32char (modN (divN b3 4) 32) end in
+               let c6 : Nat = case leb rem 3 of | true -> 61 | false -> b32char (addN (mulN (modN b3 4) 8) (divN b4 32)) end in
+               let c7 : Nat = case leb rem 4 of | true -> 61 | false -> b32char (modN b4 32) end in
+               binCons c0 (binCons c1 (binCons c2 (binCons c3 (binCons c4 (binCons c5 (binCons c6 (binCons c7 (ih s (addN i 5)))))))))
+           end
+         end
+      end)
+      fuel
+  end
+end
+base32 : Bin -> Bin is fn (s : Bin) is b32Go (binLen s) s 0 end end
+
+-- main — the RFC 4648 vectors, byte-identical cross-backend.
+--   base32 "f"      -> "MY======"
+--   base32 "foo"    -> "MZXW6==="
+--   base32 "foobar" -> "MZXW6YTBOI======"
+main : IO Unit is
+  bindIO Unit Unit (printBin (base32 b"f")) (fn (a : Unit) is
+    bindIO Unit Unit (printBin (base32 b"foo")) (fn (b : Unit) is
+      bindIO Unit Unit (printBin (base32 b"foobar")) (fn (c : Unit) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end

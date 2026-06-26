@@ -1,0 +1,121 @@
+-- Chapter 536 — encoding/xml over Bin (Go-stdlib parity). The substantive core of
+-- xml.Marshal is (1) escaping text content to entities and (2) wrapping content in
+-- start/end tags. `escapeText` expands & < > " ' to &amp; &lt; &gt; &quot; &apos;;
+-- `elem tag inner` wraps already-rendered inner content as <tag>inner</tag>.
+-- Nesting composes pre-rendered children (so element markup is never re-escaped).
+-- Pure wootz over Bin. main:
+--   escapeText "a<b&c"                              -> "a&lt;b&amp;c"
+--   <note><to>Tove</to><from>Jani</from></note>     (a nested document)
+-- Byte-identical on all backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end
+end
+
+-- bytes append (ch484 concatGo).
+concatGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (a : Bin) (b : Bin) (i : Nat) is b end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (a : Bin) (b : Bin) (i : Nat) is binCons (binAt a i) (ih a b (succ i)) end
+      end)
+      fuel
+  end
+end
+app : Bin -> Bin -> Bin is fn (a : Bin) (b : Bin) is concatGo (binLen a) a b 0 end end
+
+-- xml text escaping: each special byte expands to its entity, others pass through.
+escapeGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false ->
+               let c    : Nat = binAt s i in
+               let rest : Bin = ih s (succ i) in
+               case eqNat c 38 of
+               | true  -> app b"&amp;" rest
+               | false ->
+                 case eqNat c 60 of
+                 | true  -> app b"&lt;" rest
+                 | false ->
+                   case eqNat c 62 of
+                   | true  -> app b"&gt;" rest
+                   | false ->
+                     case eqNat c 34 of
+                     | true  -> app b"&quot;" rest
+                     | false ->
+                       case eqNat c 39 of
+                       | true  -> app b"&apos;" rest
+                       | false -> binCons c rest
+                       end
+                     end
+                   end
+                 end
+               end
+           end
+         end
+      end)
+      fuel
+  end
+end
+escapeText : Bin -> Bin is fn (s : Bin) is escapeGo (binLen s) s 0 end end
+
+-- <tag>inner</tag>, inner already rendered (children composed, never re-escaped).
+elem : Bin -> Bin -> Bin is
+  fn (tag : Bin) (inner : Bin) is
+    app b"<" (app tag (app b">" (app inner (app b"</" (app tag b">")))))
+  end
+end
+
+-- a nested document, children pre-rendered then wrapped.
+note : Bin is
+  elem b"note" (app (elem b"to" (escapeText b"Tove")) (elem b"from" (escapeText b"Jani")))
+end
+
+-- main — escaping + the nested document, byte-identical cross-backend.
+main : IO Unit is
+  bindIO Unit Unit (printBin (escapeText b"a<b&c")) (fn (a : Unit) is
+    bindIO Unit Unit (printBin note) (fn (b : Unit) is
+      pureIO Unit unit
+    end)
+  end)
+end

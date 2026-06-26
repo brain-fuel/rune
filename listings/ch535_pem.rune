@@ -1,0 +1,151 @@
+-- Chapter 535 — encoding/pem (RFC 1421/7468) over Bin (Go-stdlib parity).
+-- A PEM block is base64 armor: a BEGIN line, the base64 of the payload wrapped at
+-- 64 chars per line, and an END line, each terminated by a newline. Pure wootz,
+-- reusing the ch491 base64 codec; `pemBlock label payload` builds the block.
+-- For payload "hello" (base64 "aGVsbG8=") under label MESSAGE the block is
+--   -----BEGIN MESSAGE-----\naGVsbG8=\n-----END MESSAGE-----\n
+-- ($show renders the newlines as \x0a). Byte-identical on all backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+-- div/mod kit (ch491).
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end
+end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natDiv divN
+builtin natMod modN
+
+-- bytes.Join of two Bins (ch484 concatGo).
+concatGo : Nat -> Bin -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Bin -> Nat -> Bin end) (fn (a : Bin) (b : Bin) (i : Nat) is b end)
+      (fn (f : Nat) (ih : Bin -> Bin -> Nat -> Bin) is
+         fn (a : Bin) (b : Bin) (i : Nat) is binCons (binAt a i) (ih a b (succ i)) end
+      end)
+      fuel
+  end
+end
+app : Bin -> Bin -> Bin is fn (a : Bin) (b : Bin) is concatGo (binLen a) a b 0 end end
+
+-- encoding/base64 (ch491).
+b64char : Nat -> Nat is
+  fn (n : Nat) is
+    case leb n 25 of
+    | true  -> addN 65 n
+    | false -> case leb n 51 of
+               | true  -> addN 71 n
+               | false -> case leb n 61 of
+                          | true  -> monus n 4
+                          | false -> case eqNat n 62 of | true -> 43 | false -> 47 end
+                          end
+               end
+    end
+  end
+end
+b64Go : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false ->
+               let b0 : Nat = binAt s i in
+               let b1 : Nat = binAt s (succ i) in
+               let b2 : Nat = binAt s (succ (succ i)) in
+               let rem : Nat = monus (binLen s) i in
+               let c0 : Nat = b64char (divN b0 4) in
+               let c1 : Nat = b64char (addN (mulN (modN b0 4) 16) (divN b1 16)) in
+               let c2 : Nat = case leb rem 1 of | true -> 61 | false -> b64char (addN (mulN (modN b1 16) 4) (divN b2 64)) end in
+               let c3 : Nat = case leb rem 2 of | true -> 61 | false -> b64char (modN b2 64) end in
+               binCons c0 (binCons c1 (binCons c2 (binCons c3 (ih s (addN i 3)))))
+           end
+         end
+      end)
+      fuel
+  end
+end
+base64 : Bin -> Bin is fn (s : Bin) is b64Go (binLen s) s 0 end end
+
+-- wrap at 64 chars: emit a newline (0x0a) after every 64th char unless at the end.
+wrapGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false ->
+               let atBoundary : Bool = case eqNat (modN (succ i) 64) 0 of
+                                       | true  -> case leb (binLen s) (succ i) of | true -> false | false -> true end
+                                       | false -> false end in
+               binCons (binAt s i)
+                 (case atBoundary of | true -> binCons 10 (ih s (succ i)) | false -> ih s (succ i) end)
+           end
+         end
+      end)
+      fuel
+  end
+end
+wrap64 : Bin -> Bin is fn (s : Bin) is wrapGo (binLen s) s 0 end end
+
+-- the BEGIN/END armor for a MESSAGE block (label baked for the demo).
+beginLine : Bin is b"-----BEGIN MESSAGE-----\n" end
+endLine   : Bin is b"\n-----END MESSAGE-----\n" end
+
+pemMessage : Bin -> Bin is
+  fn (payload : Bin) is app beginLine (app (wrap64 (base64 payload)) endLine) end
+end
+
+-- main — the PEM block for payload "hello" (base64 aGVsbG8=).
+--   "-----BEGIN MESSAGE-----\x0aaGVsbG8=\x0a-----END MESSAGE-----\x0a"
+main : IO Unit is
+  bindIO Unit Unit (printBin (pemMessage b"hello")) (fn (a : Unit) is
+    pureIO Unit unit
+  end)
+end

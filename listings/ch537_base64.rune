@@ -1,0 +1,167 @@
+-- Chapter 537 — encoding/base64 ENCODE + DECODE with round trip over Bin
+-- (Go-stdlib parity). ch491 covered encode only; this adds the decoder and shows
+-- decode(encode x) = x at runtime. Standard RFC 4648 alphabet, '=' padding. Pure
+-- wootz over Bin (bit slicing = div/mod by powers of two, kernel-accelerated).
+-- main: base64 "Man" -> "TWFu"; decode "TWFu" -> "Man"; decode(base64 "hello") ->
+-- "hello" (the round trip). Byte-identical on all backends.
+
+data Unit : U is
+  unit : Unit
+end
+
+data Bool : U is
+  false : Bool
+| true  : Bool
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+foreign printBin : Bin -> IO Unit end
+
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+and2 : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end end
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is case monus a b of | zero -> case monus b a of | zero -> true | succ k -> false end | succ k -> false end end
+end
+inRange : Nat -> Nat -> Nat -> Bool is fn (lo : Nat) (c : Nat) (hi : Nat) is and2 (leb lo c) (leb c hi) end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natDiv divN
+builtin natMod modN
+
+-- ENCODE (ch491): 6-bit value -> alphabet char.
+b64char : Nat -> Nat is
+  fn (n : Nat) is
+    case leb n 25 of
+    | true  -> addN 65 n
+    | false -> case leb n 51 of
+               | true  -> addN 71 n
+               | false -> case leb n 61 of
+                          | true  -> monus n 4
+                          | false -> case eqNat n 62 of | true -> 43 | false -> 47 end
+                          end
+               end
+    end
+  end
+end
+b64Go : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false ->
+               let b0 : Nat = binAt s i in
+               let b1 : Nat = binAt s (succ i) in
+               let b2 : Nat = binAt s (succ (succ i)) in
+               let rem : Nat = monus (binLen s) i in
+               let c0 : Nat = b64char (divN b0 4) in
+               let c1 : Nat = b64char (addN (mulN (modN b0 4) 16) (divN b1 16)) in
+               let c2 : Nat = case leb rem 1 of | true -> 61 | false -> b64char (addN (mulN (modN b1 16) 4) (divN b2 64)) end in
+               let c3 : Nat = case leb rem 2 of | true -> 61 | false -> b64char (modN b2 64) end in
+               binCons c0 (binCons c1 (binCons c2 (binCons c3 (ih s (addN i 3)))))
+           end
+         end
+      end)
+      fuel
+  end
+end
+base64 : Bin -> Bin is fn (s : Bin) is b64Go (binLen s) s 0 end end
+
+-- DECODE: alphabet char -> 6-bit value (inverse of b64char; '=' and unknown -> 0).
+b64val : Nat -> Nat is
+  fn (c : Nat) is
+    case inRange 65 c 90 of
+    | true  -> monus c 65
+    | false -> case inRange 97 c 122 of
+               | true  -> monus c 71
+               | false -> case inRange 48 c 57 of
+                          | true  -> addN c 4
+                          | false -> case eqNat c 43 of
+                                     | true  -> 62
+                                     | false -> case eqNat c 47 of | true -> 63 | false -> 0 end
+                                     end
+                          end
+               end
+    end
+  end
+end
+-- one 4-char group -> up to 3 bytes; '=' in position 3/4 drops the trailing byte(s).
+decGo : Nat -> Bin -> Nat -> Bin is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Bin -> Nat -> Bin end) (fn (s : Bin) (i : Nat) is binEmpty end)
+      (fn (f : Nat) (ih : Bin -> Nat -> Bin) is
+         fn (s : Bin) (i : Nat) is
+           case leb (binLen s) i of
+           | true  -> binEmpty
+           | false ->
+               let c2 : Nat = binAt s (addN i 2) in
+               let c3 : Nat = binAt s (addN i 3) in
+               let v0 : Nat = b64val (binAt s i) in
+               let v1 : Nat = b64val (binAt s (addN i 1)) in
+               let v2 : Nat = b64val c2 in
+               let v3 : Nat = b64val c3 in
+               let b0 : Nat = addN (mulN v0 4) (divN v1 16) in
+               let b1 : Nat = addN (mulN (modN v1 16) 16) (divN v2 4) in
+               let b2 : Nat = addN (mulN (modN v2 4) 64) v3 in
+               let rest : Bin = ih s (addN i 4) in
+               case eqNat c2 61 of
+               | true  -> binCons b0 rest
+               | false -> case eqNat c3 61 of
+                          | true  -> binCons b0 (binCons b1 rest)
+                          | false -> binCons b0 (binCons b1 (binCons b2 rest))
+                          end
+               end
+           end
+         end
+      end)
+      fuel
+  end
+end
+decode64 : Bin -> Bin is fn (s : Bin) is decGo (binLen s) s 0 end end
+
+-- main — encode, decode, and the round trip.
+--   base64 "Man"            -> "TWFu"
+--   decode64 "TWFu"         -> "Man"
+--   decode64 (base64 "hello") -> "hello"
+main : IO Unit is
+  bindIO Unit Unit (printBin (base64 b"Man")) (fn (a : Unit) is
+    bindIO Unit Unit (printBin (decode64 b"TWFu")) (fn (b : Unit) is
+      bindIO Unit Unit (printBin (decode64 (base64 b"hello"))) (fn (c : Unit) is
+        pureIO Unit unit
+      end)
+    end)
+  end)
+end
