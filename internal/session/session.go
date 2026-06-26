@@ -1014,6 +1014,17 @@ func (s *Session) Certified(name string) bool {
 	return ok && s.st.Certified(h)
 }
 
+// Assumed reports whether name resolves to a bodiless assumed definition (a
+// foreign axiom or a postulate). It is the read seam the assurance ledger uses
+// to classify the assume/postulate tiers.
+func (s *Session) Assumed(name string) bool {
+	h, ok := s.refs[name]
+	if !ok {
+		return false
+	}
+	return s.st.IsAssumed(h)
+}
+
 // Lookup returns the hash bound to a session name.
 func (s *Session) Lookup(name string) (core.Hash, bool) {
 	h, ok := s.refs[name]
