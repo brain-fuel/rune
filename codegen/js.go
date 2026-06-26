@@ -49,6 +49,12 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	} else if usesIO(p) {
 		b.WriteString(ioRuntime)
 	}
+	// R-EFFECT (Task 6): the seeded cooperative frontier scheduler for `par`.
+	// Same 64-bit LCG as the Go backend (via BigInt) so a fixed WAVELET_SEED
+	// yields a byte-identical interleaving on both backends.
+	if usesPar(p) {
+		b.WriteString(jsFrontierRuntime)
+	}
 	// D6 / R-EFFECT: bake the standard OS/IO host bodies when referenced.
 	if usesForeign(p, "printNat") {
 		b.WriteString("const printNat = () => n => () => { console.log(n.toString()); return n; };\n")
@@ -388,6 +394,68 @@ const enqueueLive = () => q => m => () => __resp('LPUSH', __s2h(q), __s2h(m)).th
 const dequeueLive = () => q => () => __resp('RPOP', __s2h(q)).then(r => __h2s(r));
 `
 
+// jsFrontierRuntime is the seeded cooperative scheduler for the par combinator
+// (Task 6 / R-EFFECT), the JS twin of goFrontierRuntime. The 64-bit LCG runs on
+// BigInt with a 0xFFFFFFFFFFFFFFFF mask so the wrapping arithmetic matches Go's
+// uint64 exactly; under a fixed WAVELET_SEED (default 0) the ready-pick sequence
+// is byte-identical on both backends (the cross-backend conformance contract).
+//
+// __frontier receives a pre-flattened array of IO action thunks (compile-time
+// par-spine flattening by parDispatch/flattenParSpine; no erased-List decoding).
+// Each action is an IO thunk `() => A`, forced by calling it; __frontier returns
+// an IO-shaped thunk so it composes with the surrounding IO monad. The last
+// forced result is returned (par : IO A -> IO B -> IO B).
+const jsFrontierRuntime = `let __schedState = (() => { const s = (typeof process !== 'undefined' && process.env.WAVELET_SEED) || "0"; return BigInt(s) & 0xFFFFFFFFFFFFFFFFn; })();
+const __schedNext = n => { __schedState = (__schedState * 6364136223846793005n + 1442695040888963407n) & 0xFFFFFFFFFFFFFFFFn; return Number(__schedState % BigInt(n)); };
+const __frontier = xs => () => { let last; while (xs.length > 0) { const i = __schedNext(xs.length); last = xs[i](); xs.splice(i, 1); } return last; };
+`
+
+// parDispatch recognizes a saturated par-headed application spine and emits a
+// compile-time-flattened __frontier call (the JS twin of the Go parDispatch).
+// par : (A : U) -> (B : U) -> IO A -> IO B -> IO B; do-blocks desugar to
+// right-nested par trees, flattened here into one __frontier over every IO
+// action. Returns ("", false) when the node is not a saturated par.
+func (em *jsEmitter) parDispatch(app IApp, env []string) (string, bool) {
+	actions := em.flattenParSpine(Ir(app))
+	if actions == nil {
+		return "", false
+	}
+	parts := make([]string, len(actions))
+	for i, a := range actions {
+		parts[i] = em.expr(a, env)
+	}
+	return fmt.Sprintf("__frontier([%s])", strings.Join(parts, ", ")), true
+}
+
+// flattenParSpine walks a right-nested par spine and returns the ordered list of
+// IO-action sub-terms (a1, a2, ..., an). A saturated par application has the
+// shape IApp(IApp(IApp(IApp(IGlobal "par", _), _), action_left), rest) where rest
+// may itself be a saturated par (right-nested) or a bare IO action (leaf).
+// Returns nil when t is not a saturated par. Mirrors goEmitter.flattenParSpine
+// exactly so both backends flatten to the same action order.
+func (em *jsEmitter) flattenParSpine(t Ir) []Ir {
+	var args []Ir
+	cur := t
+	for {
+		app, ok := cur.(IApp)
+		if !ok {
+			break
+		}
+		args = append([]Ir{app.Arg}, args...)
+		cur = app.Fn
+	}
+	g, ok := cur.(IGlobal)
+	if !ok || g.Name != "par" || len(args) != 4 {
+		return nil
+	}
+	left := args[2]
+	right := args[3]
+	if nested := em.flattenParSpine(right); nested != nil {
+		return append([]Ir{left}, nested...)
+	}
+	return []Ir{left, right}
+}
+
 // usesIO reports whether any emitted definition references an IO builtin.
 func usesIO(p Program) bool {
 	names := map[string]bool{"pureIO": true, "bindIO": true}
@@ -568,6 +636,9 @@ func (em *jsEmitter) expr(t Ir, env []string) string {
 			return out
 		}
 		if out, ok := em.natDispatch(x, env); ok {
+			return out
+		}
+		if out, ok := em.parDispatch(x, env); ok {
 			return out
 		}
 		return fmt.Sprintf("%s(%s)", em.expr(x.Fn, env), em.expr(x.Arg, env))
