@@ -8,6 +8,12 @@ import (
 	"goforge.dev/rune/v3/internal/session"
 )
 
+func mkHash(b byte) core.Hash {
+	var h core.Hash
+	h[0] = b
+	return h
+}
+
 func mustSession(t *testing.T, src string) *session.Session {
 	t.Helper()
 	s := session.New()
