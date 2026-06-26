@@ -8,6 +8,15 @@ import (
 	"goforge.dev/rune/v3/internal/session"
 )
 
+func mustSession(t *testing.T, src string) *session.Session {
+	t.Helper()
+	s := session.New()
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return s
+}
+
 func buildFrom(t *testing.T, src string) []Entry {
 	t.Helper()
 	s := session.New()

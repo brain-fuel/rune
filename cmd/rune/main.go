@@ -24,6 +24,7 @@ import (
 	"goforge.dev/rune/v3/internal/repl"
 	"goforge.dev/rune/v3/internal/session"
 	"goforge.dev/rune/v3/internal/sim"
+	"goforge.dev/rune/v3/ledger"
 )
 
 func main() {
@@ -103,6 +104,17 @@ func main() {
 		if err := runSimulate(string(src), n, os.Stdout); err != nil {
 			fatal(err)
 		}
+	case "ledger":
+		if len(os.Args) < 3 {
+			fatal(fmt.Errorf("usage: rune ledger <file>"))
+		}
+		src, err := os.ReadFile(os.Args[2])
+		if err != nil {
+			fatal(err)
+		}
+		if err := runLedger(string(src), os.Stdout); err != nil {
+			fatal(err)
+		}
 	case "deploy":
 		if err := runDeploy(os.Args[2:], os.Stdout); err != nil {
 			fatal(err)
@@ -120,6 +132,16 @@ func main() {
 // network is cut in half) so divergence is visible, then a HEALED gossip round; the
 // rendered trace shows whether the protocol re-converges. Full scenario/`protocol`
 // surface sugar is a later contained pass.
+// runLedger type-checks a file and renders the assurance ledger as a text table.
+func runLedger(src string, w io.Writer) error {
+	s := session.New()
+	if _, err := s.LoadSource(src); err != nil {
+		return err
+	}
+	ledger.RenderText(ledger.Build(s), w)
+	return nil
+}
+
 func runSimulate(src string, n int, out io.Writer) error {
 	s := session.New()
 	if _, err := s.LoadSource(src); err != nil {
