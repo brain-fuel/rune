@@ -1173,7 +1173,13 @@ func (e *Elaborator) elabSeqBind(c *Ctx, s surface.ESeqBind, elabBody func(inner
 		}
 		delete(e.uses, inner.Lvl()-1) // the bindIO continuation Pi is ω; clear the level
 		aTyTm := e.M.Quote(c.Lvl(), aTy)
-		bTyTm := e.M.Quote(c.Lvl(), bodyTy)
+		bInner, bodyIsIO := e.ioArg(bodyTy)
+		var bTyTm core.Tm
+		if bodyIsIO {
+			bTyTm = e.M.Quote(c.Lvl(), bInner)
+		} else {
+			bTyTm = e.M.Quote(c.Lvl(), bodyTy)
+		}
 		bindIOHash := e.Refs["bindIO"]
 		result := core.App{
 			Fn: core.App{
