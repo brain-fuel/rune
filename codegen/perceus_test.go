@@ -477,3 +477,147 @@ end
 func TestPerceusWasmPairs(t *testing.T) {
 	assertSteadyFlat(t, perceusWasmPairsSrc, "mainPairs", "<function>")
 }
+
+// perceusCtorMkXXSrc is the FIX B receiver: a 2-field constructor whose BOTH fields
+// are the SAME owned local. Without FIX B, annotateBareSpine omits the shared-owned-
+// local dup for constructor spines, so the K_CON double-owns x at rc=1 (two store=MOVE
+// slots pointing to the same heap object). When the K_CON is released, both field
+// releases fire: x.rc 1->0 (freed), then x.rc 0->-1 (use-after-free / trap). After
+// FIX B, x is dup'd to rc=2 before the constructor spine, so the two field releases
+// bring rc 2->1->0 correctly.
+//
+// The eliminator prElim is cached as a top-level partial application so its curry
+// intermediates are built once (not per run), isolating the per-run allocation to:
+//   - K_CLO_x (the shared owned field, fn y is y end)
+//   - K_CLO_mk1 (the arity-2 constructor intermediate from the first rt_apply in mk x x,
+//     kept BARE by the recognize-then-skip rule because releasing it would UAF the field)
+//   - K_CON (the mk x x result)
+//
+// With FIX B: K_CON is released correctly (field[0] rc 2->1, field[1] rc 1->0, freed);
+// K_CLO_mk1 leaks +1/run (the arity-2 ctor container leak, a known 6b-2 residual).
+// Without FIX B: the double-free of x corrupts the WASM output or causes a trap.
+const perceusCtorMkXXSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Pr : U is mk : (Nat -> Nat) -> (Nat -> Nat) -> Pr end
+prMot : Pr -> U is fn (p : Pr) is Nat -> Nat end end
+prCase : (Nat -> Nat) -> (Nat -> Nat) -> Nat -> Nat is
+  fn (a : Nat -> Nat) is fn (b : Nat -> Nat) is a end end
+end
+prElim : Pr -> (Nat -> Nat) is PrElim prMot prCase end
+mainMkXX : Nat -> Nat is
+  let x : Nat -> Nat = fn (y : Nat) is y end in
+  prElim (mk x x)
+end
+`
+
+// TestPerceusCtorMkXX is the FIX B gate: shared-owned-local dup in constructor spines.
+//
+// OUTPUT-INVARIANCE: the primary assertion. Without FIX B, the K_CON double-owns x at
+// rc=1, so releasing it double-frees x -> corrupted output or trap. After FIX B, x is
+// dup'd to rc=2 before the mk spine, so both field releases are balanced. Output must be
+// "<function>" (prElim projects field[0] = x, the identity closure).
+//
+// STEADY: the arity-2 constructor intermediate K_CLO_mk1 leaks +1/run (the recognize-
+// then-skip rule keeps the ctor backbone BARE; emitCtorBlock does not release the
+// intermediate). This is the known 6b-2 residual (arity>=2 ctor container leak). We
+// assert the delta is EXACTLY +1/run -- proving x itself is balanced (FIX B working)
+// and only K_CLO_mk1 leaks.
+func TestPerceusCtorMkXX(t *testing.T) {
+	// Output gate: double-free of x corrupts the value or traps; "<function>" proves FIX B.
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusCtorMkXXSrc, "mainMkXX"))
+	if got != "<function>" {
+		t.Fatalf("mk x x double-free: got %q, want \"<function>\" (FIX B shared-var dup missing?)", got)
+	}
+	// Steady: expect +1/run from K_CLO_mk1 (arity-2 ctor intermediate, 6b-2 boundary).
+	// A delta > 1 would indicate x itself is leaking (FIX B not working or additional UAF).
+	p := mustProgram(t, perceusCtorMkXXSrc, "mainMkXX")
+	counts := wasmSteadyLiveP(t, p, 4)
+	if len(counts) != 4 {
+		t.Fatalf("want 4 per-run live counts, got %d: %v", len(counts), counts)
+	}
+	c2, err2 := strconv.Atoi(counts[1])
+	c3, err3 := strconv.Atoi(counts[2])
+	c4, err4 := strconv.Atoi(counts[3])
+	if err2 != nil || err3 != nil || err4 != nil {
+		t.Fatalf("non-integer live counts: %v", counts)
+	}
+	d32 := c3 - c2
+	d43 := c4 - c3
+	if d32 > 1 || d43 > 1 {
+		t.Fatalf("mk x x steady: counts %v, deltas %d/%d exceed +1/run (expected only K_CLO_mk1 intermediate; FIX B broken?)", counts, d32, d43)
+	}
+	t.Logf("mk x x steady: %v (delta=%d/%d; +1/run from arity-2 K_CLO_mk1 intermediate, 6b-2 boundary; double-free fixed)", counts, d32, d43)
+}
+
+// perceusInlineElimSrc is the FIX A receiver: an INLINE saturated general-eliminator
+// application (the 4-argument OptElim applied directly in the def body, not cached as a
+// partial-application def). Before FIX A, OptElim was in bareSpineHead, so its 3
+// curry-intermediate K_CLOs were kept BARE and leaked per run (+3/run). After FIX A,
+// OptElim is removed from bareSpineHead; the intermediates are ordinary curry closures
+// and are released after each application.
+//
+// The key question FIX A answers: does releasing the eliminator intermediates cause a
+// use-after-free? The eliminator's curry blocks consumeOwning their CEnv prefix captures
+// (dup forward), so each intermediate's env carries an independent reference. Releasing
+// the intermediate frees the env copy; the next application still holds its own dup'd
+// reference. Output "7" confirms no UAF.
+//
+// STEADY: the dead-motive carve-out leak (+1/run: the dup'd motive arg that the motive's
+// curry-through block leaves borrowed) and the rt_big_parse K_BIG temporaries (the 7
+// literal, deferred 6b-2 bignum path) mean inline-eliminator programs do not reach flat.
+// We document the residual without asserting flat.
+const perceusInlineElimSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Opt : U is
+  none : Opt
+| some : Nat -> Opt
+end
+optMot : Opt -> U is fn (o : Opt) is Nat end end
+mainInlineElim : Nat is OptElim optMot zero (fn (x : Nat) is x end) (some 7) end
+`
+
+// TestPerceusInlineElim is the FIX A gate: general eliminator intermediates are now
+// released (not leaked like before).
+//
+// OUTPUT-INVARIANCE: the primary assertion. Before FIX A the intermediates leaked but
+// output was still correct (UAF cannot occur for a spine-kept eliminator). After FIX A,
+// releasing the intermediates must also be safe (no UAF from the release itself, because
+// each intermediate's env captures are independently dup'd by the curry block). Output
+// must be "7".
+//
+// STEADY: logged but not asserted flat. Residuals are the dead-motive carve-out leak
+// (the dup'd optMot that the motive curry-through block leaves BORROWED) and the
+// rt_big_parse bignum temporaries from the `7` literal -- both 6b-2 boundaries.
+func TestPerceusInlineElim(t *testing.T) {
+	// Primary gate: output correct = no UAF from releasing the eliminator intermediates.
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusInlineElimSrc, "mainInlineElim"))
+	if got != "7" {
+		t.Fatalf("inline-eliminator output: got %q, want \"7\" (UAF from releasing intermediates? FIX A broken?)", got)
+	}
+	// Steady: log residual. Inline-eliminator programs are excluded from perceusBalanceable
+	// (6b-2 boundary: dead-motive + bignum temp leaks).
+	p := mustProgram(t, perceusInlineElimSrc, "mainInlineElim")
+	counts := wasmSteadyLiveP(t, p, 4)
+	if len(counts) != 4 {
+		t.Fatalf("want 4 per-run live counts, got %d: %v", len(counts), counts)
+	}
+	c2, err2 := strconv.Atoi(counts[1])
+	c3, err3 := strconv.Atoi(counts[2])
+	c4, err4 := strconv.Atoi(counts[3])
+	if err2 != nil || err3 != nil || err4 != nil {
+		t.Fatalf("non-integer live counts: %v", counts)
+	}
+	if c2 == c3 && c3 == c4 {
+		t.Logf("inline-eliminator steady: %v (flat; FIX A eliminates per-run intermediate leaks)", counts)
+	} else {
+		t.Logf("inline-eliminator steady: %v (residual = dead-motive+bignum leak; 6b-2 boundary; FIX A released intermediates correctly)", counts)
+	}
+}

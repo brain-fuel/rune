@@ -171,15 +171,26 @@ func pairProjSrc(t CIr, owned []bool) int {
 type perceusPass struct {
 	natElim string
 	accel   map[string]core.NatOp
-	// bareSpineHead holds the emitted names whose SATURATED-OR-PARTIAL application spine
-	// must stay BARE (no curry-intermediate release): every datatype CONSTRUCTOR and
-	// every datatype ELIMINATOR. A constructor's curry steps MOVE each accumulated field
-	// forward into the final K_CON (store = MOVE), so releasing an intermediate would free
-	// a field the constructor now owns (use-after-free -- a nat field shows as a stray
-	// <function>); an eliminator's lowered curry steps likewise feed the frozen
-	// case/recursion. Only ORDINARY function curry intermediates (whose final block
-	// dup-on-escapes its result) are released. accel ops + the nat eliminator are
-	// recognized separately (accelMatchC / NatElimSpine) per the recognize-then-skip rule.
+	// bareSpineHead holds the emitted CONSTRUCTOR names whose SATURATED-OR-PARTIAL
+	// application spine must stay BARE (no curry-intermediate release). A constructor's
+	// curry steps MOVE each accumulated field forward into the final K_CON via the
+	// hand-emitted emitCtorBlock WAT (store = MOVE), so releasing an intermediate would
+	// free a field the K_CON now owns (use-after-free). Only ORDINARY function curry
+	// intermediates (whose final block dup-on-escapes its result) are released.
+	//
+	// NOTE (FIX A, 6-pre-fix): general DATATYPE ELIMINATORS are NOT in this set.
+	// Eliminator curry blocks consumeOwning their CEnv prefix captures (dup forward), so
+	// releasing their intermediates is BALANCED, not a UAF. The over-broad original
+	// inclusion of d.ElimName made every inline pattern-match leak its intermediates
+	// (hollow 6-gate). Accel ops + the builtin-nat eliminator are recognized separately
+	// (accelMatchC / NatElimSpine) per the recognize-then-skip rule; they are not in
+	// bareSpineHead either.
+	//
+	// bareSpineHead ALSO governs the FIX B shared-owned-local dup in annotateBareSpine:
+	// because constructors store=MOVE, a local appearing in two argument slots of the same
+	// constructor spine is consumed twice and needs N-1 dups (annotateBareSpine isCtor=true
+	// path). Accel/nat spines borrow their args (the emitter never builds the intermediate);
+	// no dup is needed or correct there.
 	bareSpineHead map[string]bool
 }
 
@@ -192,12 +203,12 @@ func Perceus(p ClosureProgram) ClosureProgram {
 		pp.natElim = p.Nat.ElimName
 		pp.accel = p.Nat.Ops
 	}
-	// Every constructor + eliminator spine stays bare (its curry intermediates carry
-	// fields/cases forward by MOVE, not by a dup-on-escape closure return).
+	// Only CONSTRUCTOR spines stay bare (their emitCtorBlock curry steps MOVE each
+	// accumulated field into the final K_CON by store=MOVE; releasing an intermediate
+	// would free a field the K_CON now owns -- use-after-free). General DATATYPE
+	// ELIMINATORS are NOT added here (FIX A): their curry blocks consumeOwning their
+	// CEnv prefix captures (dup forward), so releasing their intermediates is balanced.
 	for _, d := range p.Datas {
-		if d.ElimName != "" {
-			pp.bareSpineHead[d.ElimName] = true
-		}
 		for _, c := range d.Ctors {
 			pp.bareSpineHead[c.Name] = true
 		}
@@ -364,7 +375,15 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		// releasing its intermediates would corrupt it). annotateBareSpine keeps the whole
 		// backbone bare and only makes the leaf args owned.
 		if pp.isRecognizedSpine(x) {
-			return pp.annotateBareSpine(x, owned)
+			// After FIX A, bareSpineHead contains only constructors. A constructor
+			// spine needs the shared-owned-local dup (FIX B: store=MOVE, an owned
+			// local appearing in N arg slots needs N-1 dups). Accel/nat spines
+			// borrow their args; no dup is needed or correct for them.
+			isCtor := false
+			if g, ok := spineBaseGlobal(x); ok && pp.bareSpineHead[g] {
+				isCtor = true
+			}
+			return pp.annotateBareSpine(x, owned, isCtor)
 		}
 
 		clo := pp.annotate(x.Clo, owned)
@@ -485,13 +504,24 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 	}
 }
 
-// isRecognizedSpine reports whether the AppClosure x is a saturated spine the WASM
-// emitter pattern-matches on the RAW (un-annotated) backbone: a 2-argument accel-op
-// application (accelMatchC) or a >=4-argument builtin-nat-elim application
-// (NatElimSpine). Such a spine must be left BARE (no CLet/CDup/CDrop on the Clo chain)
-// so the matcher still fires after the Perceus pass. Checked on the ORIGINAL x, before
-// any annotation -- the matchers see no ownership wrappers in the C / other backends
-// (which never run Perceus), so this recognition is the WASM-only equivalent.
+// isRecognizedSpine reports whether the AppClosure x is a spine that must stay BARE
+// (no CLet/CDup/CDrop on its Clo chain after the Perceus pass):
+//   - A 2-argument accel-op application (accelMatchC): the WASM emitter shortcuts it
+//     DIRECTLY to rt_nat_add/mul/monus(a,b) -- the intermediate closure is never built,
+//     so there is nothing to release.
+//   - A >=4-argument builtin-nat-elim application (NatElimSpine): the frozen emitNatFold
+//     borrow-passes its loop counter (non-retaining rt_apply) and reuses it.
+//   - A constructor spine (spineBaseGlobal in bareSpineHead): the hand-emitted
+//     emitCtorBlock WAT moves each field into the K_CON by store=MOVE; releasing an
+//     intermediate would free a field the K_CON now owns (use-after-free).
+//
+// General datatype ELIMINATORS are NOT recognized here (FIX A): their curry blocks
+// consumeOwning their CEnv prefix captures (dup forward), so releasing their
+// intermediates is balanced. The over-broad original inclusion made every inline
+// pattern-match leak its intermediates (hollow 6-gate).
+//
+// Checked on the ORIGINAL x, before any annotation -- the matchers see no ownership
+// wrappers in the C / other backends (which never run Perceus).
 func (pp *perceusPass) isRecognizedSpine(x AppClosure) bool {
 	if _, _, _, ok := accelMatchC(x, pp.accel); ok {
 		return true
@@ -526,31 +556,48 @@ func spineBaseGlobal(x AppClosure) (string, bool) {
 	return "", false
 }
 
-// annotateBareSpine annotates a RECOGNIZED accel / nat-elim spine while keeping its
-// AppClosure backbone BARE: no CLet/CDup/CDrop wrappers anywhere on the Clo chain, so
-// the WASM emitter's accelMatchC / NatElimSpine still recognize it. Only the leaf ARGS
-// are annotated and made owned (consumeOwning), exactly as the pre-6-pre AppClosure
-// else-branch did for these spines -- so this is behaviour-preserving for every accel /
-// nat program. It deliberately does NOT insert the multi-use shared-var dup the general
-// AppClosure case applies: a recognized accel spine is borrow-emitted (accelDispatch
-// reads each arg, never consuming it) and a recognized nat-elim spine's args are each
-// made owned per position by consumeOwning, so no spine-head CDup is needed (and a
-// spine-head CDup would break the matcher anyway). The receivers exercising recognized
-// spines (mulN/addN/monusN, NatElim folds) carry no shared owned local across the two
-// accel args, so this matches the prior emitted output (conformance byte-identical).
-func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool) CIr {
+// annotateBareSpine annotates a RECOGNIZED accel / nat-elim / constructor spine while
+// keeping its AppClosure backbone BARE: no CLet/CDup/CDrop wrappers anywhere on the Clo
+// chain, so the WASM emitter's accelMatchC / NatElimSpine still recognize it. Only the
+// leaf ARGS are annotated and made owned (consumeOwning).
+//
+// isCtor=true (a constructor spine, after FIX A the ONLY kind in bareSpineHead): a
+// constructor's emitCtorBlock curry steps store each accumulated field by MOVE into the
+// final K_CON. An owned local appearing in BOTH a deeper Clo level (x.Clo side) AND the
+// current arg slot (x.Arg) is consumed twice -- the K_CON owns the same pointer in two
+// slots at rc=1, so releasing the K_CON would double-free (rc 1->0 then again -> UAF).
+// FIX B: mirror the general AppClosure shared-var dup: for each owned local[i] where
+// cirUsesArg(x.Clo, i) && cirUsesArg(x.Arg, i), insert CDup{CVar{i}, out}. This is
+// applied at EACH level of the spine recursion so the check sees each (Clo, Arg) pair.
+//
+// isCtor=false (accel / nat-elim spines): args are borrow-read by the emitter (accel
+// shortcut reads each arg directly; nat-elim borrows its loop counter). No dup is needed
+// or correct there (and a spine-head CDup would break the matcher anyway).
+func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool, isCtor bool) CIr {
 	var clo CIr
 	if inner, ok := x.Clo.(AppClosure); ok {
 		// More backbone: recurse, keeping it bare (do NOT re-enter the general
 		// AppClosure case, which would release this AppClosure-headed intermediate).
-		clo = pp.annotateBareSpine(inner, owned)
+		clo = pp.annotateBareSpine(inner, owned, isCtor)
 	} else {
-		// The spine head: a CGlobal (accel op / nat eliminator). annotate is a no-op
-		// on a bare CGlobal but keeps the code uniform.
+		// The spine head: a CGlobal (constructor / accel op / nat eliminator).
+		// annotate is a no-op on a bare CGlobal but keeps the code uniform.
 		clo = pp.annotate(x.Clo, owned)
 	}
 	arg := consumeOwning(pp.annotate(x.Arg, owned))
-	return AppClosure{Clo: clo, Arg: arg}
+	out := CIr(AppClosure{Clo: clo, Arg: arg})
+	// FIX B: constructor shared-owned-local dup. A local appearing in both the Clo
+	// sub-spine AND this Arg level is consumed twice by store=MOVE; dup it once so
+	// the K_CON owns two live references instead of double-owning one at rc=1.
+	// accel/nat spines skip this (isCtor=false; borrow-read, no dup needed).
+	if isCtor {
+		for i := len(owned) - 1; i >= 0; i-- {
+			if owned[i] && cirUsesArg(x.Clo, i) && cirUsesArg(x.Arg, i) {
+				out = CDup{V: CVar{Idx: i}, K: out}
+			}
+		}
+	}
+	return out
 }
 
 // annotateCase inserts ownership for an eliminator's tag dispatch (CCase). The

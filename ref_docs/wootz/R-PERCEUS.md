@@ -465,30 +465,38 @@ asks isRecognizedSpine on the ORIGINAL un-annotated AppClosure:
 
   - accelMatchC matches (a saturated accel op), OR
   - NatElimSpine matches (the builtin-nat eliminator, >= 4 args), OR
-  - the spine's BASE head (spineBaseGlobal) is a datatype CONSTRUCTOR or ELIMINATOR.
+  - the spine's BASE head (spineBaseGlobal) is a datatype CONSTRUCTOR (bareSpineHead).
 
-The constructor/eliminator clause is necessary beyond accel/nat: a constructor's curry
-steps MOVE each accumulated field forward into the final K_CON (store = MOVE), and an
-eliminator's lowered curry steps feed the frozen case/recursion -- so releasing one of
-their intermediates frees a value the final constructor/eliminator now owns
-(use-after-free; a nat field then prints as a stray `<function>`). These spines are
-recognized at ANY arity (a partially applied constructor used as a value must also keep
-its intermediates).
+NOTE (6-pre-fix FIX A): general DATATYPE ELIMINATORS are NOT in the recognized set.
+The original 6-pre implementation added d.ElimName to bareSpineHead on a false analogy
+to constructors. This was wrong: a general eliminator's curry blocks consumeOwning their
+CEnv prefix captures (the motive/branch closures are dup'd before being stored), so
+releasing an eliminator intermediate is BALANCED, not a UAF. Leaving eliminators in the
+skip-set caused every inline pattern-match to leak its N-1 curry intermediates per run
+(hollow 6-gate). FIX A removes them; the builtin-nat eliminator remains handled by the
+separate NatElimSpine path (which correctly borrows the loop counter).
 
-If recognized, annotateBareSpine annotates only the LEAF args (consumeOwning each, as
-before) and keeps the entire AppClosure backbone BARE -- no CLet/CDup/CDrop anywhere on
-the Clo chain -- so the matcher still fires and the emitter shortcuts the spine (nothing
-is built -> nothing to leak). This is behaviour-preserving for every accel / nat /
-constructor / eliminator program (conformance byte-identical across all 8 backends; the
+The constructor clause is necessary because a constructor's hand-emitted emitCtorBlock
+WAT moves each accumulated field into the K_CON by store=MOVE: releasing an intermediate
+before the K_CON is built would free a field the K_CON now owns (use-after-free). These
+spines are recognized at ANY arity (a partially applied constructor used as a value must
+also keep its intermediates).
+
+If recognized, annotateBareSpine annotates only the LEAF args (consumeOwning each) and
+keeps the entire AppClosure backbone BARE -- no CLet/CDup/CDrop anywhere on the Clo chain
+-- so the matcher still fires and the emitter shortcuts the spine. Constructors also apply
+the FIX B shared-owned-local dup (see below). This is behaviour-preserving for every
+accel / nat / constructor program (conformance byte-identical across all 8 backends; the
 C backend, which never runs Perceus, is unaffected -- it sees no ownership nodes).
 
-If NOT recognized, the Clo is an ORDINARY curry intermediate (an ordinary user function
-or inline-lambda spine), whose final block dup-on-escapes its result (consumeOwning at
-the return position), so its captures carry an independent reference. The pass extends
-the Task 3 closure-release to this case: bind the intermediate, apply, drop it, yield
-the result -- the same CLet+CDrop pattern, now firing for an AppClosure-headed Clo.
+If NOT recognized, the Clo is an ORDINARY curry intermediate (an ordinary user function,
+inline-lambda spine, or -- after FIX A -- a general eliminator curry step). Its final
+block dup-on-escapes its result (consumeOwning at the return position), so its captures
+carry an independent reference. The pass extends the Task 3 closure-release to this case:
+bind the intermediate, apply, drop it, yield the result -- the CLet+CDrop pattern.
 
-Receiver: an INLINE saturated curried application of an ordinary two-argument function.
+Receiver for ordinary curry intermediate release: an INLINE saturated curried application
+of an ordinary two-argument function (TestPerceusInlineCurry).
 
 ```
 const2 : (Nat -> Nat) -> (Nat -> Nat) -> (Nat -> Nat) is
@@ -516,3 +524,80 @@ A it holds) leaked: $live counts [4, 6, 8, 10] (+2/run). After: flat from run 2.
 `<function>` (const2 A B = A). Bignum-free (closures), so no rt_big_parse temporaries
 mask the balance. mulN 100 100 -> 10000 and the nat/list eliminator + multi-field
 constructor conformance all stay correct (the matchers are intact).
+
+## 6-pre-fix: FIX B -- constructor shared-owned-local dup
+
+annotateBareSpine was correct for accel/nat spines (their emitters borrow-read each arg,
+never storing it by move) but UNSOUND for constructor spines (store = MOVE into the K_CON
+slots). The missing case: an owned local appearing in two or more argument slots of the
+SAME constructor spine is consumed twice with no dup. The K_CON owns the same heap object
+in two slots at refcount 1. When the K_CON is released, both field releases fire:
+rc 1 -> 0 (freed), then rc 0 -> -1 (use-after-free / WASM trap or corrupted output).
+
+FIX B adds the shared-owned-local dup to annotateBareSpine when isCtor=true. For each
+owned local at de Bruijn index i where cirUsesArg(x.Clo, i) AND cirUsesArg(x.Arg, i),
+a CDup{CVar{i}, <spine>} is inserted (mirroring the general AppClosure and CPair shared-
+var dup logic). The check fires at each level of the spine recursion, so it covers every
+(Clo, Arg) pair in a multi-field constructor application. For accel/nat spines (isCtor
+false), the dup is NOT inserted: those spines borrow-read their args, so inserting a
+CDup would overcounting.
+
+The isCtor flag is passed from the call site in annotate: after FIX A, bareSpineHead
+contains ONLY constructors (not eliminators), so isCtor = spineBaseGlobal(x) in
+bareSpineHead is exactly the constructor case.
+
+### Known residuals (6b-2 boundary)
+
+Two steady-state residuals remain for the recognise-then-skip path:
+
+1. ARITY>=2 CONSTRUCTOR INTERMEDIATE K_CLO (+1/run per call-site): for an n-ary
+   constructor (n >= 2), emitCtorBlock builds n-1 intermediate K_CLOs (one per currying
+   step before the final K_CON). These intermediates are kept BARE by annotateBareSpine
+   (releasing them would UAF a field the K_CON just moved in). So each inline application
+   of a 2-field constructor leaks one K_CLO per run. Cached top-level partial applications
+   avoid the per-run leak (the intermediate is built once). A fix requires either (a)
+   emitCtorBlock to emit a release of the Clo after the final K_CON is built (within the
+   FROZEN WAT emitter, out of edit scope for this task), or (b) a new multi-field ctor
+   emitter that builds the K_CON in a single step without any intermediate. Bucketed 6b-2.
+
+2. DEAD-MOTIVE CARVE-OUT LEAK (+1/run): when a general eliminator is applied INLINE (not
+   cached), the motive argument is passed through a curry-through block (whose body is a
+   MkClosure). The carve-out marks that block's argument BORROWED (not dropped), because
+   the FROZEN fold/curry machinery reuses it. The caller's consumeOwning dups the motive
+   before the call; the block borrows the arg (does not drop). The dup'd reference leaks
+   per run. Bucketed 6b-2 (carve-out refinement).
+
+### Receiver TestPerceusCtorMkXX
+
+```rune
+data Pr : U is mk : (Nat -> Nat) -> (Nat -> Nat) -> Pr end
+prElim : Pr -> (Nat -> Nat) is PrElim prMot prCase end
+mainMkXX : Nat -> Nat is
+  let x : Nat -> Nat = fn (y : Nat) is y end in
+  prElim (mk x x)
+end
+```
+
+Without FIX B: mk x x double-owns x at rc=1 -> annotateCase drops K_CON -> rt_release
+field[0] frees x (rc 1->0) -> rt_release field[1] is a use-after-free -> corrupted output
+or WASM trap. After FIX B: x is dup'd to rc=2 before the constructor spine; both field
+releases balance correctly (rc 2->1->0). Output "<function>" (prElim returns field[0]).
+
+Steady: [7 8 9 10] = +1/run from K_CLO_mk1 (arity-2 ctor intermediate, 6b-2 residual).
+The delta is exactly 1 -- proving x itself is balanced and only K_CLO_mk1 leaks.
+
+### Receiver TestPerceusInlineElim (FIX A gate)
+
+```rune
+mainInlineElim : Nat is OptElim optMot zero (fn (x : Nat) is x end) (some 7) end
+```
+
+Before FIX A: OptElim in bareSpineHead -> 3 intermediate K_CLOs leaked per run. After
+FIX A: intermediates released as ordinary curry closures. Output "7" confirms no UAF
+from releasing them (the curry blocks dup-on-escape their captured args, so each
+intermediate's env carries an independent reference; releasing the K_CLO frees only the
+env copy, not the captures themselves).
+
+Steady: [9 13 17 21] = +4/run from dead-motive carve-out + rt_big_parse bignum temps
+(the 7 literal, 6b-2 boundary). Inline-eliminator programs are excluded from
+perceusBalanceable until 6b-2 closes the carve-out.
