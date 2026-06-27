@@ -88,6 +88,8 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 
 ### Plan 3: Control catalog
 
+> STATUS: PLANNED. Task file: `2026-06-26-control-catalog.md`. 8 tasks: catalog listing `ch538` (model + 4 proven flagships in-region/encrypted/least-priv-IAM/convergence reusing ch453) + postulated tail; over-broad-IAM rejected at elaboration; `control/` registry (flagship set + CALM element map); plugs into the Plan-2 ledger + gate. Depends on Plan 2 (`postulate` keyword + `ledger/`).
+
 - **Goal.** A small blessed set of controls fully proven (least-privilege IAM, in-region,
   encrypted-in-transit, CRDT-convergence-under-all-schedules) plus the guarded-tail framework.
 - **Constraints.** Each control is a content-hashed proposition over the architecture model. The
