@@ -39,14 +39,21 @@ const wasmRuntime = `
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
   (global $hp (mut i32) (i32.const 65536))  ;; heap pointer; below it: scratch + cstrs
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
+  (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
 
-  ;; bump-allocate n bytes, 4-byte aligned, returning the base pointer.
+  ;; ARC alloc: reserve an 8-byte hidden header [size][rc] below the payload. Stores
+  ;; the requested payload size and rc=1, bumps $live, returns the PAYLOAD pointer so
+  ;; every existing record offset is unchanged. (Plan 6a; Plan 6b inserts retain/release.)
   (func $alloc (param $n i32) (result i32)
-    (local $p i32)
+    (local $base i32) (local $payload i32)
     (local.set $n (i32.and (i32.add (local.get $n) (i32.const 3)) (i32.const -4)))
-    (local.set $p (global.get $hp))
-    (global.set $hp (i32.add (local.get $p) (local.get $n)))
-    (local.get $p))
+    (local.set $base (global.get $hp))
+    (local.set $payload (i32.add (local.get $base) (i32.const 8)))
+    (global.set $hp (i32.add (local.get $payload) (local.get $n)))
+    (i32.store (local.get $base) (local.get $n))                         ;; [payload-8] = size
+    (i32.store (i32.add (local.get $base) (i32.const 4)) (i32.const 1)) ;; [payload-4] = rc
+    (global.set $live (i32.add (global.get $live) (i32.const 1)))
+    (local.get $payload))
 
   ;; immediate-int tag helpers (FFI LitInt path; nats are K_BIG below).
   (func $rt_mkint (param $n i32) (result i32)
@@ -394,4 +401,14 @@ const wasmRuntime = `
     (i32.store (i32.const 16) (local.get $ptr))
     (i32.store (i32.const 20) (local.get $len))
     (drop (call $fd_write (local.get $fd) (i32.const 16) (i32.const 1) (i32.const 24))))
+
+  ;; ARC live-block count (alloc bumps, free drops): the leak/double-free probe.
+  (func $rt_live (result i32) (global.get $live))
+
+  ;; print an unsigned i32 in decimal to stdout (reuses the show buffer + fd_write).
+  (func $rt_print_u32 (param $n i32)
+    (global.set $sbuf (i32.const 4096))
+    (call $emit_u32 (local.get $n))
+    (call $puts (i32.const 1) (i32.const 4096)
+      (i32.sub (global.get $sbuf) (i32.const 4096))))
 `
