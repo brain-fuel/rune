@@ -402,6 +402,44 @@ func TestPerceusConstructorCase(t *testing.T) {
 	}
 }
 
+// perceusInlineCurrySrc is the Phase 6-pre receiver: an INLINE saturated curried
+// application of an ORDINARY (non-accel, non-eliminator) two-argument user function.
+// `const2 a b = a` is applied INLINE to two fresh identity closures. The inline
+// application `const2 A B` closure-converts to
+//
+//	AppClosure(AppClosure(CGlobal const2, A), B)
+//
+// whose inner AppClosure `(const2 A)` is a CURRY INTERMEDIATE -- a fresh closure
+// (capturing A) allocated every run. Before Phase 6-pre the pass released only
+// CVar/MkClosure-headed closures (Task 3), so this AppClosure-HEADED intermediate
+// was left bare and LEAKED (+2/run: the intermediate K_CLO plus the A it captures).
+//
+// Phase 6-pre's recognize-then-skip rule releases it: const2 is not a recognized accel
+// or nat-elim spine, so its AppClosure-headed Clo is released after the call (the same
+// CLet+CDrop pattern Task 3 uses for CVar/MkClosure Clos). Bignum-free (closures only)
+// so no rt_big_parse temps mask the balance.
+//
+// Output: "<function>" (const2 A B = A, the first identity closure).
+const perceusInlineCurrySrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+const2 : (Nat -> Nat) -> (Nat -> Nat) -> (Nat -> Nat) is
+  fn (a : Nat -> Nat) is fn (b : Nat -> Nat) is a end end
+end
+mainCurry : Nat -> Nat is const2 (fn (x : Nat) is x end) (fn (y : Nat) is y end) end
+`
+
+// TestPerceusInlineCurry is the Phase 6-pre gate: an inline saturated curried
+// application of an ordinary user function reaches STEADY-FLAT (its curry intermediate
+// is released), with correct output. Before Phase 6-pre the intermediate leaked
+// (+2/run); after, $rt_live is flat from run 2.
+func TestPerceusInlineCurry(t *testing.T) {
+	assertSteadyFlat(t, perceusInlineCurrySrc, "mainCurry", "<function>")
+}
+
 // perceusWasmPairsSrc is the Task 5 receiver. Build a pair of closures (Fst=f, Snd=g),
 // project Fst (the kept half), drop the pair (which also frees g). Each run:
 //   - Allocates K_CLO_f, K_CLO_g, K_PAIR.

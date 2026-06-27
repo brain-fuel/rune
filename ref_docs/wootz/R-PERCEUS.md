@@ -441,3 +441,78 @@ drop-after releases the pair in the correct order.
 
 Closures are used as pair components (not bignums) for the same reason as earlier
 receivers: `rt_big_parse` leaks K_BIG temporaries that would mask the balance signal.
+
+## Curry-intermediate release (the recognize-then-skip rule)
+
+Task 3 releases an applied closure only when it is CVar- or MkClosure-headed (an owned
+local or a freshly allocated inline lambda). An AppClosure-HEADED closure -- a CURRY
+INTERMEDIATE, the `(f a)` in `(f a) b` -- was left bare, so it LEAKED every run.
+Inline saturated multi-argument application is pervasive, so the steady-state corpus
+gate cannot reach flat without releasing these. Phase 6-pre releases them, WITHOUT
+breaking the WASM emitter's spine matchers.
+
+The emitter pattern-matches the RAW (un-annotated) AppClosure backbone in two places:
+accelMatchC (codegen/c.go) recognizes a 2-argument accel-op application and lowers it
+DIRECTLY to rt_nat_add/mul/monus(a, b) -- the intermediate closure `(add a)` is NEVER
+BUILT -- and NatElimSpine (codegen/closure.go) recognizes the builtin-nat eliminator
+spine the frozen emitNatFold drives (it borrow-passes its loop counter via non-retaining
+rt_apply and reuses it). Inserting a CLet/CDup/CDrop wrapper mid-backbone makes the
+`t.(AppClosure)` walk fail, so the matcher no longer fires (mulN 100 100 mis-renders to
+`<function>`), and the emitter is out of edit scope for the runtime semantics.
+
+The rule is RECOGNIZE-THEN-SKIP. Before releasing an AppClosure-headed Clo, the pass
+asks isRecognizedSpine on the ORIGINAL un-annotated AppClosure:
+
+  - accelMatchC matches (a saturated accel op), OR
+  - NatElimSpine matches (the builtin-nat eliminator, >= 4 args), OR
+  - the spine's BASE head (spineBaseGlobal) is a datatype CONSTRUCTOR or ELIMINATOR.
+
+The constructor/eliminator clause is necessary beyond accel/nat: a constructor's curry
+steps MOVE each accumulated field forward into the final K_CON (store = MOVE), and an
+eliminator's lowered curry steps feed the frozen case/recursion -- so releasing one of
+their intermediates frees a value the final constructor/eliminator now owns
+(use-after-free; a nat field then prints as a stray `<function>`). These spines are
+recognized at ANY arity (a partially applied constructor used as a value must also keep
+its intermediates).
+
+If recognized, annotateBareSpine annotates only the LEAF args (consumeOwning each, as
+before) and keeps the entire AppClosure backbone BARE -- no CLet/CDup/CDrop anywhere on
+the Clo chain -- so the matcher still fires and the emitter shortcuts the spine (nothing
+is built -> nothing to leak). This is behaviour-preserving for every accel / nat /
+constructor / eliminator program (conformance byte-identical across all 8 backends; the
+C backend, which never runs Perceus, is unaffected -- it sees no ownership nodes).
+
+If NOT recognized, the Clo is an ORDINARY curry intermediate (an ordinary user function
+or inline-lambda spine), whose final block dup-on-escapes its result (consumeOwning at
+the return position), so its captures carry an independent reference. The pass extends
+the Task 3 closure-release to this case: bind the intermediate, apply, drop it, yield
+the result -- the same CLet+CDrop pattern, now firing for an AppClosure-headed Clo.
+
+Receiver: an INLINE saturated curried application of an ordinary two-argument function.
+
+```
+const2 : (Nat -> Nat) -> (Nat -> Nat) -> (Nat -> Nat) is
+  fn (a : Nat -> Nat) is fn (b : Nat -> Nat) is a end end
+end
+mainCurry : Nat -> Nat is const2 (fn (x : Nat) is x end) (fn (y : Nat) is y end) end
+```
+
+`const2 A B` closure-converts to AppClosure(AppClosure(CGlobal const2, A), B). const2 is
+an ordinary def (not a constructor/eliminator/accel/nat), so the inner AppClosure
+`(const2 A)` -- a fresh closure capturing A, allocated every run -- is released after the
+call. Per-run ledger:
+
+| step | event | A.rc | intermediate.rc | B.rc | $live |
+|------|-------|------|-----------------|------|-------|
+| alloc A | rt_mkclo | 1 | - | - | +1 |
+| alloc B | rt_mkclo | 1 | - | 1 | +1 |
+| `const2 A` | rt_apply: A moves into env | 1 | 1 | 1 | +1 |
+| `(const2 A) B` | inner block returns CEnv A (CDup); drops dead b | 2 | 1 | 0 | -1 |
+| CDrop{intermediate} | rt_free: rt_release(env A) | 1 | 0 | 0 | -1 |
+| harness rt_release(result=A) | rt_free(A) | 0 | 0 | 0 | -1 |
+
+Net per run: +3 allocations, -3 frees = 0. Before Phase 6-pre the intermediate (and the
+A it holds) leaked: $live counts [4, 6, 8, 10] (+2/run). After: flat from run 2. Output
+`<function>` (const2 A B = A). Bignum-free (closures), so no rt_big_parse temporaries
+mask the balance. mulN 100 100 -> 10000 and the nat/list eliminator + multi-field
+constructor conformance all stay correct (the matchers are intact).

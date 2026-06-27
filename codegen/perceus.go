@@ -1,6 +1,10 @@
 package codegen
 
-import "fmt"
+import (
+	"fmt"
+
+	"goforge.dev/rune/v3/core"
+)
 
 // perceus.go -- the Perceus ownership-insertion pass over the closure-converted
 // CIr. It inserts CDup/CDrop so heap values are reference-counted by the Plan 6a
@@ -159,16 +163,45 @@ func pairProjSrc(t CIr, owned []bool) int {
 	return cv.Idx
 }
 
-// perceusPass holds per-pass state. Currently stateless -- the type exists to allow
-// future fields (e.g. accel table lookup for smarter CDrop elision) without changing
-// signatures.
-type perceusPass struct{}
+// perceusPass holds per-pass state. It carries the builtin-nat eliminator name and the
+// accel-op table (both from the program's NatSpec) so the AppClosure case can RECOGNIZE
+// a saturated accel / nat-elim spine -- the spine the WASM emitter pattern-matches
+// (accelMatchC / NatElimSpine) and shortcuts -- and leave its AppClosure backbone BARE
+// (the recognize-then-skip rule; see annotateBareSpine).
+type perceusPass struct {
+	natElim string
+	accel   map[string]core.NatOp
+	// bareSpineHead holds the emitted names whose SATURATED-OR-PARTIAL application spine
+	// must stay BARE (no curry-intermediate release): every datatype CONSTRUCTOR and
+	// every datatype ELIMINATOR. A constructor's curry steps MOVE each accumulated field
+	// forward into the final K_CON (store = MOVE), so releasing an intermediate would free
+	// a field the constructor now owns (use-after-free -- a nat field shows as a stray
+	// <function>); an eliminator's lowered curry steps likewise feed the frozen
+	// case/recursion. Only ORDINARY function curry intermediates (whose final block
+	// dup-on-escapes its result) are released. accel ops + the nat eliminator are
+	// recognized separately (accelMatchC / NatElimSpine) per the recognize-then-skip rule.
+	bareSpineHead map[string]bool
+}
 
 // Perceus inserts CDup/CDrop into all code blocks and top-level defs of the closure
 // program. Each code block OWNS its argument (CVar{0}); top-level defs own nothing
 // (owned = nil). Returns the annotated program.
 func Perceus(p ClosureProgram) ClosureProgram {
-	pp := &perceusPass{}
+	pp := &perceusPass{bareSpineHead: map[string]bool{}}
+	if p.Nat != nil {
+		pp.natElim = p.Nat.ElimName
+		pp.accel = p.Nat.Ops
+	}
+	// Every constructor + eliminator spine stays bare (its curry intermediates carry
+	// fields/cases forward by MOVE, not by a dup-on-escape closure return).
+	for _, d := range p.Datas {
+		if d.ElimName != "" {
+			pp.bareSpineHead[d.ElimName] = true
+		}
+		for _, c := range d.Ctors {
+			pp.bareSpineHead[c.Name] = true
+		}
+	}
 	for i := range p.Blocks {
 		body := p.Blocks[i].Body
 		if isCurryThrough(body) {
@@ -320,27 +353,43 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		return out
 
 	case AppClosure:
+		// RECOGNIZE-THEN-SKIP (Phase 6-pre): a saturated accel (add/mul/monus) or
+		// builtin-nat-elim spine is recognized + shortcut by the WASM emitter, which
+		// pattern-matches the RAW AppClosure backbone (accelMatchC / NatElimSpine) ending
+		// in a CGlobal. A recognized accel spine is lowered by accelDispatch DIRECTLY to
+		// rt_nat_add/mul/monus(a, b) -- the intermediate closure `(add a)` is NEVER BUILT,
+		// so there is nothing to leak; leaving the backbone bare is both NECESSARY (so the
+		// matcher fires) and leak-free. A recognized nat-elim spine is likewise left bare
+		// (the frozen emitNatFold borrows its loop counter via non-retaining rt_apply, so
+		// releasing its intermediates would corrupt it). annotateBareSpine keeps the whole
+		// backbone bare and only makes the leaf args owned.
+		if pp.isRecognizedSpine(x) {
+			return pp.annotateBareSpine(x, owned)
+		}
+
 		clo := pp.annotate(x.Clo, owned)
 		// The argument is consumed by the callee (which owns its CVar{0}); make it
 		// owned so a borrowed arg is dup'd before the call.
 		arg := consumeOwning(pp.annotate(x.Arg, owned))
 
-		// Release the closure after the call ONLY when it is an owned local (CVar) or a
-		// freshly allocated inline closure (MkClosure). A CGlobal/AppClosure closure
-		// (a cached or intermediate K_CLO) is borrowed by rt_apply and NOT released
-		// here -- releasing it would cascade-free thunk-cached values. rt_apply itself
-		// is never modified (it would free closures at rc=1 in the no-Perceus runtime).
-		// NOTE (Task 4): the WASM emitter recognizes the FROZEN nat-fold / accel spine by
-		// pattern-matching the raw AppClosure chain (NatElimSpine / accelMatchC); wrapping
-		// an AppClosure-headed Clo in a CLet+CDrop here would break that recognition (and
-		// the emitter is out of edit scope), so curry-spine intermediates are not released
-		// in-band. A saturated eliminator receiver instead partial-applies the eliminator
-		// at top level so the curry spine is a cached thunk built once, not per run.
+		// Release the closure after the call when it is an owned local (CVar), a freshly
+		// allocated inline closure (MkClosure), OR a CURRY INTERMEDIATE (an AppClosure-
+		// headed Clo, e.g. the `(f a)` in `(f a) b`). Each is a K_CLO that nothing else
+		// frees: an applied closure is consumed by rt_apply but rt_apply does NOT release
+		// it (it would free closures at rc=1 in the no-Perceus runtime, which stays
+		// FROZEN), so the pass releases it post-call. The curry-intermediate case is what
+		// Phase 6-pre adds (Task 3 released only CVar/MkClosure): it is now safe because a
+		// RECOGNIZED accel/nat spine was already routed to annotateBareSpine above, so the
+		// only AppClosure-headed Clos reaching here are ORDINARY curry intermediates the
+		// emitter does NOT pattern-match -- releasing them cannot break accelMatchC /
+		// NatElimSpine. A CGlobal Clo (a cached root / constructor) stays borrowed (NOT
+		// released): the cache owns it.
 		_, isCloVar := x.Clo.(CVar)
 		_, isCloMk := x.Clo.(MkClosure)
+		_, isCloApp := x.Clo.(AppClosure)
 
 		var out CIr
-		if isCloVar || isCloMk {
+		if isCloVar || isCloMk || isCloApp {
 			// CLet("$clo", clo, CLet("$res", AppClosure(CVar{0}, shiftedArg),
 			//   CDrop{CVar{1}, CVar{0}})). The arg shifts by 1: the $clo binder
 			// displaces existing indices.
@@ -434,6 +483,74 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		// CBounce: outside the covered fragment. Carry through unchanged.
 		return t
 	}
+}
+
+// isRecognizedSpine reports whether the AppClosure x is a saturated spine the WASM
+// emitter pattern-matches on the RAW (un-annotated) backbone: a 2-argument accel-op
+// application (accelMatchC) or a >=4-argument builtin-nat-elim application
+// (NatElimSpine). Such a spine must be left BARE (no CLet/CDup/CDrop on the Clo chain)
+// so the matcher still fires after the Perceus pass. Checked on the ORIGINAL x, before
+// any annotation -- the matchers see no ownership wrappers in the C / other backends
+// (which never run Perceus), so this recognition is the WASM-only equivalent.
+func (pp *perceusPass) isRecognizedSpine(x AppClosure) bool {
+	if _, _, _, ok := accelMatchC(x, pp.accel); ok {
+		return true
+	}
+	if _, ok := NatElimSpine(pp.natElim, x); ok {
+		return true
+	}
+	// A constructor / eliminator spine (recognized by its base head, at ANY arity:
+	// even a partially applied constructor used as a value must keep its intermediates).
+	if g, ok := spineBaseGlobal(x); ok && pp.bareSpineHead[g] {
+		return true
+	}
+	return false
+}
+
+// spineBaseGlobal walks an AppClosure's Clo backbone to its base and returns the
+// CGlobal name if the base is a CGlobal (the head of a constructor / eliminator /
+// def / accel / nat-elim spine). Returns ok=false for a CVar / MkClosure base (an
+// ordinary local or inline-lambda spine, whose curry intermediates are releasable).
+func spineBaseGlobal(x AppClosure) (string, bool) {
+	var t CIr = x
+	for {
+		app, ok := t.(AppClosure)
+		if !ok {
+			break
+		}
+		t = app.Clo
+	}
+	if g, ok := t.(CGlobal); ok {
+		return g.Name, true
+	}
+	return "", false
+}
+
+// annotateBareSpine annotates a RECOGNIZED accel / nat-elim spine while keeping its
+// AppClosure backbone BARE: no CLet/CDup/CDrop wrappers anywhere on the Clo chain, so
+// the WASM emitter's accelMatchC / NatElimSpine still recognize it. Only the leaf ARGS
+// are annotated and made owned (consumeOwning), exactly as the pre-6-pre AppClosure
+// else-branch did for these spines -- so this is behaviour-preserving for every accel /
+// nat program. It deliberately does NOT insert the multi-use shared-var dup the general
+// AppClosure case applies: a recognized accel spine is borrow-emitted (accelDispatch
+// reads each arg, never consuming it) and a recognized nat-elim spine's args are each
+// made owned per position by consumeOwning, so no spine-head CDup is needed (and a
+// spine-head CDup would break the matcher anyway). The receivers exercising recognized
+// spines (mulN/addN/monusN, NatElim folds) carry no shared owned local across the two
+// accel args, so this matches the prior emitted output (conformance byte-identical).
+func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool) CIr {
+	var clo CIr
+	if inner, ok := x.Clo.(AppClosure); ok {
+		// More backbone: recurse, keeping it bare (do NOT re-enter the general
+		// AppClosure case, which would release this AppClosure-headed intermediate).
+		clo = pp.annotateBareSpine(inner, owned)
+	} else {
+		// The spine head: a CGlobal (accel op / nat eliminator). annotate is a no-op
+		// on a bare CGlobal but keeps the code uniform.
+		clo = pp.annotate(x.Clo, owned)
+	}
+	arg := consumeOwning(pp.annotate(x.Arg, owned))
+	return AppClosure{Clo: clo, Arg: arg}
 }
 
 // annotateCase inserts ownership for an eliminator's tag dispatch (CCase). The
