@@ -138,6 +138,21 @@ type CCaseArm struct {
 // spine whose head is a CGlobal naming the group member.
 type CBounce struct{ Call CIr }
 
+// CDup retains V (a CVar or CEnv naming an already-evaluated, possibly-counted
+// value) and then evaluates K. V stays valid in K. Inserted only by the Perceus
+// ownership pass (codegen/perceus.go); present only in the WASM/ARC pipeline.
+type CDup struct {
+	V CIr
+	K CIr
+}
+
+// CDrop releases V and then evaluates K. V is dead in K (the pass guarantees V
+// does not occur in K). Inserted only by Perceus; WASM/ARC pipeline only.
+type CDrop struct {
+	V CIr
+	K CIr
+}
+
 func (CVar) isCIr()       {}
 func (CEnv) isCIr()       {}
 func (CGlobal) isCIr()    {}
@@ -153,6 +168,8 @@ func (CSnd) isCIr()       {}
 func (CField) isCIr()     {}
 func (CCase) isCIr()      {}
 func (CBounce) isCIr()    {}
+func (CDup) isCIr()       {}
+func (CDrop) isCIr()      {}
 
 // CodeBlock is a lifted lambda body: a top-level code block with exactly two
 // binders (the argument, then the environment record; see CVar). Its Body refers
@@ -287,6 +304,10 @@ func cirUsesArg(t CIr, idx int) bool {
 		return false
 	case CBounce:
 		return cirUsesArg(x.Call, idx)
+	case CDup:
+		return cirUsesArg(x.V, idx) || cirUsesArg(x.K, idx)
+	case CDrop:
+		return cirUsesArg(x.V, idx) || cirUsesArg(x.K, idx)
 	default:
 		return false
 	}

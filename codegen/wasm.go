@@ -46,32 +46,12 @@ func (Wasm) Emit(p Program) (TargetSource, error) {
 	}
 
 	cp := ClosureConvert(p)
-	em := &wasmEmitter{codeIdx: map[string]int{}, strs: map[string]int{}}
-	if p.Nat != nil {
-		em.natElim = p.Nat.ElimName
-		em.accel = p.Nat.Ops
-	}
+	cp = Perceus(cp)
+	em := newWasmEmitter(cp)
 
 	var body strings.Builder
 
-	// Constructor + eliminator code blocks and thunks.
-	for _, d := range cp.Datas {
-		if cp.Nat != nil && d.ElimName == cp.Nat.ElimName {
-			em.emitNat(&body, *cp.Nat)
-			continue
-		}
-		for _, c := range d.Ctors {
-			em.emitCtor(&body, c)
-		}
-	}
-	// The lifted code blocks (definitions' and eliminators' bodies).
-	for _, blk := range cp.Blocks {
-		em.emitBlock(&body, blk)
-	}
-	// Definition thunks (eliminators converted as CDefSpec, then user defs).
-	for _, def := range cp.Defs {
-		em.emitDefThunk(&body, def.Name, def.Body)
-	}
+	em.emitDefs(&body)
 
 	// $rune_main: evaluate the entry thunk and show it.
 	body.WriteString("  (func $rune_main\n")
@@ -169,6 +149,7 @@ func wasmCheckSupported(p Program) error {
 // the data segment), and assigns each emitted code block a function-table index so
 // `call_indirect` can reach it.
 type wasmEmitter struct {
+	cp      ClosureProgram // the program being emitted; set by newWasmEmitter
 	natElim string
 	accel   map[string]core.NatOp
 
@@ -182,6 +163,46 @@ type wasmEmitter struct {
 	strs     map[string]int
 	strOrder []string
 	strBytes int
+}
+
+// newWasmEmitter constructs a wasmEmitter for the given closure-converted program,
+// wiring the nat eliminator name and accel table when a NatSpec is present.
+func newWasmEmitter(cp ClosureProgram) *wasmEmitter {
+	em := &wasmEmitter{
+		cp:      cp,
+		codeIdx: map[string]int{},
+		strs:    map[string]int{},
+	}
+	if cp.Nat != nil {
+		em.natElim = cp.Nat.ElimName
+		em.accel = cp.Nat.Ops
+	}
+	return em
+}
+
+// emitDefs emits all constructor/eliminator code blocks + thunks, the lifted lambda
+// code blocks, and the top-level definition thunks into b. This is the "program
+// bodies" section of the module, factored out of Emit so WasmSteadyModule can reuse
+// the same emission path with a custom entry point.
+func (em *wasmEmitter) emitDefs(b *strings.Builder) {
+	// Constructor + eliminator code blocks and thunks.
+	for _, d := range em.cp.Datas {
+		if em.cp.Nat != nil && d.ElimName == em.cp.Nat.ElimName {
+			em.emitNat(b, *em.cp.Nat)
+			continue
+		}
+		for _, c := range d.Ctors {
+			em.emitCtor(b, c)
+		}
+	}
+	// The lifted code blocks (definitions' and eliminators' bodies).
+	for _, blk := range em.cp.Blocks {
+		em.emitBlock(b, blk)
+	}
+	// Definition thunks (eliminators converted as CDefSpec, then user defs).
+	for _, def := range em.cp.Defs {
+		em.emitDefThunk(b, def.Name, def.Body)
+	}
 }
 
 // codeRef registers (on first sight) a code-block name and returns its table index.
@@ -539,6 +560,16 @@ func (f *wasmFunc) emitIn(b *strings.Builder, t CIr, locals []string) string {
 		return "(local.get " + r + ")"
 	case CCase:
 		return f.emitCase(b, x, locals)
+	case CDup:
+		// Retain V (a CVar/CEnv -- pure, no side effect) then evaluate K.
+		v := f.emitIn(b, x.V, locals)
+		fmt.Fprintf(b, "    (call $rt_retain %s)\n", v)
+		return f.emitIn(b, x.K, locals)
+	case CDrop:
+		// Release V (a CVar/CEnv -- pure, no side effect) then evaluate K.
+		v := f.emitIn(b, x.V, locals)
+		fmt.Fprintf(b, "    (call $rt_release %s)\n", v)
+		return f.emitIn(b, x.K, locals)
 	default:
 		panic(fmt.Sprintf("codegen(wasm): unknown CIr node %T", t))
 	}
