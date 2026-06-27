@@ -131,6 +131,15 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 
 ### Plan 6: The demo artifact (2-tab CRDT)
 
+> DECISION (2026-06-27): WASM approach = HEAVY full WASM-hardening with Swift-style ARC (reference counting), architected as a portable discipline that carries to C / LLVM (replacing their mark-sweep GC). Sound because the erased IR's value graph is acyclic (Perceus / "Counting Immutable Beans" setting: precise RC, no cycle collector). This makes Plan 6 a foundational multi-plan effort; decomposed:
+> - 6a: ARC heap runtime for WASM (the substrate) - `2026-06-27-arc-wasm-runtime.md` (PLANNED). 5 tasks: hidden refcount header, rt_retain/rt_release, recursive child release by kind, size-classed free list, R-ARC.md design+roadmap. Unit-tested at WAT level via wasmtime (`$live` leak probe). Behavior-preserving (existing WASM gate green).
+> - 6b: the Perceus codegen insertion pass (the hard part; own plan + design doc needed - retain/release insertion over closure.go IR; the `$live` probe is the regression net).
+> - 6c: strings/bytes as refcounted heap objects (Bin over ARC).
+> - 6d: WebRTC FFI shim (WASM imports, sandbox/no-native interop class).
+> - 6e: port the ARC discipline to C + LLVM (replace mark-sweep).
+> - 6f: the two-tab CRDT browser app (WASM merge + JS/WebRTC glue + two divs).
+> - 6g: the GTM script / book chapter (proven-minimal-IAM + Ledger moments).
+
 - **Goal.** A shared counter or note CRDT in two browser tabs over WebRTC, wired to plans 1 through
   5, plus the go-to-market script or book chapter.
 - **Constraints.** Bounded browser scope: WASM merge plus JS and WebRTC glue plus two divs, not a
