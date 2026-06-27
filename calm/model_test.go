@@ -80,3 +80,41 @@ func TestBuildModelMissingNode(t *testing.T) {
 		t.Fatalf("a control on a missing node must be an error")
 	}
 }
+
+func TestBuildModelMultiRelNoLoss(t *testing.T) {
+	rs := []infra.Resource{
+		infra.PaaS{Name: "a"}, infra.Compute{Name: "b"}, infra.KV{Name: "c"}, infra.KV{Name: "d"},
+	}
+	// catalog order: a->b control, then c->d control, then a SECOND a->b control.
+	// If the relPos/pointer handling reallocated rels between the first and third,
+	// a pointer strategy would lose the third control on a->b.
+	catalog := []control.Control{
+		{Name: "ctlA", Kind: "k1", Element: "a->b"},
+		{Name: "ctlB", Kind: "k2", Element: "c->d"},
+		{Name: "ctlC", Kind: "k3", Element: "a->b"},
+	}
+	entries := []ledger.Entry{
+		{Name: "ctlA", Tier: ledger.Proven},
+		{Name: "ctlB", Tier: ledger.Proven},
+		{Name: "ctlC", Tier: ledger.Proven},
+	}
+	m, err := BuildModel(rs, catalog, entries)
+	if err != nil {
+		t.Fatalf("BuildModel: %v", err)
+	}
+	// find the a->b relationship; it must carry BOTH ctlA and ctlC
+	var ab ModelRel
+	found := false
+	for _, r := range m.Rels {
+		if r.ID == "a->b" {
+			ab = r
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a->b relationship missing")
+	}
+	if len(ab.Controls) != 2 {
+		t.Fatalf("a->b must carry both controls, got %d: %+v", len(ab.Controls), ab.Controls)
+	}
+}
