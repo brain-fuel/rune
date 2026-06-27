@@ -149,3 +149,80 @@ func sortModel(nodes []ModelNode, rels []ModelRel) {
 		sort.Slice(rels[i].Controls, func(a, b int) bool { return rels[i].Controls[a].ID < rels[i].Controls[b].ID })
 	}
 }
+
+// requirementURL is the stable control-requirement URL for a control class.
+func requirementURL(id string) string {
+	return "https://wavelet-lang.org/controls/" + id
+}
+
+// ToDoc renders the model as a CALM document. Each control attachment becomes a
+// single CALM requirement carrying the assurance config.
+func (m Model) ToDoc() Doc {
+	toBlocks := func(cs []ControlAttachment) map[string]ControlBlock {
+		if len(cs) == 0 {
+			return nil
+		}
+		out := map[string]ControlBlock{}
+		for _, c := range cs {
+			out[c.ID] = ControlBlock{
+				Description: "Wavelet control " + c.ID + " discharged by " + c.Definition,
+				Requirements: []Requirement{{
+					RequirementURL: requirementURL(c.ID),
+					Config:         Config{Definition: c.Definition, Tier: c.Tier, Proposition: c.Proposition, Proof: c.Proof, Why: c.Why},
+				}},
+			}
+		}
+		return out
+	}
+	d := Doc{Metadata: []map[string]any{{"wavelet": map[string]any{"generated-by": "rune calm"}}}}
+	for _, n := range m.Nodes {
+		d.Nodes = append(d.Nodes, Node{
+			UniqueID: n.ID, NodeType: n.NodeType, Name: n.ID,
+			Description: "Wavelet " + n.NodeType + " " + n.ID,
+			Controls:    toBlocks(n.Controls),
+		})
+	}
+	for _, r := range m.Rels {
+		d.Relationships = append(d.Relationships, Relationship{
+			UniqueID:         r.ID,
+			RelationshipType: RelType{Connects: &Connects{Source: Endpoint{Node: r.Source}, Destination: Endpoint{Node: r.Dest}}},
+			Controls:         toBlocks(r.Controls),
+		})
+	}
+	return d
+}
+
+// Reconstruct rebuilds the model from a parsed CALM document. It is the inverse of
+// ToDoc on the structural and assurance fields; cosmetic fields (descriptions,
+// metadata) are not part of the model and are not reconstructed.
+func Reconstruct(d Doc) Model {
+	fromBlocks := func(blocks map[string]ControlBlock) []ControlAttachment {
+		if len(blocks) == 0 {
+			return nil
+		}
+		var out []ControlAttachment
+		for id, cb := range blocks {
+			if len(cb.Requirements) == 0 {
+				continue
+			}
+			cfg := cb.Requirements[0].Config
+			out = append(out, ControlAttachment{ID: id, Definition: cfg.Definition, Tier: cfg.Tier, Proposition: cfg.Proposition, Proof: cfg.Proof, Why: cfg.Why})
+		}
+		return out
+	}
+	var m Model
+	for _, n := range d.Nodes {
+		m.Nodes = append(m.Nodes, ModelNode{ID: n.UniqueID, NodeType: n.NodeType, Controls: fromBlocks(n.Controls)})
+	}
+	for _, r := range d.Relationships {
+		mr := ModelRel{ID: r.UniqueID}
+		if r.RelationshipType.Connects != nil {
+			mr.Source = r.RelationshipType.Connects.Source.Node
+			mr.Dest = r.RelationshipType.Connects.Destination.Node
+		}
+		mr.Controls = fromBlocks(r.Controls)
+		m.Rels = append(m.Rels, mr)
+	}
+	sortModel(m.Nodes, m.Rels)
+	return m
+}
