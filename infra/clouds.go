@@ -566,6 +566,17 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
 			h.attr("location", "azurerm_resource_group.wavelet.location")
 			h.close()
+			if len(v.Grants) > 0 {
+				h.blank()
+				h.open("resource \"azurerm_role_definition\" %s", str(v.Name+"_role"))
+				h.attr("name", str(v.Name+"-role"))
+				h.attr("scope", "azurerm_resource_group.wavelet.id")
+				h.open("permissions")
+				h.attr("actions", hclList(v.Grants))
+				h.attr("not_actions", "[]")
+				h.close()
+				h.close()
+			}
 		case K8s:
 			h.open("resource \"azurerm_kubernetes_cluster\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
