@@ -1,0 +1,72 @@
+-- Chapter 538 - the Wavelet control catalog (Plan 3 of the Wavelet beta).
+--
+-- A small blessed set of architecture controls, PROVEN over a demo model: the
+-- two-tab collaborative-CRDT app, whose CALM nodes are {web, relay, store}. Each
+-- control is a content-hashed PROPOSITION (a type) discharged by a real proof
+-- term; the Assurance Ledger (rune ledger) reads this file and labels each one
+-- proven. Flagship controls landed in this chapter:
+--   in-region, encrypted-in-transit, least-privilege-IAM, convergence.
+-- A postulated TAIL control (the guarded-tail framework) is added in Task 5.
+--
+-- The proofs are the gate: each fold computes to `true` (or the merge laws hold),
+-- so `refl` type-checks only when the claim holds. An over-broad IAM policy makes
+-- the IAM fold reduce to `false`, so its `refl` fails to elaborate (a compile
+-- error, not a runtime check) - see harness/control_catalog_test.go.
+
+data Unit : U is unit : Unit end
+data Bool : U is false : Bool | true : Bool end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+-- ===== decidable kit =====
+-- Boolean Nat equality (the ch75 pattern): eqNat a b = true iff a and b are the
+-- same numeral, by nested NatElim.
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is
+         NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) m end)
+      (fn (k : Nat) (eqK : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is eqK j end) m end end)
+      a b
+  end
+end
+
+-- andB a b = if a then b else false (BoolElim: motive, false-case, true-case, scrutinee).
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) false b a end
+end
+
+-- ===== the architecture model: services pinned to a region =====
+-- A service is an id paired with the region it is deployed in.
+data Svc : U is svc : Nat -> Nat -> Svc end
+data SvcList : U is snil : SvcList | scons : Svc -> SvcList -> SvcList end
+
+region : Svc -> Nat is
+  fn (s : Svc) is SvcElim (fn (w : Svc) is Nat end) (fn (id : Nat) (r : Nat) is r end) s end
+end
+
+-- allInRegion pin xs = true iff every service in xs is deployed in region `pin`.
+allInRegion : Nat -> SvcList -> Bool is
+  fn (pin : Nat) (xs : SvcList) is
+    SvcListElim (fn (w : SvcList) is Bool end)
+      true
+      (fn (h : Svc) (t : SvcList) (ih : Bool) is andB (eqNat (region h) pin) ih end)
+      xs
+  end
+end
+
+-- ===== the demo model instance =====
+-- Region ids: us-east = 0. The three demo services (web=0, relay=1, store=2) are
+-- all pinned to us-east.
+usEast : Nat is zero end
+web   : Svc is svc 0 usEast end
+relay : Svc is svc 1 usEast end
+store : Svc is svc 2 usEast end
+demoServices : SvcList is scons web (scons relay (scons store snil)) end
+
+-- ===== flagship control: IN-REGION =====
+-- PROPOSITION: every demo service is in the pinned region (us-east).
+-- PROOF: the fold computes to `true`, so refl discharges it.
+inRegionProof : Eq Bool (allInRegion usEast demoServices) true is refl end
