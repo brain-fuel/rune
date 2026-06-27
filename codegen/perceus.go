@@ -26,11 +26,11 @@ import "fmt"
 //     callee dropping it leaves the cache's reference intact -- no corruption.
 //
 // TASK 3.5: reworks Task 3's argCount dead-drop SKIP (a non-generalizable workaround)
-// into the principled PATH B model above. Constructor/case nodes (CCase, CPair,
-// CField, CFst, CSnd, CBounce) are still carried through annotate unchanged -- Tasks
-// 4-5 extend ownership coverage there -- but shiftCIr now recurses through ALL nodes
-// (the structural dual of cirUsesArg) so feeding a constructor as a closure-application
-// argument keeps de Bruijn indices correct.
+// into the principled PATH B model above. shiftCIr recurses through ALL nodes (the
+// structural dual of cirUsesArg) so feeding a constructor or pair as a closure-application
+// argument keeps de Bruijn indices correct. Task 4 extends annotate with CCase/CField;
+// Task 5 extends it with CPair/CFst/CSnd (owned component positions + drop-after for
+// pair projections).
 
 // shiftCIr shifts all free CVar indices >= minDepth by amount. Used when inserting a
 // CLet binder around an AppClosure (or a borrowed value) to keep de Bruijn indices
@@ -138,6 +138,27 @@ func consumeOwning(t CIr) CIr {
 	}
 }
 
+// pairProjSrc returns the de Bruijn index k if t is CFst{CVar{k}} or CSnd{CVar{k}}
+// where owned[k] = true (the pair source is an owned local). Returns -1 otherwise.
+// Used by the CLet case to detect a projection of an owned pair local and insert the
+// pair-drop-after pattern (dup projection, then drop pair when dead in body).
+func pairProjSrc(t CIr, owned []bool) int {
+	var p CIr
+	switch x := t.(type) {
+	case CFst:
+		p = x.P
+	case CSnd:
+		p = x.P
+	default:
+		return -1
+	}
+	cv, ok := p.(CVar)
+	if !ok || cv.Idx < 0 || cv.Idx >= len(owned) || !owned[cv.Idx] {
+		return -1
+	}
+	return cv.Idx
+}
+
 // perceusPass holds per-pass state. Currently stateless -- the type exists to allow
 // future fields (e.g. accel table lookup for smarter CDrop elision) without changing
 // signatures.
@@ -232,17 +253,67 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		// indices by +1. Annotate the value in the current scope, open a new scope for
 		// the body.
 		val := pp.annotate(x.Val, owned)
+
+		// Pair-projection ownership (Task 5): if Val is CFst/CSnd of an owned local
+		// CVar{k}, the binding gets an ALIAS of the component (borrowed at runtime).
+		// consumeOwning inserts a CDup so the binding carries its own reference
+		// (component.rc+1). The pair is then dropped after the body if it is dead
+		// in x.Body (the component outlives the pair drop because rc was pre-incremented).
+		srcIdx := pairProjSrc(x.Val, owned)
+		if srcIdx >= 0 {
+			val = consumeOwning(val)
+		}
+
 		bodyOwned := make([]bool, len(owned)+1)
 		bodyOwned[0] = true
 		copy(bodyOwned[1:], owned)
+
+		// When Val is CFst/CSnd of owned local k and the pair is dead in x.Body,
+		// set bodyOwned[k+1] = false so ownScope does not dead-drop the pair. The
+		// drop-after below is the sole consumer of the pair's lifetime.
+		pairDeadInBody := srcIdx >= 0 && !cirUsesArg(x.Body, srcIdx+1)
+		if pairDeadInBody {
+			bodyOwned[srcIdx+1] = false
+		}
+
+		// When Val is CPair and its components are owned local CVars, those locals
+		// are MOVED into the pair (rt_mkpair stores them with store=MOVE). Mark them
+		// not-owned in the body so ownScope does not dead-drop them -- the pair's
+		// rt_free will release them when the pair itself is dropped.
+		if cv, ok := x.Val.(CPair); ok {
+			if cvA, ok2 := cv.A.(CVar); ok2 && cvA.Idx >= 0 && cvA.Idx < len(owned) && owned[cvA.Idx] {
+				bodyOwned[cvA.Idx+1] = false
+			}
+			if cvB, ok2 := cv.B.(CVar); ok2 && cvB.Idx >= 0 && cvB.Idx < len(owned) && owned[cvB.Idx] {
+				bodyOwned[cvB.Idx+1] = false
+			}
+		}
+
 		body := pp.ownScope(x.Body, bodyOwned)
+
+		if pairDeadInBody {
+			// Drop-after: bind the body result ($pres), then release the pair.
+			// In bodyOwned's scope the pair is at srcIdx+1 (new 'a' binding = 0).
+			// After binding $pres (+1 shift), pair index becomes srcIdx+2.
+			body = CLet{
+				Name: "$pres",
+				Val:  body,
+				Body: CDrop{V: CVar{Idx: srcIdx + 2}, K: CVar{Idx: 0}},
+			}
+		}
+
 		out := CIr(CLet{Name: x.Name, Val: val, Body: body})
 		// Capture-then-use-later (and any Val/Body shared owned local): a local
 		// consumed in BOTH the bound value and the continuation is consumed twice
 		// (e.g. captured into a closure env in Val AND applied in Body), so it needs a
 		// dup before the binding. In the body the local sits one binder deeper (i+1).
+		// Guard: if Val is a pure pair projection of local i (a borrow, not a consume),
+		// do NOT dup i -- its lifetime is managed by the drop-after above.
 		for i := len(owned) - 1; i >= 0; i-- {
 			if owned[i] && cirUsesArg(x.Val, i) && cirUsesArg(x.Body, i+1) {
+				if srcIdx >= 0 && i == srcIdx {
+					continue // pair projection is a borrow; drop-after handles its lifetime
+				}
 				out = CDup{V: CVar{Idx: i}, K: out}
 			}
 		}
@@ -332,10 +403,35 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 	case CCase:
 		return pp.annotateCase(x, owned)
 
+	case CPair:
+		// Both A and B are owning positions (rt_mkpair stores them with store=MOVE).
+		// consumeOwning ensures a borrowed value (CEnv, CGlobal, projection) is dup'd
+		// before the store so the pair becomes the sole owner. An owned local (CVar)
+		// passes through (moves into the pair). If the same owned local appears in
+		// both A and B (rare but valid), dup it once so each slot gets a live reference.
+		a := consumeOwning(pp.annotate(x.A, owned))
+		b := consumeOwning(pp.annotate(x.B, owned))
+		out := CIr(CPair{A: a, B: b})
+		for i := len(owned) - 1; i >= 0; i-- {
+			if owned[i] && cirUsesArg(x.A, i) && cirUsesArg(x.B, i) {
+				out = CDup{V: CVar{Idx: i}, K: out}
+			}
+		}
+		return out
+
+	case CFst:
+		// rt_pair_fst returns an ALIAS (borrow); no retain here. When this CFst is
+		// the Val of a CLet whose pair source is dead in the body, the CLet case
+		// above inserts consumeOwning (dup) + drop-after (pair released after body).
+		// When CFst escapes to an owning position (return slot, AppClosure arg),
+		// consumeOwning's CFst arm dups it there.
+		return CFst{P: pp.annotate(x.P, owned)}
+
+	case CSnd:
+		return CSnd{P: pp.annotate(x.P, owned)}
+
 	default:
-		// CPair/CFst/CSnd/CBounce: outside the covered fragment (Task 5 extends pairs).
-		// Carry through unchanged; consumeOwning still owns a borrowed RESULT of one of
-		// these when it reaches an owning position.
+		// CBounce: outside the covered fragment. Carry through unchanged.
 		return t
 	}
 }

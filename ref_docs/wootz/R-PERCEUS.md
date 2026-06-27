@@ -357,3 +357,87 @@ the field, dropping the scrutinee `some 7` would free the K_BIG(7) before it is 
 a wrong value or a trap. Output `7` confirms the dup-on-escape holds for a recursively
 freed field too -- this is the first runtime proof of `consumeOwning`'s `CField` arm
 (the Task 3.5 Minor).
+
+## Worked example: pairs
+
+### Rules (Task 5)
+
+**CPair{A, B}** -- both components are OWNING positions (`rt_mkpair` stores them with
+store=MOVE, no retain). Each component passes through `consumeOwning` before the pair is
+built: a borrowed value (`CEnv`, `CGlobal`, a projection `CFst`/`CSnd`/`CField`) is
+dup'd so the pair becomes the sole owner; an owned local (`CVar`) moves in unchanged.
+If the same owned local appears in BOTH A and B (e.g. `Pair v v`), a CDup is inserted
+once before the CPair.
+
+When the Val of a CLet is CPair and its components are owned CVar locals, those locals
+are marked not-owned in the body scope (bodyOwned[k+1] = false), preventing ownScope
+from dead-dropping them: `rt_free` on the pair will release each component when the pair
+itself is dropped.
+
+**CFst{P} / CSnd{P}** -- `rt_pair_fst` / `rt_pair_snd` return ALIASES (raw pointers, no
+retain). The annotation simply recurses into P. The result is treated as BORROWED at its
+use site:
+
+- When CFst/CSnd escapes to an OWNING position (AppClosure arg, MkClosure env slot,
+  return via `consumeOwning` at a scope exit), `consumeOwning`'s `CFst`/`CSnd` arm
+  let-binds the projection and inserts a CDup (already present from Task 3.5). This
+  gives the kept projection its own reference so it survives the pair's recursive free.
+
+- When CFst/CSnd is the Val of a CLet (`let a = Fst p`), the CLet case detects the
+  pattern via `pairProjSrc` and applies `consumeOwning` to the projected value (CDup),
+  binding `a` with an owned reference. Then if the pair `p` is DEAD in the body
+  (cirUsesArg false for p in x.Body), a DROP-AFTER is inserted:
+
+  ```
+  let $pres = annotated_body in CDrop{p_shifted, $pres}
+  ```
+
+  The sequence at runtime: project Fst (alias), retain the component (CDup), evaluate
+  body, bind result as $pres, release the pair. Releasing the pair calls `rt_free`
+  which recursively releases both components: the Fst component goes from rc=2 to
+  rc=1 (still alive, $pres holds it), the Snd component goes to rc=0 (freed). $pres
+  (rc=1) is returned and eventually freed by the caller.
+
+The DROP-AFTER ordering guarantees: the kept projection is always dup'd BEFORE the pair
+is released. Any borrowing of the same pair in an intermediate let body (e.g. a second
+`let b = Snd p` before p is dead) pushes the drop-after to the innermost let where p
+first becomes dead, naturally chaining drops in the correct order.
+
+The guard in the shared-var dup loop skips pair projections (`srcIdx >= 0 && i ==
+srcIdx`): a projection is a BORROW, not a MOVE, so a dup of the pair source would be
+wrong (the pair is not consumed by the projection).
+
+### Receiver `TestPerceusWasmPairs`
+
+```rune
+mainPairs : Nat -> Nat is
+  let f : Nat -> Nat = fn (x : Nat) is x end in
+  let g : Nat -> Nat = fn (y : Nat) is y end in
+  let p : Sig (Nat -> Nat) (fn (z : Nat -> Nat) is Nat -> Nat end)
+        = Pair (Nat -> Nat) (fn (z : Nat -> Nat) is Nat -> Nat end) f g in
+  let a : Nat -> Nat = Fst p in
+  a
+end
+```
+
+Per-run allocation/free ledger (with Perceus):
+
+| step | event | f.rc | g.rc | p.rc | $live |
+|------|-------|------|------|------|-------|
+| alloc f | rt_mkclo | 1 | - | - | +1 |
+| alloc g | rt_mkclo | 1 | 1 | - | +1 |
+| alloc p | rt_mkpair(f, g) | 1 | 1 | 1 | +1 |
+| Fst p + CDup | rt_pair_fst; rt_retain(f) | 2 | 1 | 1 | 0 |
+| CDrop{p} (drop-after) | rt_free(p): rt_release(f), rt_release(g) | 1 | 0 | 0 | -2 |
+| harness rt_release(result=f) | rt_free(f) | 0 | 0 | 0 | -1 |
+
+Net per run: +3 allocations, -3 frees = 0. $live flat from run 2 onward.
+
+Gate: OUTPUT `<function>` (the identity `Nat -> Nat` closure f) AND $live flat. Under
+the pre-Task-5 carry-through, ownScope dead-drops f and g BEFORE `rt_pair_fst` (because
+they are dead in `let a = Fst p in a`), causing use-after-free and the wrong output
+`()`. After Task 5, the CPair bodyOwned update suppresses those dead-drops and the
+drop-after releases the pair in the correct order.
+
+Closures are used as pair components (not bignums) for the same reason as earlier
+receivers: `rt_big_parse` leaks K_BIG temporaries that would mask the balance signal.

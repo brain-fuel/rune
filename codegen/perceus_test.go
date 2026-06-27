@@ -401,3 +401,41 @@ func TestPerceusConstructorCase(t *testing.T) {
 		t.Fatalf("kept field use-after-free under scrutinee drop: got %q, want 7", got)
 	}
 }
+
+// perceusWasmPairsSrc is the Task 5 receiver. Build a pair of closures (Fst=f, Snd=g),
+// project Fst (the kept half), drop the pair (which also frees g). Each run:
+//   - Allocates K_CLO_f, K_CLO_g, K_PAIR.
+//   - consumeOwning on Fst dup's f (f.rc 1->2).
+//   - drop-after releases the pair: f.rc 2->1, g freed, pair freed.
+//   - Harness releases result (f): f freed.
+//   - Net change to $live: 0 (steady flat).
+//
+// Uses closures (not bignums) as components to avoid rt_big_parse temp leaks in the
+// steady gate. Uses separate `let p` and `let a` bindings so the pair is a let-bound
+// owned local and the drop-after fires (not an anonymous inline Fst(Pair f g)).
+const perceusWasmPairsSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+mainPairs : Nat -> Nat is
+  let f : Nat -> Nat = fn (x : Nat) is x end in
+  let g : Nat -> Nat = fn (y : Nat) is y end in
+  let p : Sig (Nat -> Nat) (fn (z : Nat -> Nat) is Nat -> Nat end) = Pair (Nat -> Nat) (fn (z : Nat -> Nat) is Nat -> Nat end) f g in
+  let a : Nat -> Nat = Fst p in
+  a
+end
+`
+
+// TestPerceusWasmPairs is the Task 5 receiver gate (pairs: CPair / CFst / CSnd).
+//
+// OUTPUT-INVARIANCE: Perceus must not alter the computed value. The def evaluates
+// to f = fn (x is x) : Nat -> Nat, printed as "<function>".
+//
+// STEADY-STATE: $live must be flat after run 1. Each run allocates K_CLO_f,
+// K_CLO_g, K_PAIR. The pair drop (after projecting Fst) frees K_PAIR and K_CLO_g;
+// the harness releases K_CLO_f. Net: 0 change per run from run 2 onward.
+func TestPerceusWasmPairs(t *testing.T) {
+	assertSteadyFlat(t, perceusWasmPairsSrc, "mainPairs", "<function>")
+}
