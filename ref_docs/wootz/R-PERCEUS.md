@@ -112,6 +112,73 @@ exactly like R-ARC's free-list reuse test.
 - Task 6 (broad gate) -- receiver: the WASM-supported listings subset run through
   the steady-state gate. Section "The corpus gate".
 
+## Worked example: dup and drop in the pure fragment
+
+Receiver program (`TestPerceusCoreDupDrop`):
+
+```rune
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+applyTwice : ((Nat -> Nat) -> (Nat -> Nat)) -> (Nat -> Nat) is
+  fn (f : (Nat -> Nat) -> (Nat -> Nat)) is
+    let unused : Nat -> Nat = fn (y : Nat) is y end in
+    f (f (fn (z : Nat) is z end))
+  end
+end
+idFun : (Nat -> Nat) -> (Nat -> Nat) is fn (g : Nat -> Nat) is g end end
+main : Nat -> Nat is applyTwice idFun end
+```
+
+The receiver forces three distinct ownership events:
+
+**1. CDup on f** (`fn (f : ...) is f (f (...)) end`). The body is
+`AppClosure(f, AppClosure(f, Mk_z))` where f = CVar{0}. Both the outer Clo
+position and the inner Clo/Arg search see f, so the algorithm inserts
+`CDup{f, <annotated-AppClosure>}`. f.rc goes 1->2 before the two applications.
+
+**2. CLet+CDrop pair for each AppClosure(f, ...)** (scope limitation: Clo is a
+CVar so the closure is released after `rt_apply`). Each application wraps the
+call in:
+```
+CLet("$clo", f,
+  CLet("$res", AppClosure(CVar{0}, arg),
+    CDrop{CVar{1}, CVar{0]}))
+```
+The outer application's CDrop brings f.rc from 2 to 1; the inner application's
+CDrop brings it from 1 to 0, freeing the K_CLO_f heap object.
+
+**3. CDrop on unused** (dead CLet binder). Inside the CLet("unused", MkClosure,
+body) binder, `ownScope` sees unused (CVar{0}) is dead in body and wraps:
+`CDrop{CVar{0}, body}`. This frees the K_CLO_unused immediately after binding.
+
+**ARC trace (one hot run; argCount=1 so code-block args are not dead-dropped):**
+
+| Event | Object | rc delta | rc after |
+|-------|--------|----------|----------|
+| rt_mkclo idFun arg | K_CLO_g | alloc | 1 |
+| CDup f in applyTwice block | K_CLO_g | +1 | 2 |
+| rt_mkclo unused | K_CLO_unused | alloc | 1 |
+| CDrop unused | K_CLO_unused | -1, freed | 0 |
+| rt_mkclo fn(z)isz | K_CLO_z | alloc | 1 |
+| inner AppClosure: CDrop $clo_i | K_CLO_g | -1 | 1 |
+| outer AppClosure: CDrop $clo_o | K_CLO_g | -1, freed | 0 |
+| harness rt_release result | K_CLO_z | -1, freed | 0 |
+
+Net per run after warm-up: 0. $rt_live is flat after run 1. Output: `<function>`.
+
+**Scope limitation: code-block args are not dead-dropped.** The `argCount`
+parameter to `ownScope` marks the outermost owned slot as a code-block argument.
+Dead-drop CDrop is only inserted for CLet-introduced binders (indices below
+`len(owned)-argCount`). This prevents cascade-release of structural K_CON values
+or bignum counters passed to step functions whose results discard the counter
+argument -- values that may alias thunk-cached heap objects. The `rt_mkcon` /
+`rt_clo_set` do not retain fields, so such aliases are not counted in the rc.
+Task 4+ will address this by making the runtime retain on store.
+
 ## Held for Plan 6b-2 (named, not silently dropped)
 - CBounce / the partial trampoline: ownership across a DEFERRED saturated tail
   call and the public driver loop. Receiver (future): the ch39 countdown / a

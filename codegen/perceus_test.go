@@ -1,22 +1,24 @@
 package codegen_test
 
-// perceus_test.go -- Plan 6b Task 2: CDup/CDrop nodes, WASM rendering, and the
+// perceus_test.go -- Plan 6b Tasks 2-3: CDup/CDrop nodes, WASM rendering, and the
 // $live steady-state gate.
 //
-// Three tests:
+// Four tests:
 //
 //  1. TestPerceusDupDropBalances -- verifies the ARC runtime balances a hand-written
 //     dup/drop sequence: allocate a bignum, retain twice (rc=3), release three times
 //     (rc->0 -> freed). $rt_live returns 1 (back to just UNIT).
 //
-//  2. TestPerceusEmitterRendersDupDrop -- verifies that Perceus (currently identity)
-//     does not corrupt the emitted module structure; the WAT contains $rune_main.
+//  2. TestPerceusEmitterRendersDupDrop -- verifies that Perceus does not corrupt the
+//     emitted module structure; the WAT contains $rune_main.
 //
 //  3. TestPerceusSteadyTrivial -- verifies that the steady-state gate has teeth:
-//     under IDENTITY Perceus a succ chain with builtin-nat K_BIG bignums leaks
-//     intermediate bignum allocations each run (K_BIG has no child pointers, so a
-//     single $rt_release on the final result does not free the intermediates). The
-//     test asserts counts GROW run-over-run, proving the gate detects the leak.
+//     under the real Perceus pass a succ chain with builtin-nat K_BIG bignums still
+//     leaks (all closures are CGlobal -> no CLet+CDrop inserted). Counts GROW.
+//
+//  4. TestPerceusCoreDupDrop -- the Task 3 receiver: a closure used twice (forces
+//     CDup) and a dead let-binding (forces CDrop) are balanced -- output correct AND
+//     $rt_live flat after run 1.
 
 import (
 	"strconv"
@@ -121,9 +123,87 @@ func TestPerceusSteadyTrivial(t *testing.T) {
 	if err1 != nil || err2 != nil {
 		t.Fatalf("non-integer live counts: %v", counts)
 	}
-	// Identity Perceus: intermediates leak each run -> counts GROW. The gate has teeth.
-	// Task 3+ will make a balanced program show flat counts here.
+	// Real Perceus does not insert CDrop for CGlobal-clo AppClosures (scope limitation
+	// Task 3), so succ-chain intermediates still leak each run -> counts GROW.
 	if !(c2 > c1) {
-		t.Fatalf("expected a visible leak under identity Perceus (run3 > run2), got flat %v", counts)
+		t.Fatalf("expected a visible leak for succ-chain (run3 > run2), got flat %v", counts)
+	}
+}
+
+// perceusCoreSrc is the Task 3 receiver program. It forces:
+//
+//   - ONE CDup: f (the identity closure over (Nat->Nat), a K_CLO) is owned
+//     (CVar) in applyTwice's code block and used in BOTH the Clo and Arg
+//     positions of the outer AppClosure in "f (f (fn z is z end))".
+//
+//   - ONE CDrop: "unused = fn (y : Nat) is y end" is a dead let-binding;
+//     the K_CLO is allocated and immediately released.
+//
+//   - ONE CLet+CDrop on $clo (the post-call closure release): applyTwice's
+//     code-block closure is a CVar so the AppClosure wrapper inserts
+//     CLet("$clo", ...) / CDrop to release the closure after rt_apply.
+//
+// The argument to f is "fn (z : Nat) is z end" -- a fresh K_CLO with an
+// empty env, allocated in the hot path. No bignum literals or bignum
+// arithmetic appear in the hot path, so rt_big_parse's intermediate
+// K_BIG allocations never fire and $rt_live stays flat after run 1.
+//
+// Output: "<function>" (the result is a Nat -> Nat closure).
+const perceusCoreSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+applyTwice : ((Nat -> Nat) -> (Nat -> Nat)) -> (Nat -> Nat) is
+  fn (f : (Nat -> Nat) -> (Nat -> Nat)) is
+    let unused : Nat -> Nat = fn (y : Nat) is y end in
+    f (f (fn (z : Nat) is z end))
+  end
+end
+idFun : (Nat -> Nat) -> (Nat -> Nat) is fn (g : Nat -> Nat) is g end end
+main : Nat -> Nat is applyTwice idFun end
+`
+
+// TestPerceusCoreDupDrop is the Task 3 receiver gate.
+//
+// OUTPUT-INVARIANCE: Perceus must not alter the computed value.
+// applyTwice receives the identity on (Nat->Nat); it applies it twice
+// to a fresh identity closure, yielding that closure back.  The WASM
+// show function prints "<function>" for any K_CLO.
+//
+// STEADY-STATE: $rt_live must be flat after run 1. Each run allocates:
+//
+//   K_CLO_g      -- fn (g : Nat->Nat) is g end  (passed to applyTwice)
+//   K_CLO_unused -- fn (y : Nat)      is y end  (dead let-binding, CDrop'd)
+//   K_CLO_z      -- fn (z : Nat)      is z end  (argument to f, result)
+//
+// All three are allocated fresh each run and released before the loop
+// advances: K_CLO_unused by CDrop, K_CLO_g by the two CLet+CDrop wrappers
+// (CDup gives rc=2, two CDrop's bring it to 0), and K_CLO_z by the
+// harness's $rt_release after printing.
+func TestPerceusCoreDupDrop(t *testing.T) {
+	// --- output-invariance gate ---
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusCoreSrc, "main"))
+	if got != "<function>" {
+		t.Fatalf("Perceus output-invariance: got %q, want \"<function>\"", got)
+	}
+
+	// --- steady-state gate ---
+	p := mustProgram(t, perceusCoreSrc, "main")
+	counts := wasmSteadyLiveP(t, p, 4)
+	if len(counts) != 4 {
+		t.Fatalf("want 4 per-run live counts, got %d: %v", len(counts), counts)
+	}
+	// Parse as integers to avoid lexicographic anomalies.
+	c2, err2 := strconv.Atoi(counts[1])
+	c3, err3 := strconv.Atoi(counts[2])
+	c4, err4 := strconv.Atoi(counts[3])
+	if err2 != nil || err3 != nil || err4 != nil {
+		t.Fatalf("non-integer live counts: %v", counts)
+	}
+	// Balanced Perceus: runs 2-4 must all be the same (steady state).
+	if !(c2 == c3 && c3 == c4) {
+		t.Fatalf("Perceus steady-state FAIL: counts not flat after run 1: %v", counts)
 	}
 }
