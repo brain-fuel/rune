@@ -221,9 +221,10 @@ func (Metrics) Kind() string          { return "metrics" }
 func (m Metrics) LogicalName() string { return m.Name }
 
 // Identity is a managed workload identity (AWS IAM role / Azure user-assigned managed
-// identity / GCP service account) — the principal a workload runs as. Cloud-only.
+// identity / GCP service account) -- the principal a workload runs as. Cloud-only.
 type Identity struct {
-	Name string
+	Name   string
+	Grants []string // agnostic least-privilege capability tokens, e.g. "kv:Get"
 }
 
 func (Identity) isResource()           {}
