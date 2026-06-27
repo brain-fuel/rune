@@ -121,8 +121,8 @@ func BuildModel(rs []infra.Resource, catalog []control.Control, entries []ledger
 		n.Controls = append(n.Controls, a)
 	}
 
-	// rebuild rels slice pointers may have moved during append; reindex from nodes/rels
-	// by re-deriving from the populated structures, then sort deterministically.
+	// Copy the populated nodes (rels were attached in place by index via relPos, so
+	// no reallocation hazard remains), then sort everything for deterministic output.
 	finalNodes := make([]ModelNode, len(nodes))
 	copy(finalNodes, nodes)
 	sortModel(finalNodes, rels)

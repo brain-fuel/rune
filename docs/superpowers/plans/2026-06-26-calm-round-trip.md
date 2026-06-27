@@ -394,7 +394,9 @@ func BuildModel(rs []infra.Resource, catalog []control.Control, entries []ledger
 	for i := range nodes {
 		nodeIdx[nodes[i].ID] = &nodes[i]
 	}
-	relIdx := map[string]*ModelRel{}
+	relPos := map[string]int{} // element -> index into rels (index, NOT a pointer:
+	// rels is appended-to in this loop, so a stored *ModelRel would dangle after a
+	// reallocation and silently drop later control attachments)
 	var rels []ModelRel
 
 	attachment := func(c control.Control) (ControlAttachment, error) {
@@ -421,13 +423,11 @@ func BuildModel(rs []infra.Resource, catalog []control.Control, entries []ledger
 			if nodeIdx[dst] == nil {
 				return Model{}, fmt.Errorf("control %q attaches to relationship %q but node %q is not in the resource graph", c.Name, c.Element, dst)
 			}
-			rel := relIdx[c.Element]
-			if rel == nil {
+			if _, exists := relPos[c.Element]; !exists {
 				rels = append(rels, ModelRel{ID: c.Element, Source: src, Dest: dst})
-				rel = &rels[len(rels)-1]
-				relIdx[c.Element] = rel
+				relPos[c.Element] = len(rels) - 1
 			}
-			rel.Controls = append(rel.Controls, a)
+			rels[relPos[c.Element]].Controls = append(rels[relPos[c.Element]].Controls, a)
 			continue
 		}
 		n := nodeIdx[c.Element]
@@ -437,8 +437,8 @@ func BuildModel(rs []infra.Resource, catalog []control.Control, entries []ledger
 		n.Controls = append(n.Controls, a)
 	}
 
-	// rebuild rels slice pointers may have moved during append; reindex from nodes/rels
-	// by re-deriving from the populated structures, then sort deterministically.
+	// Copy the populated nodes (rels were attached in place by index via relPos, so
+	// no reallocation hazard remains), then sort everything for deterministic output.
 	finalNodes := make([]ModelNode, len(nodes))
 	copy(finalNodes, nodes)
 	sortModel(finalNodes, rels)
