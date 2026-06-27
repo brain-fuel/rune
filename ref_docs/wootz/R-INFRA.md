@@ -205,7 +205,7 @@ gate) but applied and observed against a real AWS IAM API with no cloud account:
 LocalStack stands up, `terraform apply` creates the role and inline policy through
 the existing apply lifecycle, the IAM API's get-role-policy returns the stored
 document, and the test asserts it is exactly the declared grants and nothing more,
-then destroys it (harness/../infra/iam_localstack_apply_test.go). This is the
+then destroys it (infra/iam_localstack_apply_test.go). This is the
 live-provider realization of ch538's least-privilege-IAM proof: the scoped policy
 round-trips through a genuine IAM implementation. The kv (ElastiCache) and compute
 slices of the demo need a real account (LocalStack community does not implement
