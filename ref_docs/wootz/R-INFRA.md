@@ -212,3 +212,21 @@ slices of the demo need a real account (LocalStack community does not implement
 them); IAM is the no-account-applicable part. Azure has no terraform emulator (see
 the Azure no-account IAM note); the billed one-cloud apply is documented in
 examples/wavelet_deploy.wav.
+
+## Azure least-privilege IAM: the no-account ceiling
+
+Azure has no terraform emulator: the azurerm provider targets ARM (the control
+plane), and Azurite emulates only the storage DATA plane, so there is no per-service
+emulator endpoint to redirect. An Azure `rune deploy --apply --localstack` is
+therefore refused with a specific error (infra/apply.go), and a no-account emulator
+apply of the demo's IAM is impossible by design, not unbuilt.
+
+The honest no-account Azure story for the demo IAM is two facts, both gated by a test
+(cmd/rune/azure_iam_noaccount_test.go): the scoped azurerm_role_definition (actions =
+kv:Get, kv:Set) is provider-VALID with no account (terraform validate), and the
+emulator apply is cleanly refused. For Azure's DATA shapes (kv, object, queue) the
+no-account path is FOSS-via-Podman (Valkey, Garage, RabbitMQ/NATS); IAM is a cloud
+control-plane concept with no FOSS equivalent, so for the IAM specifically the
+no-account ceiling is validate, and real provisioning needs a billed account (the
+billed apply is documented in examples/wavelet_deploy.wav). AWS, by contrast, is
+applied-and-observed no-account because LocalStack implements IAM (see the AWS note).
