@@ -115,7 +115,11 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 
 ### Plan 5: Wavelet infra, one cloud live
 
-> STATUS: PLANNED. Task file: `2026-06-26-infra-one-cloud-live.md`. 7 tasks: the demo's IAM currently emits an EMPTY policy; this builds the headline "proven-minimal-IAM" - Identity.Grants + a scoped least-privilege policy on AWS (aws_iam_role_policy) / GCP (custom role) / Azure (role definition), manifest `grants=` option, `examples/wavelet_deploy.wav`, a 3-cloud fmt-clean + least-privilege HCL gate, and the one-cloud-live FOSS apply gate (no account) reusing infra.Apply. Region pin via the existing provider region var. Grants correspond to ch538's least-priv-IAM `needed`. Billed apply stays cloud-gated (documented).
+> STATUS: DONE (v3.335.0). Task file: `2026-06-26-infra-one-cloud-live.md`. 7 tasks landed: Identity.Grants + scoped least-privilege policy on AWS (aws_iam_role_policy) / GCP (custom role) / Azure (role definition), manifest `grants=` option, `examples/wavelet_deploy.wav`, a 3-cloud fmt-clean + terraform-validate least-privilege HCL gate, and the one-cloud-live FOSS apply gate reusing infra.Apply. Grants correspond to ch538's least-priv-IAM `needed`. (Whole-branch review caught + fixed: GCP account_id underscore failed `terraform validate`.)
+>
+> FOLLOW-UPS (emulator apply-gates for the demo's IAM, no account):
+> - Plan 5b: `2026-06-27-aws-localstack-iam-apply.md` (PLANNED). 3 tasks: apply the demo's scoped AWS IAM on LocalStack no-account (provider accepts CreateRole+PutRolePolicy), then read the inline policy back via the IAM API and assert it is EXACTLY kv:Get/kv:Set (live-provider macro-micro tie), + doc. Reuses the TestApplyLocalStackBucketReallyCreated pattern.
+> - Plan 5c: `2026-06-27-azure-iam-noaccount-ceiling.md` (PLANNED). 2 tasks: pin Azure's honest no-account ceiling - the scoped role definition is terraform-validated no-account but emulator-apply is impossible-by-design (azurerm=ARM control plane; Azurite=storage data plane); FOSS-via-Podman covers data shapes not IAM. Test + doc, no fake emulator.
 
 - **Goal.** The demo infra (relay, store, region pin, minimal IAM) deploys live on one cloud; the
   other two emit HCL only.
