@@ -50,6 +50,8 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 
 ### Plan 1: Evaluation model (lazy core, seq/do, concurrent-effect frontier)
 
+> STATUS: DONE (v3.330.0). Plan + task file: `2026-06-25-eval-model.md`. do/par seeded frontier on Go+JS byte-identical, order-independence proof (ch_frontier_order_independent), REPL acceptance.
+
 - **Goal.** Lazy call-by-need pure layer; effectful actions as a data-flow DAG dispatched M-on-N
   across executors with nondeterministic interleaving; `seq ... end` as the linearization barrier;
   `do` as the nested concurrent block inside `seq`; correctness-under-every-interleaving as a
@@ -68,6 +70,8 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
   does not claim to close the general theorem.
 
 ### Plan 2: Assurance Ledger
+
+> STATUS: DONE (v3.332.0). Plan + task file: `2026-06-26-assurance-ledger.md`. `ledger/` package + `rune ledger <file> [--json] [--check]`; tiers postulate/assume/guard/proven, content-hashed proposition+proof, git-blame provenance, upgrade detector, CI gate, `postulate ... because "..." end`. Follow-ups: partial/mutual Pos threading; `--baseline`/Upgrades CLI wiring.
 
 - **Goal.** Tiers `postulate` / `assume` / `guard` / `proven` on every control and foreign claim;
   content-hashed propositions; git-blame provenance; verifiable postulate-to-proof upgrades; a CI
