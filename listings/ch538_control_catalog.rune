@@ -287,3 +287,14 @@ main : IO Unit is
     end)
   end)
 end
+
+-- ===== the guarded-tail framework: a postulated control (a labeled debt) =====
+-- The in-region control above is proven against the STATIC model. The matching
+-- claim about the LIVE deployment - that the region the cloud actually placed the
+-- service in equals the pinned region - cannot be proven yet (the provider region
+-- API is not modeled). It is stated as a POSTULATE: an axiom with a reason, which
+-- the Assurance Ledger labels `postulate`, attributes via git blame, and tracks for
+-- upgrade. When the live region read is modeled, a proof of the SAME proposition
+-- hash upgrades it postulated -> proven (Plan 2's upgrade detector).
+foreign liveRegion : Nat end
+postulate liveInRegion : Eq Nat liveRegion usEast because "live cloud region read not yet modeled (provider API); attested out of band" end
