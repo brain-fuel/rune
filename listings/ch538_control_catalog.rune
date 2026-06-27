@@ -1,0 +1,300 @@
+-- Chapter 538 - the Wavelet control catalog (Plan 3 of the Wavelet beta).
+--
+-- A small blessed set of architecture controls, PROVEN over a demo model: the
+-- two-tab collaborative-CRDT app, whose CALM nodes are {web, relay, store}. Each
+-- control is a content-hashed PROPOSITION (a type) discharged by a real proof
+-- term; the Assurance Ledger (rune ledger) reads this file and labels each one
+-- proven. Flagship controls landed in this chapter:
+--   in-region, encrypted-in-transit, least-privilege-IAM, convergence.
+-- A postulated TAIL control (the guarded-tail framework) is added in Task 5.
+--
+-- The proofs are the gate: each fold computes to `true` (or the merge laws hold),
+-- so `refl` type-checks only when the claim holds. An over-broad IAM policy makes
+-- the IAM fold reduce to `false`, so its `refl` fails to elaborate (a compile
+-- error, not a runtime check) - see harness/control_catalog_test.go.
+
+data Unit : U is unit : Unit end
+data Bool : U is false : Bool | true : Bool end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+-- ===== decidable kit =====
+-- Boolean Nat equality (the ch75 pattern): eqNat a b = true iff a and b are the
+-- same numeral, by nested NatElim.
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (m : Nat) is
+         NatElim (fn (y : Nat) is Bool end) true (fn (j : Nat) (ih : Bool) is false end) m end)
+      (fn (k : Nat) (eqK : Nat -> Bool) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Bool end) false (fn (j : Nat) (ih : Bool) is eqK j end) m end end)
+      a b
+  end
+end
+
+-- andB a b = if a then b else false (BoolElim: motive, false-case, true-case, scrutinee).
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) false b a end
+end
+
+-- ===== the architecture model: services pinned to a region =====
+-- A service is an id paired with the region it is deployed in.
+data Svc : U is svc : Nat -> Nat -> Svc end
+data SvcList : U is snil : SvcList | scons : Svc -> SvcList -> SvcList end
+
+region : Svc -> Nat is
+  fn (s : Svc) is SvcElim (fn (w : Svc) is Nat end) (fn (id : Nat) (r : Nat) is r end) s end
+end
+
+-- allInRegion pin xs = true iff every service in xs is deployed in region `pin`.
+allInRegion : Nat -> SvcList -> Bool is
+  fn (pin : Nat) (xs : SvcList) is
+    SvcListElim (fn (w : SvcList) is Bool end)
+      true
+      (fn (h : Svc) (t : SvcList) (ih : Bool) is andB (eqNat (region h) pin) ih end)
+      xs
+  end
+end
+
+-- ===== the demo model instance =====
+-- Region ids: us-east = 0. The three demo services (web=0, relay=1, store=2) are
+-- all pinned to us-east.
+usEast : Nat is zero end
+web   : Svc is svc 0 usEast end
+relay : Svc is svc 1 usEast end
+store : Svc is svc 2 usEast end
+demoServices : SvcList is scons web (scons relay (scons store snil)) end
+
+-- ===== flagship control: IN-REGION =====
+-- PROPOSITION: every demo service is in the pinned region (us-east).
+-- PROOF: the fold computes to `true`, so refl discharges it.
+inRegionProof : Eq Bool (allInRegion usEast demoServices) true is refl end
+
+-- ===== the model: transport edges carry a TLS flag =====
+-- An edge connects two service ids and records whether the link is encrypted.
+data Edge : U is edge : Nat -> Nat -> Bool -> Edge end
+data EdgeList : U is enil : EdgeList | econs : Edge -> EdgeList -> EdgeList end
+
+tls : Edge -> Bool is
+  fn (e : Edge) is EdgeElim (fn (w : Edge) is Bool end) (fn (f : Nat) (t : Nat) (s : Bool) is s end) e end
+end
+
+-- allEncrypted xs = true iff every edge in xs is TLS-protected.
+allEncrypted : EdgeList -> Bool is
+  fn (xs : EdgeList) is
+    EdgeListElim (fn (w : EdgeList) is Bool end)
+      true
+      (fn (h : Edge) (t : EdgeList) (ih : Bool) is andB (tls h) ih end)
+      xs
+  end
+end
+
+-- demo edges: web -> relay (WebRTC/DTLS) and relay -> store (TLS), both encrypted.
+demoEdges : EdgeList is econs (edge 0 1 true) (econs (edge 1 2 true) enil) end
+
+-- ===== flagship control: ENCRYPTED-IN-TRANSIT =====
+-- PROPOSITION: every transport edge in the demo model is encrypted.
+-- PROOF: the fold computes to `true`.
+encryptedProof : Eq Bool (allEncrypted demoEdges) true is refl end
+
+-- ===== the model: IAM access as a set of grant codes =====
+-- A grant code names one (action, resource) capability the relay's erased code
+-- can perform; e.g. 10 = kv:get, 11 = kv:set. An access set is the list of codes.
+data CodeList : U is cnil : CodeList | ccons : Nat -> CodeList -> CodeList end
+
+-- eqCodes xs ys = true iff the two access sets are positionally equal (the demo
+-- model keeps both in the same canonical order, so set-equality is list-equality).
+eqCodes : CodeList -> CodeList -> Bool is
+  fn (xs : CodeList) is
+    CodeListElim (fn (w : CodeList) is CodeList -> Bool end)
+      (fn (ys : CodeList) is
+         CodeListElim (fn (w : CodeList) is Bool end)
+           true
+           (fn (h : Nat) (t : CodeList) (ih : Bool) is false end)
+           ys end)
+      (fn (x : Nat) (xt : CodeList) (eqXt : CodeList -> Bool) is
+         fn (ys : CodeList) is
+           CodeListElim (fn (w : CodeList) is Bool end)
+             false
+             (fn (y : Nat) (yt : CodeList) (ih : Bool) is andB (eqNat x y) (eqXt yt) end)
+             ys end end)
+      xs
+  end
+end
+
+-- `needed` is the access the relay's erased code actually performs: kv:get, kv:set.
+-- `granted` is the IAM policy attached to the relay's identity. LEAST PRIVILEGE is
+-- granted == needed: no capability is granted that the code does not use (no excess)
+-- and the code is not denied a capability it needs (no deficit).
+needed  : CodeList is ccons 10 (ccons 11 cnil) end
+granted : CodeList is ccons 10 (ccons 11 cnil) end
+
+-- ===== flagship control: LEAST-PRIVILEGE-IAM =====
+-- PROPOSITION: the granted policy is exactly the access the workload needs.
+-- PROOF: the decision computes to `true`. An over-broad `granted` (an extra code)
+-- makes eqCodes reduce to `false`, so this refl would fail to elaborate (Task 6).
+leastPrivProof : Eq Bool (eqCodes granted needed) true is refl end
+
+-- ===== convergence: the verified max-register CvRDT (reused from ch453) =====
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+natMax : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (m : Nat) is m end)
+      (fn (k : Nat) (maxK : Nat -> Nat) is
+         fn (m : Nat) is
+           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is succ (maxK j) end) m
+         end end)
+      a b
+  end
+end
+maxZeroR : (a : Nat) -> Eq Nat (natMax a zero) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (natMax x zero) x end) refl (fn (k : Nat) (ih : Eq Nat (natMax k zero) k) is refl end) a
+  end
+end
+maxComm : (a : Nat) -> (b : Nat) -> Eq Nat (natMax a b) (natMax b a) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (natMax x b) (natMax b x) end)
+      (fn (b : Nat) is symEq Nat (natMax b zero) b (maxZeroR b) end)
+      (fn (k : Nat) (ih : (b : Nat) -> Eq Nat (natMax k b) (natMax b k)) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is Eq Nat (natMax (succ k) y) (natMax y (succ k)) end)
+             refl
+             (fn (j : Nat) (ihj : Eq Nat (natMax (succ k) j) (natMax j (succ k))) is
+                cong Nat Nat succ (natMax k j) (natMax j k) (ih j) end)
+             b
+         end
+       end)
+      a
+  end
+end
+maxIdem : (a : Nat) -> Eq Nat (natMax a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (natMax x x) x end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natMax k k) k) is cong Nat Nat succ (natMax k k) k ih end)
+      a
+  end
+end
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) ->
+           Eq Nat (natMax (natMax a b) c) (natMax a (natMax b c)) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (natMax (natMax x b) c) (natMax x (natMax b c)) end)
+      (fn (b : Nat) (c : Nat) is refl end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (natMax (natMax k b) c) (natMax k (natMax b c))) is
+         fn (b : Nat) is
+           NatElim (fn (y : Nat) is (c : Nat) -> Eq Nat (natMax (natMax (succ k) y) c) (natMax (succ k) (natMax y c)) end)
+             (fn (c : Nat) is refl end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (natMax (natMax (succ k) j) c) (natMax (succ k) (natMax j c))) is
+                fn (c : Nat) is
+                  NatElim (fn (z : Nat) is Eq Nat (natMax (natMax (succ k) (succ j)) z) (natMax (succ k) (natMax (succ j) z)) end)
+                    refl
+                    (fn (i : Nat) (ihc : Eq Nat (natMax (natMax (succ k) (succ j)) i) (natMax (succ k) (natMax (succ j) i))) is
+                       cong Nat Nat succ (natMax (natMax k j) i) (natMax k (natMax j i)) (ih j i) end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+data Reg : U is reg : Nat -> Reg end
+val : Reg -> Nat is fn (r : Reg) is RegElim (fn (w : Reg) is Nat end) (fn (n : Nat) is n end) r end end
+merge : Reg -> Reg -> Reg is fn (x : Reg) (y : Reg) is reg (natMax (val x) (val y)) end end
+
+mergeComm : (x : Reg) -> (y : Reg) -> Eq Reg (merge x y) (merge y x) is
+  fn (x : Reg) is
+    RegElim (fn (wx : Reg) is (y : Reg) -> Eq Reg (merge wx y) (merge y wx) end)
+      (fn (a : Nat) is
+         fn (y : Reg) is
+           RegElim (fn (wy : Reg) is Eq Reg (merge (reg a) wy) (merge wy (reg a)) end)
+             (fn (b : Nat) is cong Nat Reg reg (natMax a b) (natMax b a) (maxComm a b) end)
+             y
+         end end)
+      x
+  end
+end
+mergeIdem : (x : Reg) -> Eq Reg (merge x x) x is
+  fn (x : Reg) is
+    RegElim (fn (wx : Reg) is Eq Reg (merge wx wx) wx end)
+      (fn (a : Nat) is cong Nat Reg reg (natMax a a) a (maxIdem a) end)
+      x
+  end
+end
+mergeAssoc : (x : Reg) -> (y : Reg) -> (z : Reg) ->
+             Eq Reg (merge (merge x y) z) (merge x (merge y z)) is
+  fn (x : Reg) is
+    RegElim (fn (wx : Reg) is (y : Reg) -> (z : Reg) ->
+        Eq Reg (merge (merge wx y) z) (merge wx (merge y z)) end)
+      (fn (a : Nat) is
+         fn (y : Reg) is
+           RegElim (fn (wy : Reg) is (z : Reg) ->
+               Eq Reg (merge (merge (reg a) wy) z) (merge (reg a) (merge wy z)) end)
+             (fn (b : Nat) is
+                fn (z : Reg) is
+                  RegElim (fn (wz : Reg) is
+                      Eq Reg (merge (merge (reg a) (reg b)) wz) (merge (reg a) (merge (reg b) wz)) end)
+                    (fn (c : Nat) is
+                       cong Nat Reg reg (natMax (natMax a b) c) (natMax a (natMax b c)) (maxAssoc a b c) end)
+                    z
+                end end)
+             y
+         end end)
+      x
+  end
+end
+
+-- ===== flagship control: CONVERGENCE-UNDER-ALL-SCHEDULES =====
+-- The three semilattice laws on `merge` (commutative + idempotent + associative)
+-- ARE the CvRDT convergence criterion: replicas reach the same state regardless of
+-- gossip order, duplication, or grouping. Conv packages them into ONE content-hashed
+-- proposition so the ledger shows a single `convergesProof : proven` control.
+data Conv : (R : U) -> (m : R -> R -> R) -> U is
+  conv : (R : U) -> (m : R -> R -> R)
+      -> ((x : R) -> (y : R) -> Eq R (m x y) (m y x))
+      -> ((x : R) -> Eq R (m x x) x)
+      -> ((x : R) -> (y : R) -> (z : R) -> Eq R (m (m x y) z) (m x (m y z)))
+      -> Conv R m
+end
+
+convergesProof : Conv Reg merge is conv Reg merge mergeComm mergeIdem mergeAssoc end
+
+-- ===== a runnable witness (the Lambert spirit gate: it deploys + runs) =====
+-- Two replicas hold 3 and 7; either merge order converges to 7 = max(3, 7).
+foreign printNat : Nat -> IO Nat end
+r3 : Reg is reg 3 end
+r7 : Reg is reg 7 end
+
+main : IO Unit is
+  bindIO Nat Unit (printNat (val (merge r3 r7))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (val (merge r7 r3))) (fn (u2 : Nat) is
+      pureIO Unit unit
+    end)
+  end)
+end
+
+-- ===== the guarded-tail framework: a postulated control (a labeled debt) =====
+-- The in-region control above is proven against the STATIC model. The matching
+-- claim about the LIVE deployment - that the region the cloud actually placed the
+-- service in equals the pinned region - cannot be proven yet (the provider region
+-- API is not modeled). It is stated as a POSTULATE: an axiom with a reason, which
+-- the Assurance Ledger labels `postulate`, attributes via git blame, and tracks for
+-- upgrade. When the live region read is modeled, a proof of the SAME proposition
+-- hash upgrades it postulated -> proven (Plan 2's upgrade detector).
+foreign liveRegion : Nat end
+postulate liveInRegion : Eq Nat liveRegion usEast because "live cloud region read not yet modeled (provider API); attested out of band" end
