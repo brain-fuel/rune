@@ -1092,3 +1092,52 @@ func TestPerceusBareRebindDeadH(t *testing.T) {
 	// CDrop h frees arg; harness releases result. Net: 0/run. Flat after run 1.
 	assertSteadyFlat(t, perceusBareRebindDeadHSrc, "mainRebindDead", "<function>")
 }
+
+// perceusNatFoldSrc: a NatElim fold (doubling) over the literal 3. Three iterations,
+// step = succ(succ(ih)). Correct output: 6. Used by TestPerceusNatFoldOwnership.
+const perceusNatFoldSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+double : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is succ (succ ih) end) n
+  end
+end
+mainFold : Nat is double 3 end
+`
+
+const natFoldWant = "6"
+
+// natFoldMaxResidual: upper bound on the per-run steady $live delta after Task 1.
+// Post-fix measured delta for n=3 (succ succ ih step): 27.
+// Pre-fix measured delta for n=3: 31.
+// Any value in (27, 31) gives teeth: passes after fix, fails before.
+// Set to 30 for a round bound with 3 units of headroom above the measured 27.
+const natFoldMaxResidual = 30
+
+// TestPerceusNatFoldOwnership: a NatElim fold over a small nat. BEFORE Task 1: each of
+// the N iterations leaks the prior counter + step closure + acc, so the steady per-run
+// delta grows with N. AFTER Task 1: the fold's per-iteration temps (counter/step) are
+// released, reducing the per-run delta from 31 to 27 (for n=3). We assert the delta
+// shrinks to natFoldMaxResidual. Output must be unchanged.
+//
+// Residual after Task 1: K_CONST intermediate from rt_big_succ (1 per iteration, frozen
+// runtime) + CGlobal AppClosure limitation in the step body (Task 4 scope). The
+// retain/release pairing for the counter awaits Task 2 (carve-out removal). The fix
+// eliminates the step-closure leak and final-counter leak.
+func TestPerceusNatFoldOwnership(t *testing.T) {
+	src := perceusNatFoldSrc
+	got := runWasm(t, emitWith(t, cg.Wasm{}, src, "mainFold"))
+	if got != natFoldWant {
+		t.Fatalf("output changed under Task 1: got %q want %q", got, natFoldWant)
+	}
+	p := mustProgram(t, src, "mainFold")
+	counts := wasmSteadyLivePInts(t, p, 4)
+	d := counts[3] - counts[2]
+	if d > natFoldMaxResidual {
+		t.Fatalf("nat-fold still leaks per-iteration: per-run delta=%d > %d", d, natFoldMaxResidual)
+	}
+}

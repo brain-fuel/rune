@@ -459,19 +459,37 @@ func (em *wasmEmitter) emitNat(b *strings.Builder, n NatSpec) {
 
 // emitNatFold emits the eliminator's inner fold: env = {m, c0, c1}, arg = x. acc starts
 // at c0; k counts from 0; while k < x: acc = (c1 k) acc; k = k+1. Returns acc.
+//
+// Ownership: $arg (the bound) is BORROWED from the caller -- do NOT release it. $c1
+// (env slot 2, the step closure) is BORROWED from the env -- do NOT release it. $acc
+// is moved into the step each iteration (the step owns+consumes it). $k is owned by the
+// loop: we RETAIN $k before the first apply so the step gets its own reference while the
+// loop keeps its own; after the step we RELEASE the old $k, and after the loop we RELEASE
+// the final $k (which was never consumed by the step because the loop exited). $step (the
+// partially-applied step closure from rt_apply($c1, $k)) is released after the second
+// apply -- it is a fresh K_CLO each iteration and nothing else owns it.
 func (em *wasmEmitter) emitNatFold(b *strings.Builder, fname string) {
 	em.codeRef(fname)
 	fmt.Fprintf(b, "  (func $%s (param $arg i32) (param $env i32) (result i32)\n", fname)
-	b.WriteString("    (local $c1 i32) (local $acc i32) (local $k i32) (local $step i32)\n")
+	b.WriteString("    (local $c1 i32) (local $acc i32) (local $k i32) (local $step i32) (local $knext i32)\n")
 	b.WriteString("    (local.set $c1 (call $rt_env (local.get $env) (i32.const 2)))\n")
 	b.WriteString("    (local.set $acc (call $rt_env (local.get $env) (i32.const 1)))\n")
 	b.WriteString("    (local.set $k (call $rt_big_from_long (i32.const 0)))\n")
 	b.WriteString("    (block $done (loop $l\n")
 	b.WriteString("      (br_if $done (i32.ge_s (call $rt_big_cmp (local.get $k) (local.get $arg)) (i32.const 0)))\n")
+	b.WriteString("      ;; retain $k: the step owns its argument copy; the loop keeps its own\n")
+	b.WriteString("      (call $rt_retain (local.get $k))\n")
 	b.WriteString("      (local.set $step (call $rt_apply (local.get $c1) (local.get $k)))\n")
 	b.WriteString("      (local.set $acc (call $rt_apply (local.get $step) (local.get $acc)))\n")
-	b.WriteString("      (local.set $k (call $rt_big_succ (local.get $k)))\n")
+	b.WriteString("      ;; $step is a fresh K_CLO each iteration; release it now\n")
+	b.WriteString("      (call $rt_release (local.get $step))\n")
+	b.WriteString("      ;; advance $k: compute successor, release old $k, install new\n")
+	b.WriteString("      (local.set $knext (call $rt_big_succ (local.get $k)))\n")
+	b.WriteString("      (call $rt_release (local.get $k))\n")
+	b.WriteString("      (local.set $k (local.get $knext))\n")
 	b.WriteString("      (br $l)))\n")
+	b.WriteString("    ;; final $k (loop exited because $k >= $arg): release it\n")
+	b.WriteString("    (call $rt_release (local.get $k))\n")
 	b.WriteString("    (local.get $acc))\n")
 }
 
