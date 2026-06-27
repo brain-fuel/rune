@@ -196,3 +196,19 @@ v3.327.x (JVM + JS live bindings) · v3.327.4 (WALKTHROUGH.md end-to-end) · v3.
 (Rust live binding — all four source backends round-trip a real Valkey).
 27 matrix rows; the data plane runs cross-backend AND binds LIVE to a real broker on
 Go+JVM+JS; `rune deploy` does infra / workload / manifest modes.
+
+## AWS least-privilege IAM: applied and observed (no account)
+
+The demo's scoped IAM (an aws_iam_role plus an aws_iam_role_policy carrying exactly
+kv:Get and kv:Set) is not only emitted and terraform-validated (the 3-cloud HCL
+gate) but applied and observed against a real AWS IAM API with no cloud account:
+LocalStack stands up, `terraform apply` creates the role and inline policy through
+the existing apply lifecycle, the IAM API's get-role-policy returns the stored
+document, and the test asserts it is exactly the declared grants and nothing more,
+then destroys it (harness/../infra/iam_localstack_apply_test.go). This is the
+live-provider realization of ch538's least-privilege-IAM proof: the scoped policy
+round-trips through a genuine IAM implementation. The kv (ElastiCache) and compute
+slices of the demo need a real account (LocalStack community does not implement
+them); IAM is the no-account-applicable part. Azure has no terraform emulator (see
+the Azure no-account IAM note); the billed one-cloud apply is documented in
+examples/wavelet_deploy.wav.

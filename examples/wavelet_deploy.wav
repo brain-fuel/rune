@@ -22,3 +22,7 @@ iam     relay_role grants=kv:Get,kv:Set
 #   # against a real billed account (drop --localstack; uses ambient AWS creds):
 #   AWS_PROFILE=your-profile rune deploy --manifest examples/wavelet_deploy.wav --backend aws --apply --destroy
 # The other two clouds emit fmt-clean HCL (rune deploy ... --backend azure|gcp).
+#
+# NO-ACCOUNT IAM (applied + observed): the scoped relay_role policy is apply-tested
+# on AWS LocalStack (infra/iam_localstack_apply_test.go) - the provider accepts and
+# stores exactly kv:Get/kv:Set. The kv/compute slices need a real account.
