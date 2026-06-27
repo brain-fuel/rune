@@ -1093,52 +1093,71 @@ func TestPerceusBareRebindDeadH(t *testing.T) {
 	assertSteadyFlat(t, perceusBareRebindDeadHSrc, "mainRebindDead", "<function>")
 }
 
-// perceusNatFoldSrc: a NatElim fold (doubling) over the literal 3. Three iterations,
-// step = succ(succ(ih)). Correct output: 6. Used by TestPerceusNatFoldOwnership.
-const perceusNatFoldSrc = `
+// natFoldSrc builds a NatElim doubling fold over a literal of magnitude n
+// (step = succ(succ(ih))). `double 3` outputs 6. Used by
+// TestPerceusNatFoldOwnership to measure the per-iteration steady-leak slope at
+// two fold sizes.
+func natFoldSrc(n int) string {
+	return `
 data Nat : U is
   zero : Nat
 | succ : Nat -> Nat
 end
 builtin nat Nat zero succ
 double : Nat -> Nat is
-  fn (n : Nat) is
-    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is succ (succ ih) end) n
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is succ (succ ih) end) m
   end
 end
-mainFold : Nat is double 3 end
+mainFold : Nat is double ` + strconv.Itoa(n) + ` end
 `
+}
 
 const natFoldWant = "6"
 
-// natFoldMaxResidual: upper bound on the per-run steady $live delta after Task 1.
-// Post-fix measured delta for n=3 (succ succ ih step): 27.
-// Pre-fix measured delta for n=3: 31.
-// Any value in (27, 31) gives teeth: passes after fix, fails before.
-// Set to 30 for a round bound with 3 units of headroom above the measured 27.
-const natFoldMaxResidual = 30
+// natFoldDelta returns the per-run steady $live increment for `double n` (the
+// per-iteration leak the fold contributes; counts[3]-counts[2] after warmup).
+func natFoldDelta(t *testing.T, n int) int {
+	t.Helper()
+	p := mustProgram(t, natFoldSrc(n), "mainFold")
+	c := wasmSteadyLivePInts(t, p, 4)
+	return c[3] - c[2]
+}
 
-// TestPerceusNatFoldOwnership: a NatElim fold over a small nat. BEFORE Task 1: each of
-// the N iterations leaks the prior counter + step closure + acc, so the steady per-run
-// delta grows with N. AFTER Task 1: the fold's per-iteration temps (counter/step) are
-// released, reducing the per-run delta from 31 to 27 (for n=3). We assert the delta
-// shrinks to natFoldMaxResidual. Output must be unchanged.
-//
-// Residual after Task 1: K_CONST intermediate from rt_big_succ (1 per iteration, frozen
-// runtime) + CGlobal AppClosure limitation in the step body (Task 4 scope). The
-// retain/release pairing for the counter awaits Task 2 (carve-out removal). The fix
-// eliminates the step-closure leak and final-counter leak.
+// natFoldPerIterMax: the post-Task-1 per-iteration steady-leak SLOPE is 6. The
+// fold body still leaks, per iteration, the frozen rt_big_succ's K_BIG(1) (out
+// of 6b-2 scope), the not-yet-dropped old counter (awaits the Task 2 carve-out
+// removal), and the step-body intermediates. Pre-fix the slope was 7: Task 1's
+// rt_retain(k) + rt_release(step) + final-counter release removed exactly the
+// per-iteration STEP-CLOSURE unit, dropping the slope 7 -> 6. The test measures
+// the slope between two fold sizes and asserts it is at most natFoldPerIterMax,
+// which FAILS on the pre-fix emitNatFold (slope 7) and passes after. Full
+// iteration-independence is a later property (Task 2 drops the counter; the
+// frozen rt_big_succ residual is out of scope), so this task asserts its own
+// contribution (the slope drop), not absolute flatness.
+const natFoldPerIterMax = 6
+
+// TestPerceusNatFoldOwnership pins Task 1: the emitNatFold ownership rewrite
+// (a) preserves output (output-invariance) and (b) drops the per-iteration
+// steady-leak slope from 7 to 6 by releasing the step closure each iteration.
+// Teeth: the slope assertion FAILS on the pre-fix loop (slope 7) and passes
+// after. Measured here: delta(n) = 6n + 5, slope 6.
 func TestPerceusNatFoldOwnership(t *testing.T) {
-	src := perceusNatFoldSrc
-	got := runWasm(t, emitWith(t, cg.Wasm{}, src, "mainFold"))
+	// (a) output-invariance: the fold result is unchanged by the ownership rewrite.
+	got := runWasm(t, emitWith(t, cg.Wasm{}, natFoldSrc(3), "mainFold"))
 	if got != natFoldWant {
 		t.Fatalf("output changed under Task 1: got %q want %q", got, natFoldWant)
 	}
-	p := mustProgram(t, src, "mainFold")
-	counts := wasmSteadyLivePInts(t, p, 4)
-	d := counts[3] - counts[2]
-	if d > natFoldMaxResidual {
-		t.Fatalf("nat-fold still leaks per-iteration: per-run delta=%d > %d", d, natFoldMaxResidual)
+	// (b) per-iteration slope: measure the per-run leak at two fold sizes and
+	// take the slope in n. Pre-fix it is 7 (counter+step+acc all leak per
+	// iteration); Task 1 releases the step closure, dropping it to 6.
+	const n1, n2 = 3, 12
+	d1 := natFoldDelta(t, n1)
+	d2 := natFoldDelta(t, n2)
+	slope := (d2 - d1) / (n2 - n1)
+	if slope > natFoldPerIterMax {
+		t.Fatalf("nat-fold per-iteration leak slope=%d > %d (delta(%d)=%d, delta(%d)=%d): "+
+			"the step-closure leak is not removed", slope, natFoldPerIterMax, n1, d1, n2, d2)
 	}
 }
 
@@ -1147,42 +1166,51 @@ func TestPerceusNatFoldOwnership(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // bignumLitSrc is the 6b-2 Task 4 receiver source: a program whose main body
-// is a bare bignum literal "7". Each run of WasmSteadyModule evaluates the
-// literal by calling $rt_big_parse on the interned cstr "7", then releases the
-// result. Without rt_big_parse releasing its per-digit temporaries, $rt_live
-// grows each run (the initial zero K_BIG, the "ten" K_BIG, and the per-digit
-// intermediate K_BIGs from rt_nat_mul and rt_big_from_long all leak). After the
-// fix, all temporaries are released inside the loop and "ten" is released after
-// the loop, so $rt_live is flat from run 2.
+// is a bare MULTI-digit bignum literal "137". Each run of WasmSteadyModule
+// evaluates the literal by calling $rt_big_parse on the interned cstr "137",
+// then releases the result. The literal is multi-digit on purpose: with a
+// single digit, rt_nat_mul short-circuits on its zero-limb accumulator and the
+// r[i+j] += a[i]*b[j] path that requires zero-initialized limbs never runs, so
+// the big_alloc zeroing half of the fix would go unexercised. With "137", run 2
+// onward draws freed (and therefore zeroed) K_BIG blocks from the free list and
+// runs the real multiply, so the test covers BOTH halves of the fix.
+//
+// Without rt_big_parse releasing its per-digit temporaries, $rt_live grows each
+// run (the initial zero K_BIG, the "ten" K_BIG, and the per-digit intermediate
+// K_BIGs from rt_nat_mul and rt_big_from_long all leak). After the fix, all
+// temporaries are released inside the loop and "ten" is released after the loop,
+// so $rt_live is flat from run 2.
 const bignumLitSrc = `
 data Nat : U is
   zero : Nat
 | succ : Nat -> Nat
 end
 builtin nat Nat zero succ
-main : Nat is 7 end
+main : Nat is 137 end
 `
 
-// TestPerceusBignumParseTemps is the Plan 6b-2 Task 4 gate: $rt_big_parse
-// releases its per-digit K_BIG temporaries so $rt_live reaches true
-// steady-FLAT after run 1.
+// TestPerceusBignumParseTemps is the Plan 6b-2 Task 4 gate. It asserts BOTH:
 //
-// Each call to $rt_big_parse for the literal "7" allocates:
+//   - OUTPUT-INVARIANCE: the literal still prints "137". This is the guard for
+//     the big_alloc zeroing subfix; without zeroing, free-list reuse feeds dirty
+//     limbs into rt_nat_mul and a multi-digit literal misprints (e.g. "137" came
+//     out wrong) while $rt_live could still read flat.
+//   - STEADY-FLAT: $rt_big_parse releases its per-digit temporaries, so $rt_live
+//     reaches true steady-flat after run 1.
 //
-//	$acc     -- the initial zero K_BIG (big_alloc(0))
-//	$ten     -- the constant 10 K_BIG (rt_big_from_long(10))
-//	$mid     -- rt_nat_mul($acc, $ten) = 0*10 = 0 (intermediate)
-//	$dig     -- rt_big_from_long(digit) = K_BIG(7) (per-digit temporary)
-//	new_acc  -- big_add($mid, $dig) = K_BIG(7) (the result, returned owned)
-//
-// With the fix: $old (= initial $acc), $mid, and $dig are released inside the
-// loop body AFTER new_acc is computed. $ten is released after the loop. The
-// returned new_acc (K_BIG(7)) is released by the WasmSteadyModule harness.
-// Net allocations per run: +5 allocs, -5 frees = 0. Steady-FLAT from run 2.
-//
-// Without the fix: $old, $mid, $dig, and $ten leak each run. $rt_live grows
-// by 4 per run after run 1 for a single-digit literal.
+// Per call, $rt_big_parse allocates (per digit) $old (previous acc), $mid
+// (rt_nat_mul result), $dig (rt_big_from_long), plus the one-shot $ten and the
+// returned accumulator. With the fix, $old/$mid/$dig are released inside the
+// loop after big_add, $ten after the loop, and the result by the harness, so the
+// per-run net is zero. Without it, those temporaries leak each run.
 func TestPerceusBignumParseTemps(t *testing.T) {
+	// output-invariance: the multi-digit literal must still print 137 (the
+	// big_alloc zeroing subfix; dirty free-list limbs would misprint it).
+	got := runWasm(t, emitWith(t, cg.Wasm{}, bignumLitSrc, "main"))
+	if got != "137" {
+		t.Fatalf("output changed under Task 4: got %q want \"137\"", got)
+	}
+	// steady-flat: per-digit temporaries are released, zero per-run increment.
 	p := mustProgram(t, bignumLitSrc, "main")
 	assertSteadyFlatInts(t, p, 4)
 }
