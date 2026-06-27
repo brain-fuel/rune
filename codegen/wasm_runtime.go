@@ -412,3 +412,8 @@ const wasmRuntime = `
     (call $puts (i32.const 1) (i32.const 4096)
       (i32.sub (global.get $sbuf) (i32.const 4096))))
 `
+
+// WasmRuntime returns the WAT runtime string for the WASM backend. The underlying
+// const is unexported so the runtime cannot be modified from outside codegen; this
+// accessor gives the external test package read-only access.
+func WasmRuntime() string { return wasmRuntime }
