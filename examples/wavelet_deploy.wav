@@ -1,0 +1,17 @@
+# examples/wavelet_deploy.wav - the two-tab CRDT app's deployable infrastructure.
+#
+# relay: the signaling/relay service (a container workload).
+# store: the persistence layer (a managed kv store; Valkey self-hosted).
+# relay_role: the relay's workload identity, scoped to LEAST PRIVILEGE - exactly the
+#   kv capabilities the relay's erased code performs (kv:Get, kv:Set), nothing more.
+#   These grants correspond to the least-privilege-IAM control proven in
+#   listings/ch538_control_catalog.rune (needed = kv get/set). An over-broad policy
+#   would carry extra actions and be visible in the diff.
+#
+# Deploy the HCL for any cloud (region pinned via the provider's region variable):
+#   rune deploy --manifest examples/wavelet_deploy.wav --backend aws   > demo.tf
+#   rune deploy --manifest examples/wavelet_deploy.wav --backend azure > demo.tf
+#   rune deploy --manifest examples/wavelet_deploy.wav --backend gcp   > demo.tf
+compute relay
+kv      store
+iam     relay_role grants=kv:Get,kv:Set
