@@ -170,14 +170,16 @@ body) binder, `ownScope` sees unused (CVar{0}) is dead in body and wraps:
 
 Net per run after warm-up: 0. $rt_live is flat after run 1. Output: `<function>`.
 
-**Scope limitation: code-block args are not dead-dropped.** The `argCount`
-parameter to `ownScope` marks the outermost owned slot as a code-block argument.
-Dead-drop CDrop is only inserted for CLet-introduced binders (indices below
-`len(owned)-argCount`). This prevents cascade-release of structural K_CON values
-or bignum counters passed to step functions whose results discard the counter
-argument -- values that may alias thunk-cached heap objects. The `rt_mkcon` /
-`rt_clo_set` do not retain fields, so such aliases are not counted in the rc.
-Task 4+ will address this by making the runtime retain on store.
+**SUPERSEDED by PATH B (Task 3.5).** Task 3 used an `argCount` parameter to
+`ownScope` that SKIPPED dead-dropping the code-block argument entirely. That was a
+sound-but-non-generalizable workaround (Task 4's owned-scrutinee receivers must DROP
+owned args, which the skip suppresses). It is removed: code-block arguments are now
+owned and dropped when dead, the caller dups borrowed values before passing them, and
+the one remaining borrow case (a curry-through step argument the frozen fold/curry
+machinery reuses) is handled by the carve-out documented under "PATH B:
+borrowed-vs-owned and dup-on-consume" below. The trace above still holds (no code-block
+arg in `applyTwice` is dead, so none is dropped); read the per-event ownership through
+the PATH B rules.
 
 ## Held for Plan 6b-2 (named, not silently dropped)
 - CBounce / the partial trampoline: ownership across a DEFERRED saturated tail
@@ -188,3 +190,84 @@ Task 4+ will address this by making the runtime retain on store.
   bignum-arithmetic listing (e.g. `mul` on large literals) run leak-free.
 Until 6b-2, the WASM Perceus pass is gated to programs that do not exercise these
 paths (Task 6 defines the exact subset and asserts the boundary).
+
+## PATH B: borrowed-vs-owned and dup-on-consume
+
+Task 3.5 replaces Task 3's `argCount` dead-drop SKIP (a sound-but-non-generalizable
+workaround) with the principled PATH B convention. The 6a runtime stays FROZEN: store
+is MOVE (rt_mkcon / rt_clo_set / rt_mkpair do NOT retain; rt_apply does NOT retain its
+argument; rt_con_get / rt_pair_fst / rt_pair_snd return ALIASES). The pass adapts to
+that runtime; it does not change it.
+
+### Owned vs borrowed (the refined rule)
+- OWNED: a freshly-allocated value (alloc gives rc=1) or a value received as an owned
+  argument. Consuming an owned value MOVES it (no dup). A value consumed N times needs
+  N-1 dups.
+- BORROWED: a `CGlobal` (a thunk-cached root the cache owns for the life of the
+  program), a `CEnv` capture (the closure heap object owns the env record), and a
+  `CField` / `CFst` / `CSnd` projection result (an alias into a parent the parent owns).
+  Reading a borrowed value does not transfer ownership.
+
+### Dup-on-consume-borrowed
+When a BORROWED value is CONSUMED in an OWNING position (passed as a function argument,
+stored into a constructor / pair / closure-env slot, or returned as the scope result),
+the pass inserts a `CDup` of it FIRST so the owner keeps its reference and the consumer
+takes a fresh one. The helper `consumeOwning(t)` realizes this: an already-owned `t`
+(an owned-local `CVar`, or a fresh `MkClosure` / `AppClosure` / `CPair`) passes through;
+a bare `CEnv` becomes `CDup{V: CEnv, K: CEnv}`; a `CGlobal` / `CField` / `CFst` / `CSnd`
+(not a bare variable, and `CDup.V` must name a `CVar` / `CEnv`) is let-bound first then
+the binding is dup'd (`CLet $own = t in CDup{CVar 0, CVar 0}`). It reaches the tail
+value through `CLet` / `CDup` / `CDrop` continuations and is idempotent. Without this, a
+cached root flowing into a consuming position would be dropped under the cache:
+use-after-free (the exact crash Task 3's skip dodged).
+
+### Args are owned by the callee
+A code block OWNS `CVar{0}` and DROPS it when dead, uniformly with dead `CLet` locals
+(the `argCount` skip is removed). Because the caller dups any borrowed value before
+passing it, a cached root arrives at the callee as a FRESH owned reference, so the
+callee dropping it leaves the cache's reference intact. The no-Perceus output is
+unchanged (refcounts only inflate, are never freed; the printed value is identical).
+
+### The curry-through borrow carve-out (the frozen-runtime boundary)
+ONE class of argument stays BORROWED by the callee: a code block whose entire body is a
+single `MkClosure` is a CURRYING step that returns a closure. Its argument may be
+applied by the FROZEN 6a fold/curry machinery (`emitNatFold`, the builtin-nat
+eliminator loop, and `emitCurryBlock`), which BORROWS the value (rt_apply does not
+retain) and REUSES it afterward -- `emitNatFold` succ's its loop counter `$k` AFTER
+passing it to the step. Dropping that argument would free a value the frozen caller
+still uses (observed as the `mulN 100 100 = "101"` and `length = "succ <function>"`
+corruptions). So the pass conservatively does NOT drop a curry-through argument
+(`isCurryThrough` / the carve-out in `Perceus`): it annotates the body and dups any
+escaping capture but leaves the argument borrowed. A REAL consumer (a non-`MkClosure`
+body -- an eliminator leaf such as `fn ih is succ ih end`, or a Task 4 match arm that
+drops an owned scrutinee) drops its dead argument normally. This is the principled
+boundary between the pass's move-discipline and the frozen runtime's borrow-discipline
+at the eliminator/fold interface. The residue is a bounded leak of an ignored curried
+argument (never a corruption, never a wrong value), refined once Task 4+ brings
+eliminator/fold ownership into the pass.
+
+NOTE on `shiftCIr`: it is now the structural dual of `cirUsesArg`, recursing through
+EVERY node (`CCase` scrut + arms, `CPair`, `CField`, `CFst`, `CSnd`, `CBounce`), so
+feeding a constructor or case as a closure-application argument keeps de Bruijn indices
+correct. A `MkClosure`'s code-block body is a separate closed scope and is never
+shifted; only its `Env` terms, evaluated in the enclosing frame, shift.
+
+### Worked receivers (Task 3.5)
+- `TestPerceusDeadFreshArg` (`mainFresh = dropArg (fn w is w end)`): `dropArg`'s body
+  is a `let r = ... in r` (a real consumer, not a curry-through), so its dead
+  freshly-allocated closure argument is DROPPED each run. Steady-state goes flat
+  `[2 2 2 2]`; under the old `argCount` skip it LEAKED `[3 4 5 6]` (+1/run). Output
+  `<function>`. Proves the skip removal.
+- `TestPerceusCachedRootArg` (`mainRoot = dropArg root`): `root` is a `CGlobal`
+  thunk-cached root passed as an argument. dup-on-consume-borrowed dups it before the
+  call, so the callee drops a FRESH reference and the cache survives. Steady-state flat
+  `[2 1 1 1]` (run 1 warms the cache) with correct output `<function>`; without the dup,
+  removing the skip would cascade-free the cached root and corrupt the cache. Proves
+  dup-on-consume-borrowed.
+- `TestPerceusCaptureUseLater` (`mainCap = capUse (fn m is m end)`): an owned local `g`
+  is captured into a closure env AND applied again later, so it is consumed twice and
+  needs one cross-`CLet` dup (Task 3's `MkClosure`-only escape-dup missed this); the
+  returned capture (`cap`'s body is a `CEnv`) is dup'd at the return position.
+  Steady-state flat `[2 2 2 2]`, output `<function>`.
+- `TestPerceusCoreDupDrop` (Task 3's receiver) stays GREEN: a closure used twice (one
+  real dup) and a dead let-binding (one real drop) balance flat, output `<function>`.

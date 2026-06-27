@@ -207,3 +207,104 @@ func TestPerceusCoreDupDrop(t *testing.T) {
 		t.Fatalf("Perceus steady-state FAIL: counts not flat after run 1: %v", counts)
 	}
 }
+
+// assertSteadyFlat runs the PATH B gate for a receiver: OUTPUT-INVARIANCE (the
+// Perceus-emitted WASM prints wantOut) AND STEADY-STATE (after run 1, $rt_live is
+// flat: runs 2..4 are equal). The two together pin balance + correctness.
+func assertSteadyFlat(t *testing.T, src, main, wantOut string) {
+	t.Helper()
+	got := runWasm(t, emitWith(t, cg.Wasm{}, src, main))
+	if got != wantOut {
+		t.Fatalf("output-invariance: got %q, want %q", got, wantOut)
+	}
+	p := mustProgram(t, src, main)
+	counts := wasmSteadyLiveP(t, p, 4)
+	if len(counts) != 4 {
+		t.Fatalf("want 4 per-run live counts, got %d: %v", len(counts), counts)
+	}
+	c2, err2 := strconv.Atoi(counts[1])
+	c3, err3 := strconv.Atoi(counts[2])
+	c4, err4 := strconv.Atoi(counts[3])
+	if err2 != nil || err3 != nil || err4 != nil {
+		t.Fatalf("non-integer live counts: %v", counts)
+	}
+	if !(c2 == c3 && c3 == c4) {
+		t.Fatalf("steady-state FAIL: counts not flat after run 1: %v", counts)
+	}
+}
+
+// pathBArgSrc is the PATH B argument-ownership receiver source. `dropArg` takes a
+// (Nat -> Nat) argument it never uses and returns a fresh identity closure bound via a
+// `let` (so the block body is a CLet -- a REAL CONSUMER, not a bare-MkClosure
+// curry-through), so its code block OWNS CVar{0} and (under PATH B) DROPS it as a dead
+// owned local. Two mains feed it the same shape from two different ownership origins:
+//
+//   - mainFresh: a freshly-allocated closure (owned). The drop frees it each run
+//     (balanced: alloc +1, drop -1). Under the old argCount skip the arg is NOT
+//     dropped, so the fresh closure LEAKS and $rt_live grows -- TestPerceusDeadFreshArg
+//     FAILS before this task, PASSES after.
+//   - mainRoot: a CGlobal thunk-cached root (`root`). dup-on-consume-borrowed dups it
+//     before the call, so the callee drops a FRESH reference and the cache's reference
+//     survives -- no use-after-free. Without the dup, removing the skip would
+//     cascade-free the cached root and corrupt the cache (TestPerceusCachedRootArg).
+const pathBArgSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+dropArg : (Nat -> Nat) -> (Nat -> Nat) is
+  fn (a : Nat -> Nat) is
+    let r : Nat -> Nat = fn (z : Nat) is z end in r
+  end
+end
+root : Nat -> Nat is fn (n : Nat) is n end end
+mainFresh : Nat -> Nat is dropArg (fn (w : Nat) is w end) end
+mainRoot  : Nat -> Nat is dropArg root end
+`
+
+// TestPerceusDeadFreshArg: a dead freshly-allocated owned argument is DROPPED, so
+// steady-state is flat (the closure is freed each run). This proves removing the
+// argCount dead-drop skip works. Under the old workaround the closure leaks
+// (counts grow) and this test fails.
+func TestPerceusDeadFreshArg(t *testing.T) {
+	assertSteadyFlat(t, pathBArgSrc, "mainFresh", "<function>")
+}
+
+// TestPerceusCachedRootArg: a CGlobal thunk-cached root passed as a function
+// argument runs to steady state with correct output and flat $rt_live. This proves
+// dup-on-consume-borrowed protects the cache: the caller dups the borrowed root, so
+// the callee dropping its (now fresh) argument leaves the cache intact. Without the
+// dup, removing the skip would free the cached root under the cache and corrupt it.
+func TestPerceusCachedRootArg(t *testing.T) {
+	assertSteadyFlat(t, pathBArgSrc, "mainRoot", "<function>")
+}
+
+// pathBCaptureSrc is the capture-then-use-later receiver. `g` is the owned argument
+// of capUse; it is CAPTURED into `cap`'s closure environment (one consuming store)
+// AND applied again as `cap g` (a second consume). A var consumed twice needs one
+// dup; the MkClosure-only escape-dup of Task 3 missed the cross-let case. Under PATH
+// B the CLet annotation inserts the dup, so the two consumes are balanced and
+// steady-state is flat. The body of `cap` returns its captured `g` (a CEnv), which
+// dup-on-consume-borrowed dups at the return position.
+const pathBCaptureSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+capUse : (Nat -> Nat) -> (Nat -> Nat) is
+  fn (g : Nat -> Nat) is
+    let cap : (Nat -> Nat) -> (Nat -> Nat) = fn (x : Nat -> Nat) is g end in
+    cap g
+  end
+end
+mainCap : Nat -> Nat is capUse (fn (m : Nat) is m end) end
+`
+
+// TestPerceusCaptureUseLater: an owned local captured into a closure env AND used
+// later in the continuation is consumed twice and must be dup'd. Steady-state flat +
+// correct output proves the cross-let capture dup (Task 3.5 item 4) balances.
+func TestPerceusCaptureUseLater(t *testing.T) {
+	assertSteadyFlat(t, pathBCaptureSrc, "mainCap", "<function>")
+}
