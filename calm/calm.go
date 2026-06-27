@@ -7,7 +7,10 @@
 // the demo's control set. It is read-side tooling and touches no kernel state.
 package calm
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // Doc is a FINOS CALM architecture document (the v0.1 subset Wavelet emits).
 type Doc struct {
@@ -73,9 +76,22 @@ type Config struct {
 	Why         string `json:"why,omitempty"`
 }
 
-// Marshal renders a CALM document as indented JSON.
+// Marshal renders a CALM document as indented JSON. HTML escaping is disabled so
+// relationship IDs containing ">" (e.g. "web->relay") are preserved literally.
 func Marshal(d Doc) ([]byte, error) {
-	return json.MarshalIndent(d, "", "  ")
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(d); err != nil {
+		return nil, err
+	}
+	// json.Encoder.Encode appends a trailing newline; trim it to match MarshalIndent behaviour.
+	b := buf.Bytes()
+	if len(b) > 0 && b[len(b)-1] == '\n' {
+		b = b[:len(b)-1]
+	}
+	return b, nil
 }
 
 // Parse decodes a CALM document from JSON.
