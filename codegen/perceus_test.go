@@ -1141,3 +1141,48 @@ func TestPerceusNatFoldOwnership(t *testing.T) {
 		t.Fatalf("nat-fold still leaks per-iteration: per-run delta=%d > %d", d, natFoldMaxResidual)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plan 6b-2 Task 4: rt_big_parse releases its per-digit K_BIG temporaries.
+// ---------------------------------------------------------------------------
+
+// bignumLitSrc is the 6b-2 Task 4 receiver source: a program whose main body
+// is a bare bignum literal "7". Each run of WasmSteadyModule evaluates the
+// literal by calling $rt_big_parse on the interned cstr "7", then releases the
+// result. Without rt_big_parse releasing its per-digit temporaries, $rt_live
+// grows each run (the initial zero K_BIG, the "ten" K_BIG, and the per-digit
+// intermediate K_BIGs from rt_nat_mul and rt_big_from_long all leak). After the
+// fix, all temporaries are released inside the loop and "ten" is released after
+// the loop, so $rt_live is flat from run 2.
+const bignumLitSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+main : Nat is 7 end
+`
+
+// TestPerceusBignumParseTemps is the Plan 6b-2 Task 4 gate: $rt_big_parse
+// releases its per-digit K_BIG temporaries so $rt_live reaches true
+// steady-FLAT after run 1.
+//
+// Each call to $rt_big_parse for the literal "7" allocates:
+//
+//	$acc     -- the initial zero K_BIG (big_alloc(0))
+//	$ten     -- the constant 10 K_BIG (rt_big_from_long(10))
+//	$mid     -- rt_nat_mul($acc, $ten) = 0*10 = 0 (intermediate)
+//	$dig     -- rt_big_from_long(digit) = K_BIG(7) (per-digit temporary)
+//	new_acc  -- big_add($mid, $dig) = K_BIG(7) (the result, returned owned)
+//
+// With the fix: $old (= initial $acc), $mid, and $dig are released inside the
+// loop body AFTER new_acc is computed. $ten is released after the loop. The
+// returned new_acc (K_BIG(7)) is released by the WasmSteadyModule harness.
+// Net allocations per run: +5 allocs, -5 frees = 0. Steady-FLAT from run 2.
+//
+// Without the fix: $old, $mid, $dig, and $ten leak each run. $rt_live grows
+// by 4 per run after run 1 for a single-digit literal.
+func TestPerceusBignumParseTemps(t *testing.T) {
+	p := mustProgram(t, bignumLitSrc, "main")
+	assertSteadyFlatInts(t, p, 4)
+}

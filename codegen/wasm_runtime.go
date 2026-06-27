@@ -145,10 +145,18 @@ const wasmRuntime = `
   ;; ---- naive base-1e9 bignum (builtin-nat); twin of the C/LLVM bignum ----
   ;; K_BIG=6 layout: [kind][nlimbs][limb0..]; little-endian, zero = empty.
   (func $big_alloc (param $nlimbs i32) (result i32)
-    (local $o i32)
+    (local $o i32) (local $i i32)
     (local.set $o (call $alloc (i32.add (i32.const 8) (i32.shl (local.get $nlimbs) (i32.const 2)))))
     (call $sw (local.get $o) (i32.const 0) (i32.const 6))
     (call $sw (local.get $o) (i32.const 1) (local.get $nlimbs))
+    ;; zero limb slots: free-list reuse may carry stale data; rt_nat_mul accumulates
+    ;; r[i+j] += a[i]*b[j] and requires all limbs start at zero.
+    (local.set $i (i32.const 0))
+    (block $bz (loop $lz
+      (br_if $bz (i32.ge_s (local.get $i) (local.get $nlimbs)))
+      (call $big_setlimb (local.get $o) (local.get $i) (i32.const 0))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lz)))
     (local.get $o))
   (func $big_nlimbs (param $v i32) (result i32) (call $w (local.get $v) (i32.const 1)))
   (func $big_limb (param $v i32) (param $i i32) (result i32)
@@ -283,21 +291,32 @@ const wasmRuntime = `
     (call $big_norm (local.get $r)))
 
   ;; rt_big_parse: parse a NUL-terminated decimal cstr at $p into a bignum.
-  ;; Reads the digit count, then folds groups of 9 digits (most-significant first
-  ;; into the top limb). Builds via repeated *10 + digit using big_mul/big_add - naive
-  ;; but only runs once per literal.
+  ;; Builds via repeated acc = acc*10 + digit using rt_nat_mul / big_add (naive,
+  ;; runs once per literal). Each iteration's per-digit temporaries are OWNED and
+  ;; released before the next iteration: $old (the previous acc), $mid (acc*10),
+  ;; and $dig (the digit K_BIG) are freed after big_add returns the new acc.
+  ;; $ten is released after the loop. The returned $acc is owned (rc=1).
+  ;;
+  ;; rt_nat_mul and big_add borrow their inputs (they read without retaining), so
+  ;; releasing $old/$mid/$dig after big_add is safe -- all reads are complete.
   (func $rt_big_parse (param $p i32) (result i32)
     (local $acc i32) (local $ten i32) (local $c i32)
+    (local $old i32) (local $mid i32) (local $dig i32)
     (local.set $acc (call $big_alloc (i32.const 0)))
     (local.set $ten (call $rt_big_from_long (i32.const 10)))
     (block $b (loop $l
       (local.set $c (i32.load8_u (local.get $p)))
       (br_if $b (i32.eqz (local.get $c)))
-      (local.set $acc (call $big_add
-        (call $rt_nat_mul (local.get $acc) (local.get $ten))
-        (call $rt_big_from_long (i32.sub (local.get $c) (i32.const 48)))))
+      (local.set $old (local.get $acc))
+      (local.set $mid (call $rt_nat_mul (local.get $old) (local.get $ten)))
+      (local.set $dig (call $rt_big_from_long (i32.sub (local.get $c) (i32.const 48))))
+      (local.set $acc (call $big_add (local.get $mid) (local.get $dig)))
+      (call $rt_release (local.get $old))
+      (call $rt_release (local.get $mid))
+      (call $rt_release (local.get $dig))
       (local.set $p (i32.add (local.get $p) (i32.const 1)))
       (br $l)))
+    (call $rt_release (local.get $ten))
     (local.get $acc))
 
   ;; ---- $show: render a value to the scratch buffer, then fd_write to stdout ----
