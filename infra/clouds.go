@@ -845,6 +845,14 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.attr("account_id", str(v.Name))
 			h.attr("display_name", str("wavelet "+v.Name))
 			h.close()
+			if len(v.Grants) > 0 {
+				h.blank()
+				h.open("resource \"google_project_iam_custom_role\" %s", str(v.Name+"_role"))
+				h.attr("role_id", str(v.Name+"_role"))
+				h.attr("title", str(v.Name+" least privilege"))
+				h.attr("permissions", hclList(v.Grants))
+				h.close()
+			}
 		case K8s:
 			h.open("resource \"google_container_cluster\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
