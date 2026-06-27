@@ -97,3 +97,41 @@ demoEdges : EdgeList is econs (edge 0 1 true) (econs (edge 1 2 true) enil) end
 -- PROPOSITION: every transport edge in the demo model is encrypted.
 -- PROOF: the fold computes to `true`.
 encryptedProof : Eq Bool (allEncrypted demoEdges) true is refl end
+
+-- ===== the model: IAM access as a set of grant codes =====
+-- A grant code names one (action, resource) capability the relay's erased code
+-- can perform; e.g. 10 = kv:get, 11 = kv:set. An access set is the list of codes.
+data CodeList : U is cnil : CodeList | ccons : Nat -> CodeList -> CodeList end
+
+-- eqCodes xs ys = true iff the two access sets are positionally equal (the demo
+-- model keeps both in the same canonical order, so set-equality is list-equality).
+eqCodes : CodeList -> CodeList -> Bool is
+  fn (xs : CodeList) is
+    CodeListElim (fn (w : CodeList) is CodeList -> Bool end)
+      (fn (ys : CodeList) is
+         CodeListElim (fn (w : CodeList) is Bool end)
+           true
+           (fn (h : Nat) (t : CodeList) (ih : Bool) is false end)
+           ys end)
+      (fn (x : Nat) (xt : CodeList) (eqXt : CodeList -> Bool) is
+         fn (ys : CodeList) is
+           CodeListElim (fn (w : CodeList) is Bool end)
+             false
+             (fn (y : Nat) (yt : CodeList) (ih : Bool) is andB (eqNat x y) (eqXt yt) end)
+             ys end end)
+      xs
+  end
+end
+
+-- `needed` is the access the relay's erased code actually performs: kv:get, kv:set.
+-- `granted` is the IAM policy attached to the relay's identity. LEAST PRIVILEGE is
+-- granted == needed: no capability is granted that the code does not use (no excess)
+-- and the code is not denied a capability it needs (no deficit).
+needed  : CodeList is ccons 10 (ccons 11 cnil) end
+granted : CodeList is ccons 10 (ccons 11 cnil) end
+
+-- ===== flagship control: LEAST-PRIVILEGE-IAM =====
+-- PROPOSITION: the granted policy is exactly the access the workload needs.
+-- PROOF: the decision computes to `true`. An over-broad `granted` (an extra code)
+-- makes eqCodes reduce to `false`, so this refl would fail to elaborate (Task 6).
+leastPrivProof : Eq Bool (eqCodes granted needed) true is refl end
