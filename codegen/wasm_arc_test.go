@@ -104,6 +104,28 @@ func TestARCHeaderLiveCounter(t *testing.T) {
 	}
 }
 
+// TestARCRecursiveRelease: build a constructor holding two bignum fields (a small
+// tree), then release the root to zero. The root's release must recurse into both
+// field bignums (each rc 1 -> 0), freeing all three blocks. live returns to 1 (UNIT).
+// Without recursion, the two field bignums would leak and live would be 3.
+func TestARCRecursiveRelease(t *testing.T) {
+	body := `
+    (local $f0 i32) (local $f1 i32) (local $root i32)
+    (local.set $f0 (call $rt_big_from_long (i32.const 3)))
+    (local.set $f1 (call $rt_big_from_long (i32.const 4)))
+    ;; a 2-field constructor (tag 0, name ptr 64, nfield 2) holding the two bignums
+    (local.set $root (call $rt_mkcon (i32.const 0) (i32.const 64) (i32.const 2)))
+    (call $rt_con_set (local.get $root) (i32.const 0) (local.get $f0))
+    (call $rt_con_set (local.get $root) (i32.const 1) (local.get $f1))
+    ;; release the root: must recurse into f0 and f1
+    (call $rt_release (local.get $root))
+    (call $rt_print_u32 (call $rt_live))`
+	out := runWasm(t, arcTestModule(body))
+	if out != "1" {
+		t.Fatalf("after releasing the root tree, live = %q, want 1 (all 3 blocks freed)", out)
+	}
+}
+
 // TestARCLeafRetainRelease: a bignum (a leaf object, no child pointers) is allocated
 // (rc=1, live=2 with UNIT), retained twice (rc=3), released three times (rc 0 -> freed,
 // live back to 1, just UNIT). An immediate int and the UNIT singleton are also passed

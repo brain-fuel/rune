@@ -433,9 +433,49 @@ const wasmRuntime = `
         (if (i32.eqz (local.get $rc))
           (then (call $rt_free (local.get $v)))))))
 
-  ;; rt_free: drop the live count. (Task 4 adds the free list; for now the bytes leak
-  ;; until reuse is implemented, but $live accurately reflects block liveness.)
+  ;; rt_free: release the object's child pointers by kind (so the whole immutable
+  ;; structure is reclaimed), then drop the live count. The value graph is acyclic
+  ;; (immutable functional data), so this terminates.
+  ;; Kinds: K_CLO=0 env slots at word 3 (count at word 2);
+  ;;        K_CON=1 field slots at word 4 (count at word 3);
+  ;;        K_PAIR=2 halves at words 1 and 2;
+  ;;        K_BIG=6 and others: leaf -- limbs are raw ints, not pointers.
+  ;; (Task 4 adds the free list; for now bytes leak until reuse is implemented,
+  ;;  but $live accurately reflects block liveness.)
   (func $rt_free (param $v i32)
+    (local $kind i32) (local $n i32) (local $i i32) (local $base i32)
+    (local.set $kind (call $w (local.get $v) (i32.const 0)))
+    (block $done
+      ;; K_CLO=0: env slots start at word 3, count at word 2
+      (if (i32.eqz (local.get $kind))
+        (then
+          (local.set $n (call $w (local.get $v) (i32.const 2)))
+          (local.set $base (i32.const 3))
+          (br $done)))
+      ;; K_CON=1: field slots start at word 4, count at word 3
+      (if (i32.eq (local.get $kind) (i32.const 1))
+        (then
+          (local.set $n (call $w (local.get $v) (i32.const 3)))
+          (local.set $base (i32.const 4))
+          (br $done)))
+      ;; K_PAIR=2: two child pointers at words 1 and 2
+      (if (i32.eq (local.get $kind) (i32.const 2))
+        (then
+          (call $rt_release (call $w (local.get $v) (i32.const 1)))
+          (call $rt_release (call $w (local.get $v) (i32.const 2)))
+          (local.set $n (i32.const 0))
+          (local.set $base (i32.const 0))
+          (br $done)))
+      ;; K_BIG and anything else: leaf, no child pointers
+      (local.set $n (i32.const 0))
+      (local.set $base (i32.const 0)))
+    ;; release the $n child slots starting at word $base (closures + constructors)
+    (local.set $i (i32.const 0))
+    (block $brk (loop $lp
+      (br_if $brk (i32.ge_u (local.get $i) (local.get $n)))
+      (call $rt_release (call $w (local.get $v) (i32.add (local.get $base) (local.get $i))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lp)))
     (global.set $live (i32.sub (global.get $live) (i32.const 1))))
 
   ;; print an unsigned i32 in decimal to stdout (reuses the show buffer + fd_write).
