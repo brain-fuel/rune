@@ -525,6 +525,12 @@ const wasmRuntime = `
     (call $emit_u32 (local.get $n))
     (call $puts (i32.const 1) (i32.const 4096)
       (i32.sub (global.get $sbuf) (i32.const 4096))))
+
+  ;; rt_print_nl: write a single newline byte (10) to stdout.
+  ;; Stores the byte at the scratch buffer base (4096) and calls puts with length 1.
+  (func $rt_print_nl
+    (i32.store8 (i32.const 4096) (i32.const 10))
+    (call $puts (i32.const 1) (i32.const 4096) (i32.const 1)))
 `
 
 // WasmRuntime returns the WAT runtime string for the WASM backend. The underlying
