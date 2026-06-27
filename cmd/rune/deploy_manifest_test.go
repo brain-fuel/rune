@@ -120,7 +120,7 @@ func TestManifestErrors(t *testing.T) {
 // "added a kind but forgot a provider case" bug class.
 func TestAllCLIKindsLowerOnEveryCloud(t *testing.T) {
 	for _, k := range infra.Kinds() {
-		r, err := resourceFor(k, "x", false, "", 1)
+		r, err := resourceFor(k, "x", false, "", 1, nil)
 		if err != nil {
 			t.Errorf("resourceFor(%q): %v (is the kind wired in deploy.go and the usage string?)", k, err)
 			continue

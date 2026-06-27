@@ -162,7 +162,7 @@ func runDeploy(args []string, out io.Writer) error {
 			"--resource <kind> --name <n> --backend <b> (one resource), or --manifest FILE --backend <b> (a graph)")
 	}
 
-	r, err := resourceFor(resource, name, fifo, image, replicas)
+	r, err := resourceFor(resource, name, fifo, image, replicas, nil)
 	if err != nil {
 		return err
 	}
@@ -235,6 +235,7 @@ func parseManifest(path string) ([]infra.Resource, error) {
 		fifo := false
 		image := ""
 		replicas := 1
+		var grants []string
 		for _, opt := range fields[2:] {
 			k, v, ok := strings.Cut(opt, "=")
 			if !ok {
@@ -251,11 +252,13 @@ func parseManifest(path string) ([]infra.Resource, error) {
 					return nil, fmt.Errorf("manifest line %d: %s needs a positive integer", i+1, k)
 				}
 				replicas = n
+			case "grants":
+				grants = strings.Split(v, ",")
 			default:
 				return nil, fmt.Errorf("manifest line %d: unknown option %q", i+1, k)
 			}
 		}
-		r, err := resourceFor(kind, nm, fifo, image, replicas)
+		r, err := resourceFor(kind, nm, fifo, image, replicas, grants)
 		if err != nil {
 			return nil, fmt.Errorf("manifest line %d: %w", i+1, err)
 		}
@@ -303,7 +306,10 @@ func runWorkloadDeploy(positional []string, target string, out io.Writer) error 
 }
 
 // resourceFor builds an agnostic Resource from the CLI flags.
-func resourceFor(kind, name string, fifo bool, image string, replicas int) (infra.Resource, error) {
+func resourceFor(kind, name string, fifo bool, image string, replicas int, grants []string) (infra.Resource, error) {
+	if len(grants) > 0 && kind != "iam" {
+		return nil, fmt.Errorf("the grants= option is only valid on an iam resource, not %q", kind)
+	}
 	switch kind {
 	case "queue":
 		return infra.Queue{Name: name, FIFO: fifo}, nil
@@ -336,7 +342,7 @@ func resourceFor(kind, name string, fifo bool, image string, replicas int) (infr
 	case "metrics":
 		return infra.Metrics{Name: name}, nil
 	case "iam":
-		return infra.Identity{Name: name}, nil
+		return infra.Identity{Name: name, Grants: grants}, nil
 	case "k8s":
 		return infra.K8s{Name: name}, nil
 	case "network":
