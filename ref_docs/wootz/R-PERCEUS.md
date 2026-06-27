@@ -39,8 +39,22 @@ Per-node rules (the translation target; the algorithm in Task 3+ realizes them):
   owned variable is consumed again later on the same path, a `CDup` precedes the
   earlier consume so each consume owns a reference.
 - `AppClosure{Clo, Arg}`: evaluates Clo then Arg (the emitter's order). Both are
-  consumed (the call takes ownership of the argument; rt_apply consumes the
-  closure). A variable free in BOTH Clo and Arg is dup'd before the pair.
+  CONSUMED by the application. The ARGUMENT is consumed by the callee: the code
+  block owns its parameter `CVar{0}` and drops-or-transfers it, so the caller's
+  arg occurrence transfers ownership into the call and the caller does NOT drop
+  it. The CLOSURE is consumed by the application itself: the code block only
+  borrows the env during the call, so the closure object (and its env) must be
+  RELEASED after `$rt_apply` returns. `$rt_apply` is NOT modified to do this (that
+  would free closures at refcount 1 in the no-Perceus runtime and break the
+  existing WASM gate); instead the PASS releases the closure -- a `CDrop` of the
+  closure value after the call (bind the closure to a local, apply, drop it, then
+  yield the result). A closure applied N times therefore has N consuming
+  occurrences: dup it N-1 times (the owned-variable rule), and each application
+  releases one reference, so it frees exactly once. A variable free in BOTH Clo
+  and Arg is also dup'd before the pair. (Implementation freedom, gate-arbitrated:
+  the post-call closure release MAY instead be emitted in the WASM `emitCase`-style
+  lowering of `AppClosure`, WASM-only; the pass-level `CDrop` is preferred for
+  portability to the C/LLVM ARC port. Either way `$rt_apply` stays unchanged.)
 - `MkClosure{Code, Env}`: each env term is stored into the closure (an owning
   reference). A variable that is captured AND still live afterwards is dup'd.
 - `CLet{x=v, b}`: translate v (consuming its free vars), bind x; translate b with
