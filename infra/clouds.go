@@ -204,6 +204,14 @@ func (AWS) Emit(rs []Resource) (Artifact, error) {
 			h.attr("name", str(v.Name))
 			h.attr("assume_role_policy", str("{\"Version\":\"2012-10-17\",\"Statement\":[]}"))
 			h.close()
+			if len(v.Grants) > 0 {
+				h.blank()
+				h.open("resource \"aws_iam_role_policy\" %s", str(v.Name+"_policy"))
+				h.attr("name", str(v.Name+"-policy"))
+				h.attr("role", "aws_iam_role."+v.Name+".id")
+				h.attr("policy", str(iamPolicyJSON(v.Grants)))
+				h.close()
+			}
 		case K8s:
 			h.open("resource \"aws_eks_cluster\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
@@ -558,6 +566,17 @@ func (Azure) Emit(rs []Resource) (Artifact, error) {
 			h.attr("resource_group_name", "azurerm_resource_group.wavelet.name")
 			h.attr("location", "azurerm_resource_group.wavelet.location")
 			h.close()
+			if len(v.Grants) > 0 {
+				h.blank()
+				h.open("resource \"azurerm_role_definition\" %s", str(v.Name+"_role"))
+				h.attr("name", str(v.Name+"-role"))
+				h.attr("scope", "azurerm_resource_group.wavelet.id")
+				h.open("permissions")
+				h.attr("actions", hclList(v.Grants))
+				h.attr("not_actions", "[]")
+				h.close()
+				h.close()
+			}
 		case K8s:
 			h.open("resource \"azurerm_kubernetes_cluster\" %s", str(v.Name))
 			h.attr("name", str(v.Name))
@@ -834,9 +853,17 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.close()
 		case Identity:
 			h.open("resource \"google_service_account\" %s", str(v.Name))
-			h.attr("account_id", str(v.Name))
+			h.attr("account_id", str(gcpAccountID(v.Name)))
 			h.attr("display_name", str("wavelet "+v.Name))
 			h.close()
+			if len(v.Grants) > 0 {
+				h.blank()
+				h.open("resource \"google_project_iam_custom_role\" %s", str(v.Name+"_role"))
+				h.attr("role_id", str(v.Name+"_role"))
+				h.attr("title", str(v.Name+" least privilege"))
+				h.attr("permissions", hclList(v.Grants))
+				h.close()
+			}
 		case K8s:
 			h.open("resource \"google_container_cluster\" %s", str(v.Name))
 			h.attr("name", str(v.Name))

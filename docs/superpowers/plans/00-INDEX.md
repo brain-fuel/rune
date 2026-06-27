@@ -111,7 +111,11 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 - **Criteria.** The emitted CALM doc validates against the source 1:1; a CALM node round-trips to
   the same Wavelet service value whose control proofs hold; a mismatch produces a Diagnostic.
 
+> NOTE (added during Plan 4): "wvl deploy" in Plan 5's criteria is aspirational; the CLI rename to wvl is Plan 7. Until then the verb is `rune deploy`.
+
 ### Plan 5: Wavelet infra, one cloud live
+
+> STATUS: PLANNED. Task file: `2026-06-26-infra-one-cloud-live.md`. 7 tasks: the demo's IAM currently emits an EMPTY policy; this builds the headline "proven-minimal-IAM" - Identity.Grants + a scoped least-privilege policy on AWS (aws_iam_role_policy) / GCP (custom role) / Azure (role definition), manifest `grants=` option, `examples/wavelet_deploy.wav`, a 3-cloud fmt-clean + least-privilege HCL gate, and the one-cloud-live FOSS apply gate (no account) reusing infra.Apply. Region pin via the existing provider region var. Grants correspond to ch538's least-priv-IAM `needed`. Billed apply stays cloud-gated (documented).
 
 - **Goal.** The demo infra (relay, store, region pin, minimal IAM) deploys live on one cloud; the
   other two emit HCL only.
