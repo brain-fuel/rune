@@ -1,17 +1,17 @@
 package codegen
 
-// wasm_runtime.go — the NINTH backend's WAT runtime: a self-contained WebAssembly
+// wasm_runtime.go - the NINTH backend's WAT runtime: a self-contained WebAssembly
 // runtime emitted INLINE in the module (unlike the C/LLVM backends, whose runtime is
-// a linked C blob — wasmtime runs a single `.wat` with no host linkage, so the whole
+// a linked C blob - wasmtime runs a single `.wat` with no host linkage, so the whole
 // runtime IS WAT here). It is the design-locked "R-NATIVE Cranelift/WASM" node, shipped
 // as a WAT emitter testable via `wasmtime run module.wat`.
 //
 // VALUE REP (mirrors the C/LLVM rep, narrowed to i32): a Rune value is an i32 that is
-// either an IMMEDIATE small int — `(n<<1)|1`, low bit set — or an even-aligned heap
+// either an IMMEDIATE small int - `(n<<1)|1`, low bit set - or an even-aligned heap
 // pointer into linear memory (low bit clear). The emitter never inspects the tag; it
 // defers to the `rt_*` helpers below, so the rep stays owned by ONE place.
 //
-// HEAP LAYOUT: a bump allocator over linear memory (no collection in v1 — see the GC
+// HEAP LAYOUT: a bump allocator over linear memory (no collection in v1 - see the GC
 // note in wasm.go). Every object starts with a kind word; the field layout per kind:
 //
 //	K_CLO  [kind=0][code_idx][nenv][env0][env1]...     code_idx indexes the func table
@@ -284,7 +284,7 @@ const wasmRuntime = `
 
   ;; rt_big_parse: parse a NUL-terminated decimal cstr at $p into a bignum.
   ;; Reads the digit count, then folds groups of 9 digits (most-significant first
-  ;; into the top limb). Builds via repeated *10 + digit using big_mul/big_add — naive
+  ;; into the top limb). Builds via repeated *10 + digit using big_mul/big_add - naive
   ;; but only runs once per literal.
   (func $rt_big_parse (param $p i32) (result i32)
     (local $acc i32) (local $ten i32) (local $c i32)
@@ -472,8 +472,8 @@ const wasmRuntime = `
   ;;        K_CON=1 field slots at word 4 (count at word 3);
   ;;        K_PAIR=2 halves at words 1 and 2;
   ;;        K_BIG=6 and others: leaf -- limbs are raw ints, not pointers.
-  ;; (Task 4 adds the free list; for now bytes leak until reuse is implemented,
-  ;;  but $live accurately reflects block liveness.)
+  ;; $rt_free releases child pointers by kind (so the whole structure is reclaimed),
+  ;; decrements $live, then pushes the block onto its size-class free list for reuse.
   (func $rt_free (param $v i32)
     (local $kind i32) (local $n i32) (local $i i32) (local $base i32)
     (local $size i32) (local $bkt i32)
