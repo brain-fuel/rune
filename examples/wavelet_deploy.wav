@@ -15,3 +15,10 @@
 compute relay
 kv      store
 iam     relay_role grants=kv:Get,kv:Set
+#
+# ONE CLOUD LIVE (billed, cloud-gated):
+#   # no-account dry run on LocalStack (AWS), tears itself down:
+#   rune deploy --manifest examples/wavelet_deploy.wav --backend aws --apply --localstack --destroy
+#   # against a real billed account (drop --localstack; uses ambient AWS creds):
+#   AWS_PROFILE=your-profile rune deploy --manifest examples/wavelet_deploy.wav --backend aws --apply --destroy
+# The other two clouds emit fmt-clean HCL (rune deploy ... --backend azure|gcp).
