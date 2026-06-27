@@ -126,6 +126,36 @@ func TestARCRecursiveRelease(t *testing.T) {
 	}
 }
 
+// TestARCFreeListReuse: alloc+free the same size in a loop; with a working free list the
+// heap pointer must NOT advance (the freed block is reused). We warm the list with one
+// alloc+free to seed the bucket, capture $hp, then churn 100 more alloc+free cycles of
+// the SAME size. hp_final - hp0 must be 0 (perfect reuse: every alloc hits the free list).
+// Without reuse $hp would grow by one block per iteration. Uses $rt_big_from_long(1) --
+// a 1-limb K_BIG with a fixed 12-byte payload (size < 256 so it is poolable), then
+// $rt_hp to observe whether $hp advanced.
+func TestARCFreeListReuse(t *testing.T) {
+	body := `
+    (local $i i32) (local $b i32) (local $hp0 i32)
+    ;; warm: one alloc + free to seed the free list, capture hp
+    (local.set $b (call $rt_big_from_long (i32.const 1)))
+    (call $rt_release (local.get $b))
+    (local.set $hp0 (call $rt_hp))
+    ;; churn: 100 alloc+free of the same size; hp must not advance (block reused)
+    (local.set $i (i32.const 0))
+    (block $brk (loop $lp
+      (br_if $brk (i32.ge_u (local.get $i) (i32.const 100)))
+      (local.set $b (call $rt_big_from_long (i32.const 1)))
+      (call $rt_release (local.get $b))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lp)))
+    ;; print whether hp advanced at all (0 = perfectly reused)
+    (call $rt_print_u32 (i32.sub (call $rt_hp) (local.get $hp0)))`
+	out := runWasm(t, arcTestModule(body))
+	if out != "0" {
+		t.Fatalf("hp advanced by %q bytes under same-size churn, want 0 (free list should reuse)", out)
+	}
+}
+
 // TestARCLeafRetainRelease: a bignum (a leaf object, no child pointers) is allocated
 // (rc=1, live=2 with UNIT), retained twice (rc=3), released three times (rc 0 -> freed,
 // live back to 1, just UNIT). An immediate int and the UNIT singleton are also passed

@@ -40,13 +40,30 @@ const wasmRuntime = `
   (global $hp (mut i32) (i32.const 65536))  ;; heap pointer; below it: scratch + cstrs
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
+  (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
 
-  ;; ARC alloc: reserve an 8-byte hidden header [size][rc] below the payload. Stores
-  ;; the requested payload size and rc=1, bumps $live, returns the PAYLOAD pointer so
-  ;; every existing record offset is unchanged. (Plan 6a; Plan 6b inserts retain/release.)
+  ;; ARC alloc: reserve an 8-byte hidden header [size][rc] below the payload. Rounds the
+  ;; requested payload size to 4-byte alignment, stores the rounded size and rc=1, bumps
+  ;; $live, returns the PAYLOAD pointer. Before bumping $hp, checks the size-classed free
+  ;; list ($freelist buckets indexed by rounded_size/4): if the matching bucket is non-empty
+  ;; the head block is popped, its rc reset to 1, and returned without touching $hp.
   (func $alloc (param $n i32) (result i32)
-    (local $base i32) (local $payload i32)
+    (local $base i32) (local $payload i32) (local $bkt i32) (local $head i32)
     (local.set $n (i32.and (i32.add (local.get $n) (i32.const 3)) (i32.const -4)))
+    ;; try the size-classed free list first
+    (local.set $bkt (call $rt_bucket_addr (local.get $n)))
+    (if (local.get $bkt)
+      (then
+        (local.set $head (i32.load (local.get $bkt)))
+        (if (local.get $head)
+          (then
+            ;; pop: advance bucket head to the link stored in the freed block's first word
+            (i32.store (local.get $bkt) (i32.load (local.get $head)))
+            ;; reset rc=1 at [head-4]
+            (i32.store (i32.sub (local.get $head) (i32.const 4)) (i32.const 1))
+            (global.set $live (i32.add (global.get $live) (i32.const 1)))
+            (return (local.get $head))))))
+    ;; bump allocate from $hp
     (local.set $base (global.get $hp))
     (local.set $payload (i32.add (local.get $base) (i32.const 8)))
     (global.set $hp (i32.add (local.get $payload) (local.get $n)))
@@ -405,6 +422,21 @@ const wasmRuntime = `
   ;; ARC live-block count (alloc bumps, free drops): the leak/double-free probe.
   (func $rt_live (result i32) (global.get $live))
 
+  ;; $rt_bucket_addr: return the $freelist bucket address for a rounded payload size, or 0
+  ;; if the size is out of range (index >= 64, i.e. size >= 256 bytes). The bucket holds
+  ;; the payload pointer of the first free block of that exact size (intrusive linked list:
+  ;; the link to the next block of the same size is stored at the freed payload's word 0).
+  (func $rt_bucket_addr (param $size i32) (result i32)
+    (local $idx i32)
+    (local.set $idx (i32.shr_u (local.get $size) (i32.const 2)))
+    (if (result i32) (i32.lt_u (local.get $idx) (i32.const 64))
+      (then (i32.add (global.get $freelist) (i32.shl (local.get $idx) (i32.const 2))))
+      (else (i32.const 0))))
+
+  ;; $rt_hp: current heap pointer (for the free-list reuse test: hp must not advance under
+  ;; same-size alloc/free churn once the free list is seeded).
+  (func $rt_hp (result i32) (global.get $hp))
+
   ;; rt_counted: true iff v participates in refcounting -- not an immediate (low bit
   ;; set), not null, and not the immortal UNIT singleton.
   (func $rt_counted (param $v i32) (result i32)
@@ -444,6 +476,7 @@ const wasmRuntime = `
   ;;  but $live accurately reflects block liveness.)
   (func $rt_free (param $v i32)
     (local $kind i32) (local $n i32) (local $i i32) (local $base i32)
+    (local $size i32) (local $bkt i32)
     (local.set $kind (call $w (local.get $v) (i32.const 0)))
     (block $done
       ;; K_CLO=0: env slots start at word 3, count at word 2
@@ -476,7 +509,15 @@ const wasmRuntime = `
       (call $rt_release (call $w (local.get $v) (i32.add (local.get $base) (local.get $i))))
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br $lp)))
-    (global.set $live (i32.sub (global.get $live) (i32.const 1))))
+    (global.set $live (i32.sub (global.get $live) (i32.const 1)))
+    ;; push onto the size-classed free list (if poolable: rounded size < 256 bytes)
+    (local.set $size (i32.load (i32.sub (local.get $v) (i32.const 8))))
+    (local.set $bkt (call $rt_bucket_addr (local.get $size)))
+    (if (local.get $bkt)
+      (then
+        (i32.store (local.get $v) (i32.load (local.get $bkt)))  ;; link := old head
+        (i32.store (local.get $bkt) (local.get $v))))           ;; head := this payload
+  )
 
   ;; print an unsigned i32 in decimal to stdout (reuses the show buffer + fd_write).
   (func $rt_print_u32 (param $n i32)
