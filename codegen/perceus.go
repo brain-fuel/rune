@@ -312,6 +312,18 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		bodyOwned[0] = true
 		copy(bodyOwned[1:], owned)
 
+		// FIX: bare-variable rebind (Task 6-fix). When Val is a bare owned local CVar{k},
+		// the let-binding `let h = g in body` is a MOVE of g into h: h and g are the same
+		// heap pointer. h (at body index 0) owns the value; g (at body index k+1) must be
+		// treated as BORROWED so ownScope does not dead-drop it (which would release the
+		// pointer that h will also drop, causing a use-after-free). This mirrors the CPair
+		// component marking below: both cases suppress the source's dead-drop because the
+		// value was MOVED, not copied. g's owning-position uses in the body get CDup'd by
+		// consumeOwning (borrowed -> owned); g's non-owning uses are safe borrows (aliases).
+		if cv, ok := x.Val.(CVar); ok && cv.Idx >= 0 && cv.Idx < len(owned) && owned[cv.Idx] {
+			bodyOwned[cv.Idx+1] = false
+		}
+
 		// When Val is CFst/CSnd of owned local k and the pair is dead in x.Body,
 		// set bodyOwned[k+1] = false so ownScope does not dead-drop the pair. The
 		// drop-after below is the sole consumer of the pair's lifetime.

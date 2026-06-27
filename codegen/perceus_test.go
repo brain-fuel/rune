@@ -844,3 +844,77 @@ func TestPerceusInlineElim(t *testing.T) {
 		t.Logf("inline-eliminator steady: %v (residual = dead-motive+bignum leak; 6b-2 boundary; FIX A released intermediates correctly)", counts)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Task 6-fix: bare-variable-rebind use-after-free regression receivers.
+// ---------------------------------------------------------------------------
+
+// perceusBareRebindSrc is the FIX 1 regression receiver: a bare-variable rebind
+// `let h = g in h` where g is an owned argument. Before the fix, the CLet case has no
+// arm for Val=CVar{k} with owned[k]=true, so g stays owned in bodyOwned and ownScope
+// dead-drops it (premature release) while h (the same heap pointer) is returned and
+// used by the harness -- use-after-free / corrupted refcount. After the fix,
+// bodyOwned[k+1]=false prevents the dead-drop; h is the sole owner and is released by
+// the harness normally, reaching steady-flat.
+const perceusBareRebindSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+rebindFn : (Nat -> Nat) -> (Nat -> Nat) is
+  fn (g : Nat -> Nat) is
+    let h : Nat -> Nat = g in h
+  end
+end
+mainRebind : Nat -> Nat is rebindFn (fn (x : Nat) is x end) end
+`
+
+// TestPerceusBareRebind is the FIX 1 gate (critical bug): bare-variable rebind
+// `let h = g in h` where g is an owned argument.
+//
+// BEFORE FIX: g stays owned in bodyOwned; ownScope dead-drops g (rt_release, rc=1->0,
+// freed); h is the same pointer and is returned dangling. The harness rt_release on the
+// freed pointer corrupts the refcount / live count. Steady-state is NOT flat (live count
+// goes below baseline or oscillates). Output may be accidentally correct (the freed K_CLO
+// tag byte is unchanged before reuse) but the steady gate catches the imbalance.
+//
+// AFTER FIX: bodyOwned[k+1]=false; ownScope does NOT dead-drop g; h owns the value and
+// is released by the harness once (rc=1->0). Steady-flat.
+func TestPerceusBareRebind(t *testing.T) {
+	assertSteadyFlat(t, perceusBareRebindSrc, "mainRebind", "<function>")
+}
+
+// perceusBareRebindBothSrc is the aliasing-correctness companion receiver. The body uses
+// BOTH h and g: `let h = g in const2 h g`. The CLet shared-var dup loop (which already
+// exists) inserts CDup{CVar{k}} when Val=CVar{k} and body uses k+1 -- so g.rc=2 before
+// the let, covering both h (one consume) and g (one consume). After FIX 1
+// (bodyOwned[k+1]=false), g is not owned in body scope and is not dead-dropped by
+// ownScope; h owns the reference. The CDup ensures rc=2 so both h-use and g-use are safe
+// and the program reaches steady-flat. This proves the shared-var dup correctly handles
+// aliased uses under the fix.
+const perceusBareRebindBothSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+const2 : (Nat -> Nat) -> (Nat -> Nat) -> (Nat -> Nat) is
+  fn (a : Nat -> Nat) is fn (b : Nat -> Nat) is a end end
+end
+rebindBothFn : (Nat -> Nat) -> (Nat -> Nat) is
+  fn (g : Nat -> Nat) is
+    let h : Nat -> Nat = g in
+    const2 h g
+  end
+end
+mainRebindBoth : Nat -> Nat is rebindBothFn (fn (x : Nat) is x end) end
+`
+
+// TestPerceusBareRebindUsesBoth proves aliasing-dup correctness under FIX 1: when the
+// body uses BOTH h and g after `let h = g`, the CLet shared-var dup provides rc=2 so
+// both uses are balanced. With bodyOwned[k+1]=false (the fix), g is not dead-dropped by
+// ownScope; the net refcount per run is zero. Steady-flat + correct output.
+func TestPerceusBareRebindUsesBoth(t *testing.T) {
+	assertSteadyFlat(t, perceusBareRebindBothSrc, "mainRebindBoth", "<function>")
+}

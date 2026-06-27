@@ -71,6 +71,11 @@ func WasmSteadyModule(t *testing.T, p Program, runs int) string {
 	b.WriteString("  (type $codety (func (param i32 i32) (result i32)))\n")
 	b.WriteString(wasmRuntime)
 	b.WriteString("\n")
+	// rt_print_nl is test-only (steady-state harness); not part of the frozen runtime.
+	b.WriteString("  (func $rt_print_nl\n")
+	b.WriteString("    (i32.store8 (i32.const 4096) (i32.const 10))\n")
+	b.WriteString("    (call $puts (i32.const 1) (i32.const 4096) (i32.const 1)))\n")
+	b.WriteString("\n")
 	em.emitData(&b)
 	b.WriteString("\n")
 	b.WriteString(defs.String())

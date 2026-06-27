@@ -703,3 +703,26 @@ correctly wired: $rt_live is flat from run 2 onward (output `<function>`).
 components: if the CDup were missing, the pair drop would free `K_BIG(3)` before the
 return, producing wrong output or a WASM trap. Output "3" confirms correctness. Steady
 is NOT asserted (rt_big_parse temps from literals leak per run, 6b-2 residual 5).
+
+### Bare-variable-rebind safety (TestPerceusBareRebind, TestPerceusBareRebindUsesBoth)
+
+Task 6-fix closes the bare-variable-rebind case. `let h = g in body` where `g` is a bare
+OWNED local (CLet Val = CVar{k}, owned[k] = true) is a MOVE: `h` and `g` name the same
+heap pointer. The bug was that the CLet case marked moved-from owned locals NOT-owned in
+the body scope ONLY for CPair components and pair-projections, with no arm for a bare
+CVar. So `g` stayed owned, ownScope dead-dropped it (released the pointer), and `h` (the
+same pointer) lived on -- use-after-free.
+
+The fix mirrors the CPair arm: when Val is CVar{k} with owned[k] true, set
+`bodyOwned[k+1] = false`. This suppresses the dead-drop of `g`; `h` (at body index 0)
+owns the value and drops it when dead. `g`'s remaining uses in the body are BORROWS (an
+alias); any owning-position use of `g` in the body gets CDup'd by consumeOwning.
+
+The shared-var dup loop already handles the "uses both h and g" case: if both Val and
+Body mention index k (Val IS CVar{k}; Body uses CVar{k+1}), a CDup is inserted before
+the CLet, giving rc=2. `h` owns one reference; `g` borrows the same pointer. Owning
+uses of `g` in the body CDup again (rc+1 per use), which the callee's drop balances.
+
+`TestPerceusBareRebind` covers the basic case (`fn (g) is let h = g in h end`):
+steady flat, output `<function>`. `TestPerceusBareRebindUsesBoth` covers the aliased use
+(`let h = g in const2 h g`): steady flat, output `<function>`. Both pass after FIX 1.
