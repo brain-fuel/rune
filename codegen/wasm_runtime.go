@@ -405,6 +405,39 @@ const wasmRuntime = `
   ;; ARC live-block count (alloc bumps, free drops): the leak/double-free probe.
   (func $rt_live (result i32) (global.get $live))
 
+  ;; rt_counted: true iff v participates in refcounting -- not an immediate (low bit
+  ;; set), not null, and not the immortal UNIT singleton.
+  (func $rt_counted (param $v i32) (result i32)
+    (i32.and
+      (i32.and
+        (i32.eqz (i32.and (local.get $v) (i32.const 1)))   ;; low bit clear => pointer
+        (i32.ne (local.get $v) (i32.const 0)))             ;; non-null
+      (i32.ne (local.get $v) (global.get $UNIT))))         ;; not the immortal unit
+
+  ;; rt_retain: a no-op on immediates (low bit set) and the immortal UNIT; otherwise
+  ;; increment the refcount at [v-4].
+  (func $rt_retain (param $v i32)
+    (if (call $rt_counted (local.get $v))
+      (then
+        (i32.store (i32.sub (local.get $v) (i32.const 4))
+          (i32.add (i32.load (i32.sub (local.get $v) (i32.const 4))) (i32.const 1))))))
+
+  ;; rt_release: a no-op on immediates and UNIT; otherwise decrement the refcount; at
+  ;; zero, free the block (Task 3 adds child recursion before the free).
+  (func $rt_release (param $v i32)
+    (local $rc i32)
+    (if (call $rt_counted (local.get $v))
+      (then
+        (local.set $rc (i32.sub (i32.load (i32.sub (local.get $v) (i32.const 4))) (i32.const 1)))
+        (i32.store (i32.sub (local.get $v) (i32.const 4)) (local.get $rc))
+        (if (i32.eqz (local.get $rc))
+          (then (call $rt_free (local.get $v)))))))
+
+  ;; rt_free: drop the live count. (Task 4 adds the free list; for now the bytes leak
+  ;; until reuse is implemented, but $live accurately reflects block liveness.)
+  (func $rt_free (param $v i32)
+    (global.set $live (i32.sub (global.get $live) (i32.const 1))))
+
   ;; print an unsigned i32 in decimal to stdout (reuses the show buffer + fd_write).
   (func $rt_print_u32 (param $n i32)
     (global.set $sbuf (i32.const 4096))
