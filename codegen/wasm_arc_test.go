@@ -156,6 +156,48 @@ func TestARCFreeListReuse(t *testing.T) {
 	}
 }
 
+// TestARCPairRelease: allocate two bignums, build a pair holding them, release the pair
+// root; assert rt_live returns "1" (back to just UNIT, all three blocks freed). Without
+// the K_PAIR child-release branch in $rt_free the two bignums would leak (live = 3).
+// $rt_mkpair stores its two args directly at words 1 and 2 (no separate set call needed).
+func TestARCPairRelease(t *testing.T) {
+	body := `
+    (local $f0 i32) (local $f1 i32) (local $root i32)
+    (local.set $f0 (call $rt_big_from_long (i32.const 3)))
+    (local.set $f1 (call $rt_big_from_long (i32.const 4)))
+    ;; a pair whose two halves ARE the two bignums (stored at words 1 and 2 by $rt_mkpair)
+    (local.set $root (call $rt_mkpair (local.get $f0) (local.get $f1)))
+    ;; release the root: must recurse into f0 and f1 via the K_PAIR branch
+    (call $rt_release (local.get $root))
+    (call $rt_print_u32 (call $rt_live))`
+	out := runWasm(t, arcTestModule(body))
+	if out != "1" {
+		t.Fatalf("after releasing the pair root, live = %q, want 1 (all 3 blocks freed)", out)
+	}
+}
+
+// TestARCClosureRelease: allocate a closure with nenv=2, fill its two env slots with
+// bignums via $rt_clo_set, release the closure root; assert rt_live returns "1". Without
+// the K_CLO env-release loop in $rt_free the two bignums would leak (live = 3). The
+// closure's code index is 0 -- the test never CALLS the closure, only releases it.
+func TestARCClosureRelease(t *testing.T) {
+	body := `
+    (local $f0 i32) (local $f1 i32) (local $c i32)
+    (local.set $f0 (call $rt_big_from_long (i32.const 3)))
+    (local.set $f1 (call $rt_big_from_long (i32.const 4)))
+    ;; closure: code index 0, nenv=2
+    (local.set $c (call $rt_mkclo (i32.const 0) (i32.const 2)))
+    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $f0))
+    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $f1))
+    ;; release the closure: must walk env slots 0 and 1 via the K_CLO branch
+    (call $rt_release (local.get $c))
+    (call $rt_print_u32 (call $rt_live))`
+	out := runWasm(t, arcTestModule(body))
+	if out != "1" {
+		t.Fatalf("after releasing the closure, live = %q, want 1 (all 3 blocks freed)", out)
+	}
+}
+
 // TestARCLeafRetainRelease: a bignum (a leaf object, no child pointers) is allocated
 // (rc=1, live=2 with UNIT), retained twice (rc=3), released three times (rc 0 -> freed,
 // live back to 1, just UNIT). An immediate int and the UNIT singleton are also passed
