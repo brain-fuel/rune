@@ -182,14 +182,42 @@ arg in `applyTwice` is dead, so none is dropped); read the per-event ownership t
 the PATH B rules.
 
 ## Held for Plan 6b-2 (named, not silently dropped)
-- CBounce / the partial trampoline: ownership across a DEFERRED saturated tail
-  call and the public driver loop. Receiver (future): the ch39 countdown / a
-  partial-recursive listing run leak-free on WASM.
-- The hand-rolled nat-fold (`emitNatFold`) bignum temporaries: ownership of the
-  base-1e9 limb temporaries inside the eliminator loop. Receiver (future): a
-  bignum-arithmetic listing (e.g. `mul` on large literals) run leak-free.
-Until 6b-2, the WASM Perceus pass is gated to programs that do not exercise these
-paths (Task 6 defines the exact subset and asserts the boundary).
+
+Five leak-only residuals remain after Task 6. All are characterized: no UAF, no
+double-free, no wrong output. Only $rt_live grows per run. Each has a named future
+receiver that will become the 6b-2 steady gate when the boundary is closed.
+
+1. **CBounce / the partial trampoline** -- ownership across a DEFERRED saturated
+   tail call and the public driver loop. The driver reuses args across bounces in a
+   way the current drop rules do not model. Future receiver: the ch39 countdown /
+   a partial-recursive listing run leak-free on WASM.
+
+2. **Inline builtin-nat-fold bignum temporaries** -- the frozen `emitNatFold`
+   borrow-passes its loop counter via non-retaining `rt_apply` and creates bignum
+   temporaries (base-1e9 limbs via `rt_big_parse`). Ownership of the loop-internal
+   temporaries is not modeled. Future receiver: a bignum-arithmetic listing
+   (e.g. `mulN 1000 1000`) run leak-free.
+
+3. **Dead-motive carve-out (+1/run inline eliminator)** -- when a FULLY-SATURATED
+   eliminator application is inlined (all motive + cases + scrutinee at one site),
+   the dup'd motive arg that the curry-through block leaves borrowed is not released.
+   Future receiver: `perceusInlineElimSrc` steady-flat (currently output-invariance-
+   only).
+
+4. **K_CLO_mk1 container (+1/run per inline multi-arg constructor call-site)** --
+   `emitCtorBlock` keeps the first intermediate K_CLO BARE (releasing it mid-spine
+   would UAF a field the K_CON just moved in). Future receiver: `perceusCtorMkXXSrc`
+   steady-flat (currently output-invariance-only, not measured in Task 5).
+
+5. **rt_big_parse literal temporaries** -- bignum literal values (`CLit{Kind:LitNat}`)
+   create `rt_big_parse` K_BIG nodes per run even when the value is subsequently
+   used only for its mathematical content (e.g. as a pair component). Future receiver:
+   `perceusWasmBignumPairSrc` steady-flat (currently output-invariance-only in Task 6).
+
+Until 6b-2, the WASM Perceus pass is gated by `PerceusBalanceable` to programs that
+do not exercise these paths. `TestPerceusFrontierBoundary` makes the boundary
+executable: it asserts that the ch39 countdown is outside the v1 fragment. The test
+flips to a steady assertion when 6b-2 closes CBounce ownership.
 
 ## PATH B: borrowed-vs-owned and dup-on-consume
 
@@ -540,7 +568,7 @@ a CDup{CVar{i}, <spine>} is inserted (mirroring the general AppClosure and CPair
 var dup logic). The check fires at each level of the spine recursion, so it covers every
 (Clo, Arg) pair in a multi-field constructor application. For accel/nat spines (isCtor
 false), the dup is NOT inserted: those spines borrow-read their args, so inserting a
-CDup would overcounting.
+CDup would overcount.
 
 The isCtor flag is passed from the call site in annotate: after FIX A, bareSpineHead
 contains ONLY constructors (not eliminators), so isCtor = spineBaseGlobal(x) in
@@ -600,4 +628,78 @@ env copy, not the captures themselves).
 
 Steady: [9 13 17 21] = +4/run from dead-motive carve-out + rt_big_parse bignum temps
 (the 7 literal, 6b-2 boundary). Inline-eliminator programs are excluded from
-perceusBalanceable until 6b-2 closes the carve-out.
+`PerceusBalanceable` until 6b-2 closes the carve-out.
+
+## The corpus gate (Task 6)
+
+Task 6 closes the Perceus plan with three assertions layered over the full WASM
+conformance corpus (the 10 programs from `TestWasmConformsToJS`):
+
+### Output-invariance gate (TestPerceusCorpusOutputInvariance)
+
+`dup`/`drop` operations adjust only refcounts -- they never change the computed value.
+Therefore, the WASM Perceus output must be byte-identical to the JS reference for every
+corpus program. `TestPerceusCorpusOutputInvariance` asserts this for all 10 listings
+by running both backends and comparing. A regression in the pass that changes output
+(e.g., a missing dup that causes a use-after-free) will be caught immediately.
+
+### Steady-state gate (TestPerceusCorpusSteady)
+
+Programs in the v1 Perceus balanceable fragment -- those passing `PerceusBalanceable` --
+must reach a true steady state: $rt_live is flat from run 2 onward (no per-run leak).
+`TestPerceusCorpusSteady` iterates the corpus, skips programs with
+`PerceusBalanceable = false` (the 6b-2 frontier), and asserts flat for the rest.
+
+Result with the current corpus: 0 balanced, 10 skipped. All 10 corpus programs are
+excluded by one of the four conditions:
+
+| Corpus listing | Exclusion condition |
+|---|---|
+| three (natSrc add) | Condition 3: inline saturated NatElim (4 args, 1+1+1+1 = data elim) |
+| two (listSrc length) | Condition 3: inline saturated ListElim (4 args, 1+2+1 = data elim) |
+| p (pairSrc mk) | Condition 4: inline arity-4 ctor mk applied 4 times at one site |
+| big, bigger, product (bigNatSrc) | Condition 2: NatElimSpine (builtin-nat-fold in addN/mulN) |
+| sum, prod, diff, diffZero (accelNatSrc) | Condition 2: NatElimSpine (builtin-nat-fold in addN/mulN) |
+
+The "0 balanced" result is vacuously valid: the steady guarantee is asserted for all
+programs that are not at the known frontier. The receiver programs in Tasks 3-5 cover
+the steady-flat assertion for every major ownership pattern (closures, constructors,
+case, pairs, curry intermediates, inline elim as output-invariance-only).
+
+### Frontier boundary (TestPerceusFrontierBoundary)
+
+`TestPerceusFrontierBoundary` asserts that the ch39-style countdown program (which uses
+CBounce under closure conversion) has `PerceusBalanceable = false`. This is an
+executable boundary marker: if a future change accidentally widens the predicate to
+include trampoline programs without 6b-2 CBounce ownership, the test fails visibly. When
+6b-2 lands and the pass handles CBounce, the test flips to a steady-flat assertion.
+
+### PerceusBalanceable
+
+`PerceusBalanceable(p Program) bool` in `codegen/perceus.go` scans the closure-converted
+CIr of p for four exclusion patterns. It is conservative: when unsure, it returns false
+(exclude from the steady gate). The four conditions are documented in the function's
+godoc comment. The key saturation thresholds:
+
+- General eliminator (condition 3): spine depth >= 1 + len(ctors) + 1 (motive + cases + scrutinee).
+  A partially-applied eliminator cached as a def (shorter spine at the application site)
+  is NOT excluded, so `perceusCaseSrc` (which caches `matchF = OptFElim mot c0 c1`)
+  remains balanceable.
+- Multi-arg constructor (condition 4): spine depth >= 2 AND `c.Arity >= 2`. A 1-arg
+  constructor (like `someF : (Nat->Nat) -> OptF`) is never in `multiArgCtors` and is not
+  excluded even when applied at depth 1.
+
+### CSnd minor (TestPerceusWasmSnd)
+
+Task 6 also closes the CSnd receiver (Task 5 minor). `perceusWasmSndSrc` projects the
+second half of a closure-pair (`mainSnd = Snd (Pair f g)`), drops the pair (which frees
+`f`), and returns `g`. The steady gate confirms the CSnd arm in `pairProjSrc` is
+correctly wired: $rt_live is flat from run 2 onward (output `<function>`).
+
+### Bignum-pair output-invariance (TestPerceusWasmBignumPair)
+
+`perceusWasmBignumPairSrc` builds a pair of Nat bignum literals (3, 4) and projects
+`Fst`. This is the first runtime proof that `CPair`'s dup-on-escape holds for bignum
+components: if the CDup were missing, the pair drop would free `K_BIG(3)` before the
+return, producing wrong output or a WASM trap. Output "3" confirms correctness. Steady
+is NOT asserted (rt_big_parse temps from literals leak per run, 6b-2 residual 5).

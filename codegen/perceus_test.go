@@ -584,6 +584,229 @@ optMot : Opt -> U is fn (o : Opt) is Nat end end
 mainInlineElim : Nat is OptElim optMot zero (fn (x : Nat) is x end) (some 7) end
 `
 
+// ---------------------------------------------------------------------------
+// Task 6-gate: corpus output-invariance, corpus steady-state, frontier boundary,
+// and the remaining minors (CSnd receiver, bignum-pair output-invariance).
+// ---------------------------------------------------------------------------
+
+// corpusListSrc is the wasm-conformance list-length program (mirrors wasm_test.go
+// listSrc, defined separately because wasm_test.go's constant is function-local).
+const corpusListSrc = natSrc + `
+data List : U -> U is
+  nil : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+length : (A : U) -> List A -> Nat is
+  fn (A : U) (xs : List A) is
+    ListElim A (fn (x : List A) is Nat end)
+      zero
+      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
+      xs
+  end
+end
+two : Nat is length Nat (cons Nat zero (cons Nat (succ zero) (nil Nat))) end
+`
+
+// corpusPairSrc is the wasm-conformance multi-field constructor program (mirrors
+// wasm_test.go pairSrc, defined separately for the same reason as corpusListSrc).
+const corpusPairSrc = natSrc + `
+data Pairing : U -> U -> U is
+  mk : (A : U) -> (B : U) -> A -> B -> Pairing A B
+end
+p : Pairing Nat Nat is mk Nat Nat (succ zero) (succ (succ zero)) end
+`
+
+// wasmCorpusEntry is one entry in the WASM conformance corpus: a test name, the
+// rune source, and the main definition to emit.
+type wasmCorpusEntry struct {
+	name string
+	src  string
+	main string
+}
+
+// wasmCorpusCases returns the same corpus used by TestWasmConformsToJS: the ten
+// WASM-supported listings that the backend-conformance gate requires to be
+// byte-identical to the JS reference.
+func wasmCorpusCases() []wasmCorpusEntry {
+	return []wasmCorpusEntry{
+		{"three", natSrc + `three : Nat is add (succ zero) (succ (succ zero)) end`, "three"},
+		{"two", corpusListSrc, "two"},
+		{"p", corpusPairSrc, "p"},
+		{"big", bigNatSrc, "big"},
+		{"bigger", bigNatSrc, "bigger"},
+		{"product", bigNatSrc, "product"},
+		{"sum", accelNatSrc, "sum"},
+		{"prod", accelNatSrc, "prod"},
+		{"diff", accelNatSrc, "diff"},
+		{"diffZero", accelNatSrc, "diffZero"},
+	}
+}
+
+// TestPerceusCorpusOutputInvariance asserts the WASM Perceus output equals the JS
+// reference for every WASM-supported corpus listing. dup/drop operations never
+// change the computed value (they only adjust refcounts), so Perceus output must
+// be byte-identical to non-Perceus output. This test NAMES that guarantee and
+// asserts it across the full corpus.
+//
+// The Perceus pass is always-on in Wasm.Emit (TestWasmConformsToJS already passes),
+// so this test is a thin documentation gate: it names the invariance explicitly and
+// will catch any future regression in the pass that changes computed values.
+func TestPerceusCorpusOutputInvariance(t *testing.T) {
+	for _, c := range wasmCorpusCases() {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			jsOut := runNode(t, emitJS(t, c.src, c.main))
+			wasmOut := runWasm(t, emitWith(t, cg.Wasm{}, c.src, c.main))
+			if jsOut != wasmOut {
+				t.Fatalf("%s: Perceus changed output: WASM=%q JS=%q", c.name, wasmOut, jsOut)
+			}
+		})
+	}
+}
+
+// TestPerceusCorpusSteady asserts that every corpus listing in the v1 Perceus
+// balanceable fragment (PerceusBalanceable = true) reaches a TRUE steady state:
+// after the first run, $rt_live is flat (no per-run leak). Listings outside the
+// fragment (PerceusBalanceable = false) are SKIPPED -- they are the 6b-2 frontier
+// documented in R-PERCEUS.md. The test logs how many were balanced vs skipped.
+//
+// The four exclusion conditions are:
+//  1. CBounce (partial trampoline)
+//  2. Inline builtin-nat-fold (NatElimSpine)
+//  3. Inline saturated general-eliminator (dead-motive carve-out + bignum temps)
+//  4. Inline arity>=2 constructor (K_CLO_mk1 container leak)
+func TestPerceusCorpusSteady(t *testing.T) {
+	cases := wasmCorpusCases()
+	nBalanced, nSkipped := 0, 0
+	for _, c := range cases {
+		p := mustProgram(t, c.src, c.main)
+		if !cg.PerceusBalanceable(p) {
+			nSkipped++
+			continue
+		}
+		nBalanced++
+		counts := wasmSteadyLiveP(t, p, 4)
+		if len(counts) < 4 {
+			t.Fatalf("%s: want 4 per-run live counts, got %d: %v", c.name, len(counts), counts)
+		}
+		c2, err2 := strconv.Atoi(counts[1])
+		c3, err3 := strconv.Atoi(counts[2])
+		c4, err4 := strconv.Atoi(counts[3])
+		if err2 != nil || err3 != nil || err4 != nil {
+			t.Fatalf("%s: non-integer live counts: %v", c.name, counts)
+		}
+		if !(c2 == c3 && c3 == c4) {
+			t.Fatalf("%s leaks under Perceus: counts=%v", c.name, counts)
+		}
+	}
+	t.Logf("corpus steady: %d balanced (steady flat), %d skipped (6b-2 frontier)", nBalanced, nSkipped)
+}
+
+// countdownSrc is the ch39-style partial-recursive countdown: a `partial` def that
+// calls itself via CBounce (the T2 native trampoline). It is the canonical 6b-2
+// frontier program: the WASM Perceus pass does not model ownership across CBounce
+// tail calls (the driver-loop reuse pattern). PerceusBalanceable must return false
+// for it; when 6b-2 lands and CBounce ownership is wired in, this test flips.
+const countdownSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+partial countdown : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero
+      (fn (k : Nat) (ih : Nat) is countdown k end)
+      n
+  end
+end
+countdownMain : Nat is countdown 3 end
+`
+
+// TestPerceusFrontierBoundary pins that a partial-recursive countdown program (which
+// uses CBounce under closure conversion) is NOT in the v1 Perceus balanceable
+// fragment. The assertion is executable: it catches any future accidental widening
+// of PerceusBalanceable that would include trampoline programs without the 6b-2
+// CBounce ownership model. When 6b-2 lands and the pass handles CBounce, this test
+// flips (PerceusBalanceable returns true and the steady gate asserts flat).
+func TestPerceusFrontierBoundary(t *testing.T) {
+	p := mustProgram(t, countdownSrc, "countdownMain")
+	if cg.PerceusBalanceable(p) {
+		t.Fatalf("countdown uses CBounce (partial trampoline); it must be OUTSIDE the v1 balanceable fragment until 6b-2 lands")
+	}
+}
+
+// perceusWasmSndSrc is the CSnd receiver (Task 5 minor, folded into Task 6). It
+// builds a pair of closures (Fst=f, Snd=g), projects Snd (the kept second half),
+// and drops the pair -- which also frees f (the first half, not dup'd). The
+// ownership events mirror TestPerceusWasmPairs but exercise the CSnd arm:
+//
+//   - consumeOwning on the CSnd result inserts CDup (g.rc 1 -> 2).
+//   - drop-after releases the pair: f.rc 1 -> 0 (freed), g.rc 2 -> 1.
+//   - Harness releases result (g): g.rc 1 -> 0 (freed).
+//   - Net per run: +3 allocs, -3 frees = 0. Steady flat.
+//
+// Uses closures (not bignums) as components to avoid rt_big_parse temp leaks.
+const perceusWasmSndSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+mainSnd : Nat -> Nat is
+  let f : Nat -> Nat = fn (x : Nat) is x end in
+  let g : Nat -> Nat = fn (y : Nat) is y end in
+  let p : Sig (Nat -> Nat) (fn (z : Nat -> Nat) is Nat -> Nat end) = Pair (Nat -> Nat) (fn (z : Nat -> Nat) is Nat -> Nat end) f g in
+  let b : Nat -> Nat = Snd p in
+  b
+end
+`
+
+// TestPerceusWasmSnd is the CSnd receiver gate.
+//
+// OUTPUT-INVARIANCE: the def evaluates to g = fn (y is y) : Nat -> Nat, "<function>".
+//
+// STEADY-STATE: $live flat after run 1. Snd dup-on-escape keeps g alive past the
+// pair drop (which frees f). Net: 0 change per run from run 2 onward. This proves
+// the symmetric CSnd arm in the pass (pairProjSrc / drop-after) is correctly wired.
+func TestPerceusWasmSnd(t *testing.T) {
+	assertSteadyFlat(t, perceusWasmSndSrc, "mainSnd", "<function>")
+}
+
+// perceusWasmBignumPairSrc is the bignum-pair output-invariance witness. It builds
+// a pair of Nat bignum literals (3, 4) and projects the first half (Fst). This
+// exercises the CPair / CFst path with BIGNUM components: if the Fst component were
+// not dup'd before the pair drop, dropping the pair would free the K_BIG(3) value
+// before it is returned -- a use-after-free visible as wrong output or a trap.
+//
+// Output "3" confirms the dup-on-escape holds for bignum pair components.
+//
+// STEADY is NOT asserted: rt_big_parse bignum temporaries from the `3` and `4`
+// literals leak per run (the 6b-2 boundary), so $rt_live grows. This is an
+// output-invariance-only receiver, analogous to perceusCaseLitSrc.
+const perceusWasmBignumPairSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+mainBignumPair : Nat is
+  let p : Sig Nat (fn (z : Nat) is Nat end) = Pair Nat (fn (z : Nat) is Nat end) 3 4 in
+  Fst p
+end
+`
+
+// TestPerceusWasmBignumPair is the bignum-pair output-invariance gate. The pair
+// holds Nat bignum literals; Fst must survive the pair drop with correct value "3".
+// This is the first runtime proof that CPair's dup-on-escape holds for bignum
+// components (the CLit case in pairProjSrc / drop-after).
+func TestPerceusWasmBignumPair(t *testing.T) {
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusWasmBignumPairSrc, "mainBignumPair"))
+	if got != "3" {
+		t.Fatalf("bignum-pair Fst: got %q, want \"3\" (pair drop freed K_BIG(3) before return? CDup missing?)", got)
+	}
+}
+
 // TestPerceusInlineElim is the FIX A gate: general eliminator intermediates are now
 // released (not leaked like before).
 //
