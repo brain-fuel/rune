@@ -70,3 +70,30 @@ demoServices : SvcList is scons web (scons relay (scons store snil)) end
 -- PROPOSITION: every demo service is in the pinned region (us-east).
 -- PROOF: the fold computes to `true`, so refl discharges it.
 inRegionProof : Eq Bool (allInRegion usEast demoServices) true is refl end
+
+-- ===== the model: transport edges carry a TLS flag =====
+-- An edge connects two service ids and records whether the link is encrypted.
+data Edge : U is edge : Nat -> Nat -> Bool -> Edge end
+data EdgeList : U is enil : EdgeList | econs : Edge -> EdgeList -> EdgeList end
+
+tls : Edge -> Bool is
+  fn (e : Edge) is EdgeElim (fn (w : Edge) is Bool end) (fn (f : Nat) (t : Nat) (s : Bool) is s end) e end
+end
+
+-- allEncrypted xs = true iff every edge in xs is TLS-protected.
+allEncrypted : EdgeList -> Bool is
+  fn (xs : EdgeList) is
+    EdgeListElim (fn (w : EdgeList) is Bool end)
+      true
+      (fn (h : Edge) (t : EdgeList) (ih : Bool) is andB (tls h) ih end)
+      xs
+  end
+end
+
+-- demo edges: web -> relay (WebRTC/DTLS) and relay -> store (TLS), both encrypted.
+demoEdges : EdgeList is econs (edge 0 1 true) (econs (edge 1 2 true) enil) end
+
+-- ===== flagship control: ENCRYPTED-IN-TRANSIT =====
+-- PROPOSITION: every transport edge in the demo model is encrypted.
+-- PROOF: the fold computes to `true`.
+encryptedProof : Eq Bool (allEncrypted demoEdges) true is refl end

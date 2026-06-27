@@ -7,4 +7,5 @@ import "testing"
 func TestControlCatalogElaborates(t *testing.T) {
 	s := loadListing(t, "ch538_control_catalog.rune")
 	normalizesTo(t, s, `allInRegion usEast demoServices`, "true")
+	normalizesTo(t, s, `allEncrypted demoEdges`, "true")
 }
