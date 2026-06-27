@@ -918,3 +918,142 @@ mainRebindBoth : Nat -> Nat is rebindBothFn (fn (x : Nat) is x end) end
 func TestPerceusBareRebindUsesBoth(t *testing.T) {
 	assertSteadyFlat(t, perceusBareRebindBothSrc, "mainRebindBoth", "<function>")
 }
+
+// ---------------------------------------------------------------------------
+// Task 6-fix-guard: deterministic WAT-structural regression guard for the
+// bare-variable-rebind use-after-free, plus edge-case receivers.
+// ---------------------------------------------------------------------------
+
+// TestPerceusBareRebindWATGuard is the DETERMINISTIC regression guard for the
+// bare-variable-rebind use-after-free fix (FIX 1 critical).
+//
+// WHY the $live STEADY GATE is BLIND to this UAF:
+// TestPerceusBareRebind / TestPerceusBareRebindUsesBoth both pass pre-fix because
+// a freshly-allocated closure that is prematurely freed via CDrop(g) BALANCES its
+// own alloc -- the rc goes 1->0 (freed, $live--), and the harness release on the
+// now-dangling h may be a no-op if the runtime guards rc<=0. So $live stays flat
+// both pre-fix and post-fix; the steady gate cannot distinguish the UAF from the
+// correct program.
+//
+// THE DETERMINISTIC GUARD -- WAT structural check:
+// Pre-fix (bodyOwned[k+1] NOT cleared for Val=CVar{k}): g remains owned in
+// bodyOwned; ownScope dead-drops it with CDrop{CVar{1}, ...}. The WASM emitter
+// lowers CDrop to:
+//
+//	(call $rt_release (local.get $arg))   ;; releases g = h, UAF!
+//	(local.get $t1)                        ;; returns h (dangling pointer)
+//
+// Post-fix (bodyOwned[cv.Idx+1]=false, perceus.go:~323): g is NOT owned in
+// bodyOwned; ownScope does NOT insert CDrop; the release disappears entirely:
+//
+//	(local.set $t1 (local.get $arg))      ;; h = g (move)
+//	(local.get $t1)                        ;; return h (rc=1, alive)
+//
+// ASSERTION: the emitted WAT must NOT contain "(call $rt_release (local.get $arg))".
+//   Pre-fix:  FAILS -- the release is present (catches the regression).
+//   Post-fix: PASSES -- the release is absent (validates the fix).
+//
+// This is the EXACT one-line diff the controller verified against 2f3c027:perceus.go.
+func TestPerceusBareRebindWATGuard(t *testing.T) {
+	wat := emitWith(t, cg.Wasm{}, perceusBareRebindSrc, "mainRebind")
+	const bugLine = "(call $rt_release (local.get $arg))"
+	if strings.Contains(wat, bugLine) {
+		t.Fatalf(
+			"use-after-free regression: the rebindFn code block releases $arg before returning it\n"+
+				"  WAT contains: %s\n"+
+				"  g and h alias the same heap pointer; dropping g while h is returned = UAF\n"+
+				"  FIX: CLet Val=CVar{k} arm in annotate (perceus.go) must set bodyOwned[k+1]=false\n"+
+				"  (the one-line fix removes exactly this release; see 2f3c027 emit diff)",
+			bugLine,
+		)
+	}
+}
+
+// perceusBareRebindReturnSrcSrc is the edge-case receiver for `let h = g in g`
+// (return the SOURCE g, not the binding h). h is dead in the body; g is returned.
+//
+// The CLet shared-var-dup loop (independent of the FIX 1 bodyOwned arm) inserts
+// CDup{g} because g appears in BOTH Val (CVar{0}) and x.Body (CVar{1} after shift):
+//   CDup{CVar{0}, CLet{"h", CVar{0}, CDrop{CVar{0}, CVar{1}}}}
+// Sequence: retain g (rc 1->2); set h=g; CDrop h (rc 2->1); return g (rc=1).
+//
+// Crucially, the WAT for this program is IDENTICAL pre-fix and post-fix (the
+// shared-var-dup fires in both cases; in the pre-fix case bodyOwned[1]=true but
+// g is still not dead because cirUsesArg(CVar{1}, 1)=true). So this is a
+// CORRECTNESS receiver, not a regression guard. Steady-flat.
+const perceusBareRebindReturnSrcSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+rebindSrcFn : (Nat -> Nat) -> (Nat -> Nat) is
+  fn (g : Nat -> Nat) is
+    let h : Nat -> Nat = g in g
+  end
+end
+mainRebindSrc : Nat -> Nat is rebindSrcFn (fn (x : Nat) is x end) end
+`
+
+// TestPerceusBareRebindReturnSrc verifies the `let h = g in g` edge case (return
+// source, dead h). The shared-var dup ensures g.rc=2 before the let; CDrop h
+// reduces rc to 1; g returned at rc=1; harness releases (rc=0). Net: 0/run.
+// Output "<function>" (the identity closure g). Steady-flat.
+func TestPerceusBareRebindReturnSrc(t *testing.T) {
+	assertSteadyFlat(t, perceusBareRebindReturnSrcSrc, "mainRebindSrc", "<function>")
+}
+
+// perceusBareRebindDeadHSrc is the edge-case receiver for `let h = g in <body not
+// using h or g>` (dead h, dead g). The rebindDeadFn captures g in h but then builds
+// a fresh result closure -- neither h nor g appears in the MkClosure body.
+//
+// Post-fix (FIX 1): bodyOwned[1]=false (g not owned in body); only h is dead-dropped
+//   (CDrop{CVar{0}, MkClosure{...}}); g is freed exactly once via h (same pointer).
+//   WAT: (call $rt_release (local.get $t1)) -- releases $t1 (= h = g); no release of $arg.
+//
+// Pre-fix: bodyOwned=[true,true]; both h (index 0) AND g (index 1) are dead-dropped:
+//   CDrop{CVar{0}, CDrop{CVar{1}, MkClosure{...}}} in the body context where
+//   CVar{1} = $arg -> WAT contains "(call $rt_release (local.get $arg))" (double-free!).
+//   The same WAT guard string TestPerceusBareRebindWATGuard checks covers this shape;
+//   this program has its own structural check below to pin the dead-h invariant.
+const perceusBareRebindDeadHSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+rebindDeadFn : (Nat -> Nat) -> (Nat -> Nat) is
+  fn (g : Nat -> Nat) is
+    let h : Nat -> Nat = g in
+    fn (z : Nat) is z end
+  end
+end
+mainRebindDead : Nat -> Nat is rebindDeadFn (fn (x : Nat) is x end) end
+`
+
+// TestPerceusBareRebindDeadH verifies the `let h = g in <body not using h or g>`
+// edge case. Post-fix: only h is dead-dropped (CDrop h frees g via the aliased
+// pointer); the body's fresh MkClosure is returned. Output "<function>". Steady-flat.
+//
+// WAT structural check (the deterministic guard): must NOT contain
+// "(call $rt_release (local.get $arg))". Pre-fix: CDrop g appears as a second CDrop
+// on the same pointer -> that string IS present (double-free). Post-fix: absent.
+// This exercises the same FIX 1 bodyOwned arm as TestPerceusBareRebindWATGuard but
+// for the case where the body is a MkClosure (not CVar{0}), pinning the dead-h shape.
+func TestPerceusBareRebindDeadH(t *testing.T) {
+	// WAT structural guard: double-free of g must not appear.
+	wat := emitWith(t, cg.Wasm{}, perceusBareRebindDeadHSrc, "mainRebindDead")
+	const bugLine = "(call $rt_release (local.get $arg))"
+	if strings.Contains(wat, bugLine) {
+		t.Fatalf(
+			"double-free regression (dead-h shape): rebindDeadFn releases $arg = g twice\n"+
+				"  WAT contains: %s\n"+
+				"  h=g aliased; CDrop h frees g (rc=1->0); CDrop g then double-frees\n"+
+				"  FIX: bodyOwned[k+1]=false in perceus.go CLet Val=CVar{k} arm",
+			bugLine,
+		)
+	}
+	// Correctness + steady-flat: each run allocs two closures (arg + result);
+	// CDrop h frees arg; harness releases result. Net: 0/run. Flat after run 1.
+	assertSteadyFlat(t, perceusBareRebindDeadHSrc, "mainRebindDead", "<function>")
+}
