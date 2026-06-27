@@ -53,6 +53,41 @@ func wasmSteadyLiveP(t *testing.T, p cg.Program, runs int) []string {
 	return strings.Split(strings.TrimSpace(out), "\n")
 }
 
+// wasmSteadyLivePInts is the numeric variant of wasmSteadyLiveP: it runs
+// WasmSteadyModule with the given pre-built Program and returns the per-run
+// $rt_live counts parsed to ints (one per line). Used by the 6b-2 delta tests,
+// which measure the per-run leak increment counts[i]-counts[i-1] directly.
+func wasmSteadyLivePInts(t *testing.T, p cg.Program, runs int) []int {
+	t.Helper()
+	strs := wasmSteadyLiveP(t, p, runs)
+	out := make([]int, len(strs))
+	for i, s := range strs {
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			t.Fatalf("non-integer live count %q at index %d (counts %v): %v", s, i, strs, err)
+		}
+		out[i] = n
+	}
+	return out
+}
+
+// assertSteadyFlatInts asserts a pre-built Program reaches TRUE steady-flat:
+// across runs 2..runs the per-run $rt_live delta is exactly 0 (zero per-run
+// leak). The numeric companion to assertSteadyFlat for receivers that build the
+// Program directly (and that assert flat rather than just non-growing).
+func assertSteadyFlatInts(t *testing.T, p cg.Program, runs int) {
+	t.Helper()
+	counts := wasmSteadyLivePInts(t, p, runs)
+	if len(counts) != runs {
+		t.Fatalf("want %d per-run live counts, got %d: %v", runs, len(counts), counts)
+	}
+	for i := 2; i < len(counts); i++ {
+		if d := counts[i] - counts[i-1]; d != 0 {
+			t.Fatalf("steady-state not flat: run %d per-run delta=%d (counts %v)", i+1, d, counts)
+		}
+	}
+}
+
 // TestPerceusDupDropBalances: allocate a bignum, retain twice (rc 1->3), release
 // three times (rc 3->0 -> freed). With a correctly balanced dup/drop sequence the
 // ARC runtime returns $rt_live to 1 (UNIT only). This pins $rt_retain/$rt_release
