@@ -9,4 +9,7 @@ func TestControlCatalogElaborates(t *testing.T) {
 	normalizesTo(t, s, `allInRegion usEast demoServices`, "true")
 	normalizesTo(t, s, `allEncrypted demoEdges`, "true")
 	normalizesTo(t, s, `eqCodes granted needed`, "true")
+	// either merge order converges to max(3, 7) = 7
+	normalizesTo(t, s, `val (merge r3 r7)`, "7")
+	normalizesTo(t, s, `val (merge r7 r3)`, "7")
 }
