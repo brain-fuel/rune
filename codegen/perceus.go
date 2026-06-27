@@ -259,6 +259,12 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		// (a cached or intermediate K_CLO) is borrowed by rt_apply and NOT released
 		// here -- releasing it would cascade-free thunk-cached values. rt_apply itself
 		// is never modified (it would free closures at rc=1 in the no-Perceus runtime).
+		// NOTE (Task 4): the WASM emitter recognizes the FROZEN nat-fold / accel spine by
+		// pattern-matching the raw AppClosure chain (NatElimSpine / accelMatchC); wrapping
+		// an AppClosure-headed Clo in a CLet+CDrop here would break that recognition (and
+		// the emitter is out of edit scope), so curry-spine intermediates are not released
+		// in-band. A saturated eliminator receiver instead partial-applies the eliminator
+		// at top level so the curry spine is a cached thunk built once, not per run.
 		_, isCloVar := x.Clo.(CVar)
 		_, isCloMk := x.Clo.(MkClosure)
 
@@ -316,10 +322,83 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		}
 		return out
 
+	case CField:
+		// rt_con_get returns an ALIAS into the scrutinee (a borrowed read; it does not
+		// transfer ownership). Annotate the scrutinee (the projection itself consumes
+		// nothing). A projected value that ESCAPES into an owning position is dup'd
+		// there by consumeOwning's CField arm -- not here.
+		return CField{Scrut: pp.annotate(x.Scrut, owned), Index: x.Index}
+
+	case CCase:
+		return pp.annotateCase(x, owned)
+
 	default:
-		// CCase/CPair/CField/CFst/CSnd/CBounce: outside the Task 3.5 fragment. Carry
-		// through unchanged (Tasks 4-5 extend coverage); consumeOwning still owns a
-		// borrowed RESULT of one of these when it reaches an owning position.
+		// CPair/CFst/CSnd/CBounce: outside the covered fragment (Task 5 extends pairs).
+		// Carry through unchanged; consumeOwning still owns a borrowed RESULT of one of
+		// these when it reaches an owning position.
 		return t
 	}
+}
+
+// annotateCase inserts ownership for an eliminator's tag dispatch (CCase). The
+// scrutinee is BORROWED for the tag read (rt_con_tag does not consume) and for the
+// arms' field reads (rt_con_get returns aliases); after the arms it is owned and must
+// be DROPPED on EVERY arm path. The common shape -- the one a lowered eliminator's
+// final lambda-x block produces -- is an OWNED-local scrutinee CVar{k} whose arms
+// project its fields via CField{Scrut: CVar{k}} (the same index, no binder; arms share
+// the enclosing context). For that shape:
+//   - Each arm is annotated with the scrutinee marked NOT-owned, so the multi-use dup
+//     logic and the per-arm dead-drop do NOT touch it -- its field reads are borrows,
+//     not consumes. The scrutinee is consumed exactly once, by the drop below.
+//   - Each arm RESULT is run through consumeOwning so a borrowed return (a returned
+//     capture CEnv, or the kept field a `some x` arm projects) is dup'd -- the field
+//     thus carries its own reference past the scrutinee's free (no use-after-free).
+//   - PER-ARM LIVENESS: an owned local live across the case but dead in THIS arm is
+//     dropped at the arm front (a local dead in EVERY arm is dropped once before the
+//     case by ownScope). The scrutinee is excluded -- it has the drop-after below.
+//   - The scrutinee is dropped AFTER the arm body computes (after its field reads):
+//     bind the result, release the scrutinee, yield the result (drop-after).
+//
+// A scrutinee that is NOT an owned local (a borrowed CGlobal/CEnv, or -- never produced
+// by a lowered eliminator -- a non-variable term) is borrowed by, not owned by, this
+// scope: nothing to drop. The arms are still owned and per-arm-liveness handled.
+func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
+	sv, isVar := x.Scrut.(CVar)
+	scrutOwned := isVar && sv.Idx >= 0 && sv.Idx < len(owned) && owned[sv.Idx]
+
+	arms := make([]CCaseArm, len(x.Arms))
+	for i, a := range x.Arms {
+		armOwned := owned
+		if scrutOwned {
+			armOwned = append([]bool(nil), owned...)
+			armOwned[sv.Idx] = false // borrowed within the arm (field reads only)
+		}
+		body := consumeOwning(pp.annotate(a.Body, armOwned))
+
+		// Per-arm liveness for OTHER owned locals: drop one that is live across the
+		// case (used in some arm or the scrutinee position) but dead in this arm.
+		for j := len(owned) - 1; j >= 0; j-- {
+			if !owned[j] || (scrutOwned && j == sv.Idx) {
+				continue
+			}
+			if cirUsesArg(x, j) && !cirUsesArg(a.Body, j) {
+				body = CDrop{V: CVar{Idx: j}, K: body}
+			}
+		}
+
+		if scrutOwned {
+			// Drop-after: `let $scrut = <arm> in drop scrutinee; $scrut`. Binding the
+			// result shifts the scrutinee index by 1 in the CDrop continuation; the
+			// result (CVar{0}) does not mention the scrutinee, so the CDrop is clean.
+			body = CLet{
+				Name: "$scrut",
+				Val:  body,
+				Body: CDrop{V: CVar{Idx: sv.Idx + 1}, K: CVar{Idx: 0}},
+			}
+		}
+		arms[i] = CCaseArm{Tag: a.Tag, Body: body}
+	}
+	// The scrutinee position is a borrowed tag read: annotate it (a bare CVar passes
+	// through), do NOT consumeOwning it.
+	return CCase{Scrut: pp.annotate(x.Scrut, owned), Arms: arms}
 }

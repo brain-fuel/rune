@@ -271,3 +271,89 @@ shifted; only its `Env` terms, evaluated in the enclosing frame, shift.
   Steady-state flat `[2 2 2 2]`, output `<function>`.
 - `TestPerceusCoreDupDrop` (Task 3's receiver) stays GREEN: a closure used twice (one
   real dup) and a dead let-binding (one real drop) balance flat, output `<function>`.
+
+## Worked example: borrowed scrutinee, owned fields
+
+Task 4 wires `CCase` and `CField` into the pass. A datatype's eliminator is lowered to
+ordinary IR (`LowerElim`, codegen/lower.go): a curried lambda over the motive, the
+constructor cases, and the scrutinee, whose body is a `CCase` whose arms project the
+scrutinee's fields with `CField` and (for recursive arguments) call the eliminator
+recursively. After closure conversion the eliminator's FINAL lambda-x block is a `CCase`
+whose `Scrut` is the block's own argument `CVar{0}` and whose arms reference that same
+`CVar{0}` through `CField` (arms share the enclosing context, no binder, no index shift).
+The scrutinee arrives OWNED: a saturated eliminator call passes it through an AppClosure
+argument, where `consumeOwning` already dup'd it if it was borrowed.
+
+### The two node rules
+- `CField{Scrut, i}` reads field `i` with `rt_con_get`, an ALIAS into the scrutinee (a
+  borrowed read; it transfers nothing). The pass annotates the scrutinee and otherwise
+  carries the projection through. A projected value that ESCAPES into an owning position
+  (the kept field a `some x` arm returns, or the field a recursive-IH arm feeds to the
+  recursive call) is dup'd THERE by `consumeOwning`'s `CField` arm, not at the read.
+- `CCase{Scrut, Arms}` borrows the scrutinee for the tag read (`rt_con_tag` does not
+  consume) and for the arms' field reads, then must DROP the owned scrutinee on EVERY arm
+  path AFTER those reads. `annotateCase` handles the common shape an eliminator produces,
+  an OWNED-local scrutinee `CVar{k}`:
+  - Each arm is annotated with index `k` marked NOT-owned, so the multi-use dup logic and
+    the per-arm dead-drop never touch the scrutinee (its field reads are borrows, not
+    consumes; it is consumed exactly once, by the drop below). A multi-field arm that
+    reads `CVar{k}` through several `CField`s thus does not spuriously dup the scrutinee.
+  - Each arm RESULT is run through `consumeOwning`, so a borrowed return (a returned case
+    capture `CEnv`, or the kept field) is dup'd. The kept field thus carries its own
+    reference PAST the scrutinee's free, so dropping the scrutinee (which recursively
+    releases its children) does not dangle the returned value.
+  - PER-ARM LIVENESS: an owned local live across the case but dead in THIS arm is dropped
+    at the arm front (a local dead in EVERY arm is dropped once before the case by
+    `ownScope`). The scrutinee is excluded -- it has the drop-after.
+  - DROP-AFTER: the scrutinee is dropped after the arm body computes, as `let $scrut =
+    <arm> in drop scrutinee; $scrut`. Binding the result shifts the scrutinee index by 1
+    in the `CDrop` continuation; the result (`CVar{0}`) does not mention the scrutinee, so
+    the `CDrop` is clean.
+
+  A scrutinee that is NOT an owned local (a borrowed `CGlobal`/`CEnv`, or -- never emitted
+  by a lowered eliminator -- a non-variable term) is borrowed by, not owned by, this
+  scope: there is nothing to drop, and `consumeOwning` stops at a `CCase` (it owns inside
+  via the per-arm handling), so an enclosing consuming position sees the `CCase` as
+  already owned.
+
+### Receiver `TestPerceusConstructorCase`
+```rune
+data OptF : U is noneF : OptF | someF : (Nat -> Nat) -> OptF end
+optFMot : OptF -> U is fn (o : OptF) is Nat -> Nat end end
+matchF : OptF -> (Nat -> Nat) is
+  OptFElim optFMot (fn (z : Nat) is z end) (fn (x : Nat -> Nat) is x end)
+end
+mainOptF : Nat -> Nat is matchF (someF (fn (w : Nat) is w end)) end
+```
+The lowered `OptFElim`'s final block is
+`Case(CVar{0}){ tag0 -> CEnv{c0} ; tag1 -> App(CEnv{c1}, Field(CVar{0}, 0)) }`. The
+`someF` arm KEEPS the projected field (the payload closure). The pass produces, for that
+arm, `let $scrut = App(CEnv{c1}, (let $own = Field(CVar{0},0) in dup $own; $own)) in drop
+CVar{1}; $scrut`: the field is dup'd before it is handed to the identity case `c1`, then
+the scrutinee `someF ...` is released (freeing the K_CON and decrementing the payload back
+to the single dup'd reference), and the payload is returned and freed by the harness.
+
+The eliminator is PARTIAL-APPLIED at top level (`matchF`), so the saturated curry spine --
+which allocates one intermediate K_CLO per applied argument -- is a CACHED thunk built
+ONCE, not per run. The pass cannot release curry-spine intermediates in-band: the WASM
+emitter recognizes the frozen nat-fold / accel spine by pattern-matching the raw
+`AppClosure` chain (`NatElimSpine` / `accelMatchC`), and wrapping an `AppClosure`-headed
+`Clo` in a `CDrop` would break that recognition (the emitter is out of edit scope).
+Caching the spine sidesteps it; per run only the scrutinee allocates. The motive
+`optFMot` is likewise a cached def: the curry-through carve-out leaves the eliminator's
+ignored motive argument borrowed, and a cached root's refcount inflates while `$live`
+does not.
+
+Gate: OUTPUT `<function>` (the kept closure) AND `$live` flat. Steady-state goes from
+`[10 16 22 28 34]` (+6 per run under the pre-Task-4 carry-through: the K_CON scrutinee,
+its payload, and the per-run curry intermediates all leaked) to `[4 4 4 4 4]` (flat).
+
+The payload is a CLOSURE, not a bignum literal, for the same reason the Task 3 / 3.5
+receivers avoid bignums: `rt_big_parse`'s intermediate K_BIG temporaries are a deferred
+6b-2 leak that would mask the balance. The kept-field-is-a-bignum path (a RECURSIVELY
+freed field) is exercised for OUTPUT-invariance by the companion `some 7` program
+(`OptElim optMot zero (fn x is x end) (some 7)` -> `7`): if the `some x` arm did not dup
+the field, dropping the scrutinee `some 7` would free the K_BIG(7) before it is returned,
+a wrong value or a trap. Output `7` confirms the dup-on-escape holds for a recursively
+freed field too -- this is the first runtime proof of `consumeOwning`'s `CField` arm
+(the Task 3.5 Minor).

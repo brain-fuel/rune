@@ -308,3 +308,96 @@ mainCap : Nat -> Nat is capUse (fn (m : Nat) is m end) end
 func TestPerceusCaptureUseLater(t *testing.T) {
 	assertSteadyFlat(t, pathBCaptureSrc, "mainCap", "<function>")
 }
+
+// perceusCaseSrc is the Task 4 receiver: a two-constructor datatype OptF, matched by
+// its lowered eliminator OptFElim, whose `someF x` arm KEEPS the projected field.
+//
+// The final lambda-x block of the lowered OptFElim is a CCase whose scrutinee is the
+// block's owned argument CVar{0} (the value `someF (fn w is w end)`). It arrives OWNED
+// (a fresh K_CON the constructor application built). The receiver forces every Task 4
+// ownership event:
+//
+//   - BORROWED SCRUTINEE, OWNED-AT-END: the scrutinee is borrowed for the tag read and
+//     the arm's field read (rt_con_tag / rt_con_get are aliases); after the arm it is
+//     owned and is DROPPED on the arm path (drop-after). Without the drop the K_CON
+//     leaks each run ($live grows); the steady gate catches it.
+//   - CField DUP-ON-ESCAPE (the Task 3.5 Minor): the `someF x` arm returns the
+//     projected field (a kept closure). consumeOwning dups that field at the AppClosure
+//     argument position so it carries its own reference PAST the scrutinee's free. With
+//     no dup the scrutinee drop would free the kept closure -> use-after-free (corrupt
+//     output / trap), which the output-invariance gate catches.
+//   - PER-ARM LIVENESS + CURRY SPINE: two arms (the dead `noneF` arm's case capture is
+//     owned per arm), and the saturated 4-argument OptFElim curry spine's intermediate
+//     closures are released (PATH B: every application returns an OWNED closure).
+//
+// The eliminator is PARTIAL-APPLIED to its motive + cases at top level (`matchF`), so
+// the saturated curry spine -- which allocates one fresh intermediate K_CLO per applied
+// argument -- is a CACHED THUNK built ONCE, not rebuilt per run. (The pass cannot free
+// curry-spine intermediates in-band: the WASM emitter recognizes the frozen nat-fold /
+// accel spine by pattern-matching the raw AppClosure chain, and wrapping an
+// AppClosure-headed Clo in a CDrop would break that recognition -- and the emitter is out
+// of edit scope. Caching the spine sidesteps it.) Per run, only the scrutinee `someF
+// (fn w is w end)` (a K_CON wrapping a K_CLO) allocates; the single application `matchF
+// scrut` hands it to the cached final-block closure, which OWNS and drops it. The motive
+// `optFMot` is likewise a cached def (the carve-out leaves the ignored motive argument
+// borrowed; a cached root's rc inflates but $live does not). The payload is a CLOSURE,
+// not a bignum literal: exactly as the Task 3 / 3.5 receivers avoid bignums, since
+// rt_big_parse's intermediate K_BIG temps are a deferred 6b-2 leak that would mask the
+// balance. The kept-field-is-a-bignum path is exercised for OUTPUT-invariance by
+// perceusCaseLitSrc.
+const perceusCaseSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data OptF : U is
+  noneF : OptF
+| someF : (Nat -> Nat) -> OptF
+end
+optFMot : OptF -> U is fn (o : OptF) is Nat -> Nat end end
+matchF : OptF -> (Nat -> Nat) is
+  OptFElim optFMot (fn (z : Nat) is z end) (fn (x : Nat -> Nat) is x end)
+end
+mainOptF : Nat -> Nat is matchF (someF (fn (w : Nat) is w end)) end
+`
+
+// perceusCaseLitSrc keeps a projected BIGNUM field (`some 7` -> 7). It is an
+// OUTPUT-invariance receiver only: rt_big_parse leaks K_BIG temps (the deferred 6b-2
+// path), so its $live is not flat -- but the OUTPUT proves the kept field survives the
+// scrutinee's recursive free. If the `some x` arm did not dup the field, dropping the
+// scrutinee `some 7` would free the K_BIG(7) before it is returned -> a wrong value or a
+// trap. Output 7 confirms CField dup-on-escape holds for a recursively-freed field too.
+const perceusCaseLitSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Opt : U is
+  none : Opt
+| some : Nat -> Opt
+end
+optMot : Opt -> U is fn (o : Opt) is Nat end end
+mainOpt : Nat is OptElim optMot zero (fn (x : Nat) is x end) (some 7) end
+`
+
+// TestPerceusConstructorCase is the Task 4 gate: build a datatype value, match it via
+// the lowered eliminator, KEEP the projected field. Two assertions:
+//
+//   - assertSteadyFlat on the closure-payload receiver: OUTPUT "<function>" (the kept
+//     closure) AND $live flat after run 1 (balanced: K_CON scrutinee dropped, kept
+//     field dup'd out, curry-spine intermediates released). Under the pre-Task-4
+//     carry-through this program leaked +6/run.
+//   - OUTPUT-invariance on the bignum-payload receiver: `some 7` -> "7", proving the
+//     kept field survives the scrutinee's recursive free (CField dup-on-escape).
+func TestPerceusConstructorCase(t *testing.T) {
+	// Balanced gate: scrutinee dropped, kept field dup'd, steady flat.
+	assertSteadyFlat(t, perceusCaseSrc, "mainOptF", "<function>")
+
+	// Kept BIGNUM field survives the scrutinee free (output-invariance only).
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusCaseLitSrc, "mainOpt"))
+	if got != "7" {
+		t.Fatalf("kept field use-after-free under scrutinee drop: got %q, want 7", got)
+	}
+}
