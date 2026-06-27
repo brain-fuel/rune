@@ -23,7 +23,10 @@ func splitWatLocals(body string) (locals, rest string) {
 		for i < n && (body[i] == ' ' || body[i] == '\t' || body[i] == '\n' || body[i] == '\r') {
 			i++
 		}
-		if i >= n || !strings.HasPrefix(body[i:], "(local") {
+		isLocalDecl := strings.HasPrefix(body[i:], "(local ") ||
+			strings.HasPrefix(body[i:], "(local\t") ||
+			strings.HasPrefix(body[i:], "(local$")
+		if i >= n || !isLocalDecl {
 			break
 		}
 		// scan balanced parens for one (local ...) s-expression
