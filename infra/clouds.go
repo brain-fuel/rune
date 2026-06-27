@@ -853,7 +853,7 @@ func (GCP) Emit(rs []Resource) (Artifact, error) {
 			h.close()
 		case Identity:
 			h.open("resource \"google_service_account\" %s", str(v.Name))
-			h.attr("account_id", str(v.Name))
+			h.attr("account_id", str(gcpAccountID(v.Name)))
 			h.attr("display_name", str("wavelet "+v.Name))
 			h.close()
 			if len(v.Grants) > 0 {

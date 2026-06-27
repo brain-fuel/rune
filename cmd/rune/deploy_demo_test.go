@@ -13,6 +13,31 @@ import (
 
 const demoDeployManifest = "../../examples/wavelet_deploy.wav"
 
+// validateClean runs `terraform validate` on one cloud's main.tf. It needs provider
+// init; if init fails (offline / no network), it SKIPS rather than failing, so the
+// gate is robust in disconnected CI. When init succeeds it catches schema errors
+// (e.g. an invalid resource argument) that `terraform fmt` cannot.
+func validateClean(t *testing.T, tf string) {
+	t.Helper()
+	if _, err := exec.LookPath("terraform"); err != nil {
+		t.Skip("terraform not in PATH")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.tf"), []byte(tf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	init := exec.Command("terraform", "init", "-backend=false", "-input=false", "-no-color")
+	init.Dir = dir
+	if out, err := init.CombinedOutput(); err != nil {
+		t.Skipf("terraform init unavailable (offline?), skipping validate:\n%s", out)
+	}
+	val := exec.Command("terraform", "validate", "-no-color")
+	val.Dir = dir
+	if out, err := val.CombinedOutput(); err != nil {
+		t.Fatalf("emitted HCL failed terraform validate:\n%s", out)
+	}
+}
+
 // fmtClean runs `terraform fmt -check` on one main.tf; skips if terraform is absent.
 func fmtClean(t *testing.T, tf string) {
 	t.Helper()
@@ -67,5 +92,7 @@ func TestDeployDemoHCL(t *testing.T) {
 		}
 		// fmt-clean
 		fmtClean(t, tf)
+		// schema-valid
+		validateClean(t, tf)
 	}
 }

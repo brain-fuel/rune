@@ -33,6 +33,13 @@ func iamPolicyJSON(grants []string) string {
 	return string(b)
 }
 
+// gcpAccountID sanitizes a logical name into a valid GCP service-account account_id
+// (lowercase, hyphens for underscores; the google provider rejects underscores and
+// uppercase). Names already valid (e.g. "worker-role") pass through unchanged.
+func gcpAccountID(name string) string {
+	return strings.ToLower(strings.ReplaceAll(name, "_", "-"))
+}
+
 // hclList renders a single-line HCL list literal of quoted strings, fmt-stable for
 // the short permission lists the least-privilege roles carry.
 func hclList(items []string) string {
