@@ -1,17 +1,17 @@
 package codegen
 
-// wasm_runtime.go — the NINTH backend's WAT runtime: a self-contained WebAssembly
+// wasm_runtime.go - the NINTH backend's WAT runtime: a self-contained WebAssembly
 // runtime emitted INLINE in the module (unlike the C/LLVM backends, whose runtime is
-// a linked C blob — wasmtime runs a single `.wat` with no host linkage, so the whole
+// a linked C blob - wasmtime runs a single `.wat` with no host linkage, so the whole
 // runtime IS WAT here). It is the design-locked "R-NATIVE Cranelift/WASM" node, shipped
 // as a WAT emitter testable via `wasmtime run module.wat`.
 //
 // VALUE REP (mirrors the C/LLVM rep, narrowed to i32): a Rune value is an i32 that is
-// either an IMMEDIATE small int — `(n<<1)|1`, low bit set — or an even-aligned heap
+// either an IMMEDIATE small int - `(n<<1)|1`, low bit set - or an even-aligned heap
 // pointer into linear memory (low bit clear). The emitter never inspects the tag; it
 // defers to the `rt_*` helpers below, so the rep stays owned by ONE place.
 //
-// HEAP LAYOUT: a bump allocator over linear memory (no collection in v1 — see the GC
+// HEAP LAYOUT: a bump allocator over linear memory (no collection in v1 - see the GC
 // note in wasm.go). Every object starts with a kind word; the field layout per kind:
 //
 //	K_CLO  [kind=0][code_idx][nenv][env0][env1]...     code_idx indexes the func table
@@ -39,14 +39,38 @@ const wasmRuntime = `
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
   (global $hp (mut i32) (i32.const 65536))  ;; heap pointer; below it: scratch + cstrs
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
+  (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
+  (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
 
-  ;; bump-allocate n bytes, 4-byte aligned, returning the base pointer.
+  ;; ARC alloc: reserve an 8-byte hidden header [size][rc] below the payload. Rounds the
+  ;; requested payload size to 4-byte alignment, stores the rounded size and rc=1, bumps
+  ;; $live, returns the PAYLOAD pointer. Before bumping $hp, checks the size-classed free
+  ;; list ($freelist buckets indexed by rounded_size/4): if the matching bucket is non-empty
+  ;; the head block is popped, its rc reset to 1, and returned without touching $hp.
   (func $alloc (param $n i32) (result i32)
-    (local $p i32)
+    (local $base i32) (local $payload i32) (local $bkt i32) (local $head i32)
     (local.set $n (i32.and (i32.add (local.get $n) (i32.const 3)) (i32.const -4)))
-    (local.set $p (global.get $hp))
-    (global.set $hp (i32.add (local.get $p) (local.get $n)))
-    (local.get $p))
+    ;; try the size-classed free list first
+    (local.set $bkt (call $rt_bucket_addr (local.get $n)))
+    (if (local.get $bkt)
+      (then
+        (local.set $head (i32.load (local.get $bkt)))
+        (if (local.get $head)
+          (then
+            ;; pop: advance bucket head to the link stored in the freed block's first word
+            (i32.store (local.get $bkt) (i32.load (local.get $head)))
+            ;; reset rc=1 at [head-4]
+            (i32.store (i32.sub (local.get $head) (i32.const 4)) (i32.const 1))
+            (global.set $live (i32.add (global.get $live) (i32.const 1)))
+            (return (local.get $head))))))
+    ;; bump allocate from $hp
+    (local.set $base (global.get $hp))
+    (local.set $payload (i32.add (local.get $base) (i32.const 8)))
+    (global.set $hp (i32.add (local.get $payload) (local.get $n)))
+    (i32.store (local.get $base) (local.get $n))                         ;; [payload-8] = size
+    (i32.store (i32.add (local.get $base) (i32.const 4)) (i32.const 1)) ;; [payload-4] = rc
+    (global.set $live (i32.add (global.get $live) (i32.const 1)))
+    (local.get $payload))
 
   ;; immediate-int tag helpers (FFI LitInt path; nats are K_BIG below).
   (func $rt_mkint (param $n i32) (result i32)
@@ -260,7 +284,7 @@ const wasmRuntime = `
 
   ;; rt_big_parse: parse a NUL-terminated decimal cstr at $p into a bignum.
   ;; Reads the digit count, then folds groups of 9 digits (most-significant first
-  ;; into the top limb). Builds via repeated *10 + digit using big_mul/big_add — naive
+  ;; into the top limb). Builds via repeated *10 + digit using big_mul/big_add - naive
   ;; but only runs once per literal.
   (func $rt_big_parse (param $p i32) (result i32)
     (local $acc i32) (local $ten i32) (local $c i32)
@@ -394,4 +418,116 @@ const wasmRuntime = `
     (i32.store (i32.const 16) (local.get $ptr))
     (i32.store (i32.const 20) (local.get $len))
     (drop (call $fd_write (local.get $fd) (i32.const 16) (i32.const 1) (i32.const 24))))
+
+  ;; ARC live-block count (alloc bumps, free drops): the leak/double-free probe.
+  (func $rt_live (result i32) (global.get $live))
+
+  ;; $rt_bucket_addr: return the $freelist bucket address for a rounded payload size, or 0
+  ;; if the size is out of range (index >= 64, i.e. size >= 256 bytes). The bucket holds
+  ;; the payload pointer of the first free block of that exact size (intrusive linked list:
+  ;; the link to the next block of the same size is stored at the freed payload's word 0).
+  (func $rt_bucket_addr (param $size i32) (result i32)
+    (local $idx i32)
+    (local.set $idx (i32.shr_u (local.get $size) (i32.const 2)))
+    (if (result i32) (i32.lt_u (local.get $idx) (i32.const 64))
+      (then (i32.add (global.get $freelist) (i32.shl (local.get $idx) (i32.const 2))))
+      (else (i32.const 0))))
+
+  ;; $rt_hp: current heap pointer (for the free-list reuse test: hp must not advance under
+  ;; same-size alloc/free churn once the free list is seeded).
+  (func $rt_hp (result i32) (global.get $hp))
+
+  ;; rt_counted: true iff v participates in refcounting -- not an immediate (low bit
+  ;; set), not null, and not the immortal UNIT singleton.
+  (func $rt_counted (param $v i32) (result i32)
+    (i32.and
+      (i32.and
+        (i32.eqz (i32.and (local.get $v) (i32.const 1)))   ;; low bit clear => pointer
+        (i32.ne (local.get $v) (i32.const 0)))             ;; non-null
+      (i32.ne (local.get $v) (global.get $UNIT))))         ;; not the immortal unit
+
+  ;; rt_retain: a no-op on immediates (low bit set) and the immortal UNIT; otherwise
+  ;; increment the refcount at [v-4].
+  (func $rt_retain (param $v i32)
+    (if (call $rt_counted (local.get $v))
+      (then
+        (i32.store (i32.sub (local.get $v) (i32.const 4))
+          (i32.add (i32.load (i32.sub (local.get $v) (i32.const 4))) (i32.const 1))))))
+
+  ;; rt_release: a no-op on immediates and UNIT; otherwise decrement the refcount; at
+  ;; zero, free the block (Task 3 adds child recursion before the free).
+  (func $rt_release (param $v i32)
+    (local $rc i32)
+    (if (call $rt_counted (local.get $v))
+      (then
+        (local.set $rc (i32.sub (i32.load (i32.sub (local.get $v) (i32.const 4))) (i32.const 1)))
+        (i32.store (i32.sub (local.get $v) (i32.const 4)) (local.get $rc))
+        (if (i32.eqz (local.get $rc))
+          (then (call $rt_free (local.get $v)))))))
+
+  ;; rt_free: release the object's child pointers by kind (so the whole immutable
+  ;; structure is reclaimed), then drop the live count. The value graph is acyclic
+  ;; (immutable functional data), so this terminates.
+  ;; Kinds: K_CLO=0 env slots at word 3 (count at word 2);
+  ;;        K_CON=1 field slots at word 4 (count at word 3);
+  ;;        K_PAIR=2 halves at words 1 and 2;
+  ;;        K_BIG=6 and others: leaf -- limbs are raw ints, not pointers.
+  ;; $rt_free releases child pointers by kind (so the whole structure is reclaimed),
+  ;; decrements $live, then pushes the block onto its size-class free list for reuse.
+  (func $rt_free (param $v i32)
+    (local $kind i32) (local $n i32) (local $i i32) (local $base i32)
+    (local $size i32) (local $bkt i32)
+    (local.set $kind (call $w (local.get $v) (i32.const 0)))
+    (block $done
+      ;; K_CLO=0: env slots start at word 3, count at word 2
+      (if (i32.eqz (local.get $kind))
+        (then
+          (local.set $n (call $w (local.get $v) (i32.const 2)))
+          (local.set $base (i32.const 3))
+          (br $done)))
+      ;; K_CON=1: field slots start at word 4, count at word 3
+      (if (i32.eq (local.get $kind) (i32.const 1))
+        (then
+          (local.set $n (call $w (local.get $v) (i32.const 3)))
+          (local.set $base (i32.const 4))
+          (br $done)))
+      ;; K_PAIR=2: two child pointers at words 1 and 2
+      (if (i32.eq (local.get $kind) (i32.const 2))
+        (then
+          (call $rt_release (call $w (local.get $v) (i32.const 1)))
+          (call $rt_release (call $w (local.get $v) (i32.const 2)))
+          (local.set $n (i32.const 0))
+          (local.set $base (i32.const 0))
+          (br $done)))
+      ;; K_BIG and anything else: leaf, no child pointers
+      (local.set $n (i32.const 0))
+      (local.set $base (i32.const 0)))
+    ;; release the $n child slots starting at word $base (closures + constructors)
+    (local.set $i (i32.const 0))
+    (block $brk (loop $lp
+      (br_if $brk (i32.ge_u (local.get $i) (local.get $n)))
+      (call $rt_release (call $w (local.get $v) (i32.add (local.get $base) (local.get $i))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lp)))
+    (global.set $live (i32.sub (global.get $live) (i32.const 1)))
+    ;; push onto the size-classed free list (if poolable: rounded size < 256 bytes)
+    (local.set $size (i32.load (i32.sub (local.get $v) (i32.const 8))))
+    (local.set $bkt (call $rt_bucket_addr (local.get $size)))
+    (if (local.get $bkt)
+      (then
+        (i32.store (local.get $v) (i32.load (local.get $bkt)))  ;; link := old head
+        (i32.store (local.get $bkt) (local.get $v))))           ;; head := this payload
+  )
+
+  ;; print an unsigned i32 in decimal to stdout (reuses the show buffer + fd_write).
+  (func $rt_print_u32 (param $n i32)
+    (global.set $sbuf (i32.const 4096))
+    (call $emit_u32 (local.get $n))
+    (call $puts (i32.const 1) (i32.const 4096)
+      (i32.sub (global.get $sbuf) (i32.const 4096))))
 `
+
+// WasmRuntime returns the WAT runtime string for the WASM backend. The underlying
+// const is unexported so the runtime cannot be modified from outside codegen; this
+// accessor gives the external test package read-only access.
+func WasmRuntime() string { return wasmRuntime }
