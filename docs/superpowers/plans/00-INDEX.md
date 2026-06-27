@@ -100,6 +100,8 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 
 ### Plan 4: CALM round-trip
 
+> STATUS: PLANNED. Task file: `2026-06-26-calm-round-trip.md`. 7 tasks: new `calm/` package (CALM v0.1 doc model + JSON; node-type map + ledger-backed Model + BuildModel; ToDoc/Reconstruct; Emit with nodes=logical-resource-set; Validate 1:1 structural + macro-micro assurance tie via Diagnostic); `rune calm emit|validate` CLI + `examples/wavelet_demo.wav`; e2e demo round-trip + live proof-change detection. Builds on infra/ (nodes), control/ (Plan 3, attachments), ledger/ (Plan 2, assurance). Greenfield, no kernel change.
+
 - **Goal.** Language-to-CALM emit plus ingest-for-validation; 1:1 macro-to-micro traceability.
 - **Constraints.** Greenfield (no prior CALM plan). Build on the `infra/` Resource model and the
   `equal-config -> equivalent-deployment` equivalence gate. Map `infra.Kind` and LogicalResource to

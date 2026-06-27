@@ -1,0 +1,12 @@
+# examples/wavelet_demo.wav - the two-tab collaborative CRDT app (Wavelet beta demo).
+#
+# Three architecture nodes: a web client, a signaling/relay service, and a
+# persistence store. The control catalog (control.Catalog) attaches the blessed
+# controls to these by name: in-region + convergence + the live-region tail on the
+# store, least-privilege-IAM on the relay, encrypted-in-transit on the web->relay link.
+#
+#   rune calm emit                       > demo.calm.json
+#   rune calm validate demo.calm.json
+paas    web
+compute relay
+kv      store

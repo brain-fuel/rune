@@ -112,6 +112,10 @@ func main() {
 		if err := runDeploy(os.Args[2:], os.Stdout); err != nil {
 			fatal(err)
 		}
+	case "calm":
+		if err := runCalm(os.Args[2:], os.Stdout); err != nil {
+			fatal(err)
+		}
 	default:
 		usage()
 		os.Exit(2)
