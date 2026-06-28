@@ -763,8 +763,8 @@ func PerceusBalanceable(p Program) bool {
 // traverses every node, mirroring cirUsesArg's scope rules: a MkClosure's code-block
 // body is a separate lifted scope (already scanned as a separate CodeBlock by
 // PerceusBalanceable), so only its Env captures are scanned. It flags two constructs:
-// CBounce, and an OVER-APPLIED NatElim spine (the accel-op exclusion is handled at the
-// program level in PerceusBalanceable; SATURATED 4-arg NatElim folds are now flat).
+// CBounce, and an OVER-APPLIED NatElim spine (accel-op programs are now admitted --
+// accelDispatch frees both owned operands; SATURATED 4-arg NatElim folds are flat).
 func cirUnbalanceable(t CIr, natElim string) bool {
 	switch x := t.(type) {
 	case CBounce:
