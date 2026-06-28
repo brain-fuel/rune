@@ -760,17 +760,15 @@ func TestPerceusCorpusOutputInvariance(t *testing.T) {
 // (PerceusBalanceable = false) are SKIPPED -- they are the remaining 6b-2 frontier
 // documented in R-PERCEUS.md. The test logs how many were balanced vs skipped.
 //
-// After the Plan 6b-2 re-opening (Task 5), the balanceable subset is NON-EMPTY: the
+// After the accel-operand leak is closed (Task 2), the balanceable subset grows: the
 // recursive-datatype eliminators `three` (NatElim fold) and `two` (ListElim fold) and
-// the arity-4 constructor `p` all reach flat. `product` (mulN 100 100) stays excluded
-// (the builtin-nat fold-SETUP residual, +507/run); `big`/`bigger`/`sum`/`prod`/`diff`/
-// `diffZero` are flat but conservatively excluded because their source modules carry
-// dead addN/mulN defs whose NatElimSpine trips condition 2 (a one-sided miss, never a
-// soundness break: PerceusBalanceable is never true for a non-flat program).
+// the arity-4 constructor `p` all reach flat; so do `big`/`bigger`/`product` (accel-free
+// NatElim folds via satElimDispatch); and now `sum`/`prod`/`diff`/`diffZero` (the accel
+// conformance listings) join the flat fragment (accelDispatch frees both owned operands).
+// Only the CBounce listings remain excluded.
 //
-// The two REMAINING exclusion conditions are:
+// The ONE REMAINING exclusion condition:
 //  1. CBounce (partial trampoline) -- unsupported on WASM.
-//  2. Inline builtin-nat-fold (NatElimSpine) -- the fold-SETUP residual.
 func TestPerceusCorpusSteady(t *testing.T) {
 	cases := wasmCorpusCases()
 	nBalanced, nSkipped := 0, 0
@@ -988,12 +986,11 @@ func TestPerceusFrontierBoundary(t *testing.T) {
 	}
 }
 
-// perceusAccelArmSrc is the accel-operand frontier program: an accel op consumed
-// INSIDE a NatElim step (`addN ih (succ n)`). After Task 1, accelDispatch frees
-// BOTH owned operands unconditionally, so `ih` (the owned step accumulator) and
-// `succ n` (a fresh K_BIG) are both freed -- the per-iteration leak is closed and
-// this program is now steady-flat. TestPerceusAccelFrontier (which asserted the
-// leak was real) is intentionally left failing until Task 2 rewrites it.
+// perceusAccelArmSrc is the canonical accel-operand program: an accel op consumed
+// INSIDE a NatElim step (`addN ih (succ n)`). accelDispatch frees BOTH owned operands
+// unconditionally, so `ih` (the owned step accumulator) and `succ n` (a fresh K_BIG)
+// are both freed -- the per-iteration leak is closed and this program is steady-flat.
+// Referenced by TestPerceusAccelInFlatFragment and TestPerceusAccelCorpusFlat.
 const perceusAccelArmSrc = accelNatSrc + `
 armUse : Nat -> Nat is
   fn (n : Nat) is
@@ -1003,26 +1000,40 @@ end
 mainArm : Nat is armUse 3 end
 `
 
-// TestPerceusAccelFrontier pins the accel-operand frontier: a program that REGISTERS
-// accel ops is excluded from the flat fragment (PerceusBalanceable = false), because
-// an accel op applied to an owned-local operand leaks and is not statically separable
-// from a flat accel use. The armUse shape (accel inside a fold step) actually leaks,
-// confirming the exclusion is real and not vacuous. When the deferred accel-operand
-// ownership annotation lands, this flips (the leak closes and accel programs join the
-// flat fragment).
-func TestPerceusAccelFrontier(t *testing.T) {
+// TestPerceusAccelInFlatFragment: with the accel-operand leak closed (accelDispatch
+// frees both owned operands), an accel-registering program whose bodies are otherwise
+// flat is now INSIDE the balanceable fragment and reaches steady-flat. This is the
+// flipped former-frontier receiver (was TestPerceusAccelFrontier).
+func TestPerceusAccelInFlatFragment(t *testing.T) {
 	p := mustProgram(t, perceusAccelArmSrc, "mainArm")
-	if cg.PerceusBalanceable(p) {
-		t.Fatalf("an accel-registering program (accel-in-step leaks) must be OUTSIDE the flat fragment")
+	if !cg.PerceusBalanceable(p) {
+		t.Fatalf("accel-operand leak closed: an accel program with flat bodies must be IN the flat fragment")
 	}
-	// It genuinely leaks (the exclusion is not vacuous): per-run $rt_live grows.
-	c := wasmSteadyLivePInts(t, p, 5)
-	if c[2] == c[3] && c[3] == c[4] {
-		t.Fatalf("expected accel-in-step to leak (frontier not vacuous), got flat %v", c)
-	}
-	// Output is still correct despite the leak.
+	assertSteadyFlatInts(t, p, 5)
 	if got := runWasm(t, emitWith(t, cg.Wasm{}, perceusAccelArmSrc, "mainArm")); got != "18" {
 		t.Fatalf("accel-in-step output: got %q, want 18", got)
+	}
+}
+
+// TestPerceusAccelCorpusFlat: the accel conformance listings (sum/prod/diff/diffZero)
+// now reach steady-flat (their addN/mulN/monusN fold-def bodies free their accel
+// operands, including mulN's accel-in-step `addN n ih`).
+func TestPerceusAccelCorpusFlat(t *testing.T) {
+	cases := []struct{ main, want string }{
+		{"sum", "8000"}, {"prod", "10000"}, {"diff", "5"}, {"diffZero", "0"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.main, func(t *testing.T) {
+			p := mustProgram(t, accelNatSrc, c.main)
+			if !cg.PerceusBalanceable(p) {
+				t.Fatalf("accel listing %s must be balanceable", c.main)
+			}
+			assertSteadyFlatInts(t, p, 5)
+			if got := runWasm(t, emitWith(t, cg.Wasm{}, accelNatSrc, c.main)); got != c.want {
+				t.Fatalf("accel listing %s: got %q, want %s", c.main, got, c.want)
+			}
+		})
 	}
 }
 

@@ -671,7 +671,7 @@ must reach a true steady state: $rt_live is flat from run 2 onward (no per-run l
 `TestPerceusCorpusSteady` iterates the corpus, skips programs with
 `PerceusBalanceable = false` (the 6b-2 frontier), and asserts flat for the rest.
 
-Result with the current corpus (after the satElimDispatch follow-up): 6 balanced, 4
+Result with the current corpus (after the accel-operand closure): 10 balanced, 0
 skipped.
 
 | Corpus listing | In the flat fragment? |
@@ -680,12 +680,12 @@ skipped.
 | two (listSrc length) | YES -- accel-free inline ListElim fold, flat |
 | p (pairSrc mk) | YES -- saturated arity-4 ctor (satCtorDispatch), flat |
 | big, bigger, product (bigNatSrc) | YES -- accel-free NatElim multiplies (satElimDispatch), flat |
-| sum, prod, diff, diffZero (accelNatSrc) | NO -- register accel ops (accel-operand frontier), excluded wholesale though flat |
+| sum, prod, diff, diffZero (accelNatSrc) | YES -- accel ops admitted; accelDispatch frees both owned operands |
 
-Every balanced listing is asserted flat by `TestPerceusCorpusSteady`; the skipped four
-are the accel-operand frontier (sound conservative over-exclusion). The receiver programs
+Every balanced listing is asserted flat by `TestPerceusCorpusSteady`. The receiver programs
 cover the steady-flat assertion for every major ownership pattern (closures, constructors,
-case, pairs, curry intermediates, inline + nested + recursive eliminators, NatElim folds).
+case, pairs, curry intermediates, inline + nested + recursive eliminators, NatElim folds,
+and now accel arithmetic).
 
 ### Frontier boundary (TestPerceusFrontierBoundary)
 
@@ -698,17 +698,12 @@ include trampoline programs without 6b-2 CBounce ownership, the test fails visib
 ### PerceusBalanceable
 
 `PerceusBalanceable(p Program) bool` in `codegen/perceus.go` scans the closure-converted
-CIr of p for four exclusion patterns. It is conservative: when unsure, it returns false
-(exclude from the steady gate). The four conditions are documented in the function's
-godoc comment. The key saturation thresholds:
-
-- General eliminator (condition 3): spine depth >= 1 + len(ctors) + 1 (motive + cases + scrutinee).
-  A partially-applied eliminator cached as a def (shorter spine at the application site)
-  is NOT excluded, so `perceusCaseSrc` (which caches `matchF = OptFElim mot c0 c1`)
-  remains balanceable.
-- Multi-arg constructor (condition 4): spine depth >= 2 AND `c.Arity >= 2`. A 1-arg
-  constructor (like `someF : (Nat->Nat) -> OptF`) is never in `multiArgCtors` and is not
-  excluded even when applied at depth 1.
+CIr of p for exclusion patterns. It is conservative: when unsure, it returns false
+(exclude from the steady gate). After the accel-operand closure, only ONE exclusion
+remains: CBounce (the per-spine `cirUnbalanceable` scan). Accel-op programs are now
+ADMITTED -- `p.Nat.Ops` non-empty no longer triggers a wholesale exclusion. The former
+condition-3 (inline general eliminator) and condition-4 (inline arity>=2 constructor)
+were already removed; the accel-program wholesale exclusion is now also removed.
 
 ### CSnd minor (TestPerceusWasmSnd)
 
@@ -761,6 +756,7 @@ fragment. The closures, in order:
 | rt_big_parse per-digit temporaries (nat literals) | Task 4 (rt_big_parse releases its per-digit temps + big_alloc zeroing) | `TestPerceusBignumParseTemps` |
 | rt_big_succ internal K_BIG(1) temp | Task 4b | `TestPerceusBigSuccTempReleased` |
 | accel/succ owned-operand frees (succ-chains + add/mul/monus arithmetic) | Task 4d (rt_nat_add/mul/monus + succ_code free their owned operands) | `TestPerceusSuccChainFlat` |
+| accel-CVar-operand leak (addN n n, addN ih (succ n) in fold steps) | accel-operand plan Task 1 + Task 2 (accelDispatch frees both owned operands; wholesale exclusion dropped) | `TestPerceusAccelInFlatFragment`, `TestPerceusAccelCorpusFlat` |
 
 ### The resulting flat fragment
 
@@ -769,7 +765,9 @@ runs 2..N, measured by `wasmSteadyLivePInts` / `assertSteadyFlatInts`):
 
 - **succ-chains** (`succ (succ (succ zero))`, `bigger = succ (succ 5000)`),
 - **accel arithmetic** (`addN`/`mulN`/`monusN` bound via `builtin natAdd`/`natMul`/
-  `natMonus`, lowered directly to `rt_nat_add`/`mul`/`monus`),
+  `natMonus`, lowered directly to `rt_nat_add`/`mul`/`monus`), including accel ops on
+  owned locals (`addN n n`, accel-in-fold-step `addN ih (succ n)`) -- the accel-operand
+  residual is CLOSED (both operands freed unconditionally by accelDispatch),
 - **saturated constructors** (the arity-4 `mk Nat Nat (succ zero) (succ (succ zero))`),
 - **inline NON-RECURSIVE user-eliminators** (`OptElim`/`BoxElim` over a non-recursive
   record), AND empirically the **recursive datatype eliminators** `three` (a NatElim
@@ -782,13 +780,12 @@ saturated arity-2 constructor, an inline non-recursive eliminator, and succ arit
 in one per-run main path (`BoxElim mot (fn a rest is succ (succ a) end) (mk 42 (succ 7))`
 -> `44`) and reaches `[3 3 3 3 3]`.
 
-`PerceusBalanceable` was re-opened by DELETING the former conditions 3 (inline general
-eliminator) and 4 (inline arity>=2 constructor). The empirical justification: every
-corpus listing those two conditions excluded now reaches flat -- `three` `[4 4 4 4]`,
-`two` `[4 4 4 4]`, `p` `[2 2 2 2]`. `TestPerceusCorpusSteady` now reports **3 balanced,
-7 skipped** (was 0 balanced, 10 skipped) and asserts `nBalanced > 0`. The HARD INVARIANT
-stays one-sided: `PerceusBalanceable` is CONSERVATIVE and must NEVER return true for a
-non-flat program; a flat program it excludes is only a missed opportunity.
+`PerceusBalanceable` was re-opened in stages: DELETING the former conditions 3 (inline
+general eliminator) and 4 (inline arity>=2 constructor), then removing the wholesale accel
+exclusion. `TestPerceusCorpusSteady` now reports **10 balanced, 0 skipped** (was 3
+balanced, 7 skipped after 6b-2; 0 balanced, 10 skipped before). The HARD INVARIANT stays
+one-sided: `PerceusBalanceable` is CONSERVATIVE and must NEVER return true for a non-flat
+program; a flat program it excludes is only a missed opportunity.
 
 NOTE on recursive eliminators: the corpus's recursive folds (`three`/`two`) recurse via
 the induction hypothesis `ih`, not by calling the eliminator head by NAME in the source
@@ -821,31 +818,38 @@ TRUE steady-flat, iteration-independent (verified for succ-step, ctor-step, and 
 folds, `TestPerceusNatFoldFlat`, and for the corpus `big`/`bigger`/`product` -- plain
 NatElim multiplies of 100 iterations -- all `[1..5]/[2..5]` flat). 8-backend conformance
 byte-identical. `PerceusBalanceable` no longer excludes NatElim folds; the corpus
-steady-flat set grew from 3 to 6 (`three`/`two`/`p`/`big`/`bigger`/`product`).
+steady-flat set grew from 3 to 6 (`three`/`two`/`p`/`big`/`bigger`/`product`), and
+subsequently grew to 10 after the accel-operand closure admitted `sum`/`prod`/`diff`/
+`diffZero`.
 
-### The two REMAINING excluded classes
+### ACCEL-operand residual: CLOSED
 
-1. **ACCEL-operand residual** (PerceusBalanceable program-level exclusion: `p.Nat.Ops`
-   non-empty). An accel op (`addN`/`mulN`/`monusN`) BORROW-reads its operands but does NOT
-   free a bare-CVar operand -- `accelDispatch`'s `freshOwned` releases only a freshly
-   PRODUCED operand (AppClosure/CLit/...), never a CVar, to avoid freeing a borrowed root.
-   So an accel op applied to an OWNED-dead local leaks that operand: `addN n n` leaks
-   +1/run, and an accel op inside a fold STEP (`addN ih (succ n)`) leaks the step arg `ih`
-   once per iteration (`armUse` measures +9/run, `TestPerceusAccelFrontier`). A flat accel
-   use (literal/fresh operands, `mulN 100 100` -> `accelDispatch` native) cannot be
-   statically separated from a leaky one (owned-local operand), so any program that
-   REGISTERS accel ops is excluded WHOLESALE -- `sum`/`prod`/`diff`/`diffZero` are
-   themselves flat but conservatively excluded (never a soundness break). Closing it is the
-   NEXT plan: a Perceus-level accel-operand ownership annotation (mark which accel CVar
-   operands are owned-dead so `accelDispatch` frees exactly those), the accel dual of the
-   succ_code arg-free. This is the deferred STRUCTURAL frontier.
+The accel-operand residual is now CLOSED. accelDispatch (codegen/wasm.go) previously
+released only freshly-PRODUCED operand forms (AppClosure/CLit/..., the `freshOwned`
+predicate), leaving bare-CVar operands (owned locals) and dup'd-borrow operands un-freed.
+The fix (Task 1 of the accel-operand plan): release BOTH operands unconditionally. Privacy
+is guaranteed: `annotateBareSpine` routes every accel-spine leaf through `consumeOwning`
+(a bare owned CVar stays a single private ref; a borrowed CEnv/CGlobal/projection is dup'd
+to a fresh owned ref), and a local consumed in both operand sub-spines is dup'd once by
+`annotateBareSpine`'s shared-owned-local dup, while a local also used outside the spine is
+dup'd by the enclosing scope. So exactly one live reference reaches the op per operand, and
+releasing both is the accel dual of succ_code freeing its arg.
 
-2. **CBounce / partials** (condition 1). A `partial`/trampoline program lowered through
+With the leak closed, Task 2 drops the wholesale accel-program exclusion from
+`PerceusBalanceable`: any remaining unbalanceable construct (CBounce, over-applied NatElim)
+is still caught per-spine by `cirUnbalanceable`. The accel conformance listings
+(`sum`/`prod`/`diff`/`diffZero`) join the flat fragment. Receivers:
+`TestPerceusAccelInFlatFragment` (was the frontier, now asserts balanceable + flat) and
+`TestPerceusAccelCorpusFlat` (sum/prod/diff/diffZero: balanceable + flat + correct output).
+
+### The ONE REMAINING excluded class
+
+1. **CBounce / partials** (condition 1). A `partial`/trampoline program lowered through
    closure conversion produces a `CBounce`, which is UNSUPPORTED on WASM: `emitIn` has no
-   `CBounce` case, so the program does not lower at all. This is relabelled a
-   MISSING-FEATURE exclusion, not a leak -- there is no per-run delta to measure because
-   there is no WASM lowering. Closing it is a SEPARATE future plan (WASM-partial-support):
-   add a `CBounce` lowering to the WASM emitter, then model ownership across the deferred
-   saturated tail call (the trampoline driver reuses args across bounces in a way the v1
-   drop rules do not capture). `TestPerceusFrontierBoundary` keeps the boundary executable
-   (the ch39 countdown stays outside the balanceable fragment).
+   `CBounce` case, so the program does not lower at all. This is a MISSING-FEATURE
+   exclusion, not a leak -- there is no per-run delta to measure because there is no WASM
+   lowering. Closing it is a SEPARATE future plan (WASM-partial-support): add a `CBounce`
+   lowering to the WASM emitter, then model ownership across the deferred saturated tail
+   call (the trampoline driver reuses args across bounces in a way the v1 drop rules do not
+   capture). `TestPerceusFrontierBoundary` keeps the boundary executable (the ch39 countdown
+   stays outside the balanceable fragment).

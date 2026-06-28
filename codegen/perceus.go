@@ -727,29 +727,18 @@ func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
 // steady-flat -- verified for succ-step, ctor-step, and nested folds, and for the corpus
 // `big`/`bigger`/`product` (plain NatElim multiplies, 100 iterations, [1..5]/[2..5] flat).
 //
-// The two REMAINING exclusion categories:
+// The ONE REMAINING exclusion category:
 //
 //  1. CBounce (partial/trampoline): UNSUPPORTED on WASM -- emitIn has no CBounce case,
 //     so a partial-recursive program does not lower at all. This is a missing-feature
 //     exclusion, NOT a leak: ownership across a deferred saturated tail call needs the
 //     WASM-partial-support frontier (a separate future plan; see R-PERCEUS).
 //
-//  2. ACCEL-op programs (a program that REGISTERS natAdd/natMul/natMonus, i.e.
-//     p.Nat.Ops is non-empty): after Task 1, accelDispatch frees BOTH owned operands
-//     unconditionally and annotateBareSpine ensures every operand is privately owned
-//     (shared-owned-local dup + consumeOwning for borrows), so accel programs ARE now
-//     steady-flat (`addN n n`, `addN ih (succ n)` in a fold step, etc.). The predicate
-//     still conservatively excludes them WHOLESALE because TestPerceusAccelFrontier
-//     (which asserted the leak was real and non-vacuous) is intentionally left failing
-//     until Task 2 rewrites it. Widening the predicate is Task 2's job; widening it
-//     early would make the frontier test vacuously pass rather than documenting the
-//     corrected behaviour. The hard invariant (never return true for a non-flat program)
-//     is preserved -- this is a conservative exclusion, not a soundness break.
+// Accel-op programs are now admitted: accelDispatch frees both owned operands (the
+// accel-operand leak is closed), so a flat accel use reaches steady-flat. Any remaining
+// unbalanceable construct (CBounce, over-applied NatElim) is still caught per-spine by
+// cirUnbalanceable below.
 func PerceusBalanceable(p Program) bool {
-	// Accel-op programs are conservatively excluded (see comment above; Task 2 widens).
-	if p.Nat != nil && len(p.Nat.Ops) > 0 {
-		return false
-	}
 
 	natElim := ""
 	if p.Nat != nil {
