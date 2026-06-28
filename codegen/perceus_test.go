@@ -1661,3 +1661,91 @@ func TestPerceusDeadMotiveDropped(t *testing.T) {
 	}
 	t.Logf("dead motive dropped: counts %v, per-run delta=%d (carve-out removed)", counts, d)
 }
+
+// --- Frontier: accel-operand ownership (Task 1) ---
+
+// accelSharedSrc: an accel op on a SHARED owned local (addN n n). annotateBareSpine
+// inserts one shared-owned-local dup (rc 1->2); accelDispatch must free BOTH operands
+// (2->0). A double-free here corrupts output; a missed free leaks.
+const accelSharedSrc = accelNatSrc + `
+shared : Nat -> Nat is fn (n : Nat) is addN n n end end
+mainShared : Nat is shared 3000 end
+`
+
+func TestPerceusAccelSharedOperandFlat(t *testing.T) {
+	p := mustProgram(t, accelSharedSrc, "mainShared")
+	assertSteadyFlatInts(t, p, 5)
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, accelSharedSrc, "mainShared")); got != "6000" {
+		t.Fatalf("addN n n with n=3000: got %q, want 6000", got)
+	}
+}
+
+// accelDistinctSrc: two DISTINCT owned locals, each used once (mulN a b). Each operand
+// is a private owned ref; accelDispatch frees each once.
+const accelDistinctSrc = accelNatSrc + `
+distinct : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is mulN a b end end
+mainDistinct : Nat is distinct 100 100 end
+`
+
+func TestPerceusAccelDistinctOperandsFlat(t *testing.T) {
+	p := mustProgram(t, accelDistinctSrc, "mainDistinct")
+	assertSteadyFlatInts(t, p, 5)
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, accelDistinctSrc, "mainDistinct")); got != "10000" {
+		t.Fatalf("mulN a b with 100,100: got %q, want 10000", got)
+	}
+}
+
+// accelLiveAfterSrc: an owned local used in the accel AND again after it (addN n n then
+// add the result to n). The enclosing scope dups n for the later use, so the accel
+// release frees only the spine's private ref -- the later use must still see a live n.
+// A premature free here is a use-after-free (wrong output or trap).
+const accelLiveAfterSrc = accelNatSrc + `
+liveAfter : Nat -> Nat is fn (n : Nat) is addN (addN n n) n end end
+mainLiveAfter : Nat is liveAfter 1000 end
+`
+
+func TestPerceusAccelLiveAfterNoUAF(t *testing.T) {
+	p := mustProgram(t, accelLiveAfterSrc, "mainLiveAfter")
+	assertSteadyFlatInts(t, p, 5)
+	// addN (addN 1000 1000) 1000 = 3000.
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, accelLiveAfterSrc, "mainLiveAfter")); got != "3000" {
+		t.Fatalf("addN (addN n n) n with n=1000: got %q, want 3000", got)
+	}
+}
+
+// accelArmFlatSrc: the canonical frontier shape -- an accel op consumed INSIDE a
+// NatElim fold step (addN ih (succ n)). ih is an owned step local (released, killing
+// the per-iteration leak); (succ n) is fresh (released). Previously leaked per
+// iteration; must now be steady-flat.
+const accelArmFlatSrc = accelNatSrc + `
+armUse : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) (addN n n) (fn (k : Nat) (ih : Nat) is addN ih (succ n) end) n
+  end
+end
+mainArm2 : Nat is armUse 3 end
+`
+
+func TestPerceusAccelArmStepFlat(t *testing.T) {
+	p := mustProgram(t, accelArmFlatSrc, "mainArm2")
+	assertSteadyFlatInts(t, p, 5)
+	// Same shape/value as the old frontier program: result 18.
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, accelArmFlatSrc, "mainArm2")); got != "18" {
+		t.Fatalf("accel-in-step output: got %q, want 18", got)
+	}
+}
+
+// accelFreshSrc: a regression guard that accel-on-fresh operands (mulN of two fresh
+// accel results) still reach flat after freshOwned is removed.
+const accelFreshSrc = accelNatSrc + `
+freshOp : Nat is mulN (addN 10 10) (addN 20 20) end
+`
+
+func TestPerceusAccelFreshOperandsFlat(t *testing.T) {
+	p := mustProgram(t, accelFreshSrc, "freshOp")
+	assertSteadyFlatInts(t, p, 5)
+	// (10+10) * (20+20) = 20*40 = 800.
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, accelFreshSrc, "freshOp")); got != "800" {
+		t.Fatalf("mulN (addN 10 10) (addN 20 20): got %q, want 800", got)
+	}
+}

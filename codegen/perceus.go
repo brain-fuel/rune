@@ -583,13 +583,50 @@ func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool) CIr {
 		clo = pp.annotate(x.Clo, owned)
 	}
 	arg := consumeOwning(pp.annotate(x.Arg, owned))
+
+	// CDup-hoist: peel any CDup wrappers that the recursive call placed around `clo`
+	// and collect them in `hoisted`. A CDup{V, K} inside the Clo position of the
+	// resulting AppClosure breaks NatElimSpine / accelMatchC / satCtorDispatch, which
+	// peel only AppClosure nodes while traversing the backbone. By lifting all inner
+	// CDups above the AppClosure at this level -- and by adding this level's own
+	// shared-owned-local CDups to the same list -- the entire accumulated set of
+	// retains is emitted BEFORE the outermost AppClosure, leaving the backbone clean
+	// for the dispatch matchers.
+	//
+	// The hoisting is semantically equivalent: all retains happen before any arg is
+	// consumed, regardless of whether they are emitted as a CDup stack around the
+	// outermost AppClosure or as CDups sprinkled inside the Clo chain. Order among
+	// the retains is immaterial (they are all rt_retain on the same or different
+	// locals with no data-flow dependency).
+	var hoisted []CVar
+	for {
+		dup, ok := clo.(CDup)
+		if !ok {
+			break
+		}
+		v, ok := dup.V.(CVar)
+		if !ok {
+			break // non-CVar-keyed CDup: leave in place (shouldn't occur here)
+		}
+		hoisted = append(hoisted, v)
+		clo = dup.K
+	}
+
 	out := CIr(AppClosure{Clo: clo, Arg: arg})
+
 	// Shared-owned-local dup: a local consumed in both the Clo sub-spine AND this Arg
 	// level is consumed twice; dup it once so each consumption frees a live reference.
 	for i := len(owned) - 1; i >= 0; i-- {
 		if owned[i] && cirUsesArg(x.Clo, i) && cirUsesArg(x.Arg, i) {
-			out = CDup{V: CVar{Idx: i}, K: out}
+			hoisted = append(hoisted, CVar{Idx: i})
 		}
+	}
+
+	// Wrap `out` in all collected CDups. The last element of hoisted (added at this
+	// level) becomes the innermost CDup; the first (from the deepest inner level)
+	// becomes the outermost. All retains precede the AppClosure in emission order.
+	for j := len(hoisted) - 1; j >= 0; j-- {
+		out = CDup{V: hoisted[j], K: out}
 	}
 	return out
 }

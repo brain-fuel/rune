@@ -832,37 +832,21 @@ func (f *wasmFunc) accelDispatch(b *strings.Builder, app AppClosure, locals []st
 		return "", false
 	}
 	fmt.Fprintf(b, "    (local.set %s (call $%s %s %s))\n", r, opName, ea, eb)
-	// The accel op BORROW-reads its operands (rt_nat_* reads both inputs and
-	// returns a fresh K_BIG) and the op has now read them, so a freshly-produced
-	// owned intermediate operand is dead and must be released -- otherwise a
-	// nested accel/succ chain (add (add a b) c, succ (succ x)) leaks one K_BIG per
-	// intermediate every run. Only FRESH-producing operand forms are released:
-	// a bare CVar/CEnv/CGlobal operand is borrowed (a root, a captured env slot,
-	// or a still-owned local the Perceus pass drops elsewhere) and must NOT be
-	// released here. See freshOwned.
-	if freshOwned(a) {
-		fmt.Fprintf(b, "    (call $rt_release %s)\n", ea)
-	}
-	if freshOwned(bb) {
-		fmt.Fprintf(b, "    (call $rt_release %s)\n", eb)
-	}
+	// The accel op BORROW-reads its two operands (rt_nat_* read both inputs and
+	// return a fresh K_BIG) and has now read them, so both operands are dead. Every
+	// operand reaching here is a PRIVATE OWNED reference: annotateBareSpine routes each
+	// accel leaf through consumeOwning (a bare owned CVar stays a single private ref; a
+	// borrowed CEnv/CGlobal/projection is dup'd to a fresh owned ref), and a local
+	// consumed in both operand sub-spines is dup'd once by annotateBareSpine's
+	// shared-owned-local dup, while a local also used outside the spine is dup'd by the
+	// enclosing scope. So exactly one live reference reaches the op per operand, and the
+	// op must free both -- the accel dual of succ_code freeing its $arg under PATH B.
+	// Releasing unconditionally (not just fresh-producing forms) is what closes the
+	// owned-CVar / dup'd-borrow operand leak; a borrowed root is never reached bare here
+	// because consumeOwning already replaced it with an owned dup.
+	fmt.Fprintf(b, "    (call $rt_release %s)\n", ea)
+	fmt.Fprintf(b, "    (call $rt_release %s)\n", eb)
 	return "(local.get " + r + ")", true
-}
-
-// freshOwned reports whether emitIn(t) produces a FRESHLY-ALLOCATED owned value
-// (rc=1, owned by the evaluating context) rather than a borrowed reference. The
-// fresh-producing CIr forms allocate a new heap object; CVar/CEnv/CGlobal/CUnit
-// yield a borrowed reference (a local, a captured env slot, a cached thunk root,
-// or the immortal unit). Used by accelDispatch to release owned intermediate
-// operands of an accel op (which borrow-reads, never frees, its inputs) without
-// ever releasing a borrowed value.
-func freshOwned(t CIr) bool {
-	switch t.(type) {
-	case AppClosure, CLit, MkClosure, CPair, CFst, CSnd, CField, CCase:
-		return true
-	default: // CVar, CEnv, CGlobal, CForeign, CUnit, CLet, CDup, CDrop
-		return false
-	}
 }
 
 // wasmName sanitizes a rune identifier into a WAT-symbol fragment ([A-Za-z0-9_], shared
