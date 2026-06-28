@@ -163,19 +163,40 @@ type wasmEmitter struct {
 	strs     map[string]int
 	strOrder []string
 	strBytes int
+
+	// ctorByName maps a non-nat constructor's emitted name to its CtorSpec, so the
+	// AppClosure emit path can recognize a SATURATED constructor application (an
+	// AppClosure spine headed by a CGlobal naming a constructor, with exactly Arity
+	// args) and build the K_CON directly via rt_mkcon (satCtorDispatch), instead of
+	// currying through emitCtorBlock and allocating an intermediate partial-application
+	// K_CLO. The builtin-nat data group is EXCLUDED (its zero/succ compile to native
+	// bignum via emitNat, not K_CON), so a `succ n` spine never matches here.
+	ctorByName map[string]CtorSpec
 }
 
 // newWasmEmitter constructs a wasmEmitter for the given closure-converted program,
 // wiring the nat eliminator name and accel table when a NatSpec is present.
 func newWasmEmitter(cp ClosureProgram) *wasmEmitter {
 	em := &wasmEmitter{
-		cp:      cp,
-		codeIdx: map[string]int{},
-		strs:    map[string]int{},
+		cp:         cp,
+		codeIdx:    map[string]int{},
+		strs:       map[string]int{},
+		ctorByName: map[string]CtorSpec{},
 	}
 	if cp.Nat != nil {
 		em.natElim = cp.Nat.ElimName
 		em.accel = cp.Nat.Ops
+	}
+	// Index every non-nat constructor for satCtorDispatch. Skip the builtin-nat data
+	// group (zero/succ compile to native bignum via emitNat, not K_CON) so a saturated
+	// `succ n` never mis-routes into the rt_mkcon path.
+	for _, d := range cp.Datas {
+		if cp.Nat != nil && d.ElimName == cp.Nat.ElimName {
+			continue
+		}
+		for _, c := range d.Ctors {
+			em.ctorByName[c.Name] = c
+		}
 	}
 	return em
 }
@@ -541,6 +562,9 @@ func (f *wasmFunc) emitIn(b *strings.Builder, t CIr, locals []string) string {
 	case MkClosure:
 		return f.emitMkClosure(b, x, locals)
 	case AppClosure:
+		if out, ok := f.satCtorDispatch(b, x, locals); ok {
+			return out
+		}
 		if out, ok := f.accelDispatch(b, x, locals); ok {
 			return out
 		}
@@ -648,6 +672,69 @@ func (f *wasmFunc) emitCase(b *strings.Builder, x CCase, locals []string) string
 		b.WriteString("    ))\n")
 	}
 	return "(local.get " + res + ")"
+}
+
+// satCtorDispatch recognizes a SATURATED constructor application -- an AppClosure spine
+// headed by a CGlobal naming a (non-nat) constructor, with EXACTLY Arity args -- and emits
+// the K_CON DIRECTLY: rt_mkcon(tag, name, arity) + one rt_con_set per arg (each arg value
+// evaluated once and MOVED into its field slot). No intermediate partial-application K_CLO
+// is ever allocated, so the arity>=2 currying container leak (the +1/run K_CLO_mk1 the
+// recognize-then-skip rule could not release without double-freeing the moved field) is
+// gone. Returns the result expression + true on a hit; "" + false otherwise.
+//
+// A PARTIALLY applied constructor (fewer than Arity args) does NOT match (len(args) !=
+// c.Arity) and falls through to the generic rt_apply path -- it curries through
+// emitCtorBlock as before, building a legitimate partial-application K_CLO the Perceus pass
+// owns and drops normally.
+//
+// OUTPUT-INVARIANCE: the rt_mkcon name offset REUSES em.intern(c.Name), the SAME interning
+// emitCtorBlock uses (emitDefs interns every ctor name before any body is emitted, so this
+// is an idempotent lookup, not a re-intern), and the tag / field order match emitCtorBlock
+// exactly -- the printed K_CON is byte-identical to the curried path.
+//
+// This is DISTINCT from an accel / nat-eliminator spine: those are headed by a CGlobal
+// naming a builtin op / eliminator def, never a constructor in ctorByName (the builtin-nat
+// ctors are excluded), so the dispatch order does not shadow accelMatchC / NatElimSpine.
+func (f *wasmFunc) satCtorDispatch(b *strings.Builder, app AppClosure, locals []string) (string, bool) {
+	// Unwind the application spine into head + args (left-to-right), mirroring
+	// accelMatchC. The Perceus pass keeps a recognized ctor spine's BACKBONE bare (only
+	// the leaf args carry consumeOwning wrappers), so the Clo chain here is a bare
+	// AppClosure chain ending in the head CGlobal.
+	var args []CIr
+	t := CIr(app)
+	for {
+		ap, isApp := t.(AppClosure)
+		if !isApp {
+			break
+		}
+		args = append([]CIr{ap.Arg}, args...)
+		t = ap.Clo
+	}
+	g, isGlobal := t.(CGlobal)
+	if !isGlobal {
+		return "", false
+	}
+	c, isCtor := f.em.ctorByName[g.Name]
+	if !isCtor || len(args) != c.Arity {
+		return "", false
+	}
+	nameOff := f.em.intern(c.Name) // idempotent: emitDefs already interned every ctor name
+	// Evaluate each arg into a stable local FIRST (so a nested AppClosure inside an arg
+	// does not interleave with the rt_con_set fills), then build + fill the con. Mirrors
+	// emitMkClosure's evaluate-then-alloc-then-set ordering.
+	vals := make([]string, len(args))
+	for i, a := range args {
+		ev := f.emitIn(b, a, locals)
+		r := f.fresh()
+		fmt.Fprintf(b, "    (local.set %s %s)\n", r, ev)
+		vals[i] = "(local.get " + r + ")"
+	}
+	o := f.fresh()
+	fmt.Fprintf(b, "    (local.set %s (call $rt_mkcon (i32.const %d) (i32.const %d) (i32.const %d)))\n", o, c.Tag, nameOff, c.Arity)
+	for i, v := range vals {
+		fmt.Fprintf(b, "    (call $rt_con_set (local.get %s) (i32.const %d) %s)\n", o, i, v)
+	}
+	return "(local.get " + o + ")", true
 }
 
 // accelDispatch emits a registered accel-op def on two args as native bignum arithmetic

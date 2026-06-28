@@ -567,8 +567,11 @@ func TestPerceusCtorMkXX(t *testing.T) {
 	if got != "<function>" {
 		t.Fatalf("mk x x double-free: got %q, want \"<function>\" (FIX B shared-var dup missing?)", got)
 	}
-	// Steady: expect +1/run from K_CLO_mk1 (arity-2 ctor intermediate, 6b-2 boundary).
-	// A delta > 1 would indicate x itself is leaking (FIX B not working or additional UAF).
+	// Steady: the FIX-B guard keeps x balanced (delta <= +1/run). Before Task 3 the
+	// residual was exactly +1/run (the arity-2 ctor intermediate K_CLO_mk1, kept BARE by
+	// the recognize-then-skip rule). Task 3's satCtorDispatch builds `mk x x`'s K_CON
+	// directly (no intermediate K_CLO), so the residual is now 0 -- but the gate stays an
+	// UPPER bound (a delta > 1 would mean x itself leaks, i.e. FIX B regressed).
 	p := mustProgram(t, perceusCtorMkXXSrc, "mainMkXX")
 	counts := wasmSteadyLiveP(t, p, 4)
 	if len(counts) != 4 {
@@ -583,9 +586,72 @@ func TestPerceusCtorMkXX(t *testing.T) {
 	d32 := c3 - c2
 	d43 := c4 - c3
 	if d32 > 1 || d43 > 1 {
-		t.Fatalf("mk x x steady: counts %v, deltas %d/%d exceed +1/run (expected only K_CLO_mk1 intermediate; FIX B broken?)", counts, d32, d43)
+		t.Fatalf("mk x x steady: counts %v, deltas %d/%d exceed +1/run (FIX B shared-var dup broken?)", counts, d32, d43)
 	}
-	t.Logf("mk x x steady: %v (delta=%d/%d; +1/run from arity-2 K_CLO_mk1 intermediate, 6b-2 boundary; double-free fixed)", counts, d32, d43)
+	t.Logf("mk x x steady: %v (delta=%d/%d; FIX B balances x, Task 3 removed the K_CLO_mk1 intermediate -> flat)", counts, d32, d43)
+}
+
+// perceusSatCtorSrc is the Task 3 receiver: an INLINE SATURATED arity-2 constructor
+// application `mk a b` (both args owned locals). Mirrors perceusCtorMkXXSrc but with two
+// DISTINCT owned fields so the measurement is not confounded by FIX B's shared-var dup.
+//
+// BEFORE Task 3: `mk a b` lowers through emitCtorBlock's curry steps, so the first
+// rt_apply builds an intermediate partial-application K_CLO (`mk a`). The recognize-then-
+// skip rule keeps the ctor backbone BARE (releasing the intermediate would double-free the
+// moved field a), so that K_CLO_mk1 container LEAKS +1/run.
+//
+// AFTER Task 3: the WASM emitter recognizes the saturated ctor spine (satCtorDispatch) and
+// builds the K_CON DIRECTLY via rt_mkcon + rt_con_set per arg -- no intermediate K_CLO is
+// ever allocated, so the +1/run container leak is gone. Output is unchanged ("<function>":
+// prElim projects field[0] = a, the identity closure).
+const perceusSatCtorSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Pr : U is mk : (Nat -> Nat) -> (Nat -> Nat) -> Pr end
+prMot : Pr -> U is fn (p : Pr) is Nat -> Nat end end
+prCase : (Nat -> Nat) -> (Nat -> Nat) -> Nat -> Nat is
+  fn (a : Nat -> Nat) is fn (b : Nat -> Nat) is a end end
+end
+prElim : Pr -> (Nat -> Nat) is PrElim prMot prCase end
+mainCtor : Nat -> Nat is
+  let a : Nat -> Nat = fn (y : Nat) is y end in
+  let b : Nat -> Nat = fn (y : Nat) is y end in
+  prElim (mk a b)
+end
+`
+
+// satCtorWant is the output of perceusSatCtorSrc's mainCtor (a Nat -> Nat value: a
+// function, shown as "<function>"). Byte-identical before and after Task 3 -- the K_CON's
+// printed form (tag/fields/name) is unchanged; only the intermediate K_CLO disappears.
+const satCtorWant = "<function>"
+
+// satCtorResidualAfter is the per-run $rt_live delta for perceusSatCtorSrc AFTER Task 3.
+// The K_CLO_mk1 container (+1/run) is removed by the direct rt_mkcon emit; the program
+// reaches TRUE flat (delta 0). Measured post-fix: the two field closures a/b are moved
+// into the K_CON and released when it is dropped, the K_CON is consumed by prElim, and no
+// intermediate survives -- nothing leaks.
+const satCtorResidualAfter = 0
+
+// TestPerceusSaturatedCtorNoContainer: an inline saturated arity-2 ctor `mk a b`.
+// BEFORE Task 3 the partial `mk a` K_CLO is allocated and leaked (+1/run, the K_CLO_mk1
+// container). AFTER Task 3 the saturated application emits rt_mkcon directly, no
+// intermediate K_CLO, so the +1/run container leak is gone. Asserts the per-run delta
+// drops to <= satCtorResidualAfter (TRUE flat) and the output is unchanged.
+func TestPerceusSaturatedCtorNoContainer(t *testing.T) {
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusSatCtorSrc, "mainCtor"))
+	if got != satCtorWant {
+		t.Fatalf("output changed: got %q want %q", got, satCtorWant)
+	}
+	p := mustProgram(t, perceusSatCtorSrc, "mainCtor")
+	counts := wasmSteadyLivePInts(t, p, 4)
+	d := counts[3] - counts[2]
+	if d > satCtorResidualAfter { // residual without the K_CLO_mk1 container
+		t.Fatalf("saturated ctor still leaks the container: delta=%d > %d (counts %v)", d, satCtorResidualAfter, counts)
+	}
+	t.Logf("saturated ctor steady: counts %v, per-run delta=%d (K_CLO_mk1 container removed)", counts, d)
 }
 
 // perceusInlineElimSrc is the FIX A receiver: an INLINE saturated general-eliminator
