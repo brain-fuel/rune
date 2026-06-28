@@ -862,6 +862,52 @@ func TestPerceusRealisticFlat(t *testing.T) {
 	assertSteadyFlatInts(t, p, 5)
 }
 
+// perceusNestedElimSrc nests one INLINE non-recursive user-eliminator inside
+// another's arm: an OptElim whose some-arm is itself an inline BoxElim over a
+// freshly-built `mk n`. Task 5 removed the general-eliminator exclusion
+// (condition 3) entirely; this is the shape the capstone review flagged as
+// admitted-but-unmeasured (a user eliminator applied inside another eliminator's
+// arm). It pins the predicate is SOUND for that shape: balanceable AND truly flat.
+const perceusNestedElimSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Box : U is
+  mk : Nat -> Box
+end
+data Opt : U is
+  none : Opt
+| some : Nat -> Opt
+end
+f : Opt -> Nat is
+  fn (o : Opt) is
+    OptElim (fn (x : Opt) is Nat end) zero
+      (fn (n : Nat) is BoxElim (fn (y : Box) is Nat end) (fn (m : Nat) is m end) (mk n) end)
+      o
+  end
+end
+mainNest : Nat is f (some (succ (succ zero))) end
+`
+
+// TestPerceusNestedElimInArmFlat closes the capstone review's Important finding:
+// removing the general-eliminator exclusion admits a nested inline
+// eliminator-in-arm, a shape the corpus does not otherwise cover. Measured here:
+// it is PerceusBalanceable AND steady-flat (output 2 = succ (succ zero)), so the
+// removal of condition 3 is sound for this shape, not merely unproven.
+func TestPerceusNestedElimInArmFlat(t *testing.T) {
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusNestedElimSrc, "mainNest"))
+	if got != "2" {
+		t.Fatalf("nested eliminator-in-arm output: got %q, want \"2\"", got)
+	}
+	p := mustProgram(t, perceusNestedElimSrc, "mainNest")
+	if !cg.PerceusBalanceable(p) {
+		t.Fatalf("nested inline eliminator-in-arm should be PerceusBalanceable")
+	}
+	assertSteadyFlatInts(t, p, 5)
+}
+
 // countdownSrc is the ch39-style partial-recursive countdown: a `partial` def that
 // calls itself via CBounce (the T2 native trampoline). It is the canonical 6b-2
 // frontier program: the WASM Perceus pass does not model ownership across CBounce

@@ -731,6 +731,15 @@ func cirUnbalanceable(t CIr, natElim string) bool {
 		// Condition 2: a saturated builtin-nat-fold spine. The frozen emitNatFold's
 		// per-run fold-SETUP (the rt_apply curry chain + erased motive closure) leaks
 		// a constant amount each run (satElimDispatch frontier).
+		//
+		// This ALSO conservatively excludes every accel-arithmetic program (add/mul/
+		// monus): an accel op is necessarily DEFINED by a NatElim fold body (the
+		// eliminator is rune's only recursion principle, and accel registration's
+		// differential-soundness check requires a real unfolded peeling, so no
+		// foreign/partial accel op can exist), so the def's fold body trips this same
+		// NatElimSpine when cp.Defs is scanned. That is load-bearing: an accel op
+		// consumed INSIDE an eliminator arm leaks +1/run, and this exclusion is what
+		// keeps such a program out of the flat fragment.
 		if _, ok := NatElimSpine(natElim, x); ok {
 			return true
 		}
