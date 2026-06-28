@@ -365,15 +365,13 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		// releasing its intermediates would corrupt it). annotateBareSpine keeps the whole
 		// backbone bare and only makes the leaf args owned.
 		if pp.isRecognizedSpine(x) {
-			// After FIX A, bareSpineHead contains only constructors. A constructor
-			// spine needs the shared-owned-local dup (FIX B: store=MOVE, an owned
-			// local appearing in N arg slots needs N-1 dups). Accel/nat spines
-			// borrow their args; no dup is needed or correct for them.
-			isCtor := false
-			if g, ok := spineBaseGlobal(x); ok && pp.bareSpineHead[g] {
-				isCtor = true
-			}
-			return pp.annotateBareSpine(x, owned, isCtor)
+			// Keep the backbone bare for the matcher; annotateBareSpine makes the leaf
+			// args owned and inserts the shared-owned-local dup. The dup is needed for
+			// EVERY recognized spine: a constructor stores fields by MOVE, and (since
+			// Task 4d) accel/nat operands CONSUME too (accelDispatch frees a freshOwned
+			// operand; succ_code frees its arg), so a local consumed in two operand
+			// sub-spines (e.g. `addN (succ n) (succ n)`) is freed twice without it.
+			return pp.annotateBareSpine(x, owned)
 		}
 
 		clo := pp.annotate(x.Clo, owned)
@@ -549,26 +547,33 @@ func spineBaseGlobal(x AppClosure) (string, bool) {
 // annotateBareSpine annotates a RECOGNIZED accel / nat-elim / constructor spine while
 // keeping its AppClosure backbone BARE: no CLet/CDup/CDrop wrappers anywhere on the Clo
 // chain, so the WASM emitter's accelMatchC / NatElimSpine still recognize it. Only the
-// leaf ARGS are annotated and made owned (consumeOwning).
+// leaf ARGS are annotated and made owned (consumeOwning), and the SHARED-owned-local dup
+// is applied at each level (see below). A CDup that wraps the WHOLE spine is fine -- the
+// emitter sees CDup, retains, then recurses to the bare spine inside, so the matcher
+// still fires.
 //
-// isCtor=true (a constructor spine, after FIX A the ONLY kind in bareSpineHead): a
-// constructor's emitCtorBlock curry steps store each accumulated field by MOVE into the
-// final K_CON. An owned local appearing in BOTH a deeper Clo level (x.Clo side) AND the
-// current arg slot (x.Arg) is consumed twice -- the K_CON owns the same pointer in two
-// slots at rc=1, so releasing the K_CON would double-free (rc 1->0 then again -> UAF).
-// FIX B: mirror the general AppClosure shared-var dup: for each owned local[i] where
-// cirUsesArg(x.Clo, i) && cirUsesArg(x.Arg, i), insert CDup{CVar{i}, out}. This is
-// applied at EACH level of the spine recursion so the check sees each (Clo, Arg) pair.
-//
-// isCtor=false (accel / nat-elim spines): args are borrow-read by the emitter (accel
-// shortcut reads each arg directly; nat-elim borrows its loop counter). No dup is needed
-// or correct there (and a spine-head CDup would break the matcher anyway).
-func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool, isCtor bool) CIr {
+// SHARED-OWNED-LOCAL DUP (all recognized spines). An owned local appearing in BOTH a
+// deeper Clo level (x.Clo side) AND the current arg slot (x.Arg) is consumed twice, so it
+// needs N-1 dups across N consuming slots (mirror the general AppClosure shared-var dup):
+//   - Constructor spine: emitCtorBlock / satCtorDispatch store each field by MOVE into the
+//     final K_CON, so the same pointer in two field slots at rc=1 would double-free on
+//     the K_CON's release.
+//   - Accel / nat-elim spine: the operands CONSUME now (Task 4d -- accelDispatch releases
+//     a freshOwned operand, and succ_code frees its arg), so the SAME owned local consumed
+//     in two operand sub-spines (e.g. `addN (succ n) (succ n)`) is freed twice -> UAF
+//     without the dup. A spine where the local is a bare borrowed operand (`addN n n`,
+//     accel borrow-reads a bare CVar and does NOT free it) gets a harmless extra retain
+//     (a +1/run LEAK, never a UAF -- a CDup can only over-retain); such accel/nat
+//     programs are already outside the steady-flat fragment (PerceusBalanceable condition
+//     2 excludes every NatElim/accel program), so the leak is invisible to the flat gate
+//     while output stays correct. Correctness (no double-free) is the binding requirement
+//     here, so the dup is applied UNCONDITIONALLY rather than guessing borrow-vs-consume.
+func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool) CIr {
 	var clo CIr
 	if inner, ok := x.Clo.(AppClosure); ok {
 		// More backbone: recurse, keeping it bare (do NOT re-enter the general
 		// AppClosure case, which would release this AppClosure-headed intermediate).
-		clo = pp.annotateBareSpine(inner, owned, isCtor)
+		clo = pp.annotateBareSpine(inner, owned)
 	} else {
 		// The spine head: a CGlobal (constructor / accel op / nat eliminator).
 		// annotate is a no-op on a bare CGlobal but keeps the code uniform.
@@ -576,15 +581,11 @@ func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool, isCtor bool
 	}
 	arg := consumeOwning(pp.annotate(x.Arg, owned))
 	out := CIr(AppClosure{Clo: clo, Arg: arg})
-	// FIX B: constructor shared-owned-local dup. A local appearing in both the Clo
-	// sub-spine AND this Arg level is consumed twice by store=MOVE; dup it once so
-	// the K_CON owns two live references instead of double-owning one at rc=1.
-	// accel/nat spines skip this (isCtor=false; borrow-read, no dup needed).
-	if isCtor {
-		for i := len(owned) - 1; i >= 0; i-- {
-			if owned[i] && cirUsesArg(x.Clo, i) && cirUsesArg(x.Arg, i) {
-				out = CDup{V: CVar{Idx: i}, K: out}
-			}
+	// Shared-owned-local dup: a local consumed in both the Clo sub-spine AND this Arg
+	// level is consumed twice; dup it once so each consumption frees a live reference.
+	for i := len(owned) - 1; i >= 0; i-- {
+		if owned[i] && cirUsesArg(x.Clo, i) && cirUsesArg(x.Arg, i) {
+			out = CDup{V: CVar{Idx: i}, K: out}
 		}
 	}
 	return out

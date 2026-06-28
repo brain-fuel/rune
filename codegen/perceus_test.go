@@ -908,6 +908,52 @@ func TestPerceusNestedElimInArmFlat(t *testing.T) {
 	assertSteadyFlatInts(t, p, 5)
 }
 
+// perceusSharedConsumeSrc exercises a SHARED owned local CONSUMED in two operand
+// sub-spines of a recognized accel / nat-elim spine -- the exact shape the final
+// whole-branch review caught as a double-free (C1). `addN (succ n) (succ n)`:
+// each `succ n` operand is freshOwned (accelDispatch releases its result) AND
+// succ_code frees its arg n, so n (rc=1) is freed TWICE without a dup -> UAF /
+// double-free. The same for mulN, and for an INLINE NatElim whose base and bound
+// both consume n. After the fix (annotateBareSpine inserts the shared-owned-local
+// dup for accel/nat spines too, not only constructors), n is dup'd once so each
+// consumption frees a live reference. Pre-fix these produce WRONG output (the
+// runtime reads freed memory); post-fix they match the reference value.
+const perceusSharedConsumeSrc = accelNatSrc + `
+dblAdd : Nat -> Nat is fn (q : Nat) is addN (succ q) (succ q) end end
+dblMul : Nat -> Nat is fn (q : Nat) is mulN (succ q) (succ q) end end
+elimShared : Nat -> Nat is
+  fn (q : Nat) is
+    NatElim (fn (x : Nat) is Nat end) q (fn (k : Nat) (ih : Nat) is succ ih end) q
+  end
+end
+mainDblAdd : Nat is dblAdd 3 end
+mainDblMul : Nat is dblMul 3 end
+mainElimShared : Nat is elimShared 4 end
+`
+
+// TestPerceusSharedConsumeNoDoubleFree is the regression guard for the final-review
+// C1 double-free: a shared owned local consumed in two operand positions of a
+// recognized accel / nat-elim spine. Output-invariance (WASM == the reference
+// value) is the deterministic detector -- a double-free reads freed memory and
+// diverges. addN (succ 3) (succ 3) = 8; mulN (succ 3) (succ 3) = 16; the inline
+// NatElim folds q+q = 8 (base q=4, bound q=4, succ applied 4 times).
+func TestPerceusSharedConsumeNoDoubleFree(t *testing.T) {
+	cases := []struct {
+		main, want string
+	}{
+		{"mainDblAdd", "8"},
+		{"mainDblMul", "16"},
+		{"mainElimShared", "8"},
+	}
+	for _, c := range cases {
+		got := runWasm(t, emitWith(t, cg.Wasm{}, perceusSharedConsumeSrc, c.main))
+		if got != c.want {
+			t.Fatalf("%s: shared-local double-free regression: WASM got %q, want %q",
+				c.main, got, c.want)
+		}
+	}
+}
+
 // countdownSrc is the ch39-style partial-recursive countdown: a `partial` def that
 // calls itself via CBounce (the T2 native trampoline). It is the canonical 6b-2
 // frontier program: the WASM Perceus pass does not model ownership across CBounce
