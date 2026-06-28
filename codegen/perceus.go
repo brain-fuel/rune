@@ -358,12 +358,15 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		// builtin-nat-elim spine is recognized + shortcut by the WASM emitter, which
 		// pattern-matches the RAW AppClosure backbone (accelMatchC / NatElimSpine) ending
 		// in a CGlobal. A recognized accel spine is lowered by accelDispatch DIRECTLY to
-		// rt_nat_add/mul/monus(a, b) -- the intermediate closure `(add a)` is NEVER BUILT,
-		// so there is nothing to leak; leaving the backbone bare is both NECESSARY (so the
-		// matcher fires) and leak-free. A recognized nat-elim spine is likewise left bare
-		// (the frozen emitNatFold borrows its loop counter via non-retaining rt_apply, so
-		// releasing its intermediates would corrupt it). annotateBareSpine keeps the whole
-		// backbone bare and only makes the leaf args owned.
+		// rt_nat_add/mul/monus(a, b) -- the intermediate CLOSURE `(add a)` is NEVER BUILT,
+		// so there is no intermediate to leak; leaving the backbone bare is NECESSARY (so
+		// the matcher fires). A recognized nat-elim spine is likewise left bare (the frozen
+		// emitNatFold borrows its loop counter via non-retaining rt_apply, so releasing its
+		// intermediates would corrupt it). annotateBareSpine keeps the whole backbone bare
+		// and annotates the leaf args (owned + the shared-owned-local dup). NOTE: the leaf
+		// OPERANDS are not borrows -- since Task 4d they CONSUME (accelDispatch frees a
+		// freshOwned operand; succ_code frees its arg), which is exactly why
+		// annotateBareSpine must dup a shared owned local (see its docstring).
 		if pp.isRecognizedSpine(x) {
 			// Keep the backbone bare for the matcher; annotateBareSpine makes the leaf
 			// args owned and inserts the shared-owned-local dup. The dup is needed for
