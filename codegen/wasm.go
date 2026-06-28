@@ -453,11 +453,17 @@ func (em *wasmEmitter) emitNat(b *strings.Builder, n NatSpec) {
 		fmt.Fprintf(bb, "    (local.set %s (call $rt_big_from_long (i32.const 0)))\n", r)
 		return "(local.get " + r + ")"
 	})
-	// succ code: x -> x+1 (bignum increment).
+	// succ code: x -> x+1 (bignum increment). rt_big_succ BORROW-reads $arg and
+	// returns a fresh K_BIG; under PATH B the caller hands the closure an OWNED arg
+	// (Perceus dups a borrowed operand at the owning AppClosure position), so succ
+	// must FREE its arg like any user closure code block does -- otherwise a
+	// succ-chain (succ (succ x)) leaks every intermediate K_BIG each run.
 	sc := wasmName(n.Succ) + "_code"
 	em.codeRef(sc)
-	fmt.Fprintf(b, "  (func $%s (param $arg i32) (param $env i32) (result i32)\n", sc)
-	b.WriteString("    (call $rt_big_succ (local.get $arg)))\n")
+	fmt.Fprintf(b, "  (func $%s (param $arg i32) (param $env i32) (result i32) (local $r i32)\n", sc)
+	b.WriteString("    (local.set $r (call $rt_big_succ (local.get $arg)))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
 	em.emitCachedThunk(b, n.Succ, func(f *wasmFunc, bb *strings.Builder) string {
 		r := f.fresh()
 		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, em.codeRef(sc))
@@ -747,18 +753,49 @@ func (f *wasmFunc) accelDispatch(b *strings.Builder, app AppClosure, locals []st
 	ea := f.emitIn(b, a, locals)
 	eb := f.emitIn(b, bb, locals)
 	r := f.fresh()
+	var opName string
 	switch op {
 	case core.NatOpAdd:
-		fmt.Fprintf(b, "    (local.set %s (call $rt_nat_add %s %s))\n", r, ea, eb)
-		return "(local.get " + r + ")", true
+		opName = "rt_nat_add"
 	case core.NatOpMul:
-		fmt.Fprintf(b, "    (local.set %s (call $rt_nat_mul %s %s))\n", r, ea, eb)
-		return "(local.get " + r + ")", true
+		opName = "rt_nat_mul"
 	case core.NatOpMonus:
-		fmt.Fprintf(b, "    (local.set %s (call $rt_nat_monus %s %s))\n", r, ea, eb)
-		return "(local.get " + r + ")", true
+		opName = "rt_nat_monus"
+	default:
+		return "", false
 	}
-	return "", false
+	fmt.Fprintf(b, "    (local.set %s (call $%s %s %s))\n", r, opName, ea, eb)
+	// The accel op BORROW-reads its operands (rt_nat_* reads both inputs and
+	// returns a fresh K_BIG) and the op has now read them, so a freshly-produced
+	// owned intermediate operand is dead and must be released -- otherwise a
+	// nested accel/succ chain (add (add a b) c, succ (succ x)) leaks one K_BIG per
+	// intermediate every run. Only FRESH-producing operand forms are released:
+	// a bare CVar/CEnv/CGlobal operand is borrowed (a root, a captured env slot,
+	// or a still-owned local the Perceus pass drops elsewhere) and must NOT be
+	// released here. See freshOwned.
+	if freshOwned(a) {
+		fmt.Fprintf(b, "    (call $rt_release %s)\n", ea)
+	}
+	if freshOwned(bb) {
+		fmt.Fprintf(b, "    (call $rt_release %s)\n", eb)
+	}
+	return "(local.get " + r + ")", true
+}
+
+// freshOwned reports whether emitIn(t) produces a FRESHLY-ALLOCATED owned value
+// (rc=1, owned by the evaluating context) rather than a borrowed reference. The
+// fresh-producing CIr forms allocate a new heap object; CVar/CEnv/CGlobal/CUnit
+// yield a borrowed reference (a local, a captured env slot, a cached thunk root,
+// or the immortal unit). Used by accelDispatch to release owned intermediate
+// operands of an accel op (which borrow-reads, never frees, its inputs) without
+// ever releasing a borrowed value.
+func freshOwned(t CIr) bool {
+	switch t.(type) {
+	case AppClosure, CLit, MkClosure, CPair, CFst, CSnd, CField, CCase:
+		return true
+	default: // CVar, CEnv, CGlobal, CForeign, CUnit, CLet, CDup, CDrop
+		return false
+	}
 }
 
 // wasmName sanitizes a rune identifier into a WAT-symbol fragment ([A-Za-z0-9_], shared

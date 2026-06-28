@@ -120,11 +120,11 @@ func TestPerceusEmitterRendersDupDrop(t *testing.T) {
 	}
 }
 
-// steadySrc is a minimal rune source with builtin-nat bignums. With builtin nat,
-// $rt_big_succ creates a NEW K_BIG each time (no child-pointer link to the input).
-// So releasing the final succ^N result does not recursively free the intermediate
-// K_BIG objects created during evaluation -- they are properly-allocated leaks under
-// identity Perceus, making $rt_live grow per run.
+// steadySrc is a minimal rune source with builtin-nat bignums. Each `succ`
+// application invokes succ_code, which does rt_big_succ($arg) (a fresh K_BIG)
+// and -- after Plan 6b-2 Task 4d -- RELEASES its owned $arg. So in a succ-chain
+// every intermediate K_BIG is freed when the next succ consumes it, and the
+// chain runs steady-flat.
 const steadySrc = `
 data Nat : U is
   zero : Nat
@@ -134,34 +134,23 @@ builtin nat Nat zero succ
 three : Nat is succ (succ (succ zero)) end
 `
 
-// TestPerceusSteadyTrivial: the steady-state gate shows that identity Perceus
-// leaks. With builtin-nat succ, each loop iteration of WasmSteadyModule freshly
-// evaluates the three body:
-//
-//	succ (succ (succ zero))
-//
-// = three rt_big_succ calls. Each call allocates a fresh K_BIG without linking it
-// to the argument (K_BIG is a leaf: no child pointers). The single $rt_release on
-// the final K_BIG(3) does NOT free K_BIG(1) or K_BIG(2) -- they leak. After the
-// first run the cached zero and succ thunks stabilize; runs 2..N each add 2 leaked
-// K_BIG objects. The test asserts counts GROW (run 3 > run 2), proving the gate
-// detects leaks and has teeth before Task 3 fills in the real algorithm.
-func TestPerceusSteadyTrivial(t *testing.T) {
+// TestPerceusSuccChainFlat: a builtin-nat succ-chain reaches steady-flat. Before
+// Plan 6b-2 Task 4d this test asserted the OPPOSITE (succ-chains LEAK, counts
+// GROW) because succ_code borrow-read its arg and never freed it, so each
+// intermediate K_BIG in `succ (succ (succ zero))` leaked every run. Task 4d makes
+// succ_code free its owned arg (the caller hands it an owned reference under PATH
+// B), so each intermediate is released when the enclosing succ consumes it and
+// $rt_live is flat after run 1. The receiver is INVERTED accordingly (the
+// structural leak it documented is now closed).
+func TestPerceusSuccChainFlat(t *testing.T) {
 	p := mustProgram(t, steadySrc, "three")
-	counts := wasmSteadyLiveP(t, p, 3)
-	if len(counts) != 3 {
-		t.Fatalf("want 3 per-run live counts, got %d: %v", len(counts), counts)
+	counts := wasmSteadyLivePInts(t, p, 4)
+	if len(counts) != 4 {
+		t.Fatalf("want 4 per-run live counts, got %d: %v", len(counts), counts)
 	}
-	// Parse as integers to avoid lexicographic comparison anomalies on multi-digit values.
-	c1, err1 := strconv.Atoi(counts[1])
-	c2, err2 := strconv.Atoi(counts[2])
-	if err1 != nil || err2 != nil {
-		t.Fatalf("non-integer live counts: %v", counts)
-	}
-	// Real Perceus does not insert CDrop for CGlobal-clo AppClosures (scope limitation
-	// Task 3), so succ-chain intermediates still leak each run -> counts GROW.
-	if !(c2 > c1) {
-		t.Fatalf("expected a visible leak for succ-chain (run3 > run2), got flat %v", counts)
+	// succ-chain intermediates are now freed each run -> counts FLAT after run 1.
+	if !(counts[1] == counts[2] && counts[2] == counts[3]) {
+		t.Fatalf("succ-chain should be steady-flat after Task 4d, got growing/uneven %v", counts)
 	}
 }
 
@@ -1055,8 +1044,27 @@ func TestPerceusBareRebindUsesBoth(t *testing.T) {
 //   Post-fix: PASSES -- the release is absent (validates the fix).
 //
 // This is the EXACT one-line diff the controller verified against 2f3c027:perceus.go.
+// userClosureWAT returns the concatenated WAT of the emitted USER-closure code
+// blocks (the anonymous $code__codeN functions), excluding the builtin-nat
+// runtime thunks (succ_code, the eliminator fold/curry blocks). The bare-rebind
+// guards search for "(call $rt_release (local.get $arg))" -- a bug signature in
+// the rebind closure's code block -- but as of Plan 6b-2 Task 4d succ_code
+// legitimately uses $arg as its param and releases it, which would false-positive
+// a whole-module string search. The rebind closure is always a user closure
+// ($code__codeN), so scoping the search to those functions keeps the guard precise.
+func userClosureWAT(wat string) string {
+	var out strings.Builder
+	for _, ch := range strings.Split(wat, "(func $") {
+		if strings.HasPrefix(ch, "code__code") {
+			out.WriteString("(func $")
+			out.WriteString(ch)
+		}
+	}
+	return out.String()
+}
+
 func TestPerceusBareRebindWATGuard(t *testing.T) {
-	wat := emitWith(t, cg.Wasm{}, perceusBareRebindSrc, "mainRebind")
+	wat := userClosureWAT(emitWith(t, cg.Wasm{}, perceusBareRebindSrc, "mainRebind"))
 	const bugLine = "(call $rt_release (local.get $arg))"
 	if strings.Contains(wat, bugLine) {
 		t.Fatalf(
@@ -1142,8 +1150,9 @@ mainRebindDead : Nat -> Nat is rebindDeadFn (fn (x : Nat) is x end) end
 // This exercises the same FIX 1 bodyOwned arm as TestPerceusBareRebindWATGuard but
 // for the case where the body is a MkClosure (not CVar{0}), pinning the dead-h shape.
 func TestPerceusBareRebindDeadH(t *testing.T) {
-	// WAT structural guard: double-free of g must not appear.
-	wat := emitWith(t, cg.Wasm{}, perceusBareRebindDeadHSrc, "mainRebindDead")
+	// WAT structural guard: double-free of g must not appear (scoped to user
+	// closures so succ_code's legitimate $arg release does not false-positive).
+	wat := userClosureWAT(emitWith(t, cg.Wasm{}, perceusBareRebindDeadHSrc, "mainRebindDead"))
 	const bugLine = "(call $rt_release (local.get $arg))"
 	if strings.Contains(wat, bugLine) {
 		t.Fatalf(
