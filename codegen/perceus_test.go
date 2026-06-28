@@ -988,6 +988,44 @@ func TestPerceusFrontierBoundary(t *testing.T) {
 	}
 }
 
+// perceusAccelArmSrc is the accel-operand frontier program: an accel op consumed
+// INSIDE a NatElim step (`addN ih (succ n)`). accelDispatch borrow-reads its
+// operands and does not free a bare-CVar operand (freshOwned releases only freshly
+// produced operands, never a CVar, to avoid freeing a borrowed root), so the owned
+// step arg `ih` leaks once per iteration. Output stays correct (a leak never
+// corrupts), but $rt_live grows per run.
+const perceusAccelArmSrc = accelNatSrc + `
+armUse : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) (addN n n) (fn (k : Nat) (ih : Nat) is addN ih (succ n) end) n
+  end
+end
+mainArm : Nat is armUse 3 end
+`
+
+// TestPerceusAccelFrontier pins the accel-operand frontier: a program that REGISTERS
+// accel ops is excluded from the flat fragment (PerceusBalanceable = false), because
+// an accel op applied to an owned-local operand leaks and is not statically separable
+// from a flat accel use. The armUse shape (accel inside a fold step) actually leaks,
+// confirming the exclusion is real and not vacuous. When the deferred accel-operand
+// ownership annotation lands, this flips (the leak closes and accel programs join the
+// flat fragment).
+func TestPerceusAccelFrontier(t *testing.T) {
+	p := mustProgram(t, perceusAccelArmSrc, "mainArm")
+	if cg.PerceusBalanceable(p) {
+		t.Fatalf("an accel-registering program (accel-in-step leaks) must be OUTSIDE the flat fragment")
+	}
+	// It genuinely leaks (the exclusion is not vacuous): per-run $rt_live grows.
+	c := wasmSteadyLivePInts(t, p, 5)
+	if c[2] == c[3] && c[3] == c[4] {
+		t.Fatalf("expected accel-in-step to leak (frontier not vacuous), got flat %v", c)
+	}
+	// Output is still correct despite the leak.
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, perceusAccelArmSrc, "mainArm")); got != "18" {
+		t.Fatalf("accel-in-step output: got %q, want 18", got)
+	}
+}
+
 // perceusWasmSndSrc is the CSnd receiver (Task 5 minor, folded into Task 6). It
 // builds a pair of closures (Fst=f, Snd=g), projects Snd (the kept second half),
 // and drops the pair -- which also frees f (the first half, not dup'd). The

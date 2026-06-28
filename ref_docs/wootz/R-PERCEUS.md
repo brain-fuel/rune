@@ -671,21 +671,21 @@ must reach a true steady state: $rt_live is flat from run 2 onward (no per-run l
 `TestPerceusCorpusSteady` iterates the corpus, skips programs with
 `PerceusBalanceable = false` (the 6b-2 frontier), and asserts flat for the rest.
 
-Result with the current corpus: 0 balanced, 10 skipped. All 10 corpus programs are
-excluded by one of the four conditions:
+Result with the current corpus (after the satElimDispatch follow-up): 6 balanced, 4
+skipped.
 
-| Corpus listing | Exclusion condition |
+| Corpus listing | In the flat fragment? |
 |---|---|
-| three (natSrc add) | Condition 3: inline saturated NatElim (4 args, 1+1+1+1 = data elim) |
-| two (listSrc length) | Condition 3: inline saturated ListElim (4 args, 1+2+1 = data elim) |
-| p (pairSrc mk) | Condition 4: inline arity-4 ctor mk applied 4 times at one site |
-| big, bigger, product (bigNatSrc) | Condition 2: NatElimSpine (builtin-nat-fold in addN/mulN) |
-| sum, prod, diff, diffZero (accelNatSrc) | Condition 2: NatElimSpine (builtin-nat-fold in addN/mulN) |
+| three (natSrc add) | YES -- accel-free inline NatElim fold, flat |
+| two (listSrc length) | YES -- accel-free inline ListElim fold, flat |
+| p (pairSrc mk) | YES -- saturated arity-4 ctor (satCtorDispatch), flat |
+| big, bigger, product (bigNatSrc) | YES -- accel-free NatElim multiplies (satElimDispatch), flat |
+| sum, prod, diff, diffZero (accelNatSrc) | NO -- register accel ops (accel-operand frontier), excluded wholesale though flat |
 
-The "0 balanced" result is vacuously valid: the steady guarantee is asserted for all
-programs that are not at the known frontier. The receiver programs in Tasks 3-5 cover
-the steady-flat assertion for every major ownership pattern (closures, constructors,
-case, pairs, curry intermediates, inline elim as output-invariance-only).
+Every balanced listing is asserted flat by `TestPerceusCorpusSteady`; the skipped four
+are the accel-operand frontier (sound conservative over-exclusion). The receiver programs
+cover the steady-flat assertion for every major ownership pattern (closures, constructors,
+case, pairs, curry intermediates, inline + nested + recursive eliminators, NatElim folds).
 
 ### Frontier boundary (TestPerceusFrontierBoundary)
 
@@ -798,25 +798,47 @@ corpus and is not separately verified flat; if such a program were both balancea
 leaky, `TestPerceusCorpusSteady` (which asserts flat for every balanceable listing) would
 fail loudly rather than silently mis-asserting.
 
+### Builtin-nat-elim FOLD-SETUP residual: CLOSED by satElimDispatch
+
+The fold-SETUP residual is now CLOSED. A saturated builtin-nat fold (`NatElim mot z step
+n`) previously lowered via the generic `rt_apply` curry chain (the cached eliminator
+thunk's b0->b1->b2->b3), leaking the three intermediate partial-application K_CLOs plus
+the erased motive closure -- a constant per-run cost (~6/run; the corpus `product`
+measured far more pre-Task-4d). `satElimDispatch` (codegen/wasm.go, the eliminator dual of
+Task 3's `satCtorDispatch`) recognizes the saturated 4-arg `NatElimSpine` in `emitIn` and
+runs the fold DIRECTLY: it builds ONLY the b3 fold closure (env `{unit, base, step}`),
+applies it to `n`, then RELEASES it (freeing base + step) and releases `n`. The erased
+motive is evaluated for its annotated side effects and freed immediately (the fold reads
+only env slots 1, 2, so the motive is not stored). `emitNatFold` retains its `$acc` so the
+base survives the b3 release (the 0-iteration return-the-base case and the step's
+per-iteration consume both alias env slot 1). All four spine args arrive OWNED
+(`annotateBareSpine` consumeOwning'd each), so the releases are balanced.
+
+No separate Perceus-level nat-elim ownership annotation was needed: the C1 fix already
+makes `annotateBareSpine` consumeOwning each nat-elim operand and dup a shared owned local,
+so the args reach `satElimDispatch` owned. The result: an ACCEL-FREE NatElim fold reaches
+TRUE steady-flat, iteration-independent (verified for succ-step, ctor-step, and nested
+folds, `TestPerceusNatFoldFlat`, and for the corpus `big`/`bigger`/`product` -- plain
+NatElim multiplies of 100 iterations -- all `[1..5]/[2..5]` flat). 8-backend conformance
+byte-identical. `PerceusBalanceable` no longer excludes NatElim folds; the corpus
+steady-flat set grew from 3 to 6 (`three`/`two`/`p`/`big`/`bigger`/`product`).
+
 ### The two REMAINING excluded classes
 
-1. **Builtin-nat-elim FOLD-SETUP residual** (condition 2, `NatElimSpine`). A SATURATED
-   builtin-nat fold (`NatElim mot z step n`, recognized by `NatElimSpine`) still leaks a
-   CONSTANT per-run cost. The per-ITERATION leak is closed (Task 4d), but the generic
-   `rt_apply` curry chain that builds the b0/b1/b2 partial K_CLOs plus the erased motive
-   closure -- the Task-3 container pattern, but for the ELIMINATOR rather than a
-   constructor -- all leak once per run. The corpus `product` (`mulN 100 100`, where
-   `mulN` is a plain def driving a builtin-nat fold, NOT an accel op) measures `+507/run`,
-   confirming the exclusion. Closing it is the NEXT plan: a `satElimDispatch` (emit the
-   recognized nat-elim spine without the intermediate curry K_CLOs, the eliminator dual of
-   Task 3's satCtorDispatch) PLUS a Perceus-level ownership annotation of recognized
-   nat-elim spines (so the loop-setup temporaries are released). This is a deferred
-   STRUCTURAL frontier, not an incremental tweak. (Aside: `big`/`bigger`/`sum`/`prod`/
-   `diff`/`diffZero` are themselves flat but stay EXCLUDED because their source modules
-   carry dead `addN`/`mulN` defs whose `NatElimSpine` trips condition 2 -- conservative
-   over-exclusion, never a soundness break. An accel result consumed INSIDE an eliminator
-   arm also leaks +1/run empirically, which is why `TestPerceusRealisticFlat` uses
-   succ-chain rather than accel arithmetic.)
+1. **ACCEL-operand residual** (PerceusBalanceable program-level exclusion: `p.Nat.Ops`
+   non-empty). An accel op (`addN`/`mulN`/`monusN`) BORROW-reads its operands but does NOT
+   free a bare-CVar operand -- `accelDispatch`'s `freshOwned` releases only a freshly
+   PRODUCED operand (AppClosure/CLit/...), never a CVar, to avoid freeing a borrowed root.
+   So an accel op applied to an OWNED-dead local leaks that operand: `addN n n` leaks
+   +1/run, and an accel op inside a fold STEP (`addN ih (succ n)`) leaks the step arg `ih`
+   once per iteration (`armUse` measures +9/run, `TestPerceusAccelFrontier`). A flat accel
+   use (literal/fresh operands, `mulN 100 100` -> `accelDispatch` native) cannot be
+   statically separated from a leaky one (owned-local operand), so any program that
+   REGISTERS accel ops is excluded WHOLESALE -- `sum`/`prod`/`diff`/`diffZero` are
+   themselves flat but conservatively excluded (never a soundness break). Closing it is the
+   NEXT plan: a Perceus-level accel-operand ownership annotation (mark which accel CVar
+   operands are owned-dead so `accelDispatch` frees exactly those), the accel dual of the
+   succ_code arg-free. This is the deferred STRUCTURAL frontier.
 
 2. **CBounce / partials** (condition 1). A `partial`/trampoline program lowered through
    closure conversion produces a `CBounce`, which is UNSUPPORTED on WASM: `emitIn` has no

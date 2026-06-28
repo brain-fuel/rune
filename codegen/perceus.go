@@ -681,6 +681,13 @@ func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
 // balanceable listing), so a future leaky balanceable program fails loudly rather than
 // silently mis-asserting.
 //
+// SATURATED builtin-nat FOLDS are now in the fragment (satElimDispatch, the 6b-2
+// follow-up). A saturated `NatElim mot z step n` lowers via satElimDispatch to a single
+// b3 fold closure that is released after the call (no leaked b0/b1/b2 curry K_CLOs, no
+// stored motive; emitNatFold retains its base), so an accel-free fold reaches true
+// steady-flat -- verified for succ-step, ctor-step, and nested folds, and for the corpus
+// `big`/`bigger`/`product` (plain NatElim multiplies, 100 iterations, [1..5]/[2..5] flat).
+//
 // The two REMAINING exclusion categories (both still leak, both deferred frontiers):
 //
 //  1. CBounce (partial/trampoline): UNSUPPORTED on WASM -- emitIn has no CBounce case,
@@ -688,28 +695,33 @@ func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
 //     exclusion, NOT a leak: ownership across a deferred saturated tail call needs the
 //     WASM-partial-support frontier (a separate future plan; see R-PERCEUS).
 //
-//  2. Inline builtin-nat-elim FOLD (NatElimSpine): a SATURATED builtin-nat fold leaks a
-//     CONSTANT per-run fold-SETUP cost. The per-ITERATION leak is closed (Task 4d), but
-//     the generic rt_apply curry chain that builds the b0/b1/b2 partial K_CLOs plus the
-//     erased motive closure (the Task-3 container pattern, for the eliminator) all leak
-//     once per run. Closing it needs a satElimDispatch + a PERCEUS-LEVEL ownership
-//     annotation of recognized nat-elim spines -- a deferred structural frontier. The
-//     corpus `product` (mulN 100 100) measures +507/run, confirming this stays excluded.
+//  2. ACCEL-op programs (a program that REGISTERS natAdd/natMul/natMonus, i.e.
+//     p.Nat.Ops is non-empty): an accel op BORROW-reads its operands but does not free a
+//     bare-CVar operand (accelDispatch's freshOwned releases only freshly-produced
+//     operands, never a CVar, to avoid freeing a borrowed root), so an accel op applied
+//     to an OWNED-dead local -- `addN n n`, or an accel op inside a fold STEP like
+//     `addN ih (succ n)` -- leaks that operand (+1/run, or +1/iteration in a step;
+//     `armUse` measures +9/run). Statically separating a flat accel use (literal/fresh
+//     operands, e.g. `mulN 100 100`) from a leaky one (owned-local operand) needs the
+//     PERCEUS-LEVEL accel-operand ownership annotation (the deferred accel-operand
+//     frontier; see R-PERCEUS). So any accel-registering program is conservatively
+//     excluded WHOLESALE -- some are actually flat (`sum`/`prod`), but the predicate must
+//     never wrongly assert flat on the leaky ones, and the distinction is not static.
 func PerceusBalanceable(p Program) bool {
-	cp := ClosureConvert(p)
-
-	natElim := ""
-	if p.Nat != nil {
-		natElim = p.Nat.ElimName
+	// Accel-op programs are excluded wholesale (the accel-operand leak above is not
+	// statically separable from flat accel uses).
+	if p.Nat != nil && len(p.Nat.Ops) > 0 {
+		return false
 	}
 
+	cp := ClosureConvert(p)
 	for _, b := range cp.Blocks {
-		if cirUnbalanceable(b.Body, natElim) {
+		if cirUnbalanceable(b.Body) {
 			return false
 		}
 	}
 	for _, d := range cp.Defs {
-		if cirUnbalanceable(d.Body, natElim) {
+		if cirUnbalanceable(d.Body) {
 			return false
 		}
 	}
@@ -720,79 +732,62 @@ func PerceusBalanceable(p Program) bool {
 // places the program outside the Perceus flat fragment (see PerceusBalanceable). It
 // traverses every node, mirroring cirUsesArg's scope rules: a MkClosure's code-block
 // body is a separate lifted scope (already scanned as a separate CodeBlock by
-// PerceusBalanceable), so only its Env captures are scanned. After the 6b-2 re-opening
-// only two constructs are flagged: CBounce (condition 1) and a saturated builtin-nat-
-// fold spine (condition 2). General eliminators and arity>=2 constructors are NO LONGER
-// flagged (Tasks 2-3 closed their residuals; empirically flat).
-func cirUnbalanceable(t CIr, natElim string) bool {
+// PerceusBalanceable), so only its Env captures are scanned. After the satElimDispatch
+// follow-up the ONLY construct it flags is CBounce (the accel-op exclusion is handled
+// at the program level in PerceusBalanceable; NatElim folds are now flat).
+func cirUnbalanceable(t CIr) bool {
 	switch x := t.(type) {
 	case CBounce:
-		// Condition 1: partial/trampoline tail call -- UNSUPPORTED on WASM (emitIn
-		// has no CBounce case). Excluded as a missing feature, not a leak.
+		// CBounce: partial/trampoline tail call -- UNSUPPORTED on WASM (emitIn has no
+		// CBounce case). Excluded as a missing feature, not a leak.
 		return true
 
 	case AppClosure:
-		// Condition 2: a saturated builtin-nat-fold spine. The frozen emitNatFold's
-		// per-run fold-SETUP (the rt_apply curry chain + erased motive closure) leaks
-		// a constant amount each run (satElimDispatch frontier).
-		//
-		// This ALSO conservatively excludes every accel-arithmetic program (add/mul/
-		// monus): an accel op is necessarily DEFINED by a NatElim fold body (the
-		// eliminator is rune's only recursion principle, and accel registration's
-		// differential-soundness check requires a real unfolded peeling, so no
-		// foreign/partial accel op can exist), so the def's fold body trips this same
-		// NatElimSpine when cp.Defs is scanned. That is load-bearing: an accel op
-		// consumed INSIDE an eliminator arm leaks +1/run, and this exclusion is what
-		// keeps such a program out of the flat fragment.
-		if _, ok := NatElimSpine(natElim, x); ok {
-			return true
-		}
-		// Recurse into sub-terms. The Clo chain is the spine backbone; scanning it
-		// also re-checks each sub-spine (harmless). The Arg may contain independent
-		// constructs.
-		return cirUnbalanceable(x.Clo, natElim) || cirUnbalanceable(x.Arg, natElim)
+		// NatElim folds are no longer flagged (satElimDispatch made them flat); accel
+		// programs are excluded at the program level in PerceusBalanceable. Recurse to
+		// find a buried CBounce.
+		return cirUnbalanceable(x.Clo) || cirUnbalanceable(x.Arg)
 
 	case CLet:
-		return cirUnbalanceable(x.Val, natElim) || cirUnbalanceable(x.Body, natElim)
+		return cirUnbalanceable(x.Val) || cirUnbalanceable(x.Body)
 
 	case MkClosure:
 		// Code is a lifted code block scanned separately; scan only Env (evaluated
 		// in the current scope, not the closed block scope).
 		for _, e := range x.Env {
-			if cirUnbalanceable(e, natElim) {
+			if cirUnbalanceable(e) {
 				return true
 			}
 		}
 		return false
 
 	case CPair:
-		return cirUnbalanceable(x.A, natElim) || cirUnbalanceable(x.B, natElim)
+		return cirUnbalanceable(x.A) || cirUnbalanceable(x.B)
 	case CFst:
-		return cirUnbalanceable(x.P, natElim)
+		return cirUnbalanceable(x.P)
 	case CSnd:
-		return cirUnbalanceable(x.P, natElim)
+		return cirUnbalanceable(x.P)
 	case CField:
-		return cirUnbalanceable(x.Scrut, natElim)
+		return cirUnbalanceable(x.Scrut)
 
 	case CCase:
-		if cirUnbalanceable(x.Scrut, natElim) {
+		if cirUnbalanceable(x.Scrut) {
 			return true
 		}
 		for _, a := range x.Arms {
-			if cirUnbalanceable(a.Body, natElim) {
+			if cirUnbalanceable(a.Body) {
 				return true
 			}
 		}
 		return false
 
 	case CDup:
-		return cirUnbalanceable(x.V, natElim) || cirUnbalanceable(x.K, natElim)
+		return cirUnbalanceable(x.V) || cirUnbalanceable(x.K)
 	case CDrop:
-		return cirUnbalanceable(x.V, natElim) || cirUnbalanceable(x.K, natElim)
+		return cirUnbalanceable(x.V) || cirUnbalanceable(x.K)
 
 	default:
-		// CVar, CEnv, CGlobal, CForeign, CUnit, CLit: leaves. None trigger any
-		// exclusion condition on their own.
+		// CVar, CEnv, CGlobal, CForeign, CUnit, CLit: leaves. None contain a CBounce.
 		return false
 	}
 }
