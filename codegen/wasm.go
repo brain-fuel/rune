@@ -501,6 +501,14 @@ func (em *wasmEmitter) emitNatFold(b *strings.Builder, fname string) {
 	b.WriteString("    (local $c1 i32) (local $acc i32) (local $k i32) (local $step i32) (local $knext i32)\n")
 	b.WriteString("    (local.set $c1 (call $rt_env (local.get $env) (i32.const 2)))\n")
 	b.WriteString("    (local.set $acc (call $rt_env (local.get $env) (i32.const 1)))\n")
+	// $acc starts as a BORROWED alias of env slot 1 (the base c0). RETAIN it so the loop
+	// owns its own reference: each iteration the step CONSUMES (frees) $acc and returns a
+	// fresh owned one, and on a 0-iteration fold $acc is returned directly. Without this
+	// retain, a caller that RELEASES the eliminator's env (satElimDispatch frees the b3
+	// fold closure after the call) would free the same K_BIG the fold returned or the
+	// step already freed -- a use-after-free / double-free. The retain makes the returned
+	// $acc independent of the env's slot-1 ownership.
+	b.WriteString("    (call $rt_retain (local.get $acc))\n")
 	b.WriteString("    (local.set $k (call $rt_big_from_long (i32.const 0)))\n")
 	b.WriteString("    (block $done (loop $l\n")
 	b.WriteString("      (br_if $done (i32.ge_s (call $rt_big_cmp (local.get $k) (local.get $arg)) (i32.const 0)))\n")
@@ -569,6 +577,9 @@ func (f *wasmFunc) emitIn(b *strings.Builder, t CIr, locals []string) string {
 		return f.emitMkClosure(b, x, locals)
 	case AppClosure:
 		if out, ok := f.satCtorDispatch(b, x, locals); ok {
+			return out
+		}
+		if out, ok := f.satElimDispatch(b, x, locals); ok {
 			return out
 		}
 		if out, ok := f.accelDispatch(b, x, locals); ok {
@@ -741,6 +752,62 @@ func (f *wasmFunc) satCtorDispatch(b *strings.Builder, app AppClosure, locals []
 		fmt.Fprintf(b, "    (call $rt_con_set (local.get %s) (i32.const %d) %s)\n", o, i, v)
 	}
 	return "(local.get " + o + ")", true
+}
+
+// satElimDispatch recognizes a SATURATED builtin-nat eliminator application -- a
+// NatElimSpine `NatElim mot z step n` with EXACTLY 4 args -- and runs the fold
+// DIRECTLY: it builds ONLY the b3 fold closure (env {unit, z, step}) and applies it
+// to n, instead of currying through the cached eliminator thunk's b0->b1->b2 chain
+// (three intermediate partial-application K_CLOs that leak -- the eliminator analogue
+// of the satCtorDispatch container leak). This is what makes an inline NatElim fold
+// reach steady-flat.
+//
+// The erased MOTIVE is evaluated (running its consumeOwning side effects) and freed
+// immediately -- the fold never reads env slot 0, so the motive is not stored. z and
+// step are MOVED into the b3 env (the closure owns them); the b3 closure is RELEASED
+// after the call, freeing them. n is borrow-read by the fold and RELEASED here
+// afterward. All four spine args arrive OWNED (annotateBareSpine consumeOwning'd each
+// leaf), so these releases are balanced; emitNatFold retains its $acc so the base
+// survives the b3 release (0-iteration return, and the step's per-iteration consume).
+//
+// A non-4-arg (partial or over-applied) nat-elim spine returns false and falls through
+// to the generic rt_apply path unchanged. The head is the eliminator def CGlobal, never
+// a ctor in ctorByName nor an accel op, so the dispatch order does not shadow.
+func (f *wasmFunc) satElimDispatch(b *strings.Builder, app AppClosure, locals []string) (string, bool) {
+	if f.em.natElim == "" {
+		return "", false
+	}
+	args, ok := NatElimSpine(f.em.natElim, app)
+	if !ok || len(args) != 4 {
+		return "", false
+	}
+	mot, z, step, n := args[0], args[1], args[2], args[3]
+	// Erased motive: evaluate (for its annotated side effects) and release. Not stored.
+	emot := f.emitIn(b, mot, locals)
+	fmt.Fprintf(b, "    (call $rt_release %s)\n", emot)
+	// z, step, n into stable locals (a nested AppClosure in one must not interleave the
+	// closure fills); z and step are moved into the env, n is the fold bound.
+	ez := f.emitIn(b, z, locals)
+	rz := f.fresh()
+	fmt.Fprintf(b, "    (local.set %s %s)\n", rz, ez)
+	estep := f.emitIn(b, step, locals)
+	rstep := f.fresh()
+	fmt.Fprintf(b, "    (local.set %s %s)\n", rstep, estep)
+	en := f.emitIn(b, n, locals)
+	rn := f.fresh()
+	fmt.Fprintf(b, "    (local.set %s %s)\n", rn, en)
+	// Build the b3 fold closure {unit, z, step} and run it on n.
+	b3idx := f.em.codeRef(wasmName(f.em.natElim) + "_b3")
+	cl := f.fresh()
+	fmt.Fprintf(b, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 3)))\n", cl, b3idx)
+	fmt.Fprintf(b, "    (call $rt_clo_set (local.get %s) (i32.const 0) (call $rt_unit))\n", cl)
+	fmt.Fprintf(b, "    (call $rt_clo_set (local.get %s) (i32.const 1) (local.get %s))\n", cl, rz)
+	fmt.Fprintf(b, "    (call $rt_clo_set (local.get %s) (i32.const 2) (local.get %s))\n", cl, rstep)
+	r := f.fresh()
+	fmt.Fprintf(b, "    (local.set %s (call $rt_apply (local.get %s) (local.get %s)))\n", r, cl, rn)
+	fmt.Fprintf(b, "    (call $rt_release (local.get %s))\n", cl) // frees env z + step
+	fmt.Fprintf(b, "    (call $rt_release (local.get %s))\n", rn) // the bound, dead now
+	return "(local.get " + r + ")", true
 }
 
 // accelDispatch emits a registered accel-op def on two args as native bignum arithmetic

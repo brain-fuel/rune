@@ -1422,6 +1422,37 @@ func TestPerceusBigSuccTempReleased(t *testing.T) {
 	}
 }
 
+// TestPerceusNatFoldFlat pins the satElimDispatch payoff: a saturated builtin-nat
+// eliminator fold now reaches TRUE steady-flat (zero per-run leak), independent of
+// the iteration count. satElimDispatch runs the fold via a single b3 closure (env
+// {unit, base, step}) that it releases after the call, instead of currying through
+// the cached eliminator thunk's b0->b1->b2 chain (three leaked partial K_CLOs +
+// the erased motive); emitNatFold retains its base so it survives that release.
+// Before satElim the fold leaked a constant per-run fold-SETUP cost (~6/run); this
+// asserts the per-run delta is now exactly 0 at two different fold sizes.
+func TestPerceusNatFoldFlat(t *testing.T) {
+	for _, n := range []int{3, 12, 30} {
+		p := mustProgram(t, natFoldSrc(n), "mainFold")
+		c := wasmSteadyLivePInts(t, p, 5)
+		for i := 2; i < len(c); i++ {
+			if c[i] != c[i-1] {
+				t.Fatalf("double %d: NatElim fold not steady-flat: counts=%v (run %d delta=%d)",
+					n, c, i+1, c[i]-c[i-1])
+			}
+		}
+	}
+	// output-invariance (the satElim lowering must compute the same value as the
+	// curried path): double doubles the input.
+	for _, c := range []struct {
+		n    int
+		want string
+	}{{3, "6"}, {12, "24"}} {
+		if got := runWasm(t, emitWith(t, cg.Wasm{}, natFoldSrc(c.n), "mainFold")); got != c.want {
+			t.Fatalf("double %d: satElim output %q, want %q", c.n, got, c.want)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Plan 6b-2 Task 4: rt_big_parse releases its per-digit K_BIG temporaries.
 // ---------------------------------------------------------------------------
