@@ -714,14 +714,18 @@ func PerceusBalanceable(p Program) bool {
 		return false
 	}
 
+	natElim := ""
+	if p.Nat != nil {
+		natElim = p.Nat.ElimName
+	}
 	cp := ClosureConvert(p)
 	for _, b := range cp.Blocks {
-		if cirUnbalanceable(b.Body) {
+		if cirUnbalanceable(b.Body, natElim) {
 			return false
 		}
 	}
 	for _, d := range cp.Defs {
-		if cirUnbalanceable(d.Body) {
+		if cirUnbalanceable(d.Body, natElim) {
 			return false
 		}
 	}
@@ -732,10 +736,10 @@ func PerceusBalanceable(p Program) bool {
 // places the program outside the Perceus flat fragment (see PerceusBalanceable). It
 // traverses every node, mirroring cirUsesArg's scope rules: a MkClosure's code-block
 // body is a separate lifted scope (already scanned as a separate CodeBlock by
-// PerceusBalanceable), so only its Env captures are scanned. After the satElimDispatch
-// follow-up the ONLY construct it flags is CBounce (the accel-op exclusion is handled
-// at the program level in PerceusBalanceable; NatElim folds are now flat).
-func cirUnbalanceable(t CIr) bool {
+// PerceusBalanceable), so only its Env captures are scanned. It flags two constructs:
+// CBounce, and an OVER-APPLIED NatElim spine (the accel-op exclusion is handled at the
+// program level in PerceusBalanceable; SATURATED 4-arg NatElim folds are now flat).
+func cirUnbalanceable(t CIr, natElim string) bool {
 	switch x := t.(type) {
 	case CBounce:
 		// CBounce: partial/trampoline tail call -- UNSUPPORTED on WASM (emitIn has no
@@ -743,51 +747,59 @@ func cirUnbalanceable(t CIr) bool {
 		return true
 
 	case AppClosure:
-		// NatElim folds are no longer flagged (satElimDispatch made them flat); accel
-		// programs are excluded at the program level in PerceusBalanceable. Recurse to
-		// find a buried CBounce.
-		return cirUnbalanceable(x.Clo) || cirUnbalanceable(x.Arg)
+		// A SATURATED (4-arg) NatElim spine is flat (satElimDispatch). But an
+		// OVER-APPLIED inline spine (>4 args -- legitimate when the motive returns a
+		// function, e.g. `NatElim mot z step a b`) does NOT match satElimDispatch's
+		// len==4 guard, so it falls to the generic rt_apply for the surplus application
+		// of the fold-result K_CLO -- which the recognize-then-skip keeps BARE, so that
+		// K_CLO is never released and leaks +1/run. NatElimSpine matches len>=4, so flag
+		// the >4 case (the satElimDispatch-arity frontier).
+		if args, ok := NatElimSpine(natElim, x); ok && len(args) > 4 {
+			return true
+		}
+		return cirUnbalanceable(x.Clo, natElim) || cirUnbalanceable(x.Arg, natElim)
 
 	case CLet:
-		return cirUnbalanceable(x.Val) || cirUnbalanceable(x.Body)
+		return cirUnbalanceable(x.Val, natElim) || cirUnbalanceable(x.Body, natElim)
 
 	case MkClosure:
 		// Code is a lifted code block scanned separately; scan only Env (evaluated
 		// in the current scope, not the closed block scope).
 		for _, e := range x.Env {
-			if cirUnbalanceable(e) {
+			if cirUnbalanceable(e, natElim) {
 				return true
 			}
 		}
 		return false
 
 	case CPair:
-		return cirUnbalanceable(x.A) || cirUnbalanceable(x.B)
+		return cirUnbalanceable(x.A, natElim) || cirUnbalanceable(x.B, natElim)
 	case CFst:
-		return cirUnbalanceable(x.P)
+		return cirUnbalanceable(x.P, natElim)
 	case CSnd:
-		return cirUnbalanceable(x.P)
+		return cirUnbalanceable(x.P, natElim)
 	case CField:
-		return cirUnbalanceable(x.Scrut)
+		return cirUnbalanceable(x.Scrut, natElim)
 
 	case CCase:
-		if cirUnbalanceable(x.Scrut) {
+		if cirUnbalanceable(x.Scrut, natElim) {
 			return true
 		}
 		for _, a := range x.Arms {
-			if cirUnbalanceable(a.Body) {
+			if cirUnbalanceable(a.Body, natElim) {
 				return true
 			}
 		}
 		return false
 
 	case CDup:
-		return cirUnbalanceable(x.V) || cirUnbalanceable(x.K)
+		return cirUnbalanceable(x.V, natElim) || cirUnbalanceable(x.K, natElim)
 	case CDrop:
-		return cirUnbalanceable(x.V) || cirUnbalanceable(x.K)
+		return cirUnbalanceable(x.V, natElim) || cirUnbalanceable(x.K, natElim)
 
 	default:
-		// CVar, CEnv, CGlobal, CForeign, CUnit, CLit: leaves. None contain a CBounce.
+		// CVar, CEnv, CGlobal, CForeign, CUnit, CLit: leaves. None contain a CBounce
+		// or a NatElim spine head.
 		return false
 	}
 }

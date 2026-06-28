@@ -816,7 +816,7 @@ per-iteration consume both alias env slot 1). All four spine args arrive OWNED
 
 No separate Perceus-level nat-elim ownership annotation was needed: the C1 fix already
 makes `annotateBareSpine` consumeOwning each nat-elim operand and dup a shared owned local,
-so the args reach `satElimDispatch` owned. The result: an ACCEL-FREE NatElim fold reaches
+so the args reach `satElimDispatch` owned. The result: an ACCEL-FREE SATURATED (4-arg) NatElim fold reaches
 TRUE steady-flat, iteration-independent (verified for succ-step, ctor-step, and nested
 folds, `TestPerceusNatFoldFlat`, and for the corpus `big`/`bigger`/`product` -- plain
 NatElim multiplies of 100 iterations -- all `[1..5]/[2..5]` flat). 8-backend conformance

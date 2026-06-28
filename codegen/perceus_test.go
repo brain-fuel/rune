@@ -1026,6 +1026,49 @@ func TestPerceusAccelFrontier(t *testing.T) {
 	}
 }
 
+// perceusOverAppliedSrc is the satElimDispatch-arity frontier: an inline OVER-APPLIED
+// NatElim spine. The motive returns `Nat -> Nat`, so the 4-arg fold yields a function
+// applied to a 5th arg -- a 5-arg NatElimSpine. satElimDispatch handles only the
+// saturated 4-arg case (len==4), so the surplus application of the fold-result K_CLO
+// falls to the generic rt_apply, which the recognize-then-skip keeps bare -> the
+// fold-result closure is never released and leaks +1/run.
+const perceusOverAppliedSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+overApp : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (y : Nat) is y end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (y : Nat) is succ (ih y) end end)
+      a b
+  end
+end
+mainOver : Nat is overApp 3 4 end
+`
+
+// TestPerceusOverAppliedFrontier pins the satElimDispatch-arity frontier: an inline
+// over-applied (>4-arg) NatElim spine is NOT in the flat fragment (it leaks the surplus
+// application's fold-result K_CLO), so PerceusBalanceable must exclude it -- otherwise
+// the corpus steady gate would assert flat on a leaky program. The exclusion is
+// non-vacuous: it genuinely leaks (output stays correct). Caught by the final
+// whole-branch review; this is its regression guard.
+func TestPerceusOverAppliedFrontier(t *testing.T) {
+	p := mustProgram(t, perceusOverAppliedSrc, "mainOver")
+	if cg.PerceusBalanceable(p) {
+		t.Fatalf("an over-applied (>4-arg) NatElim spine leaks; it must be OUTSIDE the flat fragment")
+	}
+	c := wasmSteadyLivePInts(t, p, 5)
+	if c[2] == c[3] && c[3] == c[4] {
+		t.Fatalf("expected over-applied NatElim to leak (frontier not vacuous), got flat %v", c)
+	}
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, perceusOverAppliedSrc, "mainOver")); got != "7" {
+		t.Fatalf("over-applied NatElim output: got %q, want 7", got)
+	}
+}
+
 // perceusWasmSndSrc is the CSnd receiver (Task 5 minor, folded into Task 6). It
 // builds a pair of closures (Fst=f, Snd=g), projects Snd (the kept second half),
 // and drops the pair -- which also frees f (the first half, not dup'd). The
