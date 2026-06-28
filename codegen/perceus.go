@@ -653,36 +653,44 @@ func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
 	return CCase{Scrut: pp.annotate(x.Scrut, owned), Arms: arms}
 }
 
-// PerceusBalanceable reports whether a program lies in the v1 Perceus fragment:
+// PerceusBalanceable reports whether a program lies in the Perceus FLAT fragment:
 // programs outside the fragment are the named 6b-2 frontier (R-PERCEUS.md). It is
 // CONSERVATIVE: when unsure, it returns false (exclude from the steady gate rather
-// than wrongly asserting flat). The closure-converted CIr is scanned for four
-// known-unbalanceable constructs. All are leak-only (no UAF/double-free), but their
-// per-run delta is non-zero, so the steady-state gate cannot reach flat for them
-// until the 6b-2 plan closes each one.
+// than wrongly asserting flat). The HARD INVARIANT is one-sided: it must NEVER return
+// true for a program that is not actually steady-flat; a flat program it conservatively
+// excludes is merely a missed opportunity, never a soundness break.
 //
-// Exclusion categories (in scan order):
+// Plan 6b-2 RE-OPENED this predicate. The earlier four-condition form excluded the
+// whole flat fragment (0 balanceable). Tasks 2-4d closed the per-run residuals it was
+// guarding against -- the dead datatype-eliminator MOTIVE (Task 2), the arity>=2
+// constructor container K_CLO (Task 3), the rt_big_parse per-digit temps (Task 4), the
+// rt_big_succ temp (Task 4b), and the accel/succ owned-operand frees (Task 4d) -- so
+// the former exclusion conditions 3 (inline general eliminator) and 4 (inline arity>=2
+// constructor) are REMOVED. Empirically every corpus listing those two conditions
+// excluded now reaches TRUE steady-flat: the recursive datatype eliminators `three`
+// (NatElim fold) and `two` (ListElim fold) and the arity-4 constructor `p` all measure
+// [4 4 4 4]/[2 2 2 2] (wasmSteadyLivePInts, runs 2..5 delta 0). NOTE: the corpus's
+// recursive eliminators recurse via the induction hypothesis `ih`, not by calling the
+// eliminator head by NAME; both are flat. A pathological eliminator whose SOURCE step
+// re-invokes the eliminator head is not in the corpus and is not separately verified
+// flat -- but it is also caught by TestPerceusCorpusSteady (which asserts flat for every
+// balanceable listing), so a future leaky balanceable program fails loudly rather than
+// silently mis-asserting.
 //
-//  1. CBounce (partial/trampoline): ownership across a deferred saturated tail call
-//     is not handled by the v1 pass. The trampoline driver reuses args across bounces
-//     in a way the current drop rules do not model.
+// The two REMAINING exclusion categories (both still leak, both deferred frontiers):
 //
-//  2. Inline builtin-nat-fold application (NatElimSpine): the frozen emitNatFold
-//     borrow-passes its loop counter via non-retaining rt_apply and creates bignum
-//     temporaries (rt_big_parse) whose lifetime the pass does not track.
+//  1. CBounce (partial/trampoline): UNSUPPORTED on WASM -- emitIn has no CBounce case,
+//     so a partial-recursive program does not lower at all. This is a missing-feature
+//     exclusion, NOT a leak: ownership across a deferred saturated tail call needs the
+//     WASM-partial-support frontier (a separate future plan; see R-PERCEUS).
 //
-//  3. Inline GENERAL eliminator application (saturated spine head in p.Datas
-//     ElimNames): the dead-motive carve-out leaks +1/run (the dup'd motive arg the
-//     curry-through block leaves borrowed), and bignum-literal scrutinees create
-//     rt_big_parse temps. A PARTIALLY applied eliminator (cached as a def, applied
-//     per-call via a separate CGlobal) is not flagged: only a spine with at least
-//     (1 + numCtors + 1) args at a single application site.
-//
-//  4. Inline arity>=2 constructor application: the hand-emitted emitCtorBlock WAT
-//     keeps the K_CLO_mk1 intermediate BARE (releasing it mid-spine would UAF a
-//     moved field). Each inline multi-arg constructor application leaks +1/run per
-//     call-site from the unfree'd intermediate. Cached partial applications (the
-//     intermediate built once as a top-level thunk) avoid this.
+//  2. Inline builtin-nat-elim FOLD (NatElimSpine): a SATURATED builtin-nat fold leaks a
+//     CONSTANT per-run fold-SETUP cost. The per-ITERATION leak is closed (Task 4d), but
+//     the generic rt_apply curry chain that builds the b0/b1/b2 partial K_CLOs plus the
+//     erased motive closure (the Task-3 container pattern, for the eliminator) all leak
+//     once per run. Closing it needs a satElimDispatch + a PERCEUS-LEVEL ownership
+//     annotation of recognized nat-elim spines -- a deferred structural frontier. The
+//     corpus `product` (mulN 100 100) measures +507/run, confirming this stays excluded.
 func PerceusBalanceable(p Program) bool {
 	cp := ClosureConvert(p)
 
@@ -691,32 +699,13 @@ func PerceusBalanceable(p Program) bool {
 		natElim = p.Nat.ElimName
 	}
 
-	// elimArities: general datatype eliminator names -> required saturation depth.
-	// depth = 1 (motive) + len(ctors) (one case per constructor) + 1 (scrutinee).
-	// The builtin-nat eliminator is checked separately (condition 2, NatElimSpine).
-	elimArities := map[string]int{}
-	// multiArgCtors: constructor names with Arity >= 2. emitCtorBlock builds Arity-1
-	// intermediate K_CLO containers for each inline multi-arg application.
-	multiArgCtors := map[string]bool{}
-	for _, d := range p.Datas {
-		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
-			continue // handled by NatElimSpine (condition 2)
-		}
-		elimArities[d.ElimName] = 1 + len(d.Ctors) + 1
-		for _, c := range d.Ctors {
-			if c.Arity >= 2 {
-				multiArgCtors[c.Name] = true
-			}
-		}
-	}
-
 	for _, b := range cp.Blocks {
-		if cirUnbalanceable(b.Body, natElim, elimArities, multiArgCtors) {
+		if cirUnbalanceable(b.Body, natElim) {
 			return false
 		}
 	}
 	for _, d := range cp.Defs {
-		if cirUnbalanceable(d.Body, natElim, elimArities, multiArgCtors) {
+		if cirUnbalanceable(d.Body, natElim) {
 			return false
 		}
 	}
@@ -724,112 +713,73 @@ func PerceusBalanceable(p Program) bool {
 }
 
 // cirUnbalanceable returns true if t (or any sub-term) contains a construct that
-// places the program outside the v1 Perceus balanceable fragment (see
-// PerceusBalanceable). It traverses every node, mirroring cirUsesArg's scope rules:
-// a MkClosure's code-block body is a separate lifted scope (already scanned as a
-// separate CodeBlock by PerceusBalanceable), so only its Env captures are scanned.
-func cirUnbalanceable(t CIr, natElim string, elimArities map[string]int, multiArgCtors map[string]bool) bool {
+// places the program outside the Perceus flat fragment (see PerceusBalanceable). It
+// traverses every node, mirroring cirUsesArg's scope rules: a MkClosure's code-block
+// body is a separate lifted scope (already scanned as a separate CodeBlock by
+// PerceusBalanceable), so only its Env captures are scanned. After the 6b-2 re-opening
+// only two constructs are flagged: CBounce (condition 1) and a saturated builtin-nat-
+// fold spine (condition 2). General eliminators and arity>=2 constructors are NO LONGER
+// flagged (Tasks 2-3 closed their residuals; empirically flat).
+func cirUnbalanceable(t CIr, natElim string) bool {
 	switch x := t.(type) {
 	case CBounce:
-		// Condition 1: partial/trampoline tail call. Ownership across CBounce is
-		// deferred to 6b-2 (the pass has no model for the driver-loop reuse pattern).
+		// Condition 1: partial/trampoline tail call -- UNSUPPORTED on WASM (emitIn
+		// has no CBounce case). Excluded as a missing feature, not a leak.
 		return true
 
 	case AppClosure:
-		// Conditions 2, 3, 4: inspect the spine rooted at this AppClosure.
+		// Condition 2: a saturated builtin-nat-fold spine. The frozen emitNatFold's
+		// per-run fold-SETUP (the rt_apply curry chain + erased motive closure) leaks
+		// a constant amount each run (satElimDispatch frontier).
 		if _, ok := NatElimSpine(natElim, x); ok {
-			// Condition 2: builtin-nat-fold. The frozen emitNatFold borrows its loop
-			// counter via non-retaining rt_apply and leaks bignum temporaries.
 			return true
 		}
-		if head, depth := perceusSpineInfo(x); head != "" {
-			if req, isElim := elimArities[head]; isElim && depth >= req {
-				// Condition 3: inline saturated general-eliminator application.
-				// The dead-motive carve-out leaks +1/run; bignum-literal scrutinees
-				// add rt_big_parse temps. Only a fully-saturated spine is flagged
-				// (a partially-applied def cached at top level is not an inline spine).
-				return true
-			}
-			if multiArgCtors[head] && depth >= 2 {
-				// Condition 4: inline arity>=2 constructor application. The
-				// recognize-then-skip rule keeps the K_CLO_mk1 intermediate BARE;
-				// releasing it would UAF a field the K_CON just moved in. So each
-				// inline multi-arg ctor application leaks the intermediate +1/run.
-				return true
-			}
-		}
 		// Recurse into sub-terms. The Clo chain is the spine backbone; scanning it
-		// also re-checks each sub-spine at one fewer level of depth (harmless, since
-		// inner-depth checks are strictly weaker than the outer-depth check already
-		// performed). The Arg may contain independent constructs.
-		return cirUnbalanceable(x.Clo, natElim, elimArities, multiArgCtors) ||
-			cirUnbalanceable(x.Arg, natElim, elimArities, multiArgCtors)
+		// also re-checks each sub-spine (harmless). The Arg may contain independent
+		// constructs.
+		return cirUnbalanceable(x.Clo, natElim) || cirUnbalanceable(x.Arg, natElim)
 
 	case CLet:
-		return cirUnbalanceable(x.Val, natElim, elimArities, multiArgCtors) ||
-			cirUnbalanceable(x.Body, natElim, elimArities, multiArgCtors)
+		return cirUnbalanceable(x.Val, natElim) || cirUnbalanceable(x.Body, natElim)
 
 	case MkClosure:
 		// Code is a lifted code block scanned separately; scan only Env (evaluated
 		// in the current scope, not the closed block scope).
 		for _, e := range x.Env {
-			if cirUnbalanceable(e, natElim, elimArities, multiArgCtors) {
+			if cirUnbalanceable(e, natElim) {
 				return true
 			}
 		}
 		return false
 
 	case CPair:
-		return cirUnbalanceable(x.A, natElim, elimArities, multiArgCtors) ||
-			cirUnbalanceable(x.B, natElim, elimArities, multiArgCtors)
+		return cirUnbalanceable(x.A, natElim) || cirUnbalanceable(x.B, natElim)
 	case CFst:
-		return cirUnbalanceable(x.P, natElim, elimArities, multiArgCtors)
+		return cirUnbalanceable(x.P, natElim)
 	case CSnd:
-		return cirUnbalanceable(x.P, natElim, elimArities, multiArgCtors)
+		return cirUnbalanceable(x.P, natElim)
 	case CField:
-		return cirUnbalanceable(x.Scrut, natElim, elimArities, multiArgCtors)
+		return cirUnbalanceable(x.Scrut, natElim)
 
 	case CCase:
-		if cirUnbalanceable(x.Scrut, natElim, elimArities, multiArgCtors) {
+		if cirUnbalanceable(x.Scrut, natElim) {
 			return true
 		}
 		for _, a := range x.Arms {
-			if cirUnbalanceable(a.Body, natElim, elimArities, multiArgCtors) {
+			if cirUnbalanceable(a.Body, natElim) {
 				return true
 			}
 		}
 		return false
 
 	case CDup:
-		return cirUnbalanceable(x.V, natElim, elimArities, multiArgCtors) ||
-			cirUnbalanceable(x.K, natElim, elimArities, multiArgCtors)
+		return cirUnbalanceable(x.V, natElim) || cirUnbalanceable(x.K, natElim)
 	case CDrop:
-		return cirUnbalanceable(x.V, natElim, elimArities, multiArgCtors) ||
-			cirUnbalanceable(x.K, natElim, elimArities, multiArgCtors)
+		return cirUnbalanceable(x.V, natElim) || cirUnbalanceable(x.K, natElim)
 
 	default:
 		// CVar, CEnv, CGlobal, CForeign, CUnit, CLit: leaves. None trigger any
 		// exclusion condition on their own.
 		return false
 	}
-}
-
-// perceusSpineInfo walks an AppClosure spine down its Clo chain to its base and
-// returns the CGlobal name of the head (empty string if the base is not a CGlobal)
-// and the total depth (number of AppClosure levels). Used by cirUnbalanceable to
-// check conditions 3 and 4.
-func perceusSpineInfo(x AppClosure) (head string, depth int) {
-	var t CIr = x
-	for {
-		app, ok := t.(AppClosure)
-		if !ok {
-			break
-		}
-		depth++
-		t = app.Clo
-	}
-	if g, ok := t.(CGlobal); ok {
-		head = g.Name
-	}
-	return
 }

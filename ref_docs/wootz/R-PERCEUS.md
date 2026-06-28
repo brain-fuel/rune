@@ -183,6 +183,11 @@ the PATH B rules.
 
 ## Held for Plan 6b-2 (named, not silently dropped)
 
+NOTE (post-6b-2): residuals 2-5 below are now CLOSED and residual 1 (CBounce) is
+reclassified as unsupported-on-WASM rather than a leak. See the "Plan 6b-2 outcome"
+section at the end of this document for the closures and the two remaining excluded
+classes. The snapshot below is the historical post-Task-6 state.
+
 Five leak-only residuals remain after Task 6. All are characterized: no UAF, no
 double-free, no wrong output. Only $rt_live grows per run. Each has a named future
 receiver that will become the 6b-2 steady gate when the boundary is closed.
@@ -742,3 +747,83 @@ uses of `g` in the body CDup again (rc+1 per use), which the callee's drop balan
 `TestPerceusBareRebind` covers the basic case (`fn (g) is let h = g in h end`):
 steady flat, output `<function>`. `TestPerceusBareRebindUsesBoth` covers the aliased use
 (`let h = g in const2 h g`): steady flat, output `<function>`. Both pass after FIX 1.
+
+## Plan 6b-2 outcome: the flat fragment is re-opened
+
+Plan 6b-2 closed the leak-only residuals that the original four-condition
+`PerceusBalanceable` was guarding against, then RE-OPENED the predicate to the now-flat
+fragment. The closures, in order:
+
+| Residual (formerly held) | Closed by | Receiver |
+|---|---|---|
+| dead datatype-eliminator MOTIVE (+1/run) | Task 2 (removed the curry-through carve-out; `ownScope` dead-drops the dead motive in b0) | `TestPerceusDeadMotiveDropped` |
+| arity>=2 constructor container K_CLO_mk1 (+1/run) | Task 3 (satCtorDispatch emits `rt_mkcon` directly, no intermediate) | `TestPerceusSaturatedCtorNoContainer` |
+| rt_big_parse per-digit temporaries (nat literals) | Task 4 (rt_big_parse releases its per-digit temps + big_alloc zeroing) | `TestPerceusBignumParseTemps` |
+| rt_big_succ internal K_BIG(1) temp | Task 4b | `TestPerceusBigSuccTempReleased` |
+| accel/succ owned-operand frees (succ-chains + add/mul/monus arithmetic) | Task 4d (rt_nat_add/mul/monus + succ_code free their owned operands) | `TestPerceusSuccChainFlat` |
+
+### The resulting flat fragment
+
+After 6b-2, the following all reach TRUE steady-flat (zero per-run `$rt_live` delta,
+runs 2..N, measured by `wasmSteadyLivePInts` / `assertSteadyFlatInts`):
+
+- **succ-chains** (`succ (succ (succ zero))`, `bigger = succ (succ 5000)`),
+- **accel arithmetic** (`addN`/`mulN`/`monusN` bound via `builtin natAdd`/`natMul`/
+  `natMonus`, lowered directly to `rt_nat_add`/`mul`/`monus`),
+- **saturated constructors** (the arity-4 `mk Nat Nat (succ zero) (succ (succ zero))`),
+- **inline NON-RECURSIVE user-eliminators** (`OptElim`/`BoxElim` over a non-recursive
+  record), AND empirically the **recursive datatype eliminators** `three` (a NatElim
+  fold via the user `add`, no `builtin nat`) and `two` (a ListElim fold via `length`) --
+  both measure `[4 4 4 4]`,
+- **nat literals** (`big = 5000`, `137`).
+
+The capstone receiver `TestPerceusRealisticFlat` combines a multi-digit literal, a
+saturated arity-2 constructor, an inline non-recursive eliminator, and succ arithmetic
+in one per-run main path (`BoxElim mot (fn a rest is succ (succ a) end) (mk 42 (succ 7))`
+-> `44`) and reaches `[3 3 3 3 3]`.
+
+`PerceusBalanceable` was re-opened by DELETING the former conditions 3 (inline general
+eliminator) and 4 (inline arity>=2 constructor). The empirical justification: every
+corpus listing those two conditions excluded now reaches flat -- `three` `[4 4 4 4]`,
+`two` `[4 4 4 4]`, `p` `[2 2 2 2]`. `TestPerceusCorpusSteady` now reports **3 balanced,
+7 skipped** (was 0 balanced, 10 skipped) and asserts `nBalanced > 0`. The HARD INVARIANT
+stays one-sided: `PerceusBalanceable` is CONSERVATIVE and must NEVER return true for a
+non-flat program; a flat program it excludes is only a missed opportunity.
+
+NOTE on recursive eliminators: the corpus's recursive folds (`three`/`two`) recurse via
+the induction hypothesis `ih`, not by calling the eliminator head by NAME in the source
+step. Both are empirically flat, so condition 3 is removed rather than narrowed. A
+pathological eliminator whose SOURCE step re-invokes the eliminator head is not in the
+corpus and is not separately verified flat; if such a program were both balanceable and
+leaky, `TestPerceusCorpusSteady` (which asserts flat for every balanceable listing) would
+fail loudly rather than silently mis-asserting.
+
+### The two REMAINING excluded classes
+
+1. **Builtin-nat-elim FOLD-SETUP residual** (condition 2, `NatElimSpine`). A SATURATED
+   builtin-nat fold (`NatElim mot z step n`, recognized by `NatElimSpine`) still leaks a
+   CONSTANT per-run cost. The per-ITERATION leak is closed (Task 4d), but the generic
+   `rt_apply` curry chain that builds the b0/b1/b2 partial K_CLOs plus the erased motive
+   closure -- the Task-3 container pattern, but for the ELIMINATOR rather than a
+   constructor -- all leak once per run. The corpus `product` (`mulN 100 100`, where
+   `mulN` is a plain def driving a builtin-nat fold, NOT an accel op) measures `+507/run`,
+   confirming the exclusion. Closing it is the NEXT plan: a `satElimDispatch` (emit the
+   recognized nat-elim spine without the intermediate curry K_CLOs, the eliminator dual of
+   Task 3's satCtorDispatch) PLUS a Perceus-level ownership annotation of recognized
+   nat-elim spines (so the loop-setup temporaries are released). This is a deferred
+   STRUCTURAL frontier, not an incremental tweak. (Aside: `big`/`bigger`/`sum`/`prod`/
+   `diff`/`diffZero` are themselves flat but stay EXCLUDED because their source modules
+   carry dead `addN`/`mulN` defs whose `NatElimSpine` trips condition 2 -- conservative
+   over-exclusion, never a soundness break. An accel result consumed INSIDE an eliminator
+   arm also leaks +1/run empirically, which is why `TestPerceusRealisticFlat` uses
+   succ-chain rather than accel arithmetic.)
+
+2. **CBounce / partials** (condition 1). A `partial`/trampoline program lowered through
+   closure conversion produces a `CBounce`, which is UNSUPPORTED on WASM: `emitIn` has no
+   `CBounce` case, so the program does not lower at all. This is relabelled a
+   MISSING-FEATURE exclusion, not a leak -- there is no per-run delta to measure because
+   there is no WASM lowering. Closing it is a SEPARATE future plan (WASM-partial-support):
+   add a `CBounce` lowering to the WASM emitter, then model ownership across the deferred
+   saturated tail call (the trampoline driver reuses args across bounces in a way the v1
+   drop rules do not capture). `TestPerceusFrontierBoundary` keeps the boundary executable
+   (the ch39 countdown stays outside the balanceable fragment).

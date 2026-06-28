@@ -754,17 +754,23 @@ func TestPerceusCorpusOutputInvariance(t *testing.T) {
 	}
 }
 
-// TestPerceusCorpusSteady asserts that every corpus listing in the v1 Perceus
-// balanceable fragment (PerceusBalanceable = true) reaches a TRUE steady state:
-// after the first run, $rt_live is flat (no per-run leak). Listings outside the
-// fragment (PerceusBalanceable = false) are SKIPPED -- they are the 6b-2 frontier
+// TestPerceusCorpusSteady asserts that every corpus listing in the Perceus FLAT
+// fragment (PerceusBalanceable = true) reaches a TRUE steady state: after the first
+// run, $rt_live is flat (no per-run leak). Listings outside the fragment
+// (PerceusBalanceable = false) are SKIPPED -- they are the remaining 6b-2 frontier
 // documented in R-PERCEUS.md. The test logs how many were balanced vs skipped.
 //
-// The four exclusion conditions are:
-//  1. CBounce (partial trampoline)
-//  2. Inline builtin-nat-fold (NatElimSpine)
-//  3. Inline saturated general-eliminator (dead-motive carve-out + bignum temps)
-//  4. Inline arity>=2 constructor (K_CLO_mk1 container leak)
+// After the Plan 6b-2 re-opening (Task 5), the balanceable subset is NON-EMPTY: the
+// recursive-datatype eliminators `three` (NatElim fold) and `two` (ListElim fold) and
+// the arity-4 constructor `p` all reach flat. `product` (mulN 100 100) stays excluded
+// (the builtin-nat fold-SETUP residual, +507/run); `big`/`bigger`/`sum`/`prod`/`diff`/
+// `diffZero` are flat but conservatively excluded because their source modules carry
+// dead addN/mulN defs whose NatElimSpine trips condition 2 (a one-sided miss, never a
+// soundness break: PerceusBalanceable is never true for a non-flat program).
+//
+// The two REMAINING exclusion conditions are:
+//  1. CBounce (partial trampoline) -- unsupported on WASM.
+//  2. Inline builtin-nat-fold (NatElimSpine) -- the fold-SETUP residual.
 func TestPerceusCorpusSteady(t *testing.T) {
 	cases := wasmCorpusCases()
 	nBalanced, nSkipped := 0, 0
@@ -786,10 +792,74 @@ func TestPerceusCorpusSteady(t *testing.T) {
 			t.Fatalf("%s: non-integer live counts: %v", c.name, counts)
 		}
 		if !(c2 == c3 && c3 == c4) {
-			t.Fatalf("%s leaks under Perceus: counts=%v", c.name, counts)
+			t.Fatalf("%s leaks under Perceus but PerceusBalanceable returned true "+
+				"(predicate too loose -- narrow it): counts=%v", c.name, counts)
 		}
 	}
+	if nBalanced == 0 {
+		t.Fatalf("6b-2 should make real corpus listings balanceable; got 0")
+	}
 	t.Logf("corpus steady: %d balanced (steady flat), %d skipped (6b-2 frontier)", nBalanced, nSkipped)
+}
+
+// perceusRealisticSrc is the Plan 6b-2 Task 5 capstone receiver: a realistic INLINE
+// program that combines, in its single per-run main path, every closed member of the
+// flat fragment:
+//
+//	(a) a MULTI-DIGIT nat literal (`42`, the rt_big_parse path Task 4 made flat),
+//	(b) a SATURATED arity>=2 constructor build (`mk 42 (succ 7)`, the K_CON Task 3
+//	    emits directly via rt_mkcon -- no intermediate container),
+//	(c) an inline NON-RECURSIVE user-eliminator match of it (`BoxElim` over the
+//	    non-recursive record `Box`; the dead motive is dropped by Task 2, the K_CON
+//	    scrutinee dropped after the arm, the kept field dup'd out),
+//	(d) succ-chain arithmetic (`succ 7` building the discarded field, `succ (succ a)`
+//	    on the kept field; succ_code frees its owned operand per Task 4d).
+//
+// It deliberately does NOT use a builtin NatElim FOLD (`NatElim mot z step n`): that is
+// the deferred fold-SETUP residual (`product` leaks +507/run). Accel add/mul are also
+// avoided -- not because they leak in isolation (the corpus `sum`/`prod`/`diff` are flat)
+// but because binding them (`builtin natAdd addN`) pulls addN's NatElim fold def into the
+// module, which both trips condition 2 AND, when an accel result is consumed inside an
+// eliminator arm, leaks +1/run (empirically measured). The succ-chain form keeps the
+// program inside the truly-flat, PerceusBalanceable fragment.
+//
+// The eliminator arm projects field a = 42 and computes succ (succ 42) = 44; the second
+// field (succ 7 = 8) is discarded and freed when the scrutinee K_CON is dropped.
+const perceusRealisticSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Box : U is mk : Nat -> Nat -> Box end
+mainReal : Nat is
+  BoxElim (fn (b : Box) is Nat end)
+    (fn (a : Nat) (rest : Nat) is succ (succ a) end)
+    (mk 42 (succ 7))
+end
+`
+
+// TestPerceusRealisticFlat is the Task 5 capstone gate: a realistic inline program over
+// the flat fragment reaches TRUE steady-flat (zero per-run $rt_live delta across runs
+// 2..5) with a deterministic output. It is the integration proof that the 6b-2 residual
+// closures (dead-motive Task 2, ctor-container Task 3, parse-temps Task 4, big_succ-temp
+// Task 4b, accel/succ-operand Task 4d) compose: literal + saturated ctor + inline
+// non-recursive eliminator + succ arithmetic together leak nothing.
+func TestPerceusRealisticFlat(t *testing.T) {
+	// Output-invariance: BoxElim selects field a = 42, computes succ (succ 42) = 44.
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusRealisticSrc, "mainReal"))
+	if got != "44" {
+		t.Fatalf("realistic flat-fragment output: got %q, want \"44\"", got)
+	}
+	// The program must lie in the balanceable fragment (it uses no builtin-nat fold,
+	// no CBounce) -- a guard that the predicate actually admits this realistic shape.
+	p := mustProgram(t, perceusRealisticSrc, "mainReal")
+	if !cg.PerceusBalanceable(p) {
+		t.Fatalf("realistic program should be PerceusBalanceable (literal + ctor + inline "+
+			"non-recursive eliminator + succ arithmetic, no builtin-nat fold)")
+	}
+	// Steady-flat: zero per-run increment across runs 2..5.
+	assertSteadyFlatInts(t, p, 5)
 }
 
 // countdownSrc is the ch39-style partial-recursive countdown: a `partial` def that
