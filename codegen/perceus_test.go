@@ -1227,6 +1227,30 @@ func TestPerceusNatFoldOwnership(t *testing.T) {
 	}
 }
 
+// natFoldSuccTempMax: after Task 4b (rt_big_succ releases its internal
+// rt_big_from_long(1) temp), the per-iteration fold slope drops from 5 (post
+// Task 2) to 2. The fold makes 3 rt_big_succ calls per iteration (the counter
+// step plus the two succ in the `succ (succ ih)` body); each previously leaked
+// one K_BIG(1), so releasing that temp removes 3 per iteration (5 -> 2). The
+// remaining 2 are the CGlobal-succ intermediate RESULTS (the inner succ result
+// consumed by the outer succ), which Task 4d closes structurally.
+const natFoldSuccTempMax = 2
+
+// TestPerceusBigSuccTempReleased pins Task 4b: rt_big_succ no longer leaks its
+// internal "1" temporary, so the fold's per-iteration slope drops to at most 2.
+// Teeth: FAILS on the pre-4b runtime (slope 5) and passes after. The residual 2
+// is the structural CGlobal-succ intermediate, closed by Task 4d.
+func TestPerceusBigSuccTempReleased(t *testing.T) {
+	const n1, n2 = 3, 12
+	d1 := natFoldDelta(t, n1)
+	d2 := natFoldDelta(t, n2)
+	slope := (d2 - d1) / (n2 - n1)
+	if slope > natFoldSuccTempMax {
+		t.Fatalf("rt_big_succ still leaks its temp: fold slope=%d > %d (delta(%d)=%d, delta(%d)=%d)",
+			slope, natFoldSuccTempMax, n1, d1, n2, d2)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Plan 6b-2 Task 4: rt_big_parse releases its per-digit K_BIG temporaries.
 // ---------------------------------------------------------------------------

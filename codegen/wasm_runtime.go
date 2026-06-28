@@ -233,8 +233,15 @@ const wasmRuntime = `
       (br $l)))
     (i32.const 0))
 
-  (func $rt_big_succ (param $a i32) (result i32)
-    (call $big_add (local.get $a) (call $rt_big_from_long (i32.const 1))))
+  (func $rt_big_succ (param $a i32) (result i32) (local $one i32) (local $r i32)
+    ;; big_add reads both inputs and returns a fresh K_BIG; the "1" we allocate is
+    ;; ours to own, so release it once big_add has consumed it. Without this, every
+    ;; rt_big_succ (the per-iteration counter step in emitNatFold, and every builtin
+    ;; succ application) leaks one K_BIG(1) per call.
+    (local.set $one (call $rt_big_from_long (i32.const 1)))
+    (local.set $r (call $big_add (local.get $a) (local.get $one)))
+    (call $rt_release (local.get $one))
+    (local.get $r))
   (func $rt_big_cmp (param $a i32) (param $b i32) (result i32)
     (call $big_cmp (local.get $a) (local.get $b)))
   (func $rt_nat_add (param $a i32) (param $b i32) (result i32)
