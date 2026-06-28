@@ -364,16 +364,18 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 		// emitNatFold borrows its loop counter via non-retaining rt_apply, so releasing its
 		// intermediates would corrupt it). annotateBareSpine keeps the whole backbone bare
 		// and annotates the leaf args (owned + the shared-owned-local dup). NOTE: the leaf
-		// OPERANDS are not borrows -- since Task 4d they CONSUME (accelDispatch frees a
-		// freshOwned operand; succ_code frees its arg), which is exactly why
-		// annotateBareSpine must dup a shared owned local (see its docstring).
+		// OPERANDS are not borrows -- accelDispatch frees BOTH owned operands
+		// unconditionally (Task 1); succ_code frees its arg. consumeOwning in
+		// annotateBareSpine ensures every operand arriving at accelDispatch is owned
+		// (a borrowed CEnv is dup'd first). This is exactly why annotateBareSpine must
+		// dup a shared owned local (see its docstring).
 		if pp.isRecognizedSpine(x) {
 			// Keep the backbone bare for the matcher; annotateBareSpine makes the leaf
 			// args owned and inserts the shared-owned-local dup. The dup is needed for
-			// EVERY recognized spine: a constructor stores fields by MOVE, and (since
-			// Task 4d) accel/nat operands CONSUME too (accelDispatch frees a freshOwned
-			// operand; succ_code frees its arg), so a local consumed in two operand
-			// sub-spines (e.g. `addN (succ n) (succ n)`) is freed twice without it.
+			// EVERY recognized spine: a constructor stores fields by MOVE, and accel/nat
+			// operands CONSUME too (accelDispatch frees both owned operands
+			// unconditionally; succ_code frees its arg), so a local consumed in two
+			// operand sub-spines (e.g. `addN (succ n) (succ n)`) is freed twice without it.
 			return pp.annotateBareSpine(x, owned)
 		}
 
@@ -561,16 +563,16 @@ func spineBaseGlobal(x AppClosure) (string, bool) {
 //   - Constructor spine: emitCtorBlock / satCtorDispatch store each field by MOVE into the
 //     final K_CON, so the same pointer in two field slots at rc=1 would double-free on
 //     the K_CON's release.
-//   - Accel / nat-elim spine: the operands CONSUME now (Task 4d -- accelDispatch releases
-//     a freshOwned operand, and succ_code frees its arg), so the SAME owned local consumed
-//     in two operand sub-spines (e.g. `addN (succ n) (succ n)`) is freed twice -> UAF
-//     without the dup. A spine where the local is a bare borrowed operand (`addN n n`,
-//     accel borrow-reads a bare CVar and does NOT free it) gets a harmless extra retain
-//     (a +1/run LEAK, never a UAF -- a CDup can only over-retain); such accel/nat
-//     programs are already outside the steady-flat fragment (PerceusBalanceable condition
-//     2 excludes every NatElim/accel program), so the leak is invisible to the flat gate
-//     while output stays correct. Correctness (no double-free) is the binding requirement
-//     here, so the dup is applied UNCONDITIONALLY rather than guessing borrow-vs-consume.
+//   - Accel / nat-elim spine: accelDispatch frees BOTH owned operands unconditionally
+//     (Task 1), and succ_code frees its arg. consumeOwning ensures every operand is
+//     privately owned before reaching accelDispatch (a borrowed CEnv is dup'd to give a
+//     fresh owned ref; the closure's original ref survives). The SAME owned local consumed
+//     in two operand sub-spines (e.g. `addN (succ n) (succ n)`) is freed twice without the
+//     dup -- a double-free / UAF. A bare-CVar operand (`addN n n`) is owned by the callee
+//     and freed by accelDispatch; the shared-owned-local dup here prevents the double-free
+//     (rc 1->2 before the spine; each operand frees its copy: rc 2->1->0). This makes
+//     `addN n n` steady-flat. Correctness (no double-free) is the binding requirement here;
+//     the dup is applied UNCONDITIONALLY rather than guessing which operands share a local.
 func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool) CIr {
 	var clo CIr
 	if inner, ok := x.Clo.(AppClosure); ok {
@@ -606,7 +608,7 @@ func (pp *perceusPass) annotateBareSpine(x AppClosure, owned []bool) CIr {
 		}
 		v, ok := dup.V.(CVar)
 		if !ok {
-			break // non-CVar-keyed CDup: leave in place (shouldn't occur here)
+			panic(fmt.Sprintf("perceus: non-CVar CDup %T on bare-spine backbone", dup.V))
 		}
 		hoisted = append(hoisted, v)
 		clo = dup.K
@@ -725,7 +727,7 @@ func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
 // steady-flat -- verified for succ-step, ctor-step, and nested folds, and for the corpus
 // `big`/`bigger`/`product` (plain NatElim multiplies, 100 iterations, [1..5]/[2..5] flat).
 //
-// The two REMAINING exclusion categories (both still leak, both deferred frontiers):
+// The two REMAINING exclusion categories:
 //
 //  1. CBounce (partial/trampoline): UNSUPPORTED on WASM -- emitIn has no CBounce case,
 //     so a partial-recursive program does not lower at all. This is a missing-feature
@@ -733,20 +735,18 @@ func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
 //     WASM-partial-support frontier (a separate future plan; see R-PERCEUS).
 //
 //  2. ACCEL-op programs (a program that REGISTERS natAdd/natMul/natMonus, i.e.
-//     p.Nat.Ops is non-empty): an accel op BORROW-reads its operands but does not free a
-//     bare-CVar operand (accelDispatch's freshOwned releases only freshly-produced
-//     operands, never a CVar, to avoid freeing a borrowed root), so an accel op applied
-//     to an OWNED-dead local -- `addN n n`, or an accel op inside a fold STEP like
-//     `addN ih (succ n)` -- leaks that operand (+1/run, or +1/iteration in a step;
-//     `armUse` measures +9/run). Statically separating a flat accel use (literal/fresh
-//     operands, e.g. `mulN 100 100`) from a leaky one (owned-local operand) needs the
-//     PERCEUS-LEVEL accel-operand ownership annotation (the deferred accel-operand
-//     frontier; see R-PERCEUS). So any accel-registering program is conservatively
-//     excluded WHOLESALE -- some are actually flat (`sum`/`prod`), but the predicate must
-//     never wrongly assert flat on the leaky ones, and the distinction is not static.
+//     p.Nat.Ops is non-empty): after Task 1, accelDispatch frees BOTH owned operands
+//     unconditionally and annotateBareSpine ensures every operand is privately owned
+//     (shared-owned-local dup + consumeOwning for borrows), so accel programs ARE now
+//     steady-flat (`addN n n`, `addN ih (succ n)` in a fold step, etc.). The predicate
+//     still conservatively excludes them WHOLESALE because TestPerceusAccelFrontier
+//     (which asserted the leak was real and non-vacuous) is intentionally left failing
+//     until Task 2 rewrites it. Widening the predicate is Task 2's job; widening it
+//     early would make the frontier test vacuously pass rather than documenting the
+//     corrected behaviour. The hard invariant (never return true for a non-flat program)
+//     is preserved -- this is a conservative exclusion, not a soundness break.
 func PerceusBalanceable(p Program) bool {
-	// Accel-op programs are excluded wholesale (the accel-operand leak above is not
-	// statically separable from flat accel uses).
+	// Accel-op programs are conservatively excluded (see comment above; Task 2 widens).
 	if p.Nat != nil && len(p.Nat.Ops) > 0 {
 		return false
 	}

@@ -911,8 +911,8 @@ func TestPerceusNestedElimInArmFlat(t *testing.T) {
 // perceusSharedConsumeSrc exercises a SHARED owned local CONSUMED in two operand
 // sub-spines of a recognized accel / nat-elim spine -- the exact shape the final
 // whole-branch review caught as a double-free (C1). `addN (succ n) (succ n)`:
-// each `succ n` operand is freshOwned (accelDispatch releases its result) AND
-// succ_code frees its arg n, so n (rc=1) is freed TWICE without a dup -> UAF /
+// each `succ n` operand is owned (accelDispatch frees both operands unconditionally;
+// succ_code frees its arg n), so n (rc=1) is freed TWICE without a dup -> UAF /
 // double-free. The same for mulN, and for an INLINE NatElim whose base and bound
 // both consume n. After the fix (annotateBareSpine inserts the shared-owned-local
 // dup for accel/nat spines too, not only constructors), n is dup'd once so each
@@ -989,11 +989,11 @@ func TestPerceusFrontierBoundary(t *testing.T) {
 }
 
 // perceusAccelArmSrc is the accel-operand frontier program: an accel op consumed
-// INSIDE a NatElim step (`addN ih (succ n)`). accelDispatch borrow-reads its
-// operands and does not free a bare-CVar operand (freshOwned releases only freshly
-// produced operands, never a CVar, to avoid freeing a borrowed root), so the owned
-// step arg `ih` leaks once per iteration. Output stays correct (a leak never
-// corrupts), but $rt_live grows per run.
+// INSIDE a NatElim step (`addN ih (succ n)`). After Task 1, accelDispatch frees
+// BOTH owned operands unconditionally, so `ih` (the owned step accumulator) and
+// `succ n` (a fresh K_BIG) are both freed -- the per-iteration leak is closed and
+// this program is now steady-flat. TestPerceusAccelFrontier (which asserted the
+// leak was real) is intentionally left failing until Task 2 rewrites it.
 const perceusAccelArmSrc = accelNatSrc + `
 armUse : Nat -> Nat is
   fn (n : Nat) is
@@ -1736,7 +1736,7 @@ func TestPerceusAccelArmStepFlat(t *testing.T) {
 }
 
 // accelFreshSrc: a regression guard that accel-on-fresh operands (mulN of two fresh
-// accel results) still reach flat after freshOwned is removed.
+// accel results) remain flat now that accelDispatch frees both operands unconditionally.
 const accelFreshSrc = accelNatSrc + `
 freshOp : Nat is mulN (addN 10 10) (addN 20 20) end
 `
@@ -1747,5 +1747,79 @@ func TestPerceusAccelFreshOperandsFlat(t *testing.T) {
 	// (10+10) * (20+20) = 20*40 = 800.
 	if got := runWasm(t, emitWith(t, cg.Wasm{}, accelFreshSrc, "freshOp")); got != "800" {
 		t.Fatalf("mulN (addN 10 10) (addN 20 20): got %q, want 800", got)
+	}
+}
+
+// --- C1 regression guards: constructor-spine and borrowed-operand receivers ---
+
+// perceusCtorSharedOwnedLocalSrc exercises the CDup hoist in annotateBareSpine for
+// a CONSTRUCTOR spine where BOTH field positions hold the same owned local `q` (the
+// Nat analogue of the mk-xx / C1 double-free). satCtorDispatch stores each field by
+// MOVE into the K_CON; without the CDup, q (rc=1) is stored twice -> released twice
+// on K_CON's free -> double-free / UAF. With the CDup, q is dup'd (rc 1->2) before
+// the constructor spine so each field store moves a separate reference; both releases
+// are balanced. The output (succ q) + (succ q) = 4 + 4 = 8 for q=3 proves both
+// fields are readable (no corruption) after the K_CON is freed.
+const perceusCtorSharedOwnedLocalSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Box2 : U is mk2 : Nat -> Nat -> Box2 end
+box2Mot : Box2 -> U is fn (p : Box2) is Nat end end
+ctorShared : Nat -> Nat is
+  fn (q : Nat) is
+    Box2Elim box2Mot
+      (fn (a : Nat) (b : Nat) is
+        NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+      end)
+      (mk2 (succ q) (succ q))
+  end
+end
+mainCtorShared : Nat is ctorShared 3 end
+`
+
+// TestPerceusCtorSharedOwnedLocalNoDoubleFree is the constructor-spine C1 regression
+// guard: the same owned Nat local in BOTH field positions of a 2-field constructor.
+// A double-free corrupts both field reads, producing wrong output or a runtime trap.
+// Correct output ("8") + steady-flat together prove the CDup hoist in
+// annotateBareSpine fires for constructor spines (not only accel/nat-elim spines).
+func TestPerceusCtorSharedOwnedLocalNoDoubleFree(t *testing.T) {
+	p := mustProgram(t, perceusCtorSharedOwnedLocalSrc, "mainCtorShared")
+	// succ 3 = 4; 4 + 4 = 8. A double-free of q corrupts the field reads.
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, perceusCtorSharedOwnedLocalSrc, "mainCtorShared")); got != "8" {
+		t.Fatalf("ctorShared: constructor C1 double-free: WASM got %q, want \"8\"", got)
+	}
+	assertSteadyFlatInts(t, p, 5)
+}
+
+// perceusAccelBorrowedCEnvSrc: an accel op inside a CLOSURE that captures an outer
+// Nat `n` as a CEnv borrow. When accelDispatch frees both operands unconditionally,
+// the CEnv `n` must have been dup'd by consumeOwning (annotateBareSpine calls
+// consumeOwning on every operand) so the closure's reference survives the release.
+// A missed dup would free the closure's reference -- a use-after-free producing wrong
+// output or a trap. addK 500 500 = 1000.
+const perceusAccelBorrowedCEnvSrc = accelNatSrc + `
+addK : Nat -> Nat -> Nat is fn (n : Nat) is fn (m : Nat) is addN n m end end end
+borrowedAccel : Nat is
+  let f : Nat -> Nat = addK 500 in
+  f 500
+end
+mainBorrowed : Nat is borrowedAccel end
+`
+
+// TestPerceusAccelBorrowedCEnvFlat is the borrowed-operand accel receiver: an accel op
+// whose first operand is a CEnv capture (a value the closure owns, not the callee).
+// consumeOwning dup's the CEnv to give accelDispatch a fresh private owned reference;
+// accelDispatch releases that fresh reference; the closure's original reference is
+// untouched. Correct output ("1000") + steady-flat prove the CEnv dup path is safe
+// (no UAF, no leak from the borrowed operand).
+func TestPerceusAccelBorrowedCEnvFlat(t *testing.T) {
+	p := mustProgram(t, perceusAccelBorrowedCEnvSrc, "mainBorrowed")
+	assertSteadyFlatInts(t, p, 5)
+	// addK 500 500 = addN 500 500 = 1000.
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, perceusAccelBorrowedCEnvSrc, "mainBorrowed")); got != "1000" {
+		t.Fatalf("borrowedAccel: CEnv-operand UAF regression: got %q, want 1000", got)
 	}
 }
