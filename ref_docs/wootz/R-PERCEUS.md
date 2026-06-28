@@ -256,23 +256,40 @@ passing it, a cached root arrives at the callee as a FRESH owned reference, so t
 callee dropping it leaves the cache's reference intact. The no-Perceus output is
 unchanged (refcounts only inflate, are never freed; the printed value is identical).
 
-### The curry-through borrow carve-out (the frozen-runtime boundary)
-ONE class of argument stays BORROWED by the callee: a code block whose entire body is a
-single `MkClosure` is a CURRYING step that returns a closure. Its argument may be
-applied by the FROZEN 6a fold/curry machinery (`emitNatFold`, the builtin-nat
-eliminator loop, and `emitCurryBlock`), which BORROWS the value (rt_apply does not
-retain) and REUSES it afterward -- `emitNatFold` succ's its loop counter `$k` AFTER
-passing it to the step. Dropping that argument would free a value the frozen caller
-still uses (observed as the `mulN 100 100 = "101"` and `length = "succ <function>"`
-corruptions). So the pass conservatively does NOT drop a curry-through argument
-(`isCurryThrough` / the carve-out in `Perceus`): it annotates the body and dups any
-escaping capture but leaves the argument borrowed. A REAL consumer (a non-`MkClosure`
-body -- an eliminator leaf such as `fn ih is succ ih end`, or a Task 4 match arm that
-drops an owned scrutinee) drops its dead argument normally. This is the principled
-boundary between the pass's move-discipline and the frozen runtime's borrow-discipline
-at the eliminator/fold interface. The residue is a bounded leak of an ignored curried
-argument (never a corruption, never a wrong value), refined once Task 4+ brings
-eliminator/fold ownership into the pass.
+### The curry-through borrow carve-out (REMOVED by Plan 6b-2 Task 2)
+
+HISTORICAL NOTE: The carve-out was present from the original Perceus implementation
+through Task 1. It marked a code block whose entire body is a single `MkClosure`
+(a currying step) as BORROWED for its argument -- the `isCurryThrough` check in
+`Perceus()` routed such blocks through `consumeOwning(annotate(...))` rather than
+`ownScope(...)`. The motivation was the FROZEN 6a fold/curry machinery (`emitNatFold`,
+`emitCurryBlock`) which borrow-passed the loop counter to step blocks without retaining
+it first. Dropping a curry-through argument in that context would free a value the
+frozen caller still reused -- producing the `mulN 100 100 = "101"` use-after-free.
+
+WHY IT WAS UNSAFE: `emitNatFold` passed `$k` to the step block via `rt_apply` WITHOUT
+retaining it, then incremented `$k` afterward. A dead-drop in the step block would
+free `$k` before the increment.
+
+WHY TASK 1 MADE IT SAFE: Plan 6b-2 Task 1 added `(call $rt_retain (local.get $k))`
+in `emitNatFold` BEFORE the `rt_apply` step call. The step block now receives an
+OWNED reference to `$k`. A dead-drop of a curry-through argument is safe: the step
+block's owned copy is dropped independently of the fold's retained loop counter.
+
+WHY THE CARVE-OUT WAS REMOVED: With the carve-out in place, the dead motive argument
+of an INLINE general eliminator application leaked +1/run. When OptElim (or any
+general eliminator) is applied with an inline lambda motive, closure conversion
+produces a first curry block (b0) whose body is `MkClosure{Code: b1, Env: []}`. The
+motive argument (CVar{0}) does NOT appear in b0's env (it is DEAD). With the
+carve-out, b0 is a bare-MkClosure block so its dead argument is left borrowed. The
+caller's `consumeOwning` dups the motive K_CLO before the call; b0 borrows the arg
+(does not drop). The dup'd K_CLO is never freed, leaking +1/run ($rt_live grows).
+
+WHAT REPLACED IT: The carve-out branch and the `isCurryThrough` helper were DELETED.
+The `Perceus()` loop now applies `ownScope(body, []bool{true})` to EVERY code block
+uniformly. `ownScope` dead-drops CVar{0} iff `!cirUsesArg(body, 0)` -- which is
+true for b0 (empty env). The dead motive K_CLO is freed each run. $rt_live is flat.
+Receiver: `TestPerceusDeadMotiveDropped` (Plan 6b-2 Task 2 gate).
 
 NOTE on `shiftCIr`: it is now the structural dual of `cirUsesArg`, recursing through
 EVERY node (`CCase` scrut + arms, `CPair`, `CField`, `CFst`, `CSnd`, `CBounce`), so
@@ -588,12 +605,11 @@ Two steady-state residuals remain for the recognise-then-skip path:
    FROZEN WAT emitter, out of edit scope for this task), or (b) a new multi-field ctor
    emitter that builds the K_CON in a single step without any intermediate. Bucketed 6b-2.
 
-2. DEAD-MOTIVE CARVE-OUT LEAK (+1/run): when a general eliminator is applied INLINE (not
-   cached), the motive argument is passed through a curry-through block (whose body is a
-   MkClosure). The carve-out marks that block's argument BORROWED (not dropped), because
-   the FROZEN fold/curry machinery reuses it. The caller's consumeOwning dups the motive
-   before the call; the block borrows the arg (does not drop). The dup'd reference leaks
-   per run. Bucketed 6b-2 (carve-out refinement).
+2. DEAD-MOTIVE CARVE-OUT LEAK: FIXED by Plan 6b-2 Task 2. The carve-out that left
+   a curry-through block's dead argument borrowed was removed. `ownScope` now dead-drops
+   the motive in b0 (the first curry block, whose env is empty for non-recursive
+   datatypes). Receiver: `TestPerceusDeadMotiveDropped`. See the "curry-through borrow
+   carve-out (REMOVED)" section above for the full mechanistic explanation.
 
 ### Receiver TestPerceusCtorMkXX
 

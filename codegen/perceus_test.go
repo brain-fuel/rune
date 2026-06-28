@@ -1214,3 +1214,77 @@ func TestPerceusBignumParseTemps(t *testing.T) {
 	p := mustProgram(t, bignumLitSrc, "main")
 	assertSteadyFlatInts(t, p, 4)
 }
+
+// ---------------------------------------------------------------------------
+// Plan 6b-2 Task 2: remove the curry-through carve-out (drop the dead motive).
+// ---------------------------------------------------------------------------
+
+// perceusDeadMotiveSrc is the Task 2 receiver source: an INLINE general
+// eliminator application where the MOTIVE is an inline lambda (not a cached
+// named def). The motive `fn (o : Opt) is Nat end` erases to
+// `fn _ is () end` -- a K_CLO freshly allocated each run. Because the motive
+// (IVar at index 3 in x's frame) does NOT appear in the ICase body for the
+// non-recursive Opt datatype, the eliminator's first curry block (b0) has an
+// EMPTY env: the motive CVar{0} is dead in b0's body.
+//
+// With the curry-through carve-out: b0 is a bare-MkClosure block, so
+// Perceus annotates it without dropping its dead argument. The fresh motive
+// K_CLO is allocated each run and NEVER freed; $rt_live grows by +1/run.
+//
+// After removing the carve-out: ownScope dead-drops CVar{0} in b0
+// (CDrop{CVar{0}, MkClosure{...}}). The motive K_CLO is freed by b0 each
+// run. $rt_live is flat (per-run delta = 0). Output unchanged: "7".
+const perceusDeadMotiveSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+data Opt : U is
+  none : Opt
+| some : Nat -> Opt
+end
+mainElim : Nat is OptElim (fn (o : Opt) is Nat end) zero (fn (x : Nat) is x end) (some 7) end
+`
+
+// inlineElimResidualAfterMotive is the per-run $rt_live delta for
+// perceusDeadMotiveSrc after the carve-out is REMOVED (the motive is dropped
+// in b0). After Task 2, the only remaining contributions are eliminated by
+// Tasks 1 and 4 already: the motive K_CLO is dropped, bignum temps are freed
+// by rt_big_parse (Task 4), and the K_CON scrutinee + curry intermediates are
+// released by the Perceus pass. The residual is 0 (fully flat). The
+// pre-removal baseline is 1 (motive K_CLO not freed); removing the carve-out
+// drops the delta by exactly 1.
+const inlineElimResidualAfterMotive = 0
+
+// TestPerceusDeadMotiveDropped is the Plan 6b-2 Task 2 gate: removing the
+// curry-through carve-out so the dead motive in b0 is dropped.
+//
+// PRE-REMOVAL (with carve-out): b0 is isCurryThrough (bare-MkClosure body),
+// so Perceus skips dead-dropping its owned arg. The inline motive K_CLO
+// (freshly allocated each run) leaks: per-run delta = 1 > 0 = threshold.
+// Test FAILS before the fix, catching the carve-out.
+//
+// POST-REMOVAL (without carve-out): ownScope inserts CDrop{CVar{0}, ...} in
+// b0 because cirUsesArg(body, 0) = false (motive not in b0's empty env).
+// Motive K_CLO is freed each run: per-run delta = 0 <= 0. Test PASSES.
+//
+// OUTPUT-INVARIANCE: the eliminator still prints "7" (some 7 -> 7). A
+// use-after-free from a premature drop would corrupt this to a wrong value.
+func TestPerceusDeadMotiveDropped(t *testing.T) {
+	// Output-invariance: removing the carve-out must not change the computed value.
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusDeadMotiveSrc, "mainElim"))
+	if got != "7" {
+		t.Fatalf("output changed after carve-out removal: got %q want \"7\"", got)
+	}
+	// Delta gate: per-run $rt_live increment must drop to <= inlineElimResidualAfterMotive.
+	p := mustProgram(t, perceusDeadMotiveSrc, "mainElim")
+	counts := wasmSteadyLivePInts(t, p, 4)
+	d := counts[3] - counts[2]
+	if d > inlineElimResidualAfterMotive {
+		t.Fatalf("dead motive still leaks: per-run delta=%d > %d (counts %v); "+
+			"is the curry-through carve-out still present in Perceus?",
+			d, inlineElimResidualAfterMotive, counts)
+	}
+	t.Logf("dead motive dropped: counts %v, per-run delta=%d (carve-out removed)", counts, d)
+}

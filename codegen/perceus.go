@@ -214,43 +214,21 @@ func Perceus(p ClosureProgram) ClosureProgram {
 		}
 	}
 	for i := range p.Blocks {
-		body := p.Blocks[i].Body
-		if isCurryThrough(body) {
-			// CURRY-THROUGH carve-out: a block whose entire body is a single MkClosure
-			// is a currying step that returns a closure. Its argument may be applied by
-			// the FROZEN 6a fold/curry machinery -- emitNatFold (the builtin-nat
-			// eliminator loop) and emitCurryBlock -- which BORROWS the value (rt_apply
-			// does not retain) and REUSES it afterward (emitNatFold succ's its loop
-			// counter after passing it to the step). Conservatively BORROW such an
-			// argument: annotate the body, dup-on-consume-borrowed any escaping capture,
-			// but do NOT drop the argument. Dropping it would free a value the frozen
-			// caller still uses (the "101" / "succ <function>" corruption). A real
-			// consumer (a non-MkClosure body, e.g. an eliminator leaf or a match arm)
-			// drops its dead argument normally -- which is what Task 4's owned-scrutinee
-			// receivers need. This is the principled boundary between the pass's
-			// move-discipline and the frozen runtime's borrow-discipline at the
-			// eliminator/fold interface; a leak of an ignored curried argument is bounded
-			// and refined once Task 4+ brings eliminator/fold ownership into the pass.
-			p.Blocks[i].Body = consumeOwning(pp.annotate(body, []bool{true}))
-			continue
-		}
-		// A real consumer: the one code-block argument (CVar{0}) is an owned local,
-		// dropped when dead (PATH B; no argCount skip).
-		p.Blocks[i].Body = pp.ownScope(body, []bool{true})
+		// Every code-block argument (CVar{0}) is an owned local, dropped when dead
+		// (PATH B). This includes curry-through blocks (bare-MkClosure bodies) --
+		// the former carve-out that left a dead curry argument borrowed was REMOVED
+		// by Plan 6b-2 Task 2. That carve-out existed because the OLD emitNatFold
+		// borrow-passed its loop counter; Task 1 made emitNatFold retain the counter
+		// before the step call, so the step block receives an owned reference and
+		// dropping a dead curry argument is safe. The carve-out was leaking the dead
+		// motive argument of inline general-eliminator applications (+1/run per call).
+		p.Blocks[i].Body = pp.ownScope(p.Blocks[i].Body, []bool{true})
 	}
 	for i := range p.Defs {
 		// Defs have no owned code-block argument.
 		p.Defs[i].Body = pp.ownScope(p.Defs[i].Body, nil)
 	}
 	return p
-}
-
-// isCurryThrough reports whether a code block's body is a single MkClosure -- a
-// currying step that returns a closure without consuming its argument inline. Such a
-// block's argument is conservatively BORROWED (see the carve-out in Perceus).
-func isCurryThrough(body CIr) bool {
-	_, ok := body.(MkClosure)
-	return ok
 }
 
 // ownScope is the entry point for a lexical scope. owned[i] = true means the CVar at
