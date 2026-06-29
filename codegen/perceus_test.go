@@ -1834,3 +1834,99 @@ func TestPerceusAccelBorrowedCEnvFlat(t *testing.T) {
 		t.Fatalf("borrowedAccel: CEnv-operand UAF regression: got %q, want 1000", got)
 	}
 }
+
+// --- Frontier: WASM partial support (Task 2) ---
+
+// TestPerceusPartialCountdownRunsWasm: the ch39-style partial countdown lowers and
+// runs on the WASM backend (today: panics "unknown CIr node codegen.CBounce"). The
+// headline parity gate -- WASM joins the other 8 backends on general recursion.
+func TestPerceusPartialCountdownRunsWasm(t *testing.T) {
+	// countdownSrc uses `builtin nat`, so Nat is the bignum and zero displays as "0".
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, countdownSrc, "countdownMain")); got != "0" {
+		t.Fatalf("countdown 3 on wasm: got %q, want 0", got)
+	}
+}
+
+// partialNatPreamble is the shared builtin-nat declaration for the ARC partial
+// receivers (so zero/results display as decimal bignums).
+const partialNatPreamble = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+`
+
+// partialDropSrc: a partial whose step DROPS an unused arg. The second param `tag` is
+// owned on entry to each bounce and never used in the recursive tail, so it must be
+// freed each iteration or the trampoline leaks. Counts `a` down to zero -> "0".
+const partialDropSrc = partialNatPreamble + `
+partial dropper : Nat -> Nat -> Nat is
+  fn (a : Nat) (tag : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero
+      (fn (k : Nat) (ih : Nat) is dropper k tag end) a
+  end
+end
+dropMain : Nat is dropper 2000 7 end
+`
+
+func TestPerceusPartialDropFlat(t *testing.T) {
+	p := mustProgram(t, partialDropSrc, "dropMain")
+	assertSteadyFlatInts(t, p, 5)
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, partialDropSrc, "dropMain")); got != "0" {
+		t.Fatalf("dropper: got %q, want 0", got)
+	}
+}
+
+// partialDupSrc: a partial whose step DUPS an arg (uses `tag` twice -- once carried in
+// the tail, once in the zero-case `addN tag tag`). The bounce-owned ref plus the in-body
+// use need balancing each iteration. Base case addN 3 3 = 6 -> "6".
+const partialDupSrc = partialNatPreamble + `
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+partial duper : Nat -> Nat -> Nat is
+  fn (a : Nat) (tag : Nat) is
+    NatElim (fn (x : Nat) is Nat end) (addN tag tag)
+      (fn (k : Nat) (ih : Nat) is duper k tag end) a
+  end
+end
+dupMain : Nat is duper 2000 3 end
+`
+
+func TestPerceusPartialDupFlat(t *testing.T) {
+	p := mustProgram(t, partialDupSrc, "dupMain")
+	assertSteadyFlatInts(t, p, 5)
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, partialDupSrc, "dupMain")); got != "6" {
+		t.Fatalf("duper: got %q, want 6", got)
+	}
+}
+
+// partialSharedSrc: a SHARED-owned-local arg -- the tail call passes `n n` (one local,
+// two bounce slots), and shared2 forwards `p q` (both owned). annotateBounceSpine +
+// the enclosing dup must balance both consumes. Mutual partial group. Counts to zero -> "0".
+const partialSharedSrc = partialNatPreamble + `
+partial shared2 : Nat -> Nat -> Nat -> Nat is
+  fn (a : Nat) (p : Nat) (q : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero
+      (fn (k : Nat) (ih : Nat) is shared2 k p q end) a
+  end
+end
+partial shared : Nat -> Nat -> Nat is
+  fn (a : Nat) (n : Nat) is
+    NatElim (fn (x : Nat) is Nat end) zero
+      (fn (k : Nat) (ih : Nat) is shared2 k n n end) a
+  end
+end
+sharedMain : Nat is shared 300 4 end
+`
+
+func TestPerceusPartialSharedFlat(t *testing.T) {
+	p := mustProgram(t, partialSharedSrc, "sharedMain")
+	assertSteadyFlatInts(t, p, 5)
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, partialSharedSrc, "sharedMain")); got != "0" {
+		t.Fatalf("shared: got %q, want 0", got)
+	}
+}

@@ -588,19 +588,26 @@ const wasmRuntime = `
   ;; args (one partial-body iteration -> the next bounce or a value), shell-free the
   ;; spent bounce (args MOVED into the applies), and continue. O(1) WASM stack.
   (func $rt_tramp (param $v i32) (result i32)
-    (local $step i32) (local $nargs i32) (local $i i32) (local $f i32)
+    (local $step i32) (local $nargs i32) (local $i i32) (local $f i32) (local $next i32)
     (block $done (loop $lp
       ;; immediates are never bounces; a heap value is a bounce iff word0 == 7.
       (br_if $done (call $is_int (local.get $v)))
       (br_if $done (i32.ne (call $w (local.get $v) (i32.const 0)) (i32.const 7)))
       (local.set $step (call $w (local.get $v) (i32.const 1)))
       (local.set $nargs (call $w (local.get $v) (i32.const 2)))
+      ;; Apply the BORROWED step to each owned arg. Each apply but the last builds an
+      ;; owned intermediate closure (it captures the arg); release it before the next
+      ;; apply. The arg MOVES into that closure (or is consumed by the body on the last
+      ;; apply), so shell-free below does not touch the slots. f starts as the borrowed
+      ;; step (i==0), so it is NOT released; intermediates (i>0) are.
       (local.set $f (local.get $step))
       (local.set $i (i32.const 0))
       (block $ab (loop $al
         (br_if $ab (i32.ge_u (local.get $i) (local.get $nargs)))
-        (local.set $f (call $rt_apply (local.get $f)
+        (local.set $next (call $rt_apply (local.get $f)
           (call $w (local.get $v) (i32.add (i32.const 3) (local.get $i)))))
+        (if (local.get $i) (then (call $rt_release (local.get $f))))
+        (local.set $f (local.get $next))
         (local.set $i (i32.add (local.get $i) (i32.const 1)))
         (br $al)))
       (call $rt_bounce_free_shell (local.get $v))

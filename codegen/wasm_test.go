@@ -235,3 +235,21 @@ func TestWasmBounceRuntimeRoundTrip(t *testing.T) {
 		t.Fatalf("bounce round-trip live delta = %q, want 0", got)
 	}
 }
+
+// TestWasmBounceUnforcedRelease: a K_BOUNCE built then released WITHOUT tramp (the
+// totality path) frees its owned args exactly once via rt_free's K_BOUNCE branch --
+// live returns to baseline, no double-free of the arg, the immediate-int step untouched.
+// (Reuses wasmTestModule.)
+func TestWasmBounceUnforcedRelease(t *testing.T) {
+	start := `    (local $arg i32) (local $b i32) (local $base i32)
+    (local.set $base (global.get $live))
+    (local.set $arg (call $rt_mkcon (i32.const 0) (i32.const 0) (i32.const 0))) ;; one owned K_CON, 0 fields
+    (local.set $b (call $rt_mkbounce (call $rt_mkint (i32.const 1)) (i32.const 1)))
+    (call $rt_bounce_set (local.get $b) (i32.const 0) (local.get $arg))
+    ;; never tramp: release the whole bounce. rt_free's K_BOUNCE branch releases the arg.
+    (call $rt_release (local.get $b))
+    (call $rt_print_u32 (i32.sub (global.get $live) (local.get $base)))`
+	if got := runWasm(t, wasmTestModule(codegen.WasmRuntime(), start)); strings.TrimSpace(got) != "0" {
+		t.Fatalf("unforced-bounce release live delta = %q, want 0 (arg freed once via full-free)", got)
+	}
+}

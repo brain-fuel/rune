@@ -491,9 +491,34 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 	case CSnd:
 		return CSnd{P: pp.annotate(x.P, owned)}
 
+	case CBounce:
+		// The bounce object owns its eagerly-evaluated args (the trampoline moves them
+		// into the step applies, then shell-frees the bounce). Make each arg an OWNED
+		// reference via consumeOwning down the spine; the head CGlobal (the cached _step
+		// closure) stays borrowed. The bounce analogue of annotateBareSpine.
+		return CBounce{Call: pp.annotateBounceSpine(x.Call, owned)}
+
 	default:
-		// CBounce: outside the covered fragment. Carry through unchanged.
+		// No remaining input CIr node is unannotated (CDup/CDrop are inserted by this
+		// pass, never received). Carry through unchanged.
 		return t
+	}
+}
+
+// annotateBounceSpine annotates a CBounce's application spine so every ARGUMENT is an
+// owned reference (the bounce object owns its arg slots; $rt_tramp moves them into the
+// step applies). The head CGlobal stays borrowed (the cached _step closure singleton).
+// Every operand is consumeOwning'd: a bounce always materializes its args into heap
+// slots -- there is no emitter shortcut that borrows them (unlike accel/nat spines).
+func (pp *perceusPass) annotateBounceSpine(t CIr, owned []bool) CIr {
+	app, ok := t.(AppClosure)
+	if !ok {
+		// Bare head (CGlobal) or an unrecognized shape: annotate as usual.
+		return pp.annotate(t, owned)
+	}
+	return AppClosure{
+		Clo: pp.annotateBounceSpine(app.Clo, owned),
+		Arg: consumeOwning(pp.annotate(app.Arg, owned)),
 	}
 }
 

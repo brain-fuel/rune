@@ -220,8 +220,13 @@ func (em *wasmEmitter) emitDefs(b *strings.Builder) {
 	for _, blk := range em.cp.Blocks {
 		em.emitBlock(b, blk)
 	}
-	// Definition thunks (eliminators converted as CDefSpec, then user defs).
+	// Definition thunks (eliminators converted as CDefSpec, then user defs). A `partial`
+	// def is split into a _step body + curried drivers + a public trampoline thunk.
 	for _, def := range em.cp.Defs {
+		if em.cp.Partials[def.Name] {
+			em.emitPartialWasm(b, def.Name, def.Arity, def.Body)
+			continue
+		}
 		em.emitDefThunk(b, def.Name, def.Body)
 	}
 }
@@ -370,6 +375,93 @@ func (em *wasmEmitter) emitCachedThunk(b *strings.Builder, name string, body fun
 	b.WriteString(inner.String())
 	fmt.Fprintf(b, "    (global.set %s %s)\n", cache, v)
 	fmt.Fprintf(b, "    (global.get %s))\n", cache)
+}
+
+// wasmStepName is the partial's memoized _step thunk func name. It matches the cache
+// key name+"_step" passed to emitCachedThunk (cName is a plain sanitizer, so
+// "def_"+cName(name)+"_step" == "def_"+cName(name+"_step")).
+func wasmStepName(name string) string { return wasmThunkName(name) + "_step" }
+
+// emitPartialWasm lowers a `partial` def to the T2 trampoline split (the WASM dual of
+// emitPartialC): a memoized _step thunk (the body, where a CBounce is a K_BOUNCE), then
+// `arity` curried driver code blocks that collect args into the closure env, the last of
+// which saturates _step and drives the bounce chain via $rt_tramp; and a public thunk
+// returning a closure entering driver 0.
+func (em *wasmEmitter) emitPartialWasm(b *strings.Builder, name string, arity int, body CIr) {
+	// _step: the memoized body (a curried lambda of `arity` args; a tail call inside is
+	// a K_BOUNCE). Its func name is wasmStepName(name).
+	em.emitCachedThunk(b, name+"_step", func(f *wasmFunc, bb *strings.Builder) string {
+		return f.emit(bb, body, nil)
+	})
+	step := wasmStepName(name)
+
+	if arity == 0 {
+		// No args to collect: the public thunk drives the (bounce-free) step once.
+		em.emitCachedThunk(b, name, func(f *wasmFunc, bb *strings.Builder) string {
+			r := f.fresh()
+			fmt.Fprintf(bb, "    (local.set %s (call $rt_tramp (call $%s)))\n", r, step)
+			return "(local.get " + r + ")"
+		})
+		return
+	}
+
+	base := "drvfn_" + wasmName(name)
+	for i := 0; i < arity; i++ {
+		em.emitPartialDriverBlock(b, fmt.Sprintf("%s_%d", base, i), name, arity, i)
+	}
+	em.emitCachedThunk(b, name, func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, em.codeRef(base+"_0"))
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitPartialDriverBlock emits the i-th curry block of a partial's public driver. For
+// i<arity-1 it builds the next driver closure capturing env[0..i-1] + arg (identical to
+// emitCtorBlock's collect arm). For i==arity-1 it saturates _step() with env[0..i-1] +
+// arg via $rt_apply, then $rt_tramp's the result.
+func (em *wasmEmitter) emitPartialDriverBlock(b *strings.Builder, fname, name string, arity, i int) {
+	em.codeRef(fname)
+	base := "drvfn_" + wasmName(name)
+	step := wasmStepName(name)
+	f := &wasmFunc{em: em}
+	var inner strings.Builder
+	var ret string
+	if i < arity-1 {
+		// Collect block: build the next driver closure capturing env[0..i-1] + arg. Unlike
+		// emitCtorBlock (whose constructor spines are recognized + never released), a DRIVER
+		// intermediate IS released by the generic apply path, so each forwarded env value
+		// must be RETAINED into the child (the child takes its own reference; the parent's
+		// later release is then balanced). The fresh $arg is owned by this block, so it MOVES.
+		cl := f.fresh()
+		fmt.Fprintf(&inner, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const %d)))\n", cl, em.codeRef(fmt.Sprintf("%s_%d", base, i+1)), i+1)
+		for k := 0; k < i; k++ {
+			fmt.Fprintf(&inner, "    (call $rt_retain (call $rt_env (local.get $env) (i32.const %d)))\n", k)
+			fmt.Fprintf(&inner, "    (call $rt_clo_set (local.get %s) (i32.const %d) (call $rt_env (local.get $env) (i32.const %d)))\n", cl, k, k)
+		}
+		fmt.Fprintf(&inner, "    (call $rt_clo_set (local.get %s) (i32.const %d) (local.get $arg))\n", cl, i)
+		ret = "(local.get " + cl + ")"
+	} else {
+		// Saturating block: build the starting bounce {step(), env[0..i-1], arg} and drive
+		// it. The driver closure OWNS its captured env (and is released by the caller after
+		// this returns), so each env value is RETAINED into the bounce (the bounce takes its
+		// own reference). The fresh $arg is owned by this block, so it MOVES into the bounce.
+		// $rt_tramp then drives uniformly.
+		bn := f.fresh()
+		fmt.Fprintf(&inner, "    (local.set %s (call $rt_mkbounce (call $%s) (i32.const %d)))\n", bn, step, arity)
+		for k := 0; k < i; k++ {
+			fmt.Fprintf(&inner, "    (call $rt_retain (call $rt_env (local.get $env) (i32.const %d)))\n", k)
+			fmt.Fprintf(&inner, "    (call $rt_bounce_set (local.get %s) (i32.const %d) (call $rt_env (local.get $env) (i32.const %d)))\n", bn, k, k)
+		}
+		fmt.Fprintf(&inner, "    (call $rt_bounce_set (local.get %s) (i32.const %d) (local.get $arg))\n", bn, i)
+		rv := f.fresh()
+		fmt.Fprintf(&inner, "    (local.set %s (call $rt_tramp (local.get %s)))\n", rv, bn)
+		ret = "(local.get " + rv + ")"
+	}
+	fmt.Fprintf(b, "  (func $%s (param $arg i32) (param $env i32) (result i32)\n", fname)
+	b.WriteString(f.localDecls())
+	b.WriteString(inner.String())
+	fmt.Fprintf(b, "    %s)\n", ret)
 }
 
 // emitBlock emits one lifted code block as a WAT func taking (arg, env) -> i32 and
@@ -629,9 +721,38 @@ func (f *wasmFunc) emitIn(b *strings.Builder, t CIr, locals []string) string {
 		v := f.emitIn(b, x.V, locals)
 		fmt.Fprintf(b, "    (call $rt_release %s)\n", v)
 		return f.emitIn(b, x.K, locals)
+	case CBounce:
+		return f.emitBounce(b, x.Call, locals)
 	default:
 		panic(fmt.Sprintf("codegen(wasm): unknown CIr node %T", t))
 	}
+}
+
+// emitBounce lowers a CBounce (a saturated tail call to a partial member) to a K_BOUNCE:
+// rt_mkbounce((call $<head>_step), nargs) then store each evaluated arg. The driver loop
+// ($rt_tramp) forces the chain. A non-CGlobal head is not a recognizable partial spine,
+// so emit the call directly (it runs, just not as a bounce).
+func (f *wasmFunc) emitBounce(b *strings.Builder, call CIr, locals []string) string {
+	var args []CIr
+	t := call
+	for {
+		app, ok := t.(AppClosure)
+		if !ok {
+			break
+		}
+		args = append([]CIr{app.Arg}, args...)
+		t = app.Clo
+	}
+	g, ok := t.(CGlobal)
+	if !ok {
+		return f.emitIn(b, call, locals)
+	}
+	o := f.fresh()
+	fmt.Fprintf(b, "    (local.set %s (call $rt_mkbounce (call $%s) (i32.const %d)))\n", o, wasmStepName(g.Name), len(args))
+	for i, a := range args {
+		fmt.Fprintf(b, "    (call $rt_bounce_set (local.get %s) (i32.const %d) %s)\n", o, i, f.emitIn(b, a, locals))
+	}
+	return "(local.get " + o + ")"
 }
 
 // emitLit lowers a native literal. v1 supports LitInt (immediate-tagged i32) and LitNat
