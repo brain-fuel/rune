@@ -991,6 +991,18 @@ first and forces only on mismatch, so the fast path logs nothing.
       `furnace/internal/furnacecore`, and the existing validator imports/calls the generated
       Rune `nonzeroNat` check. OPEN: library mode beyond Go, the typed host ABI. See
       `ref_docs/wootz/R-COEXIST.md`.
+    - **WASM partial support (Track B / R-PERCEUS, LANDED).** The 9th backend (WASM) now
+      lowers `partial`/general-recursion programs, closing the LAST exclusion in the WASM
+      Perceus flat fragment. `emitPartialWasm` splits a partial into a `_step` thunk +
+      curried drivers + a public `$rt_tramp` thunk; `emitIn` lowers `CBounce` to a new
+      `K_BOUNCE` heap kind; the runtime gains `$rt_mkbounce`/`$rt_tramp`/shell-free. The ARC
+      trampoline is novel (the GC native backends have no analogue): the bounce owns its
+      args (cached `_step` head borrowed), `$rt_tramp` releases each intermediate apply-
+      closure, and the driver collect/saturate blocks RETAIN forwarded env captures (a
+      partial driver intermediate IS released by the generic apply path, unlike never-
+      released constructor spines -- the arity>=3 use-after-free caught in review).
+      `PerceusBalanceable` re-opened: ch39 countdown is balanceable + steady-flat,
+      byte-identical 9/9. No core change, no hash bump. See `ref_docs/wootz/R-PERCEUS.md`.
 
 ## Standing rules
 

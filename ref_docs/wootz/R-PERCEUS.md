@@ -183,10 +183,11 @@ the PATH B rules.
 
 ## Held for Plan 6b-2 (named, not silently dropped)
 
-NOTE (post-6b-2): residuals 2-5 below are now CLOSED and residual 1 (CBounce) is
-reclassified as unsupported-on-WASM rather than a leak. See the "Plan 6b-2 outcome"
-section at the end of this document for the closures and the two remaining excluded
-classes. The snapshot below is the historical post-Task-6 state.
+NOTE (current): ALL FIVE residuals below are now CLOSED. Residuals 2-5 closed under
+Plan 6b-2; residual 1 (CBounce) closed under WASM-partial-support (the partial
+trampoline lowers + is ARC-correct -- see "CBounce / partials: CLOSED" near the end of
+this document). The snapshot below is the historical post-Task-6 state; no per-spine
+exclusion remains except an over-applied NatElim spine.
 
 Five leak-only residuals remain after Task 6. All are characterized: no UAF, no
 double-free, no wrong output. Only $rt_live grows per run. Each has a named future
@@ -219,10 +220,9 @@ receiver that will become the 6b-2 steady gate when the boundary is closed.
    used only for its mathematical content (e.g. as a pair component). Future receiver:
    `perceusWasmBignumPairSrc` steady-flat (currently output-invariance-only in Task 6).
 
-Until 6b-2, the WASM Perceus pass is gated by `PerceusBalanceable` to programs that
-do not exercise these paths. `TestPerceusFrontierBoundary` makes the boundary
-executable: it asserts that the ch39 countdown is outside the v1 fragment. The test
-flips to a steady assertion when 6b-2 closes CBounce ownership.
+These residuals are all closed. `TestPerceusPartialInFlatFragment` (the former
+`TestPerceusFrontierBoundary`) now asserts the ch39 countdown is INSIDE the fragment and
+steady-flat; `PerceusBalanceable` admits partial programs.
 
 ## PATH B: borrowed-vs-owned and dup-on-consume
 
@@ -842,14 +842,36 @@ is still caught per-spine by `cirUnbalanceable`. The accel conformance listings
 `TestPerceusAccelInFlatFragment` (was the frontier, now asserts balanceable + flat) and
 `TestPerceusAccelCorpusFlat` (sum/prod/diff/diffZero: balanceable + flat + correct output).
 
-### The ONE REMAINING excluded class
+### CBounce / partials: CLOSED (WASM-partial-support)
 
-1. **CBounce / partials** (condition 1). A `partial`/trampoline program lowered through
-   closure conversion produces a `CBounce`, which is UNSUPPORTED on WASM: `emitIn` has no
-   `CBounce` case, so the program does not lower at all. This is a MISSING-FEATURE
-   exclusion, not a leak -- there is no per-run delta to measure because there is no WASM
-   lowering. Closing it is a SEPARATE future plan (WASM-partial-support): add a `CBounce`
-   lowering to the WASM emitter, then model ownership across the deferred saturated tail
-   call (the trampoline driver reuses args across bounces in a way the v1 drop rules do not
-   capture). `TestPerceusFrontierBoundary` keeps the boundary executable (the ch39 countdown
-   stays outside the balanceable fragment).
+The last excluded class is CLOSED. A `partial`/trampoline program lowered through closure
+conversion produces a `CBounce`, which the WASM backend now lowers:
+
+- **Lowering** (`codegen/wasm.go`). `emitPartialWasm` splits a `partial` into a memoized
+  `_step` thunk + `arity` curried driver blocks + a public thunk; the saturating driver
+  block builds the starting bounce and `$rt_tramp`s it. `emitIn`'s `CBounce` case lowers a
+  tail call to a `K_BOUNCE`. The runtime (`codegen/wasm_runtime.go`) gains the `K_BOUNCE=7`
+  kind `[kind][step][nargs][arg0..]`, `$rt_mkbounce`/`$rt_bounce_set`/`$rt_tramp`/
+  `$rt_bounce_free_shell`, plus a `K_BOUNCE` branch in `$rt_free` (the full-free path).
+
+- **ARC ownership** (novel -- the GC native backends have no analogue). A bounce OWNS its
+  args (the cached `_step` head is borrowed); each spine arg is made owned via
+  `consumeOwning` in the Perceus pass (`annotateBounceSpine`). `$rt_tramp` applies the step
+  to the args, RELEASING each intermediate apply-closure (the borrowed step at i==0 is not
+  released), then `$rt_bounce_free_shell`s the spent bounce (args moved into the applies, so
+  the shell-free does not touch the slots). An unforced bounce frees its args via `$rt_free`
+  (full-free). The driver collect+saturate blocks RETAIN each forwarded env capture, because
+  a partial driver intermediate IS released by the generic apply path (unlike constructor
+  spines, which are recognized and never built/released) -- without the retain, releasing an
+  intermediate driver frees an arg the next driver still aliases (the arity>=3 use-after-free
+  found in review).
+
+Receivers (`codegen/perceus_test.go`, `codegen/wasm_test.go`): `TestPerceusPartialCountdownRunsWasm`
+(parity), `TestPerceusPartial{Drop,Dup,Shared}Flat` (steady-flat across operand shapes +
+correct output), `TestWasmBounceRuntimeRoundTrip` / `TestWasmBounceUnforcedRelease` (the
+runtime + the full-free path), and `TestPerceusPartialInFlatFragment` (the former
+`TestPerceusFrontierBoundary`, now asserting balanceable + flat). The ch39 countdown is
+byte-identical to the other 8 backends.
+
+No missing-feature exclusion remains. The sole per-spine exclusion in `cirUnbalanceable` is
+now an OVER-APPLIED NatElim spine (its surplus-application K_CLO leaks).
