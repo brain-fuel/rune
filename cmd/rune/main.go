@@ -83,6 +83,10 @@ func main() {
 		if err != nil {
 			fatal(err)
 		}
+	case "build":
+		if err := runBuildCLI(os.Args[2:], os.Stdout); err != nil {
+			fatal(err)
+		}
 	case "simulate":
 		if len(os.Args) < 3 {
 			usage()
@@ -267,6 +271,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  rune repl [--no-prelude]")
 	fmt.Fprintln(os.Stderr, "  rune emit <file> [name] [--target js|py|go|rs|erl|jvm]")
 	fmt.Fprintln(os.Stderr, "  rune run  <file> <name> [--target js|py|go|rs|erl|jvm]")
+	fmt.Fprintln(os.Stderr, "  rune build <file> [name] [--target T] [--kind app|library] [--module M] [--export Rune[:Host]] [--out dir]")
 	fmt.Fprintln(os.Stderr, "  rune simulate <file> [replicas]   (defines init/merge/value/op0..opN)")
 	fmt.Fprintln(os.Stderr, "  rune deploy <file> [name] --target <backend>   (deploy + RUN a verified protocol)")
 	fmt.Fprintln(os.Stderr, "  rune deploy --resource <kind> --name <n> --backend <b> [--out dir] [--replicas N] [--image ref] [--fifo]")
@@ -335,11 +340,7 @@ func emitFor(src, main, target string) (string, codegen.Backend, error) {
 	if !ok {
 		return "", nil, fmt.Errorf("unknown target %q", target)
 	}
-	s := session.New()
-	if _, err := s.LoadSource(src); err != nil {
-		return "", nil, err
-	}
-	p, err := s.EmitProgram(main)
+	p, err := programFor(src, main)
 	if err != nil {
 		return "", nil, err
 	}
@@ -348,6 +349,18 @@ func emitFor(src, main, target string) (string, codegen.Backend, error) {
 		return "", nil, err
 	}
 	return string(out), bk, nil
+}
+
+func programFor(src, main string) (codegen.Program, error) {
+	s := session.New()
+	if _, err := s.LoadSource(src); err != nil {
+		return codegen.Program{}, err
+	}
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		return codegen.Program{}, err
+	}
+	return p, nil
 }
 
 // targetRunner names, per backend Target(), the temp-file extension and the

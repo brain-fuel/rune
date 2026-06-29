@@ -979,6 +979,18 @@ first and forces only on mismatch, so the fast path logs nothing.
       source backends (Rust added v3.328.3); D7's `primUpgrade` sugar (ch443 shows it
       unnecessary). A10 + the always-eventually fairness (dfix wall) parked. See the DAG for
       deps + implications.
+    - **R-COEXIST / `rune build` (Track B, IN FLIGHT, not yet tagged).** Codebase
+      coexistence: a checked program ships as host artifacts via a target-neutral
+      `BuildSpec`/`ArtifactSet` API (`codegen/artifact.go`, the deploy-side dual of
+      `Backend`). APP mode wraps `Emit` for all 8 backends; LIBRARY mode dispatches to an
+      optional `LibraryBackend` -- Go-only today (`codegen/golang_library.go`, the emitted
+      package is compiled + `go test`-run in the gate), `ErrLibraryUnsupported` elsewhere.
+      CLI `rune build FILE [name] [--kind app|library] [--module M] [--export R[:H]]
+      [--out dir]` (`cmd/rune/build.go`). Codegen-only, no core change, no hash bump.
+      Furnace now consumes it: `furnace/furnacecore/furnacecore.rune` builds to
+      `furnace/internal/furnacecore`, and the existing validator imports/calls the generated
+      Rune `nonzeroNat` check. OPEN: library mode beyond Go, the typed host ABI. See
+      `ref_docs/wootz/R-COEXIST.md`.
 
 ## Standing rules
 

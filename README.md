@@ -205,6 +205,8 @@ rune repl            # type check + normalize, definitions cached; Nat
                      # arithmetic preloaded (--no-prelude for a bare session)
 rune emit FILE NAME  # the erased JavaScript shadow, to stdout
 rune run  FILE NAME  # emit and execute under node
+rune build FILE [NAME] [--target T] [--kind app|library] [--module M] [--export R[:H]] [--out dir]
+#   checked core -> host artifacts (app for any backend; library = Go package today)
 rune simulate FILE [n]  # run a distributed protocol under a fault policy (see above)
 
 rune deploy FILE [NAME] --target beam        # deploy + RUN a verified protocol live
