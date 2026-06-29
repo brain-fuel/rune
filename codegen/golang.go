@@ -173,9 +173,15 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		b.WriteString("func readLineCode() any { return func(_u any) any { var s string; fmt.Scan(&s); n := big.NewInt(1); for i := len(s) - 1; i >= 0; i-- { n.Mul(n, big.NewInt(256)); n.Add(n, big.NewInt(int64(s[i]))) }; return n } }\n")
 	}
 	// D6 net/fs: the packed-String codec + env/file host bodies, over bare Nat codes.
-	if usesFileEnv(p) || usesLiveKV(p) {
+	if usesFileEnv(p) || usesLiveKV(p) || usesStream(p) {
 		b.WriteString("func __s2h(v any) string { b := new(big.Int).Set(v.(*big.Int)); one := big.NewInt(1); m := big.NewInt(256); var sb []byte; for b.Cmp(one) > 0 { r := new(big.Int); b.DivMod(b, m, r); sb = append(sb, byte(r.Int64())) }; return string(sb) }\n")
 		b.WriteString("func __h2s(v string) any { n := big.NewInt(1); m := big.NewInt(256); for i := len(v) - 1; i >= 0; i-- { n.Mul(n, m); n.Add(n, big.NewInt(int64(v[i]))) }; return n }\n")
+	}
+	if usesForeign(p, "byteLen") {
+		b.WriteString("func byteLen() any { return func(c any) any { return big.NewInt(int64(len(__s2h(c)))) } }\n")
+	}
+	if usesForeign(p, "splitOn") {
+		b.WriteString("func splitOn() any { return func(sep any) any { return func(c any) any { sb := byte(new(big.Int).Set(sep.(*big.Int)).Int64()); parts := strings.Split(__s2h(c), string([]byte{sb})); lst := any(map[string]any{\"tag\": 0, \"name\": \"nil\", \"args\": []any{nil}}); for i := len(parts) - 1; i >= 0; i-- { lst = map[string]any{\"tag\": 1, \"name\": \"cons\", \"args\": []any{nil, __h2s(parts[i]), lst}} }; return lst } } }\n")
 	}
 	if usesLiveKV(p) {
 		// E4: the LIVE data-plane binding. The in-process kv ops (kvPut/kvGetCode) are

@@ -127,11 +127,17 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	}
 	// D6 net/fs: the packed-String codec (decode code->string, encode string->code)
 	// + env/file host bodies, over bare Nat codes (the Rune side wraps `bytes`).
-	if usesFileEnv(p) || usesLiveKV(p) {
+	if usesFileEnv(p) || usesLiveKV(p) || usesStream(p) {
 		// globalThis.String (NOT bare `String`): a Rune `String : U` def emits a
 		// top-level `const String` that would shadow the JS builtin.
 		b.WriteString("const __s2h = n => { let s = ''; while (n > 1n) { s += globalThis.String.fromCharCode(Number(n % 256n)); n = n / 256n; } return s; };\n")
 		b.WriteString("const __h2s = v => { let n = 1n; for (let i = v.length - 1; i >= 0; i--) n = n * 256n + BigInt(v.charCodeAt(i)); return n; };\n")
+	}
+	if usesForeign(p, "byteLen") {
+		b.WriteString("const byteLen = () => c => BigInt(__s2h(c).length);\n")
+	}
+	if usesForeign(p, "splitOn") {
+		b.WriteString("const splitOn = () => sep => c => { const parts = __s2h(c).split(globalThis.String.fromCharCode(Number(sep))); let lst = {tag:0,name:\"nil\",args:[null]}; for (let i = parts.length-1; i>=0; i--) lst = {tag:1,name:\"cons\",args:[null,__h2s(parts[i]),lst]}; return lst; };\n")
 	}
 	if usesForeign(p, "getEnvCode") {
 		b.WriteString("const getEnvCode = () => c => () => __h2s(process.env[__s2h(c)] || '');\n")

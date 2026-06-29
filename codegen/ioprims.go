@@ -24,6 +24,9 @@ var ioPrims = map[string]bool{
 	"getNat":       true,
 	"timeNanos":    true,
 	"readLineCode": true,
+	"foldLines":    true, // foldLines (S:U) path step s0 : (S:U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S
+	"splitOn":      true, // splitOn   sep line          : Nat -> Nat -> List Nat   (split packed line on a byte)
+	"byteLen":      true, // byteLen   line              : Nat -> Nat               (byte length of a packed line)
 	// D6 net/fs: env + file vocabulary, over the PACKED-String code (a bignum, B4).
 	// Each takes/returns a bare `Nat` code (first byte LSB, 0x01 sentinel) — the
 	// SAME representation `readLineCode` returns and `bytes`/`codeOf` wrap/unwrap on
@@ -86,6 +89,18 @@ func usesOS(p Program) bool {
 // backend knows to emit the shared packed-String codec helpers.
 func usesFileEnv(p Program) bool {
 	for _, n := range fileEnvPrims {
+		if usesForeign(p, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// streamPrims need the __s2h/__h2s String codec; foldLines additionally needs os+bufio.
+var streamPrims = []string{"foldLines", "splitOn", "byteLen"}
+
+func usesStream(p Program) bool {
+	for _, n := range streamPrims {
 		if usesForeign(p, n) {
 			return true
 		}
