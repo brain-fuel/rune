@@ -1,0 +1,102 @@
+-- Chapter 544 -- flatten commutes with map (functor naturality, Tree<->List bridge, proven tier).
+--
+-- Relabelling a tree's keys then flattening gives the same list as flattening then mapping
+-- the list:
+--
+--   flattenMap : (f : Nat -> Nat) -> (t : Tree) -> Eq NatList (flatten (tmap f t)) (map f (flatten t))
+--
+-- the naturality square for the in-order flatten as a natural transformation from the tree
+-- functor (tmap) to the list functor (map). Proven by structural induction on t; the node
+-- step closes with cong2App + congCons on the two subtree IHs and bridges the list side via
+-- mapAppend (map distributes over append). ch267 mapped within Tree and ch290 fused two tree
+-- maps; this commutes a tree map with flatten into a list map.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data Tree : U is leaf : Tree | node : Tree -> Nat -> Tree -> Tree end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (w : NatList) is NatList end) ys (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end) xs end end
+
+map : (Nat -> Nat) -> NatList -> NatList is
+  fn (f : Nat -> Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is NatList end) nnil
+      (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons (f h) ih end) xs end end
+
+flatten : Tree -> NatList is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is NatList end) nnil
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : NatList) (ihr : NatList) is append ihl (ncons x ihr) end) t end end
+
+tmap : (Nat -> Nat) -> Tree -> Tree is
+  fn (f : Nat -> Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Tree end) leaf
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Tree) (ihr : Tree) is node ihl (f x) ihr end) t end end
+
+transL : (xs : NatList) -> (ys : NatList) -> (zs : NatList) -> Eq NatList xs ys -> Eq NatList ys zs -> Eq NatList xs zs is
+  fn (xs : NatList) (ys : NatList) (zs : NatList) (p : Eq NatList xs ys) (q : Eq NatList ys zs) is
+    subst NatList ys zs q (fn (w : NatList) is Eq NatList xs w end) p end end
+
+symL : (xs : NatList) -> (ys : NatList) -> Eq NatList xs ys -> Eq NatList ys xs is
+  fn (xs : NatList) (ys : NatList) (p : Eq NatList xs ys) is
+    subst NatList xs ys p (fn (z : NatList) is Eq NatList z xs end) (refl xs) end end
+
+congCons : (h : Nat) -> (xs : NatList) -> (ys : NatList) -> Eq NatList xs ys -> Eq NatList (ncons h xs) (ncons h ys) is
+  fn (h : Nat) (xs : NatList) (ys : NatList) (e : Eq NatList xs ys) is
+    subst NatList xs ys e (fn (z : NatList) is Eq NatList (ncons h xs) (ncons h z) end) (refl (ncons h xs)) end end
+
+congApp1 : (xs : NatList) -> (xs2 : NatList) -> (ys : NatList) -> Eq NatList xs xs2 -> Eq NatList (append xs ys) (append xs2 ys) is
+  fn (xs : NatList) (xs2 : NatList) (ys : NatList) (e : Eq NatList xs xs2) is
+    subst NatList xs xs2 e (fn (z : NatList) is Eq NatList (append xs ys) (append z ys) end) (refl (append xs ys)) end end
+
+congApp2 : (xs : NatList) -> (ys : NatList) -> (ys2 : NatList) -> Eq NatList ys ys2 -> Eq NatList (append xs ys) (append xs ys2) is
+  fn (xs : NatList) (ys : NatList) (ys2 : NatList) (e : Eq NatList ys ys2) is
+    subst NatList ys ys2 e (fn (z : NatList) is Eq NatList (append xs ys) (append xs z) end) (refl (append xs ys)) end end
+
+cong2App : (a : NatList) -> (a2 : NatList) -> (b : NatList) -> (b2 : NatList) ->
+           Eq NatList a a2 -> Eq NatList b b2 -> Eq NatList (append a b) (append a2 b2) is
+  fn (a : NatList) (a2 : NatList) (b : NatList) (b2 : NatList) (pa : Eq NatList a a2) (pb : Eq NatList b b2) is
+    transL (append a b) (append a2 b) (append a2 b2)
+      (congApp1 a a2 b pa) (congApp2 a2 b b2 pb) end end
+
+-- LEMMA: map distributes over append, by induction on xs.
+mapAppend : (f : Nat -> Nat) -> (xs : NatList) -> (ys : NatList) ->
+            Eq NatList (map f (append xs ys)) (append (map f xs) (map f ys)) is
+  fn (f : Nat -> Nat) (xs : NatList) (ys : NatList) is
+    NatListElim (fn (w : NatList) is Eq NatList (map f (append w ys)) (append (map f w) (map f ys)) end)
+      (refl (map f ys))
+      (fn (h : Nat) (rest : NatList) (ih : Eq NatList (map f (append rest ys)) (append (map f rest) (map f ys))) is
+         congCons (f h) (map f (append rest ys)) (append (map f rest) (map f ys)) ih end)
+      xs end end
+
+-- THEOREM: flatten (tmap f t) = map f (flatten t), by induction on t.
+flattenMap : (f : Nat -> Nat) -> (t : Tree) -> Eq NatList (flatten (tmap f t)) (map f (flatten t)) is
+  fn (f : Nat -> Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq NatList (flatten (tmap f x)) (map f (flatten x)) end)
+      (refl nnil)
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq NatList (flatten (tmap f l)) (map f (flatten l)))
+          (ihr : Eq NatList (flatten (tmap f r)) (map f (flatten r))) is
+         transL
+           (append (flatten (tmap f l)) (ncons (f x) (flatten (tmap f r))))
+           (append (map f (flatten l)) (ncons (f x) (map f (flatten r))))
+           (map f (append (flatten l) (ncons x (flatten r))))
+           (cong2App
+              (flatten (tmap f l)) (map f (flatten l))
+              (ncons (f x) (flatten (tmap f r))) (ncons (f x) (map f (flatten r)))
+              ihl
+              (congCons (f x) (flatten (tmap f r)) (map f (flatten r)) ihr))
+           (symL
+              (map f (append (flatten l) (ncons x (flatten r))))
+              (append (map f (flatten l)) (ncons (f x) (map f (flatten r))))
+              (mapAppend f (flatten l) (ncons x (flatten r)))) end)
+      t end end
+
+-- witnesses: keys 1,2,3 in-order; map succ over the keys; head of each side is 2 (succ of 1).
+headOr0 : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (w : NatList) is Nat end) zero (fn (h : Nat) (rest : NatList) (ih : Nat) is h end) xs end end
+sample : Tree is node (node leaf (succ zero) leaf) (succ (succ zero)) (node leaf (succ (succ (succ zero))) leaf) end
+hFlatMap : Nat is headOr0 (flatten (tmap (fn (u : Nat) is succ u end) sample)) end
+hMapFlat : Nat is headOr0 (map (fn (u : Nat) is succ u end) (flatten sample)) end
