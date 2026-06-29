@@ -194,3 +194,44 @@ func TestWasmRejectsUnsupported(t *testing.T) {
 		}
 	}
 }
+
+// wasmTestModule wraps the bare runtime body (codegen.WasmRuntime()) into a standalone
+// module for a synthetic runtime test: it adds the fd_write import, the apply type, a
+// 1-slot table, and STUBS the three program-emitted globals the runtime references
+// ($abort_msg/$abort_len/$fn_msg, normally emitted by emitData). startBody is spliced
+// as the body of a $main exported as _start (wasmtime invokes the WASI _start export).
+func wasmTestModule(runtimeBody, startBody string) string {
+	// The runtime body LEADS with its own fd_write import (WAT requires all imports
+	// first), so the test-only definitions ($codety, the table, the program-emitted
+	// global stubs $abort_msg/$abort_len/$fn_msg, and $main) follow it.
+	return `(module
+` + runtimeBody + `
+  (type $codety (func (param i32 i32) (result i32)))
+  (table 1 funcref)
+  (global $abort_msg i32 (i32.const 32))
+  (global $abort_len i32 (i32.const 5))
+  (global $fn_msg i32 (i32.const 64))
+  (func $main (export "_start")
+` + startBody + `))`
+}
+
+// TestWasmBounceRuntimeRoundTrip pins the Task-1 runtime: a 0-arg K_BOUNCE of an
+// immediate-int step tramps to a non-bounce and shell-frees, leaving $rt_live at the
+// pre-bounce baseline (the shell was reclaimed, the borrowed step is an immediate).
+func TestWasmBounceRuntimeRoundTrip(t *testing.T) {
+	rt := codegen.WasmRuntime()
+	for _, fn := range []string{"$rt_mkbounce", "$rt_tramp", "$rt_bounce_free_shell", "$rt_bounce_set"} {
+		if !strings.Contains(rt, fn) {
+			t.Fatalf("runtime missing %s", fn)
+		}
+	}
+	start := `    (local $b i32) (local $r i32) (local $base i32)
+    (local.set $base (global.get $live))
+    (local.set $b (call $rt_mkbounce (call $rt_mkint (i32.const 7)) (i32.const 0)))
+    (local.set $r (call $rt_tramp (local.get $b)))
+    (if (i32.eqz (call $is_int (local.get $r))) (then unreachable))
+    (call $rt_print_u32 (i32.sub (global.get $live) (local.get $base)))`
+	if got := runWasm(t, wasmTestModule(rt, start)); strings.TrimSpace(got) != "0" {
+		t.Fatalf("bounce round-trip live delta = %q, want 0", got)
+	}
+}

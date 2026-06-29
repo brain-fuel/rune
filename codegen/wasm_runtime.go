@@ -525,6 +525,13 @@ const wasmRuntime = `
           (local.set $n (i32.const 0))
           (local.set $base (i32.const 0))
           (br $done)))
+      ;; K_BOUNCE=7: arg slots start at word 3, count (nargs) at word 2. The step at
+      ;; word 1 is the borrowed cached _step closure -- not owned, not released here.
+      (if (i32.eq (local.get $kind) (i32.const 7))
+        (then
+          (local.set $n (call $w (local.get $v) (i32.const 2)))
+          (local.set $base (i32.const 3))
+          (br $done)))
       ;; K_BIG and anything else: leaf, no child pointers
       (local.set $n (i32.const 0))
       (local.set $base (i32.const 0)))
@@ -551,6 +558,55 @@ const wasmRuntime = `
     (call $emit_u32 (local.get $n))
     (call $puts (i32.const 1) (i32.const 4096)
       (i32.sub (global.get $sbuf) (i32.const 4096))))
+
+  ;; ---- T2 trampoline: [K_BOUNCE=7][step][nargs][arg0..] ----
+  ;; A partial's saturated tail call lowers to a K_BOUNCE: the cached _step closure
+  ;; (slot at word 1, BORROWED) plus nargs eagerly-evaluated OWNED args (words 3..).
+  (func $rt_mkbounce (param $step i32) (param $nargs i32) (result i32)
+    (local $o i32)
+    (local.set $o (call $alloc (i32.add (i32.const 12) (i32.shl (local.get $nargs) (i32.const 2)))))
+    (call $sw (local.get $o) (i32.const 0) (i32.const 7))      ;; K_BOUNCE
+    (call $sw (local.get $o) (i32.const 1) (local.get $step))
+    (call $sw (local.get $o) (i32.const 2) (local.get $nargs))
+    (local.get $o))
+  (func $rt_bounce_set (param $b i32) (param $i i32) (param $x i32)
+    (call $sw (local.get $b) (i32.add (i32.const 3) (local.get $i)) (local.get $x)))
+
+  ;; shell-free: reclaim the bounce object WITHOUT releasing the args (moved into the
+  ;; step call) or the step (borrowed). Mirrors the live--/freelist tail of $rt_free.
+  (func $rt_bounce_free_shell (param $b i32)
+    (local $size i32) (local $bkt i32)
+    (global.set $live (i32.sub (global.get $live) (i32.const 1)))
+    (local.set $size (i32.load (i32.sub (local.get $b) (i32.const 8))))
+    (local.set $bkt (call $rt_bucket_addr (local.get $size)))
+    (if (local.get $bkt)
+      (then
+        (i32.store (local.get $b) (i32.load (local.get $bkt)))
+        (i32.store (local.get $bkt) (local.get $b)))))
+
+  ;; tramp: force the bounce chain. While v is a K_BOUNCE, re-apply its step to its
+  ;; args (one partial-body iteration -> the next bounce or a value), shell-free the
+  ;; spent bounce (args MOVED into the applies), and continue. O(1) WASM stack.
+  (func $rt_tramp (param $v i32) (result i32)
+    (local $step i32) (local $nargs i32) (local $i i32) (local $f i32)
+    (block $done (loop $lp
+      ;; immediates are never bounces; a heap value is a bounce iff word0 == 7.
+      (br_if $done (call $is_int (local.get $v)))
+      (br_if $done (i32.ne (call $w (local.get $v) (i32.const 0)) (i32.const 7)))
+      (local.set $step (call $w (local.get $v) (i32.const 1)))
+      (local.set $nargs (call $w (local.get $v) (i32.const 2)))
+      (local.set $f (local.get $step))
+      (local.set $i (i32.const 0))
+      (block $ab (loop $al
+        (br_if $ab (i32.ge_u (local.get $i) (local.get $nargs)))
+        (local.set $f (call $rt_apply (local.get $f)
+          (call $w (local.get $v) (i32.add (i32.const 3) (local.get $i)))))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $al)))
+      (call $rt_bounce_free_shell (local.get $v))
+      (local.set $v (local.get $f))
+      (br $lp)))
+    (local.get $v))
 `
 
 // WasmRuntime returns the WAT runtime string for the WASM backend. The underlying
