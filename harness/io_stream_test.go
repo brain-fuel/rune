@@ -28,3 +28,18 @@ func TestStreamSplitOn(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamConlluCount(t *testing.T) {
+	for _, target := range []string{"js", "go"} {
+		cmd := exec.Command("go", "run", "../../cmd/rune", "run",
+			"../../listings/ch549_conllu_count.rune", "main", "--target", target)
+		cmd.Dir = "testdata" // so the listing's relative "sample.conllu" resolves
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] run failed: %v\n%s", target, err, out)
+		}
+		if got := strings.TrimSpace(string(out)); got != "11\n11" {
+			t.Errorf("[%s] token count = %q, want 11", target, got)
+		}
+	}
+}

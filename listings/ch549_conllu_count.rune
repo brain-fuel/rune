@@ -1,0 +1,58 @@
+-- Chapter 549 -- streaming CoNLL-U token counter (Milestone A capstone: FR1+FR2+FR3).
+--
+-- foldLines streams a file line by line in the host runtime; the Rune step is TOTAL and
+-- non-recursive (the data-plane loop lives in the runtime, so nothing here needs `partial`
+-- and nothing has to migrate when a real totality checker lands). A token line is non-blank
+-- and not a comment: splitOn the line on '#' (byte 35) and keep it iff its first part is
+-- non-empty -- a blank line "" gives an empty first part, a "#..." comment gives an empty
+-- first part, a real token line "1<tab>..." gives a non-empty first part. So splitOn + byteLen
+-- classify every line with no fourth host op. main streams sample.conllu and prints 11.
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bool : U is false : Bool | true : Bool end
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+
+-- Bytes/String/codeOf (NOT prelude-ambient): the "..." literal sugar desugars to
+-- `bytes <packed-numeral>`, so `bytes` + codeOf must be in scope (as ch215).
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign foldLines : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign splitOn   : Nat -> Nat -> List Nat end
+foreign byteLen   : Nat -> Nat end
+foreign printNat  : Nat -> IO Nat end
+
+-- head of a List Nat with a default (splitOn always returns >= 1 part, so the default is dead).
+headD : Nat -> List Nat -> Nat is
+  fn (d : Nat) (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      d
+      (fn (h : Nat) (t : List Nat) (ih : Nat) is h end)
+      xs
+  end
+end
+
+-- gtZero n = (n > 0): zero -> false, succ _ -> true.
+gtZero : Nat -> Bool is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Bool end) false (fn (k : Nat) (ih : Bool) is true end) n end
+end
+
+-- a token line is non-blank and not a comment: first part of (split on '#') is non-empty.
+isTokenLine : Nat -> Bool is
+  fn (line : Nat) is gtZero (byteLen (headD 0 (splitOn 35 line))) end
+end
+
+-- the total, non-recursive per-line step: count token lines, skip the rest.
+step : Nat -> Nat -> IO Nat is
+  fn (count : Nat) (line : Nat) is
+    pureIO Nat (BoolElim (fn (w : Bool) is Nat end) count (succ count) (isTokenLine line))
+  end
+end
+
+-- stream the fixture (path relative to the test's working dir) and print the token count.
+main : IO Nat is
+  bindIO Nat Nat (foldLines Nat (codeOf "sample.conllu") step zero)
+    (fn (n : Nat) is printNat n end)
+end

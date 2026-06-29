@@ -1,0 +1,16 @@
+# sent_id = 1
+# text = the quick brown fox jumps
+1	the	the	DET
+2	quick	quick	ADJ
+3	brown	brown	ADJ
+4	fox	fox	NOUN
+5	jumps	jump	VERB
+
+# sent_id = 2
+# text = a lazy dog sleeps here
+1	a	a	DET
+2	lazy	lazy	ADJ
+3	dog	dog	NOUN
+4	sleeps	sleep	VERB
+5	here	here	ADV
+6	.	.	PUNCT

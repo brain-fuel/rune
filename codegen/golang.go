@@ -83,6 +83,10 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		// Phase 3: TLS (HTTPS client).
 		addImp("net/http", "crypto/tls", "io")
 	}
+	if usesForeign(p, "foldLines") {
+		// The streaming fold opens a file and scans it line by line.
+		addImp("os", "bufio")
+	}
 	impPaths := make([]string, 0, len(impSet))
 	for pk := range impSet {
 		impPaths = append(impPaths, pk)
@@ -182,6 +186,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "splitOn") {
 		b.WriteString("func splitOn() any { return func(sep any) any { return func(c any) any { sb := byte(new(big.Int).Set(sep.(*big.Int)).Int64()); parts := strings.Split(__s2h(c), string([]byte{sb})); lst := any(map[string]any{\"tag\": 0, \"name\": \"nil\", \"args\": []any{nil}}); for i := len(parts) - 1; i >= 0; i-- { lst = map[string]any{\"tag\": 1, \"name\": \"cons\", \"args\": []any{nil, __h2s(parts[i]), lst}} }; return lst } } }\n")
+	}
+	if usesForeign(p, "foldLines") {
+		b.WriteString("func foldLines() any { return func(_S any) any { return func(path any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { f, err := os.Open(__s2h(path)); if err != nil { return s0 }; defer f.Close(); sc := bufio.NewScanner(f); sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024); s := s0; for sc.Scan() { s = ap(ap(ap(step, s), __h2s(sc.Text())), nil) }; return s } } } } } }\n")
 	}
 	if usesLiveKV(p) {
 		// E4: the LIVE data-plane binding. The in-process kv ops (kvPut/kvGetCode) are
