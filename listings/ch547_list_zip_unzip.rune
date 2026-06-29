@@ -1,0 +1,64 @@
+-- Chapter 547 -- zip/unzip round-trip: zipping the unzip of a pair-list recovers it.
+--
+-- zip pairs two lists elementwise into a list of NPairs (truncating to the shorter); unzip
+-- splits a pair-list back into two lists. Round-tripping unzip-then-zip is the identity:
+--
+--   zipUnzip : (ps : PList) -> Eq PList (zip (fstL (unzip ps)) (sndL (unzip ps))) ps
+--
+-- proven by induction on ps. unzip always yields equal-length halves, so no length
+-- hypothesis is needed (the other direction, zip-then-unzip, would need |xs| = |ys|). The
+-- cons case eliminates the NPair so its constructor mkp a b appears literally -- a user
+-- datatype has no definitional eta, so the projections only compute on a literal mkp.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data NPair : U is mkp : Nat -> Nat -> NPair end
+data PList : U is pnil : PList | pcons : NPair -> PList -> PList end
+data LPair : U is mklp : NatList -> NatList -> LPair end
+
+fstp : NPair -> Nat is fn (p : NPair) is NPairElim (fn (q : NPair) is Nat end) (fn (a : Nat) (b : Nat) is a end) p end end
+sndp : NPair -> Nat is fn (p : NPair) is NPairElim (fn (q : NPair) is Nat end) (fn (a : Nat) (b : Nat) is b end) p end end
+fstL : LPair -> NatList is fn (p : LPair) is LPairElim (fn (q : LPair) is NatList end) (fn (xs : NatList) (ys : NatList) is xs end) p end end
+sndL : LPair -> NatList is fn (p : LPair) is LPairElim (fn (q : LPair) is NatList end) (fn (xs : NatList) (ys : NatList) is ys end) p end end
+
+zip : NatList -> NatList -> PList is
+  fn (xs : NatList) is
+    NatListElim (fn (w : NatList) is NatList -> PList end)
+      (fn (ys : NatList) is pnil end)
+      (fn (h : Nat) (t : NatList) (ih : NatList -> PList) is
+         fn (ys : NatList) is
+           NatListElim (fn (w : NatList) is PList end) pnil (fn (h2 : Nat) (t2 : NatList) (rec : PList) is pcons (mkp h h2) (ih t2) end) ys end end)
+      xs end end
+
+unzip : PList -> LPair is
+  fn (ps : PList) is
+    PListElim (fn (w : PList) is LPair end) (mklp nnil nnil)
+      (fn (p : NPair) (rest : PList) (ih : LPair) is mklp (ncons (fstp p) (fstL ih)) (ncons (sndp p) (sndL ih)) end) ps end end
+
+congPcons : (p : NPair) -> (xs : PList) -> (ys : PList) -> Eq PList xs ys -> Eq PList (pcons p xs) (pcons p ys) is
+  fn (p : NPair) (xs : PList) (ys : PList) (e : Eq PList xs ys) is
+    subst PList xs ys e (fn (z : PList) is Eq PList (pcons p xs) (pcons p z) end) (refl (pcons p xs)) end end
+
+-- THEOREM: zip (fstL (unzip ps)) (sndL (unzip ps)) = ps, by induction on ps.
+-- The cons case eliminates the NPair (no record eta) so mkp a b appears literally.
+zipUnzip : (ps : PList) -> Eq PList (zip (fstL (unzip ps)) (sndL (unzip ps))) ps is
+  fn (ps : PList) is
+    PListElim (fn (w : PList) is Eq PList (zip (fstL (unzip w)) (sndL (unzip w))) w end)
+      (refl pnil)
+      (fn (p : NPair) (rest : PList) (ih : Eq PList (zip (fstL (unzip rest)) (sndL (unzip rest))) rest) is
+         NPairElim
+           (fn (q : NPair) is Eq PList (zip (fstL (unzip (pcons q rest))) (sndL (unzip (pcons q rest)))) (pcons q rest) end)
+           (fn (a : Nat) (b : Nat) is
+              congPcons (mkp a b) (zip (fstL (unzip rest)) (sndL (unzip rest))) rest ih end)
+           p end)
+      ps end end
+
+-- witnesses: zip [1,2]/[3,4] -> unzip -> re-zip; the round-trip and original both have len 2.
+plen : PList -> Nat is
+  fn (ps : PList) is PListElim (fn (w : PList) is Nat end) zero (fn (p : NPair) (rest : PList) (ih : Nat) is succ ih end) ps end end
+xs0 : NatList is ncons (succ zero) (ncons (succ (succ zero)) nnil) end
+ys0 : NatList is ncons (succ (succ (succ zero))) (ncons (succ (succ (succ (succ zero)))) nnil) end
+ps0 : PList is zip xs0 ys0 end
+roundLen : Nat is plen (zip (fstL (unzip ps0)) (sndL (unzip ps0))) end
+origLen : Nat is plen ps0 end
