@@ -1,0 +1,117 @@
+-- Chapter 541 -- tree membership equals list membership (Tree<->List bridge, proven tier).
+--
+-- A decidable membership test member k t on a Nat-keyed binary tree agrees with the list
+-- membership test elem k applied to the tree's in-order flatten:
+--
+--   memberFlatten : (k : Nat) -> (t : Tree) -> Eq Bool (member k t) (elem k (flatten t))
+--
+-- proven by structural induction on t. The node step rewrites both subtree IHs under the
+-- or-spine and bridges to the list side through elemAppend (elem distributes over append,
+-- whose cons step needs or-associativity orAssoc). member is defined in-order (left, root,
+-- right) so its or-spine matches elem (append (flatten l) (ncons x (flatten r))). Searching
+-- the tree and searching its flattened key list give the same answer.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bool : U is true : Bool | false : Bool end
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data Tree : U is leaf : Tree | node : Tree -> Nat -> Tree -> Tree end
+
+transB : (x : Bool) -> (y : Bool) -> (z : Bool) -> Eq Bool x y -> Eq Bool y z -> Eq Bool x z is
+  fn (x : Bool) (y : Bool) (z : Bool) (p : Eq Bool x y) (q : Eq Bool y z) is
+    subst Bool y z q (fn (w : Bool) is Eq Bool x w end) p end end
+
+symB : (x : Bool) -> (y : Bool) -> Eq Bool x y -> Eq Bool y x is
+  fn (x : Bool) (y : Bool) (p : Eq Bool x y) is
+    subst Bool x y p (fn (z : Bool) is Eq Bool z x end) (refl x) end end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) true b a end end
+
+congOr1 : (a : Bool) -> (a2 : Bool) -> (b : Bool) -> Eq Bool a a2 -> Eq Bool (or a b) (or a2 b) is
+  fn (a : Bool) (a2 : Bool) (b : Bool) (p : Eq Bool a a2) is
+    subst Bool a a2 p (fn (z : Bool) is Eq Bool (or a b) (or z b) end) (refl (or a b)) end end
+
+congOr2 : (a : Bool) -> (b : Bool) -> (b2 : Bool) -> Eq Bool b b2 -> Eq Bool (or a b) (or a b2) is
+  fn (a : Bool) (b : Bool) (b2 : Bool) (p : Eq Bool b b2) is
+    subst Bool b b2 p (fn (z : Bool) is Eq Bool (or a b) (or a z) end) (refl (or a b)) end end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) -> Eq Bool (or (or a b) c) (or a (or b c)) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (w : Bool) is Eq Bool (or (or w b) c) (or w (or b c)) end)
+      (refl true)
+      (refl (or b c))
+      a end end
+
+eqNat : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Bool end)
+      (fn (n : Nat) is NatElim (fn (x : Nat) is Bool end) true (fn (j : Nat) (ihj : Bool) is false end) n end)
+      (fn (k : Nat) (ih : Nat -> Bool) is
+         fn (n : Nat) is NatElim (fn (x : Nat) is Bool end) false (fn (j : Nat) (ihj : Bool) is ih j end) n end end)
+      m end end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (w : NatList) is NatList end) ys (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end) xs end end
+
+flatten : Tree -> NatList is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is NatList end) nnil
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : NatList) (ihr : NatList) is append ihl (ncons x ihr) end) t end end
+
+elem : Nat -> NatList -> Bool is
+  fn (k : Nat) (xs : NatList) is
+    NatListElim (fn (w : NatList) is Bool end) false
+      (fn (h : Nat) (rest : NatList) (ih : Bool) is or (eqNat k h) ih end) xs end end
+
+member : Nat -> Tree -> Bool is
+  fn (k : Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Bool end) false
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Bool) (ihr : Bool) is or ihl (or (eqNat k x) ihr) end) t end end
+
+-- LEMMA: elem distributes over append (cons step uses orAssoc).
+elemAppend : (k : Nat) -> (xs : NatList) -> (ys : NatList) ->
+             Eq Bool (elem k (append xs ys)) (or (elem k xs) (elem k ys)) is
+  fn (k : Nat) (xs : NatList) (ys : NatList) is
+    NatListElim (fn (w : NatList) is Eq Bool (elem k (append w ys)) (or (elem k w) (elem k ys)) end)
+      (refl (elem k ys))
+      (fn (h : Nat) (rest : NatList) (ih : Eq Bool (elem k (append rest ys)) (or (elem k rest) (elem k ys))) is
+         transB
+           (or (eqNat k h) (elem k (append rest ys)))
+           (or (eqNat k h) (or (elem k rest) (elem k ys)))
+           (or (or (eqNat k h) (elem k rest)) (elem k ys))
+           (congOr2 (eqNat k h) (elem k (append rest ys)) (or (elem k rest) (elem k ys)) ih)
+           (symB (or (or (eqNat k h) (elem k rest)) (elem k ys)) (or (eqNat k h) (or (elem k rest) (elem k ys)))
+              (orAssoc (eqNat k h) (elem k rest) (elem k ys))) end)
+      xs end end
+
+-- THEOREM: member k t = elem k (flatten t), by induction on t.
+memberFlatten : (k : Nat) -> (t : Tree) -> Eq Bool (member k t) (elem k (flatten t)) is
+  fn (k : Nat) (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Bool (member k x) (elem k (flatten x)) end)
+      (refl false)
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Bool (member k l) (elem k (flatten l)))
+          (ihr : Eq Bool (member k r) (elem k (flatten r))) is
+         transB
+           (or (member k l) (or (eqNat k x) (member k r)))
+           (or (elem k (flatten l)) (or (eqNat k x) (elem k (flatten r))))
+           (elem k (append (flatten l) (ncons x (flatten r))))
+           (transB
+              (or (member k l) (or (eqNat k x) (member k r)))
+              (or (elem k (flatten l)) (or (eqNat k x) (member k r)))
+              (or (elem k (flatten l)) (or (eqNat k x) (elem k (flatten r))))
+              (congOr1 (member k l) (elem k (flatten l)) (or (eqNat k x) (member k r)) ihl)
+              (congOr2 (elem k (flatten l)) (or (eqNat k x) (member k r)) (or (eqNat k x) (elem k (flatten r)))
+                 (congOr2 (eqNat k x) (member k r) (elem k (flatten r)) ihr)))
+           (symB
+              (elem k (append (flatten l) (ncons x (flatten r))))
+              (or (elem k (flatten l)) (or (eqNat k x) (elem k (flatten r))))
+              (elemAppend k (flatten l) (ncons x (flatten r)))) end)
+      t end end
+
+-- witnesses: keys 1,2,3 in the tree. 2 is present, 5 is absent.
+sample : Tree is node (node leaf (succ zero) leaf) (succ (succ zero)) (node leaf (succ (succ (succ zero))) leaf) end
+mem2 : Bool is member (succ (succ zero)) sample end
+mem5 : Bool is member (succ (succ (succ (succ (succ zero))))) sample end
