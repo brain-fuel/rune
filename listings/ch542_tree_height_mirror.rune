@@ -1,0 +1,92 @@
+-- Chapter 542 -- tree height is mirror-invariant: height (mirror t) = height t (proven tier).
+--
+-- height t is 1 + the max of its subtree heights; mirror swaps every node's two children.
+-- Mirroring never changes the height:
+--
+--   heightMirror : (t : Tree) -> Eq Nat (height (mirror t)) (height t)
+--
+-- proven by structural induction. The node step rewrites both subtree IHs under succ (.) of
+-- max (cong2Nat), then commutes the swapped max with maxComm (the standard double-induction
+-- commutativity of max, ported from ch180). A new tree property: ch246 showed mirror keeps
+-- the node COUNT; this shows it keeps the DEPTH.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Tree : U is leaf : Tree | node : Tree -> Nat -> Tree -> Tree end
+
+congNat : (f : Nat -> Nat) -> (x : Nat) -> (y : Nat) -> Eq Nat x y -> Eq Nat (f x) (f y) is
+  fn (f : Nat -> Nat) (x : Nat) (y : Nat) (p : Eq Nat x y) is
+    subst Nat x y p (fn (z : Nat) is Eq Nat (f x) (f z) end) (refl (f x)) end end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p end end
+
+cong2Nat : (f : Nat -> Nat -> Nat) -> (a : Nat) -> (a2 : Nat) -> (b : Nat) -> (b2 : Nat) ->
+           Eq Nat a a2 -> Eq Nat b b2 -> Eq Nat (f a b) (f a2 b2) is
+  fn (f : Nat -> Nat -> Nat) (a : Nat) (a2 : Nat) (b : Nat) (b2 : Nat) (pa : Eq Nat a a2) (pb : Eq Nat b b2) is
+    transEq Nat (f a b) (f a2 b) (f a2 b2)
+      (congNat (fn (x : Nat) is f x b end) a a2 pa)
+      (congNat (fn (y : Nat) is f a2 y end) b b2 pb) end end
+
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end)
+      (fn (n : Nat) is n end)
+      (fn (k : Nat) (ih : Nat -> Nat) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Nat end) (succ k) (fn (j : Nat) (ihj : Nat) is succ (ih j) end) n end end)
+      m end end
+
+maxComm : (a : Nat) -> (b : Nat) -> Eq Nat (max a b) (max b a) is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (max x b) (max b x) end)
+      (fn (b : Nat) is
+         NatElim (fn (bb : Nat) is Eq Nat (max zero bb) (max bb zero) end)
+           (refl zero)
+           (fn (b' : Nat) (ihb : Eq Nat (max zero b') (max b' zero)) is refl (succ b') end)
+           b end)
+      (fn (a' : Nat) (ih : (b : Nat) -> Eq Nat (max a' b) (max b a')) is
+         fn (b : Nat) is
+           NatElim (fn (bb : Nat) is Eq Nat (max (succ a') bb) (max bb (succ a')) end)
+             (refl (succ a'))
+             (fn (b' : Nat) (ihb : Eq Nat (max (succ a') b') (max b' (succ a'))) is
+                congNat (fn (s : Nat) is succ s end) (max a' b') (max b' a') (ih b') end)
+             b end end)
+      a end end
+
+height : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end) zero
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Nat) (ihr : Nat) is succ (max ihl ihr) end) t end end
+
+mirror : Tree -> Tree is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Tree end) leaf
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Tree) (ihr : Tree) is node ihr x ihl end) t end end
+
+-- THEOREM: height (mirror t) = height t, by induction on t.
+heightMirror : (t : Tree) -> Eq Nat (height (mirror t)) (height t) is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Nat (height (mirror x)) (height x) end)
+      (refl zero)
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Nat (height (mirror l)) (height l))
+          (ihr : Eq Nat (height (mirror r)) (height r)) is
+         transEq Nat
+           (succ (max (height (mirror r)) (height (mirror l))))
+           (succ (max (height r) (height l)))
+           (succ (max (height l) (height r)))
+           (congNat (fn (s : Nat) is succ s end)
+              (max (height (mirror r)) (height (mirror l)))
+              (max (height r) (height l))
+              (cong2Nat max (height (mirror r)) (height r) (height (mirror l)) (height l) ihr ihl))
+           (congNat (fn (s : Nat) is succ s end)
+              (max (height r) (height l)) (max (height l) (height r))
+              (maxComm (height r) (height l))) end)
+      t end end
+
+-- witnesses: a right-leaning tree of height 3; mirror has the same height.
+sample : Tree is node leaf (succ zero) (node leaf (succ (succ zero)) (node leaf (succ (succ (succ zero))) leaf)) end
+hT : Nat is height sample end
+hM : Nat is height (mirror sample) end
