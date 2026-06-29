@@ -86,7 +86,11 @@ Then, in the prim-body emission section (near the `readFileCode` body around lin
 
 - [ ] **Step 3: Gate the JS codec on `usesStream` and emit the JS bodies**
 
-In `codegen/js.go`, find the gate guarding the `__s2h`/`__h2s` emission (the two `b.WriteString` lines near js.go:133) and OR `usesStream(p)` into that condition, mirroring the Go change (the existing gate references `usesFileEnv`/`usesLiveKV`).
+In `codegen/js.go`, the gate guarding the `__s2h`/`__h2s` emission is at js.go:130 (`if usesFileEnv(p) || usesLiveKV(p) {`, just above the two codec `b.WriteString` lines at 133-134). OR `usesStream(p)` into it, mirroring the Go change:
+
+```go
+	if usesFileEnv(p) || usesLiveKV(p) || usesStream(p) {
+```
 
 Then, near the `readFileCode` JS body (around js.go:140), add:
 
@@ -119,6 +123,12 @@ data Nat : U is zero : Nat | succ : Nat -> Nat end
 builtin nat Nat zero succ
 data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
 
+-- Bytes/String/codeOf are NOT prelude-ambient: the "..." literal sugar desugars to
+-- `bytes <packed-numeral>`, so the `bytes` constructor + codeOf must be in scope (as ch215).
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
 -- the three Milestone-A foreign ops (byteLen + splitOn used here; foldLines declared in ch549).
 foreign splitOn : Nat -> Nat -> List Nat end
 foreign byteLen : Nat -> Nat end
@@ -133,7 +143,7 @@ llen : List Nat -> Nat is
   end
 end
 
--- codeOf extracts the packed Nat code of a String literal (prelude String/codeOf, as ch215).
+-- codeOf extracts the packed Nat code of a String literal (declared above, as ch215).
 partsLen : Nat is llen (splitOn 44 (codeOf "a,b,c")) end
 firstLen : Nat is byteLen (codeOf "abc") end
 ```
@@ -305,6 +315,12 @@ data Nat  : U is zero : Nat | succ : Nat -> Nat end
 builtin nat Nat zero succ
 data Bool : U is false : Bool | true : Bool end
 data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+
+-- Bytes/String/codeOf (NOT prelude-ambient): the "..." literal sugar desugars to
+-- `bytes <packed-numeral>`, so `bytes` + codeOf must be in scope (as ch215).
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
 
 foreign foldLines : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
 foreign splitOn   : Nat -> Nat -> List Nat end
