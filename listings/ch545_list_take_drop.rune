@@ -1,0 +1,61 @@
+-- Chapter 545 -- take/drop split-join: append (take n xs) (drop n xs) = xs (proven tier).
+--
+-- take n keeps the first n elements, drop n discards them; both recurse on n AND the list
+-- (a NatElim returning a NatList -> NatList, then a NatListElim inside). Splitting a list at
+-- any index and rejoining the pieces recovers the original:
+--
+--   takeDropAppend : (n : Nat) -> (xs : NatList) -> Eq NatList (append (take n xs) (drop n xs)) xs
+--
+-- proven by induction on n with a motive that quantifies xs (the succ case applies the IH at
+-- the tail). The fundamental list-splitting law every verified collections library needs.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (w : NatList) is NatList end) ys (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end) xs end end
+
+congCons : (h : Nat) -> (xs : NatList) -> (ys : NatList) -> Eq NatList xs ys -> Eq NatList (ncons h xs) (ncons h ys) is
+  fn (h : Nat) (xs : NatList) (ys : NatList) (e : Eq NatList xs ys) is
+    subst NatList xs ys e (fn (z : NatList) is Eq NatList (ncons h xs) (ncons h z) end) (refl (ncons h xs)) end end
+
+take : Nat -> NatList -> NatList is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is NatList -> NatList end)
+      (fn (xs : NatList) is nnil end)
+      (fn (k : Nat) (ih : NatList -> NatList) is
+         fn (xs : NatList) is
+           NatListElim (fn (w : NatList) is NatList end) nnil (fn (h : Nat) (t : NatList) (rec : NatList) is ncons h (ih t) end) xs end end)
+      n end end
+
+drop : Nat -> NatList -> NatList is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is NatList -> NatList end)
+      (fn (xs : NatList) is xs end)
+      (fn (k : Nat) (ih : NatList -> NatList) is
+         fn (xs : NatList) is
+           NatListElim (fn (w : NatList) is NatList end) nnil (fn (h : Nat) (t : NatList) (rec : NatList) is ih t end) xs end end)
+      n end end
+
+-- THEOREM: append (take n xs) (drop n xs) = xs, by induction on n (motive quantifies xs).
+takeDropAppend : (n : Nat) -> (xs : NatList) -> Eq NatList (append (take n xs) (drop n xs)) xs is
+  fn (n : Nat) is
+    NatElim (fn (k : Nat) is (xs : NatList) -> Eq NatList (append (take k xs) (drop k xs)) xs end)
+      (fn (xs : NatList) is refl xs end)
+      (fn (k : Nat) (ih : (xs : NatList) -> Eq NatList (append (take k xs) (drop k xs)) xs) is
+         fn (xs : NatList) is
+           NatListElim (fn (w : NatList) is Eq NatList (append (take (succ k) w) (drop (succ k) w)) w end)
+             (refl nnil)
+             (fn (h : Nat) (t : NatList) (rec : Eq NatList (append (take (succ k) t) (drop (succ k) t)) t) is
+                congCons h (append (take k t) (drop k t)) t (ih t) end)
+             xs end end)
+      n end end
+
+-- witnesses: split [1,2,3] at 2 -> take=[1,2] (len 2), rejoin -> [1,2,3] (len 3).
+len : NatList -> Nat is
+  fn (xs : NatList) is NatListElim (fn (w : NatList) is Nat end) zero (fn (h : Nat) (t : NatList) (ih : Nat) is succ ih end) xs end end
+sample : NatList is ncons (succ zero) (ncons (succ (succ zero)) (ncons (succ (succ (succ zero))) nnil)) end
+lenTake : Nat is len (take (succ (succ zero)) sample) end
+lenJoin : Nat is len (append (take (succ (succ zero)) sample) (drop (succ (succ zero)) sample)) end
