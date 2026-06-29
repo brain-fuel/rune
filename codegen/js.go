@@ -140,7 +140,7 @@ func (JS) Emit(p Program) (TargetSource, error) {
 		b.WriteString("const splitOn = () => sep => c => { const parts = __s2h(c).split(globalThis.String.fromCharCode(Number(sep))); let lst = {tag:0,name:\"nil\",args:[null]}; for (let i = parts.length-1; i>=0; i--) lst = {tag:1,name:\"cons\",args:[null,__h2s(parts[i]),lst]}; return lst; };\n")
 	}
 	if usesForeign(p, "foldLines") {
-		b.WriteString("const foldLines = () => _S => path => step => s0 => () => { let data; try { data = require('fs').readFileSync(__s2h(path), 'utf8'); } catch (e) { return s0; } const lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); let s = s0; for (const ln of lines) s = step(s)(__h2s(ln))(); return s; };\n")
+		b.WriteString("const foldLines = () => _S => path => step => s0 => () => { let data; try { data = require('fs').readFileSync(__s2h(path), 'latin1'); } catch (e) { return s0; } const lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); let s = s0; for (const ln of lines) s = step(s)(__h2s(ln))(); return s; };\n")
 	}
 	if usesForeign(p, "getEnvCode") {
 		b.WriteString("const getEnvCode = () => c => () => __h2s(process.env[__s2h(c)] || '');\n")

@@ -48,6 +48,24 @@ func TestStreamConlluCount(t *testing.T) {
 	}
 }
 
+func TestStreamUtf8ByteParity(t *testing.T) {
+	// utf8_line.txt contains one line: the Greek letter pi (U+03C0), 2 UTF-8 bytes
+	// (0xCF 0x80) followed by a newline. byteLen of that packed line must be 2 on
+	// both JS and Go. Before the latin1 fix, JS would give 1 (one UTF-16 code unit).
+	for _, target := range []string{"js", "go"} {
+		cmd := exec.Command("go", "run", "../../cmd/rune", "run",
+			"../../listings/ch550_utf8_bytelen.rune", "main", "--target", target)
+		cmd.Dir = "testdata"
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] run failed: %v\n%s", target, err, out)
+		}
+		if got := strings.TrimSpace(string(out)); got != "2\n2" {
+			t.Errorf("[%s] byteLen(pi-line) = %q, want \"2\\n2\"", target, got)
+		}
+	}
+}
+
 func TestStreamBoundedMemory(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping 1M-line streaming gate in -short")

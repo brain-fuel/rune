@@ -1,0 +1,28 @@
+-- Chapter 550 -- UTF-8 byte-length parity test (non-ASCII regression for foldLines).
+--
+-- foldLines streams utf8_line.txt; the single line is the Greek letter pi (U+03C0),
+-- which is 2 bytes in UTF-8 (0xCF 0x80). The step returns byteLen of that line, so
+-- the fold result is 2. printNat 2 checks that both JS and Go agree on byte-exact
+-- packing -- JS reads with latin1 so charCodeAt yields each byte value, matching Go's
+-- bufio.Scanner raw-UTF-8 bytes.
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign foldLines : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign byteLen   : Nat -> Nat end
+foreign printNat  : Nat -> IO Nat end
+
+-- single-line file: last-wins fold yields that line's byteLen.
+step : Nat -> Nat -> IO Nat is
+  fn (acc : Nat) (line : Nat) is pureIO Nat (byteLen line) end
+end
+
+main : IO Nat is
+  bindIO Nat Nat (foldLines Nat (codeOf "utf8_line.txt") step zero)
+    (fn (n : Nat) is printNat n end)
+end
