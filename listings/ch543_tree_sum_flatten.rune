@@ -1,0 +1,103 @@
+-- Chapter 543 -- flatten preserves the key-sum (additive Tree<->List homomorphism, proven tier).
+--
+-- treeSum t adds every key; sum (flatten t) adds the keys of the in-order key list. They
+-- agree:
+--
+--   sumFlatten : (t : Tree) -> Eq Nat (sum (flatten t)) (treeSum t)
+--
+-- proven by structural induction. The node step splits the sum over the flatten's append
+-- (sumAppend, whose cons step needs natAddAssoc) then closes with both subtree IHs (cong2).
+-- The additive analogue of ch539's length-homomorphism: flatten is a homomorphism for the
+-- count (ch539) and for the sum (here).
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data NatList : U is nnil : NatList | ncons : Nat -> NatList -> NatList end
+data Tree : U is leaf : Tree | node : Tree -> Nat -> Tree -> Tree end
+
+cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl end end
+
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p end end
+
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl end end
+
+cong2 : (A : U) -> (B : U) -> (C : U) -> (f : A -> B -> C) -> (a : A) -> (a2 : A) -> (b : B) -> (b2 : B) ->
+        Eq A a a2 -> Eq B b b2 -> Eq C (f a b) (f a2 b2) is
+  fn (A : U) (B : U) (C : U) (f : A -> B -> C) (a : A) (a2 : A) (b : B) (b2 : B) (pa : Eq A a a2) (pb : Eq B b b2) is
+    transEq C (f a b) (f a2 b) (f a2 b2)
+      (cong A C (fn (x : A) is f x b end) a a2 pa) (cong B C (fn (y : B) is f a2 y end) b b2 pb) end end
+
+natAdd : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end end
+
+natAddAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) -> Eq Nat (natAdd (natAdd a b) c) (natAdd a (natAdd b c)) is
+  fn (a : Nat) (b : Nat) (c : Nat) is
+    NatElim (fn (k : Nat) is Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) end)
+      refl
+      (fn (k : Nat) (ih : Eq Nat (natAdd (natAdd k b) c) (natAdd k (natAdd b c))) is
+         cong Nat Nat succ (natAdd (natAdd k b) c) (natAdd k (natAdd b c)) ih end)
+      a end end
+
+append : NatList -> NatList -> NatList is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (w : NatList) is NatList end) ys (fn (h : Nat) (rest : NatList) (ih : NatList) is ncons h ih end) xs end end
+
+sum : NatList -> Nat is
+  fn (xs : NatList) is
+    NatListElim (fn (w : NatList) is Nat end) zero (fn (h : Nat) (rest : NatList) (ih : Nat) is natAdd h ih end) xs end end
+
+flatten : Tree -> NatList is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is NatList end) nnil
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : NatList) (ihr : NatList) is append ihl (ncons x ihr) end) t end end
+
+treeSum : Tree -> Nat is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Nat end) zero
+      (fn (l : Tree) (x : Nat) (r : Tree) (ihl : Nat) (ihr : Nat) is natAdd ihl (natAdd x ihr) end) t end end
+
+-- LEMMA: sum distributes over append, by induction on xs (cons step uses natAddAssoc).
+sumAppend : (xs : NatList) -> (ys : NatList) -> Eq Nat (sum (append xs ys)) (natAdd (sum xs) (sum ys)) is
+  fn (xs : NatList) (ys : NatList) is
+    NatListElim (fn (w : NatList) is Eq Nat (sum (append w ys)) (natAdd (sum w) (sum ys)) end)
+      refl
+      (fn (h : Nat) (rest : NatList) (ih : Eq Nat (sum (append rest ys)) (natAdd (sum rest) (sum ys))) is
+         transEq Nat
+           (natAdd h (sum (append rest ys)))
+           (natAdd h (natAdd (sum rest) (sum ys)))
+           (natAdd (natAdd h (sum rest)) (sum ys))
+           (cong Nat Nat (fn (z : Nat) is natAdd h z end) (sum (append rest ys)) (natAdd (sum rest) (sum ys)) ih)
+           (symEq Nat (natAdd (natAdd h (sum rest)) (sum ys)) (natAdd h (natAdd (sum rest) (sum ys)))
+              (natAddAssoc h (sum rest) (sum ys))) end)
+      xs end end
+
+-- THEOREM: sum (flatten t) = treeSum t, by induction on t.
+sumFlatten : (t : Tree) -> Eq Nat (sum (flatten t)) (treeSum t) is
+  fn (t : Tree) is
+    TreeElim (fn (x : Tree) is Eq Nat (sum (flatten x)) (treeSum x) end)
+      refl
+      (fn (l : Tree) (x : Nat) (r : Tree)
+          (ihl : Eq Nat (sum (flatten l)) (treeSum l))
+          (ihr : Eq Nat (sum (flatten r)) (treeSum r)) is
+         transEq Nat
+           (sum (append (flatten l) (ncons x (flatten r))))
+           (natAdd (sum (flatten l)) (natAdd x (sum (flatten r))))
+           (natAdd (treeSum l) (natAdd x (treeSum r)))
+           (sumAppend (flatten l) (ncons x (flatten r)))
+           (cong2 Nat Nat Nat natAdd
+              (sum (flatten l)) (treeSum l)
+              (natAdd x (sum (flatten r))) (natAdd x (treeSum r))
+              ihl
+              (cong Nat Nat (fn (z : Nat) is natAdd x z end) (sum (flatten r)) (treeSum r) ihr)) end)
+      t end end
+
+-- witnesses: tree with keys 1,2,3 (in-order); sum = 6.
+sample : Tree is node (node leaf (succ zero) leaf) (succ (succ zero)) (node leaf (succ (succ (succ zero))) leaf) end
+sumF : Nat is sum (flatten sample) end
+sumT : Nat is treeSum sample end
