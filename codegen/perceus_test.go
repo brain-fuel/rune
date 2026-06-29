@@ -764,11 +764,10 @@ func TestPerceusCorpusOutputInvariance(t *testing.T) {
 // recursive-datatype eliminators `three` (NatElim fold) and `two` (ListElim fold) and
 // the arity-4 constructor `p` all reach flat; so do `big`/`bigger`/`product` (accel-free
 // NatElim folds via satElimDispatch); and now `sum`/`prod`/`diff`/`diffZero` (the accel
-// conformance listings) join the flat fragment (accelDispatch frees both owned operands).
-// Only the CBounce listings remain excluded.
-//
-// The ONE REMAINING exclusion condition:
-//  1. CBounce (partial trampoline) -- unsupported on WASM.
+// conformance listings) join the flat fragment (accelDispatch frees both owned operands);
+// and partial/CBounce programs now lower + reach steady-flat (emitPartialWasm + the
+// K_BOUNCE ARC trampoline). The only remaining per-spine exclusion is an OVER-APPLIED
+// NatElim spine (its surplus-application K_CLO leaks).
 func TestPerceusCorpusSteady(t *testing.T) {
 	cases := wasmCorpusCases()
 	nBalanced, nSkipped := 0, 0
@@ -953,10 +952,10 @@ func TestPerceusSharedConsumeNoDoubleFree(t *testing.T) {
 }
 
 // countdownSrc is the ch39-style partial-recursive countdown: a `partial` def that
-// calls itself via CBounce (the T2 native trampoline). It is the canonical 6b-2
-// frontier program: the WASM Perceus pass does not model ownership across CBounce
-// tail calls (the driver-loop reuse pattern). PerceusBalanceable must return false
-// for it; when 6b-2 lands and CBounce ownership is wired in, this test flips.
+// calls itself via CBounce (the T2 native trampoline). It is now LOWERED + ARC-correct
+// on WASM (emitPartialWasm + the K_BOUNCE runtime model ownership across the trampoline),
+// so PerceusBalanceable returns true for it and TestPerceusPartialInFlatFragment asserts
+// steady-flat.
 const countdownSrc = `
 data Nat : U is
   zero : Nat
@@ -973,17 +972,17 @@ end
 countdownMain : Nat is countdown 3 end
 `
 
-// TestPerceusFrontierBoundary pins that a partial-recursive countdown program (which
-// uses CBounce under closure conversion) is NOT in the v1 Perceus balanceable
-// fragment. The assertion is executable: it catches any future accidental widening
-// of PerceusBalanceable that would include trampoline programs without the 6b-2
-// CBounce ownership model. When 6b-2 lands and the pass handles CBounce, this test
-// flips (PerceusBalanceable returns true and the steady gate asserts flat).
-func TestPerceusFrontierBoundary(t *testing.T) {
+// TestPerceusPartialInFlatFragment: with CBounce lowered and ARC-correct (the bounce
+// owns its args; $rt_tramp shell-frees each iteration; driver/collect blocks retain
+// forwarded captures), a partial-recursive countdown is now INSIDE the balanceable
+// fragment and reaches steady-flat. This was TestPerceusFrontierBoundary (the last
+// WASM Perceus exclusion); the flip records the closure.
+func TestPerceusPartialInFlatFragment(t *testing.T) {
 	p := mustProgram(t, countdownSrc, "countdownMain")
-	if cg.PerceusBalanceable(p) {
-		t.Fatalf("countdown uses CBounce (partial trampoline); it must be OUTSIDE the v1 balanceable fragment until 6b-2 lands")
+	if !cg.PerceusBalanceable(p) {
+		t.Fatalf("CBounce lowered + ARC-correct: a flat partial program must be IN the flat fragment")
 	}
+	assertSteadyFlatInts(t, p, 5)
 }
 
 // perceusAccelArmSrc is the canonical accel-operand program: an accel op consumed

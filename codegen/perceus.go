@@ -752,17 +752,15 @@ func (pp *perceusPass) annotateCase(x CCase, owned []bool) CIr {
 // steady-flat -- verified for succ-step, ctor-step, and nested folds, and for the corpus
 // `big`/`bigger`/`product` (plain NatElim multiplies, 100 iterations, [1..5]/[2..5] flat).
 //
-// The ONE REMAINING exclusion category:
+// NO missing-feature exclusion remains. CBounce (partial/trampoline) is now LOWERED +
+// ARC-correct on WASM (emitPartialWasm + the K_BOUNCE runtime; the bounce owns its args,
+// $rt_tramp shell-frees each iteration, driver/collect blocks retain forwarded captures),
+// so a partial-recursive program reaches steady-flat and joins the fragment.
 //
-//  1. CBounce (partial/trampoline): UNSUPPORTED on WASM -- emitIn has no CBounce case,
-//     so a partial-recursive program does not lower at all. This is a missing-feature
-//     exclusion, NOT a leak: ownership across a deferred saturated tail call needs the
-//     WASM-partial-support frontier (a separate future plan; see R-PERCEUS).
-//
-// Accel-op programs are now admitted: accelDispatch frees both owned operands (the
-// accel-operand leak is closed), so a flat accel use reaches steady-flat. Any remaining
-// unbalanceable construct (CBounce, over-applied NatElim) is still caught per-spine by
-// cirUnbalanceable below.
+// Accel-op programs are also admitted: accelDispatch frees both owned operands (the
+// accel-operand leak is closed), so a flat accel use reaches steady-flat. The only
+// per-spine construct still flagged by cirUnbalanceable below is an OVER-APPLIED NatElim
+// spine (its surplus-application K_CLO leaks); everything else is balanceable.
 func PerceusBalanceable(p Program) bool {
 
 	natElim := ""
@@ -787,15 +785,18 @@ func PerceusBalanceable(p Program) bool {
 // places the program outside the Perceus flat fragment (see PerceusBalanceable). It
 // traverses every node, mirroring cirUsesArg's scope rules: a MkClosure's code-block
 // body is a separate lifted scope (already scanned as a separate CodeBlock by
-// PerceusBalanceable), so only its Env captures are scanned. It flags two constructs:
-// CBounce, and an OVER-APPLIED NatElim spine (accel-op programs are now admitted --
-// accelDispatch frees both owned operands; SATURATED 4-arg NatElim folds are flat).
+// PerceusBalanceable), so only its Env captures are scanned. It flags ONE construct:
+// an OVER-APPLIED NatElim spine (CBounce is now lowered + ARC-correct, and accel-op
+// programs are admitted -- accelDispatch frees both owned operands; SATURATED 4-arg
+// NatElim folds are flat).
 func cirUnbalanceable(t CIr, natElim string) bool {
 	switch x := t.(type) {
 	case CBounce:
-		// CBounce: partial/trampoline tail call -- UNSUPPORTED on WASM (emitIn has no
-		// CBounce case). Excluded as a missing feature, not a leak.
-		return true
+		// CBounce (partial/trampoline tail call) is now LOWERED + ARC-correct on WASM
+		// (emitPartialWasm + the K_BOUNCE runtime; the bounce owns its args, $rt_tramp
+		// shell-frees each iteration). No longer an exclusion; scan the spine for any
+		// remaining unbalanceable construct (e.g. an over-applied NatElim).
+		return cirUnbalanceable(x.Call, natElim)
 
 	case AppClosure:
 		// A SATURATED (4-arg) NatElim spine is flat (satElimDispatch). But an
