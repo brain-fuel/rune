@@ -87,6 +87,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		// The streaming fold opens a file and scans it line by line.
 		addImp("os", "bufio")
 	}
+	if usesForeign(p, "openWrite") {
+		addImp("os")
+	}
 	impPaths := make([]string, 0, len(impSet))
 	for pk := range impSet {
 		impPaths = append(impPaths, pk)
@@ -189,6 +192,18 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "jsonStrField") {
 		b.WriteString("func jsonStrField() any { return func(field any) any { return func(doc any) any { fn := __s2h(field); ds := __s2h(doc); needle := \"\\\"\" + fn + \"\\\"\"; i := strings.Index(ds, needle); none := map[string]any{\"tag\": 0, \"name\": \"none\", \"args\": []any{nil}}; if i < 0 { return none }; j := i + len(needle); for j < len(ds) && (ds[j] == ' ' || ds[j] == '\\t' || ds[j] == ':') { j++ }; if j < len(ds) && ds[j] == '\"' { j++; k := j; for k < len(ds) && ds[k] != '\"' { k++ }; return map[string]any{\"tag\": 1, \"name\": \"some\", \"args\": []any{nil, __h2s(ds[j:k])}} }; return none } } }\n")
+	}
+	if usesForeign(p, "Handle") {
+		b.WriteString("func Handle() any { return nil }\n")
+	}
+	if usesForeign(p, "openWrite") {
+		b.WriteString("func openWrite() any { return func(path any) any { return func(_u any) any { f, err := os.OpenFile(__s2h(path), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644); if err != nil { return nil }; return any(f) } } }\n")
+	}
+	if usesForeign(p, "writeChunk") {
+		b.WriteString("func writeChunk() any { return func(h any) any { return func(c any) any { return func(_u any) any { if f, ok := h.(*os.File); ok { f.WriteString(__s2h(c)); f.WriteString(\"\\n\") }; return h } } } }\n")
+	}
+	if usesForeign(p, "closeWrite") {
+		b.WriteString("func closeWrite() any { return func(h any) any { return func(_u any) any { if f, ok := h.(*os.File); ok { f.Close() }; return nil } } }\n")
 	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("func foldLines() any { return func(_S any) any { return func(path any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { f, err := os.Open(__s2h(path)); if err != nil { return s0 }; defer f.Close(); sc := bufio.NewScanner(f); sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024); s := s0; for sc.Scan() { s = ap(ap(ap(step, s), __h2s(sc.Text())), nil) }; return s } } } } } }\n")

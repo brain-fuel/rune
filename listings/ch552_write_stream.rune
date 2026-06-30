@@ -1,0 +1,36 @@
+-- Chapter 552 -- write-stream trio: openWrite/writeChunk/closeWrite (Milestone B, FR2 write path).
+--
+-- Open a file, write two lines (each writeChunk appends a newline), close, then read it back with
+-- the Milestone-A foldLines and count the lines. Witness (run js+go): 2 lines written, foldLines
+-- counts 2. Handle is an opaque foreign type. Demonstrates the write path every builder reuses.
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Unit : U is unit : Unit end
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign Handle     : U end
+foreign openWrite  : Nat -> IO Handle end
+foreign writeChunk : Handle -> Nat -> IO Handle end
+foreign closeWrite : Handle -> IO Unit end
+foreign foldLines  : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign printNat   : Nat -> IO Nat end
+
+countStep : Nat -> Nat -> IO Nat is fn (acc : Nat) (line : Nat) is pureIO Nat (succ acc) end end
+
+-- write two lines to "ch552.tmp", then read it back and count, then print the count.
+main : IO Nat is
+  bindIO Handle Nat (openWrite (codeOf "ch552.tmp")) (fn (h0 : Handle) is
+    bindIO Handle Nat (writeChunk h0 (codeOf "alpha")) (fn (h1 : Handle) is
+      bindIO Handle Nat (writeChunk h1 (codeOf "beta")) (fn (h2 : Handle) is
+        bindIO Unit Nat (closeWrite h2) (fn (u : Unit) is
+          bindIO Nat Nat (foldLines Nat (codeOf "ch552.tmp") countStep zero) (fn (n : Nat) is
+            printNat n
+          end)
+        end)
+      end)
+    end)
+  end)
+end
