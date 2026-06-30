@@ -169,6 +169,73 @@ func copyTree(t *testing.T, src, dst string) {
 	}
 }
 
+// TestBibleSharedRootByteIdentical runs the ch555 builder over the REAL bible
+// lexicon (23,681 files) and diffs the output against the committed
+// shared-root.jsonl (80,904 lines).  Skipped unless BIBLE_REPO is set.
+// The build takes ~5 minutes on the go target.
+func TestBibleSharedRootByteIdentical(t *testing.T) {
+	repo := os.Getenv("BIBLE_REPO")
+	if repo == "" {
+		t.Skip("set BIBLE_REPO to run the full byte-identical gate")
+	}
+
+	wantBytes, err := os.ReadFile(filepath.Join(repo, "relations/derived/shared-root.jsonl"))
+	if err != nil {
+		t.Fatalf("expected output not found in BIBLE_REPO: %v", err)
+	}
+
+	dir := t.TempDir()
+
+	// Copy the real lexicon tree as "lexfix" in the run dir.
+	// filepath.WalkDir does not descend a symlinked root, so we must copy.
+	// cp -r takes ~2s for 23,681 files.
+	cpCmd := exec.Command("cp", "-r",
+		filepath.Join(repo, "lexicon"),
+		filepath.Join(dir, "lexfix"))
+	if out, err := cpCmd.CombinedOutput(); err != nil {
+		t.Fatalf("cp -r lexicon failed: %v\n%s", err, out)
+	}
+
+	s := loadListing(t, "ch555_build_shared_root.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command("go", "run", f)
+	cmd.Dir = dir // builder reads "./lexfix", writes "./shared-root.out"
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("real build failed: %v\n%s", err, out)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "shared-root.out"))
+	if err != nil {
+		t.Fatalf("no output file: %v", err)
+	}
+
+	if string(got) != string(wantBytes) {
+		gl := strings.Split(string(got), "\n")
+		wl := strings.Split(string(wantBytes), "\n")
+		t.Errorf("byte-identical mismatch: got %d lines, want %d lines", len(gl), len(wl))
+		for i := 0; i < len(gl) && i < len(wl); i++ {
+			if gl[i] != wl[i] {
+				t.Errorf("first diff at line %d:\n got:  %s\n want: %s", i+1, gl[i], wl[i])
+				break
+			}
+		}
+	}
+}
+
 func TestBibleSortFile(t *testing.T) {
 	s := loadListing(t, "ch553_sort_file.rune")
 	type bkSpec struct {
