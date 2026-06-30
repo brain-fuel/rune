@@ -182,6 +182,20 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesRustStrMarshal(p) {
 		b.WriteString(rustStrMarshal)
 	}
+	// Stream prims: pure ops over the packed-String codec (_s2h/_h2s). No world token.
+	if usesForeign(p, "byteLen") {
+		b.WriteString("fn byteLen() -> Rc<V> { vfun(|c: Rc<V>| Rc::new(V::Nat(_big_from_u64(_s2h(&c).len() as u64)))) }\n")
+	}
+	if usesForeign(p, "splitOn") {
+		b.WriteString("fn splitOn() -> Rc<V> { vfun(|sep: Rc<V>| { let sb = _natusize(&sep) as u8; vfun(move |c: Rc<V>| { let data = _s2h(&c); let parts: Vec<&[u8]> = data.split(|&z| z == sb).collect(); let mut lst = Rc::new(V::Ctor(0, \"nil\", vec![unit()])); for part in parts.iter().rev() { lst = Rc::new(V::Ctor(1, \"cons\", vec![unit(), _h2s(part), lst])); } lst }) }) }\n")
+	}
+	if usesForeign(p, "jsonStrField") {
+		b.WriteString("fn _find(h: &[u8], n: &[u8]) -> Option<usize> { if n.is_empty() { return Some(0); } if n.len() > h.len() { return None; } for i in 0..=(h.len()-n.len()) { if &h[i..i+n.len()] == n { return Some(i); } } None }\n")
+		b.WriteString("fn jsonStrField() -> Rc<V> { vfun(|field: Rc<V>| { let field = field.clone(); vfun(move |doc: Rc<V>| { let fnb = _s2h(&field); let ds = _s2h(&doc); let mut needle = vec![b'\"']; needle.extend_from_slice(&fnb); needle.push(b'\"'); let none = Rc::new(V::Ctor(0, \"none\", vec![unit()])); match _find(&ds, &needle) { None => none, Some(i) => { let mut j = i + needle.len(); while j < ds.len() && (ds[j]==b' '||ds[j]==b'\\t'||ds[j]==b':') { j += 1; } if j < ds.len() && ds[j]==b'\"' { j += 1; let mut k = j; while k < ds.len() && ds[k]!=b'\"' { k += 1; } Rc::new(V::Ctor(1, \"some\", vec![unit(), _h2s(&ds[j..k])])) } else { none } } } }) }) }\n")
+	}
+	if usesForeign(p, "sqlQuote") {
+		b.WriteString("fn sqlQuote() -> Rc<V> { vfun(|s: Rc<V>| { let inp = _s2h(&s); let mut out: Vec<u8> = Vec::new(); out.push(b'\\''); for &z in inp.iter() { if z == b'\\'' { out.push(b'\\''); } out.push(z); } out.push(b'\\''); _h2s(&out) }) }\n")
+	}
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("fn printStrCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { println!(\"{}\", String::from_utf8_lossy(&_s2h(&c))); c.clone() }) }) }\n")
 	}
@@ -797,9 +811,11 @@ fn _show(v: &Rc<V>) -> String {
 `
 
 // usesRustStrMarshal reports whether any emitted body needs the packed-string <-> host
-// marshalling (_s2h/_h2s): the live data-plane ops plus the D6 string-valued OS ops.
+// marshalling (_s2h/_h2s): the live data-plane ops, the D6 string-valued OS ops, and
+// the pure stream ops (byteLen/splitOn/jsonStrField/sqlQuote) which decode/encode the
+// packed-string code exactly like the D6 file ops.
 func usesRustStrMarshal(p Program) bool {
-	return usesLiveKV(p) || usesForeign(p, "printStrCode") || usesForeign(p, "getEnvCode") ||
+	return usesLiveKV(p) || usesStream(p) || usesForeign(p, "printStrCode") || usesForeign(p, "getEnvCode") ||
 		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode")
 }
 

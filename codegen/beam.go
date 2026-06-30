@@ -107,8 +107,9 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 		b.WriteString("ff_readLineCode() -> fun(_U) -> L = string:trim(io:get_line(\"\")), {N, P} = lists:foldl(fun(C, {Acc, Pl}) -> {Acc + C * Pl, Pl * 256} end, {0, 1}, L), N + P end.\n")
 	}
 	// D6 net/fs: the packed-String codec (top-level helpers) + env/file host bodies,
-	// over bare Nat codes (the Rune side wraps `bytes`/`codeOf`).
-	if usesFileEnv(p) {
+	// over bare Nat codes (the Rune side wraps `bytes`/`codeOf`). Also emitted for
+	// the pure stream prims (byteLen/splitOn/jsonStrField/sqlQuote).
+	if usesFileEnv(p) || usesStream(p) {
 		b.WriteString("d6unpack(N) when N =< 1 -> [];\nd6unpack(N) -> [N rem 256 | d6unpack(N div 256)].\n")
 		b.WriteString("d6pack(S) -> {N, P} = lists:foldl(fun(C, {Acc, Pl}) -> {Acc + C * Pl, Pl * 256} end, {0, 1}, S), N + P.\n")
 	}
@@ -136,6 +137,25 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	}
 	if usesForeign(p, "exitWith") {
 		b.WriteString("ff_exitWith() -> fun(N) -> fun(_U) -> halt(N) end end.\n")
+	}
+	// Stream prims: pure ops over the packed-String codec (d6unpack/d6pack). No world token.
+	if usesForeign(p, "byteLen") {
+		b.WriteString("ff_byteLen() -> fun(C) -> length(d6unpack(C)) end.\n")
+	}
+	if usesForeign(p, "splitOn") {
+		b.WriteString("ff_splitOn() -> fun(Sep) -> fun(C) -> bmkparts(bsplit(Sep, d6unpack(C))) end end.\n")
+		b.WriteString("bsplit(_Sep, []) -> [[]];\nbsplit(Sep, [H|T]) when H =:= Sep -> [[] | bsplit(Sep, T)];\nbsplit(Sep, [H|T]) -> [Cur|Rest] = bsplit(Sep, T), [[H|Cur]|Rest].\n")
+		b.WriteString("bmkparts([]) -> {c,0,nil,[unit]};\nbmkparts([P|Ps]) -> {c,1,cons,[unit, d6pack(P), bmkparts(Ps)]}.\n")
+	}
+	if usesForeign(p, "jsonStrField") {
+		b.WriteString("ff_jsonStrField() -> fun(Field) -> fun(Doc) -> jsfield(d6unpack(Field), d6unpack(Doc)) end end.\n")
+		b.WriteString("jsfield(Fn, Ds) -> Needle = [$\" | Fn] ++ [$\"], case string:find(Ds, Needle) of nomatch -> {c,0,none,[unit]}; Rest -> After = lists:nthtail(length(Needle), Rest), case jskip(After) of [$\" | R2] -> {Val, _} = jtake(R2, []), {c,1,some,[unit, d6pack(Val)]}; _ -> {c,0,none,[unit]} end end.\n")
+		b.WriteString("jskip([C|T]) when C =:= 32; C =:= 9; C =:= $: -> jskip(T);\njskip(L) -> L.\n")
+		b.WriteString("jtake([$\"|T], Acc) -> {lists:reverse(Acc), T};\njtake([C|T], Acc) -> jtake(T, [C|Acc]);\njtake([], Acc) -> {lists:reverse(Acc), []}.\n")
+	}
+	if usesForeign(p, "sqlQuote") {
+		b.WriteString("ff_sqlQuote() -> fun(S) -> d6pack(bquote(d6unpack(S))) end.\n")
+		b.WriteString("bquote(L) -> [$' | bqi(L)] ++ [$'].\nbqi([]) -> [];\nbqi([$'|T]) -> [$', $' | bqi(T)];\nbqi([H|T]) -> [H | bqi(T)].\n")
 	}
 	// D3 machine floats (f64) + the BLAS dot kernel — native Erlang float arithmetic.
 	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).

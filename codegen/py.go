@@ -98,7 +98,9 @@ func (Py) Emit(p Program) (TargetSource, error) {
 		b.WriteString("def readLineCode():\n    import sys\n    def t(_u):\n        s = sys.stdin.readline().rstrip('\\n')\n        n = 1\n        for ch in reversed(s):\n            n = n * 256 + ord(ch)\n        return n\n    return t\n")
 	}
 	// D6 net/fs: the packed-String codec + env/file host bodies, over bare Nat codes.
-	if usesFileEnv(p) {
+	// Also emitted for stream prims (byteLen/splitOn/jsonStrField/sqlQuote) which use
+	// the same codec to decode/encode the packed-string representation.
+	if usesFileEnv(p) || usesStream(p) {
 		b.WriteString("def __s2h(n):\n    s = ''\n    while n > 1:\n        s += chr(n % 256)\n        n //= 256\n    return s\n")
 		b.WriteString("def __h2s(v):\n    n = 1\n    for ch in reversed(v):\n        n = n * 256 + ord(ch)\n    return n\n")
 	}
@@ -123,6 +125,20 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "exitWith") {
 		b.WriteString("def exitWith():\n    import sys\n    return lambda n: lambda _u: sys.exit(n)\n")
+	}
+	// Stream prims: pure ops that decode/encode the packed-String code via __s2h/__h2s.
+	// No world token -- byteLen/splitOn/jsonStrField/sqlQuote are pure functions.
+	if usesForeign(p, "byteLen") {
+		b.WriteString("def byteLen():\n    return lambda c: len(__s2h(c))\n")
+	}
+	if usesForeign(p, "splitOn") {
+		b.WriteString("def splitOn():\n    def _f(sep):\n        def _g(c):\n            parts = __s2h(c).split(chr(sep))\n            lst = {\"tag\":0,\"name\":\"nil\",\"args\":[None]}\n            for q in reversed(parts):\n                lst = {\"tag\":1,\"name\":\"cons\",\"args\":[None, __h2s(q), lst]}\n            return lst\n        return _g\n    return _f\n")
+	}
+	if usesForeign(p, "jsonStrField") {
+		b.WriteString("def jsonStrField():\n    def _f(field):\n        def _g(doc):\n            fn = __s2h(field); ds = __s2h(doc)\n            needle = '\"' + fn + '\"'\n            none = {\"tag\":0,\"name\":\"none\",\"args\":[None]}\n            i = ds.find(needle)\n            if i < 0: return none\n            j = i + len(needle)\n            while j < len(ds) and ds[j] in ' \\t:': j += 1\n            if j < len(ds) and ds[j] == '\"':\n                j += 1; k = j\n                while k < len(ds) and ds[k] != '\"': k += 1\n                return {\"tag\":1,\"name\":\"some\",\"args\":[None, __h2s(ds[j:k])]}\n            return none\n        return _g\n    return _f\n")
+	}
+	if usesForeign(p, "sqlQuote") {
+		b.WriteString("def sqlQuote():\n    def _f(s):\n        inp = __s2h(s); out = \"'\"\n        for ch in inp:\n            if ch == \"'\": out += \"'\"\n            out += ch\n        out += \"'\"\n        return __h2s(out)\n    return _f\n")
 	}
 	// D3 machine floats (f64) + the BLAS dot kernel — native float arithmetic.
 	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).

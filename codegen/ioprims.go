@@ -105,7 +105,7 @@ func usesFileEnv(p Program) bool {
 }
 
 // streamPrims need the __s2h/__h2s String codec; foldLines additionally needs os+bufio.
-var streamPrims = []string{"foldLines", "foldDir", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "sortFile", "sqlQuote", "dbApply"}
+var streamPrims = []string{"foldLines", "foldDir", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "closeWrite", "sortFile", "sqlQuote", "dbApply"}
 
 func usesStream(p Program) bool {
 	for _, n := range streamPrims {
