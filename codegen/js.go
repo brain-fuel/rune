@@ -154,6 +154,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "closeWrite") {
 		b.WriteString("const closeWrite = () => h => () => { if (h !== null) require('fs').closeSync(h); return null; };\n")
 	}
+	if usesForeign(p, "sortFile") {
+		b.WriteString("const sortFile = () => inp => outp => () => { const fs = require('fs'); let data; try { data = fs.readFileSync(__s2h(inp), 'latin1'); } catch (e) { fs.writeFileSync(__s2h(outp), ''); return null; } let lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); lines.sort((a,b) => a < b ? -1 : a > b ? 1 : 0); fs.writeFileSync(__s2h(outp), lines.map(l => l + '\\n').join('')); return null; };\n")
+	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("const foldLines = () => _S => path => step => s0 => () => { let data; try { data = require('fs').readFileSync(__s2h(path), 'latin1'); } catch (e) { return s0; } const lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); let s = s0; for (const ln of lines) s = step(s)(__h2s(ln))(); return s; };\n")
 	}

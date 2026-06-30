@@ -73,3 +73,44 @@ func TestBibleWriteStream(t *testing.T) {
 		})
 	}
 }
+
+func TestBibleSortFile(t *testing.T) {
+	s := loadListing(t, "ch553_sort_file.rune")
+	type bkSpec struct {
+		name string
+		emit func(codegen.Program) (codegen.TargetSource, error)
+		ext  string
+		run  func(string) *exec.Cmd
+	}
+	backends := []bkSpec{
+		{"js", codegen.JS{}.Emit, "js", func(f string) *exec.Cmd { return exec.Command("node", f) }},
+		{"go", codegen.Go{}.Emit, "go", func(f string) *exec.Cmd { return exec.Command("go", "run", f) }},
+	}
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bk := range backends {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			src, err := bk.emit(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			f := filepath.Join(dir, "main."+bk.ext)
+			if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := bk.run(f)
+			cmd.Dir = dir // the listing writes+reads relative "ch553.tmp"/"ch553.sorted" here
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("[%s] run failed: %v\n%s", bk.name, err, out)
+			}
+			if got := strings.TrimSpace(string(out)); got != "5\n5" {
+				t.Errorf("[%s] sorted first-line byteLen = %q, want 5\\n5", bk.name, got)
+			}
+		})
+	}
+}

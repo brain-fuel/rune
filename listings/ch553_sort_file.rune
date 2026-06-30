@@ -1,0 +1,46 @@
+-- Chapter 553 -- sortFile: bytewise external line sort (Milestone B, FR7 external sort).
+--
+-- Write three out-of-order lines, sortFile them, read the sorted file back and print its first
+-- line's byte length as a witness. "apple"/"cherry"/"banana" sorted -> "apple" first (byteLen 5).
+-- The external sort that scales to the 11.6M-edge miners later.
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Unit : U is unit : Unit end
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign Handle     : U end
+foreign openWrite  : Nat -> IO Handle end
+foreign writeChunk : Handle -> Nat -> IO Handle end
+foreign closeWrite : Handle -> IO Unit end
+foreign sortFile   : Nat -> Nat -> IO Unit end
+foreign foldLines  : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign byteLen    : Nat -> Nat end
+foreign printNat   : Nat -> IO Nat end
+
+-- keep the FIRST line only (state: 0 = none yet, else that line's byteLen). First line wins.
+firstStep : Nat -> Nat -> IO Nat is
+  fn (acc : Nat) (line : Nat) is
+    pureIO Nat (NatElim (fn (w : Nat) is Nat end) (byteLen line) (fn (k : Nat) (ih : Nat) is acc end) acc)
+  end
+end
+
+main : IO Nat is
+  bindIO Handle Nat (openWrite (codeOf "ch553.tmp")) (fn (h0 : Handle) is
+    bindIO Handle Nat (writeChunk h0 (codeOf "cherry")) (fn (h1 : Handle) is
+      bindIO Handle Nat (writeChunk h1 (codeOf "apple")) (fn (h2 : Handle) is
+        bindIO Handle Nat (writeChunk h2 (codeOf "banana")) (fn (h3 : Handle) is
+          bindIO Unit Nat (closeWrite h3) (fn (u : Unit) is
+            bindIO Unit Nat (sortFile (codeOf "ch553.tmp") (codeOf "ch553.sorted")) (fn (u2 : Unit) is
+              bindIO Nat Nat (foldLines Nat (codeOf "ch553.sorted") firstStep zero) (fn (n : Nat) is
+                printNat n
+              end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

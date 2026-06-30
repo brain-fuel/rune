@@ -87,6 +87,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		// The streaming fold opens a file and scans it line by line.
 		addImp("os", "bufio")
 	}
+	if usesForeign(p, "sortFile") {
+		addImp("os", "sort")
+	}
 	if usesForeign(p, "openWrite") {
 		addImp("os")
 	}
@@ -204,6 +207,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "closeWrite") {
 		b.WriteString("func closeWrite() any { return func(h any) any { return func(_u any) any { if f, ok := h.(*os.File); ok { f.Close() }; return nil } } }\n")
+	}
+	if usesForeign(p, "sortFile") {
+		b.WriteString("func sortFile() any { return func(inp any) any { return func(outp any) any { return func(_u any) any { data, err := os.ReadFile(__s2h(inp)); if err != nil { os.WriteFile(__s2h(outp), []byte{}, 0644); return nil }; lines := strings.Split(string(data), \"\\n\"); if len(lines) > 0 && lines[len(lines)-1] == \"\" { lines = lines[:len(lines)-1] }; sort.Strings(lines); var sb strings.Builder; for _, ln := range lines { sb.WriteString(ln); sb.WriteByte('\\n') }; os.WriteFile(__s2h(outp), []byte(sb.String()), 0644); return nil } } } }\n")
 	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("func foldLines() any { return func(_S any) any { return func(path any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { f, err := os.Open(__s2h(path)); if err != nil { return s0 }; defer f.Close(); sc := bufio.NewScanner(f); sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024); s := s0; for sc.Scan() { s = ap(ap(ap(step, s), __h2s(sc.Text())), nil) }; return s } } } } } }\n")
