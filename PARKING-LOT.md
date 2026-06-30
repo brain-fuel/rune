@@ -424,8 +424,11 @@ Still genuinely parked (capability provided otherwise / research): R-UFH (single
 R-GLUE G1 (derived-ua computes), cubical-coind (nuCons closed E2), the greatest-fixpoint
 Always-Eventually fairness + fully-general non-settling adequacy (the dfix wall, research).
 
-## Go foldLines is the 1-of-5 outlier on CRLF / >1MB lines (2026-06-30, bible cross-backend tier 1)
-`codegen/golang.go` foldLines uses `bufio.Scanner`/`ScanLines`, which (a) strips a trailing `\r` and
+## Go foldLines is the 1-of-5 outlier on CRLF / >1MB lines -- FIXED (2026-06-30, bible cross-backend tier 2)
+FIXED in Tier 2 (commit 1393d96): Go foldLines now `os.ReadFile` + `strings.Split(data,"\n")` (keeps `\r`,
+no cap), matching js/py/rust/beam. Locked by ch560 CRLF fixture (`TestBibleConformanceCRLF`, all backends
+sum to 16). All 6 backends (js/go/py/rust/erl/jvm) now agree 6/6 on `\n`-split foldLines. Original report:
+`codegen/golang.go` foldLines used `bufio.Scanner`/`ScanLines`, which (a) stripped a trailing `\r` and
 (b) caps a line at 1MB (an over-long line silently stops the scan, dropping it + everything after).
 The js/py/rust/beam foldLines split on `\n` only (keep `\r`, no cap) -- so 4 of 5 agree and GO is the
 lone outlier on CRLF input or any line >1MB. LATENT: no manifestation on the Unix/LF bible corpus, and
@@ -443,6 +446,20 @@ made latin1-symmetric, but the STDOUT path was not (no non-ASCII stdout consumer
 -- the builders write to files, not stdout). FIX before a non-ASCII stdout consumer: a stdout-
 encoding pass writing raw bytes (e.g. `process.stdout.write(Buffer.from(__s2h(c),'latin1'))`).
 Park (Standing Rule 1, no consumer).
+
+## JVM dbApply does not drain the sqlite3 child's stdout/stderr (2026-06-30, bible cross-backend tier 2)
+JVM `dbApply` (codegen/jvm.go) is `new ProcessBuilder("sqlite3", db, ".read "+sql).start().waitFor()`
+without redirecting/draining the child's stdout+stderr. Go's `exec.Command(...).Run()` discards them
+(nil Stdout -> /dev/null). If a future bible SQL script ever wrote >~64KB to stdout, JVM's `waitFor()`
+could DEADLOCK on a full pipe buffer where Go would not. LATENT: current build scripts are pure silent
+DDL/DML, so the real-data gate passes and there is no divergence today. FIX if touched again:
+`.redirectOutput(DISCARD).redirectError(DISCARD)` on the ProcessBuilder. Park (Standing Rule 1, no consumer).
+
+## JVM foldDir/sortFile FILENAME order is UTF-16 code-unit, not byte order (2026-06-30, bible cross-backend tier 2)
+JVM `_foldwalk`/`sortFile` order ENTRIES by `String.compareTo` (UTF-16 code-unit order); Go uses byte
+order (filepath.WalkDir / sort.Strings). Diverges only for non-ASCII FILENAMES. LATENT: bible filenames
+are ASCII (book/chapter ids), and file CONTENT ordering is byte-exact (latin1 codec, proven 6-way). FIX
+if a non-ASCII-filename consumer appears: sort filenames by their latin1/byte encoding. Park (no consumer).
 
 ## JS write vocabulary emits Node default utf8, not raw bytes (2026-06-29, bible Milestone B)
 The JS host bodies for the write ops -- `writeFileCode` (codegen/js.go), and the Milestone-B
