@@ -154,7 +154,7 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("  static V printStrCode() { return fun(c -> fun(_u -> { System.out.println(__s2h(c)); return c; })); }\n")
 	}
-	if usesLiveKV(p) {
+	if usesLiveKV(p) || usesFileEnv(p) || usesStream(p) {
 		// E4: the JVM live-broker data-plane binding. java.net.Socket BLOCKS, so RESP
 		// is synchronous (like Go, unlike the JS async path). A packed String code is a
 		// VNat bignum; __s2h/__h2s are the ASCII byte codec (first byte LSB + 0x01).
@@ -166,6 +166,25 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 		b.WriteString("  static V kvGetLive() { return fun(k -> fun(_u -> __h2s(__resp(\"GET\", __s2h(k))))); }\n")
 		b.WriteString("  static V enqueueLive() { return fun(q -> fun(m -> fun(_u -> { __resp(\"LPUSH\", __s2h(q), __s2h(m)); return m; }))); }\n")
 		b.WriteString("  static V dequeueLive() { return fun(q -> fun(_u -> __h2s(__resp(\"RPOP\", __s2h(q))))); }\n")
+	}
+	if usesForeign(p, "byteLen") {
+		b.WriteString("  static V byteLen() { return fun(c -> new VNat(java.math.BigInteger.valueOf(__s2h(c).length()))); }\n")
+	}
+	if usesForeign(p, "splitOn") {
+		b.WriteString("  static V splitOn() { return fun(sep -> fun(c -> { String data = __s2h(c); int sb = _nat(sep).intValue(); java.util.List<String> parts = new java.util.ArrayList<>(); int start = 0; for (int i = 0; i < data.length(); i++) { if (data.charAt(i) == sb) { parts.add(data.substring(start, i)); start = i + 1; } } parts.add(data.substring(start)); V lst = new VCtor(0, \"nil\", new V[]{unit()}); for (int i = parts.size() - 1; i >= 0; i--) lst = new VCtor(1, \"cons\", new V[]{unit(), __h2s(parts.get(i)), lst}); return lst; })); }\n")
+	}
+	if usesForeign(p, "jsonStrField") {
+		b.WriteString("  static V jsonStrField() { return fun(field -> fun(doc -> { String fn = __s2h(field), ds = __s2h(doc); String needle = \"\\\"\" + fn + \"\\\"\"; V none = new VCtor(0, \"none\", new V[]{unit()}); int i = ds.indexOf(needle); if (i < 0) return none; int j = i + needle.length(); while (j < ds.length() && (ds.charAt(j) == ' ' || ds.charAt(j) == '\\t' || ds.charAt(j) == ':')) j++; if (j < ds.length() && ds.charAt(j) == '\"') { j++; int k = j; while (k < ds.length() && ds.charAt(k) != '\"') k++; return new VCtor(1, \"some\", new V[]{unit(), __h2s(ds.substring(j, k))}); } return none; })); }\n")
+	}
+	if usesForeign(p, "sqlQuote") {
+		b.WriteString("  static V sqlQuote() { return fun(s -> { String in = __s2h(s); StringBuilder o = new StringBuilder(); o.append('\\''); for (int i = 0; i < in.length(); i++) { char ch = in.charAt(i); if (ch == '\\'') o.append('\\''); o.append(ch); } o.append('\\''); return __h2s(o.toString()); }); }\n")
+	}
+	if usesForeign(p, "foldLines") {
+		b.WriteString("  static V foldLines() { return fun(_S -> fun(path -> fun(step -> fun(s0 -> fun(_u -> { byte[] data; try { data = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(__s2h(path))); } catch (Exception e) { return s0; } String s = new String(data, java.nio.charset.StandardCharsets.ISO_8859_1); java.util.List<String> lines = new java.util.ArrayList<>(); int start = 0; for (int i = 0; i < s.length(); i++) { if (s.charAt(i) == '\\n') { lines.add(s.substring(start, i)); start = i + 1; } } lines.add(s.substring(start)); if (!lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) lines.remove(lines.size() - 1); V acc = s0; for (String ln : lines) acc = ap(ap(ap(step, acc), __h2s(ln)), unit()); return acc; }))))); }\n")
+	}
+	if usesForeign(p, "foldDir") {
+		b.WriteString("  static void _foldwalk(String dir, String sfx, V step, V[] box) { java.io.File d = new java.io.File(dir); java.io.File[] ents = d.listFiles(); if (ents == null) return; java.util.Arrays.sort(ents, (a, b2) -> a.getName().compareTo(b2.getName())); for (java.io.File e : ents) { if (e.isDirectory()) _foldwalk(e.getPath(), sfx, step, box); else if (e.getPath().endsWith(sfx)) { try { byte[] data = java.nio.file.Files.readAllBytes(e.toPath()); box[0] = ap(ap(ap(step, box[0]), __h2s(new String(data, java.nio.charset.StandardCharsets.ISO_8859_1))), unit()); } catch (Exception ex) {} } } }\n")
+		b.WriteString("  static V foldDir() { return fun(_S -> fun(dir -> fun(suf -> fun(step -> fun(s0 -> fun(_u -> { String sfx = __s2h(suf); V[] box = new V[]{s0}; _foldwalk(__s2h(dir), sfx, step, box); return box[0]; })))))); }\n")
 	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {

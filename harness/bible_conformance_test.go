@@ -411,3 +411,62 @@ func TestBibleConformanceCRLF(t *testing.T) {
 	// foldLines splits on \n only and keeps \r on EVERY backend: sum of line byteLens = 16.
 	assertBibleAgreeFromTestdata(t, "ch560_crlf_lines.rune", "main", "16\n16")
 }
+
+// runJVMListing emits a listing to JVM, compiles with javac --release 25, runs it from
+// optional cwd, returns trimmed stdout. Skips if Java 25 is absent.
+func runJVMListing(t *testing.T, listing, main, cwd string) (string, bool) {
+	t.Helper()
+	javac, java, ok := findJava25()
+	if !ok {
+		return "", false
+	}
+	s := loadListing(t, listing)
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		t.Fatalf("%s emit-program: %v", listing, err)
+	}
+	src, err := codegen.JVM{}.Emit(p)
+	if err != nil {
+		t.Fatalf("%s jvm emit: %v", listing, err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.java"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(javac, "--release", "25", "-d", dir, filepath.Join(dir, "main.java")).CombinedOutput(); err != nil {
+		t.Fatalf("%s javac: %v\n%s", listing, err, out)
+	}
+	cmd := exec.Command(java, "-cp", dir, "main")
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%s java run: %v", listing, err)
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+func TestBibleJVMPureFold(t *testing.T) {
+	cases := []struct{ listing, main, cwd, want string }{
+		{"ch551_json_field.rune", "strongLen", "", "5"},
+		{"ch557_sql_quote.rune", "quoteEmbedded", "", "6"},
+		{"ch549_conllu_count.rune", "main", "testdata", "11\n11"},
+		{"ch554_fold_dir.rune", "main", "testdata", "3\n3"},
+		{"ch560_crlf_lines.rune", "main", "testdata", "16\n16"},
+	}
+	ran := false
+	for _, c := range cases {
+		got, ok := runJVMListing(t, c.listing, c.main, c.cwd)
+		if !ok {
+			t.Skip("Java 25 not available")
+		}
+		ran = true
+		if got != c.want {
+			t.Errorf("jvm %s/%s = %q, want %q", c.listing, c.main, got, c.want)
+		}
+	}
+	if !ran {
+		t.Skip("Java 25 not available")
+	}
+}
