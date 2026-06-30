@@ -1,0 +1,39 @@
+-- Chapter 556 -- write vocabulary writes RAW BYTES (Milestone C, JS write-encoding fix).
+--
+-- Greek "αβγ" is 6 UTF-8 bytes. Write it with writeChunk, read it back with foldLines, print its
+-- byteLen. Witness (run js+go): 6 on BOTH backends. Before the fix, JS re-encodes the latin1 string
+-- as utf8 on write (12 bytes) -- this listing is the regression that pins the raw-byte write.
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Unit : U is unit : Unit end
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign Handle     : U end
+foreign openWrite  : Nat -> IO Handle end
+foreign writeChunk : Handle -> Nat -> IO Handle end
+foreign closeWrite : Handle -> IO Unit end
+foreign foldLines  : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign byteLen    : Nat -> Nat end
+foreign printNat   : Nat -> IO Nat end
+
+-- read the FIRST line's byteLen (state 0 = none yet; first line sets it, rest keep acc).
+firstLen : Nat -> Nat -> IO Nat is
+  fn (acc : Nat) (line : Nat) is
+    pureIO Nat (NatElim (fn (w : Nat) is Nat end) (byteLen line) (fn (k : Nat) (ih : Nat) is acc end) acc)
+  end
+end
+
+main : IO Nat is
+  bindIO Handle Nat (openWrite (codeOf "ch556.tmp")) (fn (h0 : Handle) is
+    bindIO Handle Nat (writeChunk h0 (codeOf "αβγ")) (fn (h1 : Handle) is
+      bindIO Unit Nat (closeWrite h1) (fn (u : Unit) is
+        bindIO Nat Nat (foldLines Nat (codeOf "ch556.tmp") firstLen zero) (fn (n : Nat) is
+          printNat n
+        end)
+      end)
+    end)
+  end)
+end

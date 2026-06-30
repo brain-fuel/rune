@@ -276,3 +276,42 @@ func TestBibleSortFile(t *testing.T) {
 		})
 	}
 }
+
+func TestBibleWriteBytesRoundTrip(t *testing.T) {
+	for _, tg := range []string{"js", "go"} {
+		if _, err := exec.LookPath(map[string]string{"js": "node", "go": "go"}[tg]); err != nil {
+			t.Skipf("%s runtime not in PATH", tg)
+		}
+		s := loadListing(t, "ch556_write_bytes.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatalf("emit: %v", err)
+		}
+		var src codegen.TargetSource
+		var runner func(string) *exec.Cmd
+		if tg == "js" {
+			src, err = codegen.JS{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("node", f) }
+		} else {
+			src, err = codegen.Go{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("go", "run", f) }
+		}
+		if err != nil {
+			t.Fatalf("[%s] emit: %v", tg, err)
+		}
+		dir := t.TempDir()
+		f := filepath.Join(dir, "main."+tg)
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := runner(f)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] run: %v\n%s", tg, err, out)
+		}
+		if got := strings.TrimSpace(string(out)); got != "6\n6" {
+			t.Errorf("[%s] byteLen of round-tripped Greek = %q, want 6\\n6", tg, got)
+		}
+	}
+}

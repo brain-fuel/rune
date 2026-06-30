@@ -149,13 +149,13 @@ func (JS) Emit(p Program) (TargetSource, error) {
 		b.WriteString("const openWrite = () => path => () => { try { return require('fs').openSync(__s2h(path), 'w'); } catch (e) { return null; } };\n")
 	}
 	if usesForeign(p, "writeChunk") {
-		b.WriteString("const writeChunk = () => h => c => () => { if (h !== null) require('fs').writeSync(h, __s2h(c) + '\\n'); return h; };\n")
+		b.WriteString("const writeChunk = () => h => c => () => { if (h !== null) require('fs').writeSync(h, Buffer.from(__s2h(c) + '\\n', 'latin1')); return h; };\n")
 	}
 	if usesForeign(p, "closeWrite") {
 		b.WriteString("const closeWrite = () => h => () => { if (h !== null) require('fs').closeSync(h); return null; };\n")
 	}
 	if usesForeign(p, "sortFile") {
-		b.WriteString("const sortFile = () => inp => outp => () => { const fs = require('fs'); let data; try { data = fs.readFileSync(__s2h(inp), 'latin1'); } catch (e) { fs.writeFileSync(__s2h(outp), ''); return null; } let lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); lines.sort((a,b) => a < b ? -1 : a > b ? 1 : 0); fs.writeFileSync(__s2h(outp), lines.map(l => l + '\\n').join('')); return null; };\n")
+		b.WriteString("const sortFile = () => inp => outp => () => { const fs = require('fs'); let data; try { data = fs.readFileSync(__s2h(inp), 'latin1'); } catch (e) { fs.writeFileSync(__s2h(outp), ''); return null; } let lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); lines.sort((a,b) => a < b ? -1 : a > b ? 1 : 0); fs.writeFileSync(__s2h(outp), Buffer.from(lines.map(l => l + '\\n').join(''), 'latin1')); return null; };\n")
 	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("const foldLines = () => _S => path => step => s0 => () => { let data; try { data = require('fs').readFileSync(__s2h(path), 'latin1'); } catch (e) { return s0; } const lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); let s = s0; for (const ln of lines) s = step(s)(__h2s(ln))(); return s; };\n")
@@ -170,7 +170,7 @@ func (JS) Emit(p Program) (TargetSource, error) {
 		b.WriteString("const readFileCode = () => c => () => { try { return __h2s(require('fs').readFileSync(__s2h(c), 'utf8')); } catch (e) { return 1n; } };\n")
 	}
 	if usesForeign(p, "writeFileCode") {
-		b.WriteString("const writeFileCode = () => p => c => () => { require('fs').writeFileSync(__s2h(p), __s2h(c)); return c; };\n")
+		b.WriteString("const writeFileCode = () => p => c => () => { require('fs').writeFileSync(__s2h(p), Buffer.from(__s2h(c), 'latin1')); return c; };\n")
 	}
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("const printStrCode = () => c => () => { console.log(__s2h(c)); return c; };\n")
