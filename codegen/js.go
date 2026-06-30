@@ -142,6 +142,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "jsonStrField") {
 		b.WriteString("const jsonStrField = () => field => doc => { const fn = __s2h(field), ds = __s2h(doc); const needle = '\"'+fn+'\"'; const none = {tag:0,name:\"none\",args:[null]}; let i = ds.indexOf(needle); if (i<0) return none; let j = i+needle.length; while (j<ds.length && (ds[j]===' '||ds[j]==='\\t'||ds[j]===':')) j++; if (ds[j]==='\"') { j++; let k=j; while(k<ds.length && ds[k]!=='\"') k++; return {tag:1,name:\"some\",args:[null,__h2s(ds.slice(j,k))]}; } return none; };\n")
 	}
+	if usesForeign(p, "sqlQuote") {
+		b.WriteString("const sqlQuote = () => s => { const str = __s2h(s); let out = \"'\"; for (let i = 0; i < str.length; i++) { if (str[i] === \"'\") out += \"'\"; out += str[i]; } out += \"'\"; return __h2s(out); };\n")
+	}
 	if usesForeign(p, "Handle") {
 		b.WriteString("const Handle = () => null;\n")
 	}

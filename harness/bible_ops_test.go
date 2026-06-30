@@ -315,3 +315,14 @@ func TestBibleWriteBytesRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestBibleSqlQuote(t *testing.T) {
+	for _, tg := range []string{"js", "go"} {
+		if got := runBibleOp(t, "listings/ch557_sql_quote.rune", "quotePlain", tg); got != "5" {
+			t.Errorf("[%s] quotePlain = %q, want 5", tg, got)
+		}
+		if got := runBibleOp(t, "listings/ch557_sql_quote.rune", "quoteEmbedded", tg); got != "6" {
+			t.Errorf("[%s] quoteEmbedded = %q, want 6", tg, got)
+		}
+	}
+}

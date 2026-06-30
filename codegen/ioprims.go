@@ -29,6 +29,7 @@ var ioPrims = map[string]bool{
 	"splitOn":      true, // splitOn   sep line          : Nat -> Nat -> List Nat   (split packed line on a byte)
 	"byteLen":      true, // byteLen   line              : Nat -> Nat               (byte length of a packed line)
 	"jsonStrField": true, // jsonStrField field doc : Nat -> Nat -> Option Nat  (top-level string field)
+	"sqlQuote": true, // sqlQuote v : Nat -> Nat  (SQL-escape: double ' , wrap in '...')
 	"openWrite":  true, // openWrite  path      : Nat -> IO Handle
 	"writeChunk": true, // writeChunk h chunk   : Handle -> Nat -> IO Handle  (writes chunk + "\n")
 	"closeWrite": true, // closeWrite h         : Handle -> IO Unit
@@ -103,7 +104,7 @@ func usesFileEnv(p Program) bool {
 }
 
 // streamPrims need the __s2h/__h2s String codec; foldLines additionally needs os+bufio.
-var streamPrims = []string{"foldLines", "foldDir", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "sortFile"}
+var streamPrims = []string{"foldLines", "foldDir", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "sortFile", "sqlQuote"}
 
 func usesStream(p Program) bool {
 	for _, n := range streamPrims {

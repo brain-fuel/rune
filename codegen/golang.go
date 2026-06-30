@@ -199,6 +199,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "jsonStrField") {
 		b.WriteString("func jsonStrField() any { return func(field any) any { return func(doc any) any { fn := __s2h(field); ds := __s2h(doc); needle := \"\\\"\" + fn + \"\\\"\"; i := strings.Index(ds, needle); none := map[string]any{\"tag\": 0, \"name\": \"none\", \"args\": []any{nil}}; if i < 0 { return none }; j := i + len(needle); for j < len(ds) && (ds[j] == ' ' || ds[j] == '\\t' || ds[j] == ':') { j++ }; if j < len(ds) && ds[j] == '\"' { j++; k := j; for k < len(ds) && ds[k] != '\"' { k++ }; return map[string]any{\"tag\": 1, \"name\": \"some\", \"args\": []any{nil, __h2s(ds[j:k])}} }; return none } } }\n")
 	}
+	if usesForeign(p, "sqlQuote") {
+		b.WriteString("func sqlQuote() any { return func(s any) any { in := __s2h(s); var sb strings.Builder; sb.WriteByte('\\''); for i := 0; i < len(in); i++ { if in[i] == '\\'' { sb.WriteByte('\\'') }; sb.WriteByte(in[i]) }; sb.WriteByte('\\''); return __h2s(sb.String()) } }\n")
+	}
 	if usesForeign(p, "Handle") {
 		b.WriteString("func Handle() any { return nil }\n")
 	}

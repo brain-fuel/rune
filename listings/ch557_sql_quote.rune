@@ -1,0 +1,17 @@
+-- Chapter 557 -- sqlQuote: SQL value escaper (Milestone C).
+--
+-- sqlQuote wraps a value in single quotes and doubles internal quotes. Witnesses (run js+go):
+-- sqlQuote "xyz" = 'xyz' (byteLen 5); sqlQuote "a'b" = 'a''b' (byteLen 6). Byte-level escaping,
+-- so multi-byte UTF-8 passes through untouched (the lexicon's Greek/Hebrew lemmas).
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign sqlQuote : Nat -> Nat end
+foreign byteLen  : Nat -> Nat end
+
+quotePlain    : Nat is byteLen (sqlQuote (codeOf "xyz")) end
+quoteEmbedded : Nat is byteLen (sqlQuote (codeOf "a'b")) end
