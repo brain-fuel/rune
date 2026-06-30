@@ -23,7 +23,7 @@ type bibleBackend struct {
 }
 
 func bibleBackends() []bibleBackend {
-	return []bibleBackend{
+	bks := []bibleBackend{
 		{"js", "node", "js", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.JS{}.Emit(p) },
 			func(f string) *exec.Cmd { return exec.Command("node", f) }, nil},
 		{"go", "go", "go", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.Go{}.Emit(p) },
@@ -36,6 +36,13 @@ func bibleBackends() []bibleBackend {
 		{"erl", "escript", "erl", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.Beam{}.Emit(p) },
 			func(f string) *exec.Cmd { return exec.Command("escript", f) }, nil},
 	}
+	if javac, java, ok := findJava25(); ok {
+		bks = append(bks, bibleBackend{"jvm", javac, "java",
+			func(p codegen.Program) (codegen.TargetSource, error) { return codegen.JVM{}.Emit(p) },
+			func(out string) *exec.Cmd { return exec.Command(java, "-cp", filepath.Dir(out), "main") },
+			func(src, out string) *exec.Cmd { return exec.Command(javac, "--release", "25", "-d", filepath.Dir(out), src) }})
+	}
+	return bks
 }
 
 // runBibleBackend emits+runs one listing on one backend in `dir` (cwd=dir for relative
