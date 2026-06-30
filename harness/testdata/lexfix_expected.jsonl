@@ -1,0 +1,4 @@
+{"src": "G0005", "dst": "G0007", "rel": "shared-root", "directed": false, "provenance": {"source": "strongs-root", "method": "derived"}, "rank": 65535, "note": null}
+{"src": "G0005", "dst": "G0009", "rel": "shared-root", "directed": false, "provenance": {"source": "strongs-root", "method": "derived"}, "rank": 65535, "note": null}
+{"src": "G0007", "dst": "G0009", "rel": "shared-root", "directed": false, "provenance": {"source": "strongs-root", "method": "derived"}, "rank": 65535, "note": null}
+{"src": "G0010", "dst": "G0020", "rel": "shared-root", "directed": false, "provenance": {"source": "strongs-root", "method": "derived"}, "rank": 65535, "note": null}

@@ -1,0 +1,223 @@
+-- Chapter 555 -- build_shared_root: streaming 4-phase pipeline (Milestone B).
+--
+-- 4-phase streaming pipeline (state O(group size), no large in-language List):
+--   1. foldDir the lexicon: for each entry with a non-null root, write "root<TAB>strong".
+--   2. sortFile -> groups contiguous, keys ascending within a root.
+--   3. foldLines the sorted file: a group-scan emits one edge line per ascending key pair.
+--   4. sortFile the edges by (src,dst) -> the byte-identical shared-root.out.
+-- The edge line is a constant template with only src/dst varying (rel/source/rank/etc. constant).
+
+data Nat   : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bool  : U is false : Bool | true : Bool end
+data Unit  : U is unit : Unit end
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+data List   : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+
+foreign Handle       : U end
+foreign foldDir      : (S : U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign foldLines    : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign splitOn      : Nat -> Nat -> List Nat end
+foreign jsonStrField : Nat -> Nat -> Option Nat end
+foreign byteLen      : Nat -> Nat end
+foreign openWrite    : Nat -> IO Handle end
+foreign writeChunk   : Handle -> Nat -> IO Handle end
+foreign closeWrite   : Handle -> IO Unit end
+foreign sortFile     : Nat -> Nat -> IO Unit end
+
+-- State for phase 3: (current root code, collected keys for this root, write handle).
+data St3 : U is mk3 : Nat -> List Nat -> Handle -> St3 end
+
+-- ---- Arithmetic with bignum acceleration ----
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+builtin natAdd addN
+
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN ih b end) a
+  end
+end
+builtin natMul mulN
+
+predN : Nat -> Nat is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is k end) n end
+end
+
+monusN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) a (fn (k : Nat) (ih : Nat) is predN ih end) b
+  end
+end
+builtin natMonus monusN
+
+isZeroN : Nat -> Bool is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n end
+end
+
+andB : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (w : Bool) is Bool end) false b a end
+end
+
+-- eqNat: O(1) equality via monus; safe on NatLit packed codes.
+eqNat : Nat -> Nat -> Bool is
+  fn (a : Nat) (b : Nat) is andB (isZeroN (monusN a b)) (isZeroN (monusN b a)) end
+end
+
+-- ---- Packed-string concat via the sentinel formula ----
+-- pow256 n = 256^n; byteLen is small (<=~10), so this loop is fast.
+pow256 : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is mulN 256 ih end) n
+  end
+end
+
+-- cat2 r k = packed(r_str ++ k_str).
+-- Formula: r + 256^(byteLen r) * (k - 1).
+cat2 : Nat -> Nat -> Nat is
+  fn (r : Nat) (k : Nat) is addN r (mulN (pow256 (byteLen r)) (monusN k 1)) end
+end
+
+-- catTab r k = packed(r_str ++ "\t" ++ k_str).
+catTab : Nat -> Nat -> Nat is
+  fn (r : Nat) (k : Nat) is cat2 r (cat2 (codeOf "\t") k) end
+end
+
+-- ---- Edge line template (only src/dst vary) ----
+pfxCode  : Nat is codeOf "\{\"src\": \"" end
+mid1Code : Nat is codeOf "\", \"dst\": \"" end
+sfxCode  : Nat is codeOf "\", \"rel\": \"shared-root\", \"directed\": false, \"provenance\": \{\"source\": \"strongs-root\", \"method\": \"derived\"\}, \"rank\": 65535, \"note\": null\}" end
+
+edgeLine : Nat -> Nat -> Nat is
+  fn (src : Nat) (dst : Nat) is
+    cat2 (cat2 (cat2 (cat2 pfxCode src) mid1Code) dst) sfxCode
+  end
+end
+
+-- ---- List helpers ----
+-- headD xs: head of xs or zero.
+headD : List Nat -> Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (h : Nat) (t : List Nat) (ih : Nat) is h end)
+      xs
+  end
+end
+
+-- tailHD xs: head of tail of xs or zero.
+tailHD : List Nat -> Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      zero
+      (fn (h : Nat) (t : List Nat) (ih : Nat) is headD t end)
+      xs
+  end
+end
+
+-- snocL xs x = xs ++ [x]; total structural recursion via ListElim IH.
+snocL : List Nat -> Nat -> List Nat is
+  fn (xs : List Nat) (x : Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      (cons Nat x (nil Nat))
+      (fn (h : Nat) (t : List Nat) (ih : List Nat) is cons Nat h ih end)
+      xs
+  end
+end
+
+-- ---- Pair emission (partial for handle threading) ----
+
+-- flushWithKey h src [d1,d2,...]: write edge(src,d1), edge(src,d2), ... threading h.
+partial flushWithKey : Handle -> Nat -> List Nat -> IO Handle is
+  fn (h : Handle) (src : Nat) (rest : List Nat) is
+    ListElim Nat (fn (w : List Nat) is IO Handle end)
+      (pureIO Handle h)
+      (fn (dst : Nat) (tail : List Nat) (ih : IO Handle) is
+        bindIO Handle Handle (writeChunk h (edgeLine src dst)) (fn (h2 : Handle) is
+          flushWithKey h2 src tail
+        end)
+      end)
+      rest
+  end
+end
+
+-- flushPairs h [k1,k2,...]: emit all pairs (ki,kj) for i<j.
+partial flushPairs : Handle -> List Nat -> IO Handle is
+  fn (h : Handle) (keys : List Nat) is
+    ListElim Nat (fn (w : List Nat) is IO Handle end)
+      (pureIO Handle h)
+      (fn (k1 : Nat) (rest : List Nat) (ih : IO Handle) is
+        bindIO Handle Handle (flushWithKey h k1 rest) (fn (h2 : Handle) is
+          flushPairs h2 rest
+        end)
+      end)
+      keys
+  end
+end
+
+-- ---- Phase 1 step: extract root+strong from JSON, write "root<TAB>strong" ----
+extractStep : Handle -> Nat -> IO Handle is
+  fn (h : Handle) (content : Nat) is
+    OptionElim Nat (fn (w : Option Nat) is IO Handle end)
+      (pureIO Handle h)
+      (fn (r : Nat) is
+        OptionElim Nat (fn (w : Option Nat) is IO Handle end)
+          (pureIO Handle h)
+          (fn (k : Nat) is writeChunk h (catTab r k) end)
+          (jsonStrField (codeOf "strong") content)
+      end)
+      (jsonStrField (codeOf "root") content)
+  end
+end
+
+-- ---- Phase 3 step: group-scan ----
+-- State: mk3 curRoot keys handle.
+-- Each line "root<TAB>key": if same root, snoc key; else flush current group and reset.
+groupStep : St3 -> Nat -> IO St3 is
+  fn (st : St3) (line : Nat) is
+    let parts : List Nat = splitOn 9 line in
+    let root  : Nat = headD parts in
+    let key   : Nat = tailHD parts in
+    case st of
+    | mk3 curRoot keys h ->
+        BoolElim (fn (w : Bool) is IO St3 end)
+          (bindIO Handle St3 (flushPairs h keys) (fn (h2 : Handle) is
+             pureIO St3 (mk3 root (snocL (nil Nat) key) h2)
+           end))
+          (pureIO St3 (mk3 curRoot (snocL keys key) h))
+          (eqNat root curRoot)
+    end
+  end
+end
+
+-- ---- main: wire the 4 phases ----
+main : IO Unit is
+  bindIO Handle Unit (openWrite (codeOf "stage1.tmp")) (fn (h0 : Handle) is
+    bindIO Handle Unit (foldDir Handle (codeOf "lexfix") (codeOf ".json") extractStep h0) (fn (h1 : Handle) is
+      bindIO Unit Unit (closeWrite h1) (fn (u1 : Unit) is
+        bindIO Unit Unit (sortFile (codeOf "stage1.tmp") (codeOf "stage1.sorted")) (fn (u2 : Unit) is
+          bindIO Handle Unit (openWrite (codeOf "stage2.tmp")) (fn (h2 : Handle) is
+            bindIO St3 Unit
+              (foldLines St3 (codeOf "stage1.sorted") groupStep (mk3 zero (nil Nat) h2))
+              (fn (st : St3) is
+                case st of
+                | mk3 finalRoot finalKeys finalH ->
+                    bindIO Handle Unit (flushPairs finalH finalKeys) (fn (h3 : Handle) is
+                      bindIO Unit Unit (closeWrite h3) (fn (u3 : Unit) is
+                        sortFile (codeOf "stage2.tmp") (codeOf "shared-root.out")
+                      end)
+                    end)
+                end
+              end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end
