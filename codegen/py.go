@@ -140,7 +140,17 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "sqlQuote") {
 		b.WriteString("def sqlQuote():\n    def _f(s):\n        inp = __s2h(s); out = \"'\"\n        for ch in inp:\n            if ch == \"'\": out += \"'\"\n            out += ch\n        out += \"'\"\n        return __h2s(out)\n    return _f\n")
 	}
-	// D3 machine floats (f64) + the BLAS dot kernel — native float arithmetic.
+	// Higher-order stream ops: host loop applying an erased Rune step per line / per file.
+	// foldLines reads raw bytes (latin1 decode) and splits on '\n', dropping a trailing
+	// empty element. foldDir recursively walks a directory in sorted order applying the
+	// step to each file whose name ends with the suffix.
+	if usesForeign(p, "foldLines") {
+		b.WriteString("def foldLines():\n    def _f(_S):\n        def _g(path):\n            def _h(step):\n                def _i(s0):\n                    def _t(_u):\n                        try:\n                            data = open(__s2h(path), 'rb').read().decode('latin1')\n                        except Exception:\n                            return s0\n                        lines = data.split('\\n')\n                        if lines and lines[-1] == '': lines.pop()\n                        s = s0\n                        for ln in lines:\n                            s = step(s)(__h2s(ln))(_unit)\n                        return s\n                    return _t\n                return _i\n            return _h\n        return _g\n    return _f\n")
+	}
+	if usesForeign(p, "foldDir") {
+		b.WriteString("def foldDir():\n    import os\n    def _f(_S):\n        def _g(dirc):\n            def _h(suf):\n                def _i(step):\n                    def _j(s0):\n                        def _t(_u):\n                            sfx = __s2h(suf)\n                            box = [s0]\n                            def walk(dd):\n                                try:\n                                    ents = sorted(os.listdir(dd))\n                                except Exception:\n                                    return\n                                for name in ents:\n                                    full = os.path.join(dd, name)\n                                    if os.path.isdir(full): walk(full)\n                                    elif full.endswith(sfx):\n                                        try:\n                                            data = open(full, 'rb').read().decode('latin1')\n                                        except Exception:\n                                            continue\n                                        box[0] = step(box[0])(__h2s(data))(_unit)\n                            walk(__s2h(dirc))\n                            return box[0]\n                        return _t\n                    return _j\n                return _i\n            return _h\n        return _g\n    return _f\n")
+	}
+	// D3 machine floats (f64) + the BLAS dot kernel -- native float arithmetic.
 	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).
 	if usesForeign(p, "Float") {
 		b.WriteString("def Float():\n    return None\n")

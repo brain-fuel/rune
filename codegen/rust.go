@@ -196,6 +196,23 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "sqlQuote") {
 		b.WriteString("fn sqlQuote() -> Rc<V> { vfun(|s: Rc<V>| { let inp = _s2h(&s); let mut out: Vec<u8> = Vec::new(); out.push(b'\\''); for &z in inp.iter() { if z == b'\\'' { out.push(b'\\''); } out.push(z); } out.push(b'\\''); _h2s(&out) }) }\n")
 	}
+	// Higher-order stream ops: host loop applying an erased Rune step per line / per file.
+	// foldLines reads raw bytes via std::fs::read, splits on b'\n', drops trailing empty.
+	// foldDir recursively walks a dir via _foldwalk, sorted, matching the suffix.
+	if usesForeign(p, "foldLines") {
+		// foldLines: 5 curried args (_s/path/step/s0/unit). The `path` variable is
+		// captured by `|step|` from `|path|`'s scope, making it a captured variable in
+		// `|step|`. To satisfy the Fn constraint, clone it inside the `|step|` block
+		// before the inner `|s0|` closure can capture it by move.
+		b.WriteString("fn foldLines() -> Rc<V> { vfun(|_s: Rc<V>| vfun(move |path: Rc<V>| vfun(move |step: Rc<V>| { let path = path.clone(); vfun(move |s0: Rc<V>| { let step = step.clone(); let s0 = s0.clone(); let path = path.clone(); vfun(move |_u: Rc<V>| { let pth = String::from_utf8_lossy(&_s2h(&path)).to_string(); let data = match std::fs::read(&pth) { Ok(d) => d, Err(_) => return s0.clone() }; let mut parts: Vec<&[u8]> = data.split(|&z| z == b'\\n').collect(); if let Some(last) = parts.last() { if last.is_empty() { parts.pop(); } } let mut s = s0.clone(); for ln in parts { s = ap(ap(ap(step.clone(), s.clone()), _h2s(ln)), unit()); } s }) }) }))) }\n")
+	}
+	if usesForeign(p, "foldDir") {
+		// foldDir: 6 curried args (_s/dirc/suf/step/s0/unit). Each captured variable
+		// that must reach the innermost closure is cloned at the level where it first
+		// becomes a captured var (not a param), so the Fn constraint is satisfied.
+		b.WriteString("fn _foldwalk(dir: &std::path::Path, sfx: &[u8], step: &Rc<V>, s: &mut Rc<V>) { let mut ents: Vec<_> = match std::fs::read_dir(dir) { Ok(e) => e.filter_map(|x| x.ok()).collect(), Err(_) => return }; ents.sort_by_key(|e| e.file_name()); for e in ents { let full = e.path(); if full.is_dir() { _foldwalk(&full, sfx, step, s); } else { let name = full.to_string_lossy().into_owned(); if name.as_bytes().ends_with(sfx) { if let Ok(data) = std::fs::read(&full) { *s = ap(ap(ap(step.clone(), s.clone()), _h2s(&data)), unit()); } } } } }\n")
+		b.WriteString("fn foldDir() -> Rc<V> { vfun(|_s: Rc<V>| vfun(move |dirc: Rc<V>| vfun(move |suf: Rc<V>| { let dirc = dirc.clone(); vfun(move |step: Rc<V>| { let dirc = dirc.clone(); let suf = suf.clone(); vfun(move |s0: Rc<V>| { let step = step.clone(); let s0 = s0.clone(); let dirc = dirc.clone(); let suf = suf.clone(); vfun(move |_u: Rc<V>| { let d = String::from_utf8_lossy(&_s2h(&dirc)).to_string(); let sfx = _s2h(&suf); let mut s = s0.clone(); _foldwalk(std::path::Path::new(&d), &sfx, &step, &mut s); s }) }) }) }))) }\n")
+	}
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("fn printStrCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { println!(\"{}\", String::from_utf8_lossy(&_s2h(&c))); c.clone() }) }) }\n")
 	}

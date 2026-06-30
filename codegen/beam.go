@@ -142,10 +142,25 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	if usesForeign(p, "byteLen") {
 		b.WriteString("ff_byteLen() -> fun(C) -> length(d6unpack(C)) end.\n")
 	}
+	// bsplit is also needed by foldLines (via blines), so gate it on either.
+	if usesForeign(p, "splitOn") || usesForeign(p, "foldLines") {
+		b.WriteString("bsplit(_Sep, []) -> [[]];\nbsplit(Sep, [H|T]) when H =:= Sep -> [[] | bsplit(Sep, T)];\nbsplit(Sep, [H|T]) -> [Cur|Rest] = bsplit(Sep, T), [[H|Cur]|Rest].\n")
+	}
 	if usesForeign(p, "splitOn") {
 		b.WriteString("ff_splitOn() -> fun(Sep) -> fun(C) -> bmkparts(bsplit(Sep, d6unpack(C))) end end.\n")
-		b.WriteString("bsplit(_Sep, []) -> [[]];\nbsplit(Sep, [H|T]) when H =:= Sep -> [[] | bsplit(Sep, T)];\nbsplit(Sep, [H|T]) -> [Cur|Rest] = bsplit(Sep, T), [[H|Cur]|Rest].\n")
 		b.WriteString("bmkparts([]) -> {c,0,nil,[unit]};\nbmkparts([P|Ps]) -> {c,1,cons,[unit, d6pack(P), bmkparts(Ps)]}.\n")
+	}
+	// Higher-order stream ops: host loop applying an erased Rune step per line / per file.
+	// foldLines reads the file as a binary, converts to byte-list, splits on 10 (newline),
+	// drops a trailing empty element via blines, then folds. foldDir recursively walks the
+	// directory in sorted order (lists:sort) via fdwalk, applying the step to each matching file.
+	if usesForeign(p, "foldLines") {
+		b.WriteString("ff_foldLines() -> fun(_S) -> fun(Path) -> fun(Step) -> fun(S0) -> fun(_U) -> case file:read_file(d6unpack(Path)) of {ok, Bin} -> Lines = blines(binary_to_list(Bin)), lists:foldl(fun(Ln, S) -> ap(ap(ap(Step, S), d6pack(Ln)), unit) end, S0, Lines); _ -> S0 end end end end end end.\n")
+		b.WriteString("blines(L) -> Parts = bsplit(10, L), case lists:reverse(Parts) of [[] | R] -> lists:reverse(R); _ -> Parts end.\n")
+	}
+	if usesForeign(p, "foldDir") {
+		b.WriteString("ff_foldDir() -> fun(_S) -> fun(Dir) -> fun(Suf) -> fun(Step) -> fun(S0) -> fun(_U) -> Sfx = d6unpack(Suf), fdwalk(d6unpack(Dir), Sfx, Step, S0) end end end end end end.\n")
+		b.WriteString("fdwalk(Dir, Sfx, Step, S0) -> case file:list_dir(Dir) of {ok, Names} -> lists:foldl(fun(N, S) -> Full = filename:join(Dir, N), case filelib:is_dir(Full) of true -> fdwalk(Full, Sfx, Step, S); false -> case lists:suffix(Sfx, Full) of true -> case file:read_file(Full) of {ok, B} -> ap(ap(ap(Step, S), d6pack(binary_to_list(B))), unit); _ -> S end; false -> S end end end, S0, lists:sort(Names)); _ -> S0 end.\n")
 	}
 	if usesForeign(p, "jsonStrField") {
 		b.WriteString("ff_jsonStrField() -> fun(Field) -> fun(Doc) -> jsfield(d6unpack(Field), d6unpack(Doc)) end end.\n")
