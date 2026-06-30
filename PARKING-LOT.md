@@ -423,3 +423,15 @@ consumer, no longer parked):
 Still genuinely parked (capability provided otherwise / research): R-UFH (single UF suffices),
 R-GLUE G1 (derived-ua computes), cubical-coind (nuCons closed E2), the greatest-fixpoint
 Always-Eventually fairness + fully-general non-settling adequacy (the dfix wall, research).
+
+## JS write vocabulary emits Node default utf8, not raw bytes (2026-06-29, bible Milestone B)
+The JS host bodies for the write ops -- `writeFileCode` (codegen/js.go), and the Milestone-B
+`writeChunk`/`sortFile` output -- pass the latin1 byte-string straight to `fs.writeSync`/
+`writeFileSync`, which re-encodes it as utf8. Go writes the raw bytes. For any written byte > 127
+the two backends DIVERGE (the same utf8-vs-latin1 class that bit Milestone A on the READ side).
+NOT triggered today: every byte the shared-root builder writes (`root\tstrong` + the ASCII edge
+template) is ASCII, where utf8 == latin1 == raw, so the Go byte-identical gate and the js+go
+fixture gate are both honest; the new ops match the existing `writeFileCode` precedent rather than
+introducing a one-off. FIX when a non-ASCII WRITE consumer appears: emit `Buffer.from(str,'latin1')`
+across the WHOLE write vocabulary at once (writeFileCode + writeChunk + sortFile), so they stay
+consistent. No consumer now -> parked (Standing Rule 1).
