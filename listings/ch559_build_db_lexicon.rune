@@ -1,0 +1,172 @@
+-- Chapter 559 -- build_db (lexicon table): emit deterministic SQL, load via dbApply (Milestone C).
+--
+-- 4-phase pipeline + load:
+--   1. foldDir lexdb ".json": per entry, jsonStrField x6 (strong/lemma/translit/lang/pos/root),
+--      render each (none->NULL, some->sqlQuote; strong folds empty->NULL), write one INSERT line.
+--   2. sortFile -> deterministic INSERT order.
+--   3. assemble lexicon.sql: writeChunk DDL; foldLines the sorted INSERTs re-emitting each; writeChunk index.
+--   4. dbApply lexicon.db lexicon.sql.
+-- lexDir = "lexdb" for the fixture/real gate. The DDL+index are constant templates; only VALUES vary.
+
+data Nat   : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bool  : U is false : Bool | true : Bool end
+data Unit  : U is unit : Unit end
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+data Option : U -> U is none : (A : U) -> Option A | some : (A : U) -> A -> Option A end
+
+foreign Handle       : U end
+foreign foldDir      : (S : U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign foldLines    : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign jsonStrField : Nat -> Nat -> Option Nat end
+foreign byteLen      : Nat -> Nat end
+foreign sqlQuote     : Nat -> Nat end
+foreign openWrite    : Nat -> IO Handle end
+foreign writeChunk   : Handle -> Nat -> IO Handle end
+foreign closeWrite   : Handle -> IO Unit end
+foreign sortFile     : Nat -> Nat -> IO Unit end
+foreign dbApply      : Nat -> Nat -> IO Unit end
+
+-- ---- Arithmetic with bignum acceleration ----
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a
+  end
+end
+builtin natAdd addN
+
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN ih b end) a
+  end
+end
+builtin natMul mulN
+
+predN : Nat -> Nat is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is k end) n end
+end
+
+monusN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (w : Nat) is Nat end) a (fn (k : Nat) (ih : Nat) is predN ih end) b
+  end
+end
+builtin natMonus monusN
+
+isZeroN : Nat -> Bool is
+  fn (n : Nat) is NatElim (fn (w : Nat) is Bool end) true (fn (k : Nat) (ih : Bool) is false end) n end
+end
+
+-- ---- Packed-string concat via the sentinel formula ----
+-- pow256 n = 256^n
+pow256 : Nat -> Nat is
+  fn (n : Nat) is
+    NatElim (fn (w : Nat) is Nat end) 1 (fn (k : Nat) (ih : Nat) is mulN 256 ih end) n
+  end
+end
+
+-- cat2 r k = packed(r_str ++ k_str).
+-- Formula: r + 256^(byteLen r) * (k - 1).
+cat2 : Nat -> Nat -> Nat is
+  fn (r : Nat) (k : Nat) is addN r (mulN (pow256 (byteLen r)) (monusN k 1)) end
+end
+
+-- ---- Constant SQL fragments ----
+nullCode  : Nat is codeOf "NULL" end
+pfxCode   : Nat is codeOf "INSERT OR IGNORE INTO lexicon(strong,lemma,translit,lang,pos,root) VALUES (" end
+commaCode : Nat is codeOf "," end
+sfxCode   : Nat is codeOf ");" end
+ddlCode   : Nat is codeOf "CREATE TABLE lexicon (strong TEXT PRIMARY KEY, lemma TEXT, translit TEXT, lang TEXT, pos TEXT, root TEXT);" end
+idxCode   : Nat is codeOf "CREATE INDEX idx_lexicon_lemma ON lexicon(lemma);" end
+
+-- ---- Field rendering ----
+
+-- sqlField: for lemma/translit/lang/pos/root -- none -> NULL; some v -> sqlQuote v.
+-- Empty string stays '' (not NULL) for these five columns.
+sqlField : Option Nat -> Nat is
+  fn (opt : Option Nat) is
+    OptionElim Nat (fn (w : Option Nat) is Nat end)
+      nullCode
+      (fn (v : Nat) is sqlQuote v end)
+      opt
+  end
+end
+
+-- sqlFieldStrong: for the strong column -- none -> NULL; some "" -> NULL; some v -> sqlQuote v.
+-- Python's `strong or None` folds empty-string to NULL; the other five do not.
+sqlFieldStrong : Option Nat -> Nat is
+  fn (opt : Option Nat) is
+    OptionElim Nat (fn (w : Option Nat) is Nat end)
+      nullCode
+      (fn (v : Nat) is
+        BoolElim (fn (w : Bool) is Nat end)
+          (sqlQuote v)
+          nullCode
+          (isZeroN (byteLen v))
+      end)
+      opt
+  end
+end
+
+-- insertLine: assemble the full INSERT line from six rendered SQL terms.
+-- Column order: strong, lemma, translit, lang, pos, root.
+insertLine : Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Nat is
+  fn (s : Nat) (l : Nat) (tr : Nat) (g : Nat) (p : Nat) (r : Nat) is
+    cat2 pfxCode
+      (cat2 s
+        (cat2 commaCode
+          (cat2 l
+            (cat2 commaCode
+              (cat2 tr
+                (cat2 commaCode
+                  (cat2 g
+                    (cat2 commaCode
+                      (cat2 p
+                        (cat2 commaCode
+                          (cat2 r sfxCode)))))))))))
+  end
+end
+
+-- ---- Phase 1 step: extract 6 fields from JSON content, write one INSERT line ----
+extractStep : Handle -> Nat -> IO Handle is
+  fn (h : Handle) (content : Nat) is
+    let s  : Nat = sqlFieldStrong (jsonStrField (codeOf "strong")   content) in
+    let l  : Nat = sqlField       (jsonStrField (codeOf "lemma")    content) in
+    let tr : Nat = sqlField       (jsonStrField (codeOf "translit") content) in
+    let g  : Nat = sqlField       (jsonStrField (codeOf "lang")     content) in
+    let p  : Nat = sqlField       (jsonStrField (codeOf "pos")      content) in
+    let r  : Nat = sqlField       (jsonStrField (codeOf "root")     content) in
+    writeChunk h (insertLine s l tr g p r)
+  end
+end
+
+-- ---- main: wire the 4 phases ----
+main : IO Unit is
+  -- Phase 1: fold the lexdb directory, write one INSERT line per entry to stage1.sql.
+  bindIO Handle Unit (openWrite (codeOf "stage1.sql")) (fn (h0 : Handle) is
+    bindIO Handle Unit (foldDir Handle (codeOf "lexdb") (codeOf ".json") extractStep h0) (fn (h1 : Handle) is
+      bindIO Unit Unit (closeWrite h1) (fn (u1 : Unit) is
+        -- Phase 2: sort stage1.sql -> stage1.sorted (bytewise, deterministic INSERT order).
+        bindIO Unit Unit (sortFile (codeOf "stage1.sql") (codeOf "stage1.sorted")) (fn (u2 : Unit) is
+          -- Phase 3: assemble lexicon.sql: DDL + sorted INSERTs + index.
+          bindIO Handle Unit (openWrite (codeOf "lexicon.sql")) (fn (h2 : Handle) is
+            bindIO Handle Unit (writeChunk h2 ddlCode) (fn (h3 : Handle) is
+              bindIO Handle Unit
+                (foldLines Handle (codeOf "stage1.sorted") writeChunk h3)
+                (fn (h4 : Handle) is
+                  bindIO Handle Unit (writeChunk h4 idxCode) (fn (h5 : Handle) is
+                    bindIO Unit Unit (closeWrite h5) (fn (u3 : Unit) is
+                      -- Phase 4: load lexicon.sql into lexicon.db via dbApply.
+                      dbApply (codeOf "lexicon.db") (codeOf "lexicon.sql")
+                    end)
+                  end)
+                end)
+            end)
+          end)
+        end)
+      end)
+    end)
+  end)
+end

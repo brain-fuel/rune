@@ -327,6 +327,105 @@ func TestBibleSqlQuote(t *testing.T) {
 	}
 }
 
+func TestBibleBuildDbLexiconSql(t *testing.T) {
+	want, err := os.ReadFile("testdata/lexdbfix_expected.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tg := range []string{"js", "go"} {
+		if _, err := exec.LookPath(map[string]string{"js": "node", "go": "go"}[tg]); err != nil {
+			t.Skipf("%s runtime not in PATH", tg)
+		}
+		s := loadListing(t, "ch559_build_db_lexicon.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatalf("emit: %v", err)
+		}
+		var src codegen.TargetSource
+		var runner func(string) *exec.Cmd
+		if tg == "js" {
+			src, err = codegen.JS{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("node", f) }
+		} else {
+			src, err = codegen.Go{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("go", "run", f) }
+		}
+		if err != nil {
+			t.Fatalf("[%s] emit: %v", tg, err)
+		}
+		dir := t.TempDir()
+		copyTree(t, "testdata/lexdbfix", filepath.Join(dir, "lexdb"))
+		f := filepath.Join(dir, "main."+tg)
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := runner(f)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("[%s] run: %v\n%s", tg, err, out)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "lexicon.sql"))
+		if err != nil {
+			t.Fatalf("[%s] no lexicon.sql: %v", tg, err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("[%s] lexicon.sql mismatch:\n--- got ---\n%s\n--- want ---\n%s", tg, got, want)
+		}
+	}
+}
+
+func TestBibleBuildDbLexiconQuery(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI not in PATH")
+	}
+	want, err := os.ReadFile("testdata/lexdbfix_expected_rows.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tg := range []string{"js", "go"} {
+		if _, err := exec.LookPath(map[string]string{"js": "node", "go": "go"}[tg]); err != nil {
+			t.Skipf("%s runtime not in PATH", tg)
+		}
+		s := loadListing(t, "ch559_build_db_lexicon.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatalf("emit: %v", err)
+		}
+		var src codegen.TargetSource
+		var runner func(string) *exec.Cmd
+		if tg == "js" {
+			src, err = codegen.JS{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("node", f) }
+		} else {
+			src, err = codegen.Go{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("go", "run", f) }
+		}
+		if err != nil {
+			t.Fatalf("[%s] emit: %v", tg, err)
+		}
+		dir := t.TempDir()
+		copyTree(t, "testdata/lexdbfix", filepath.Join(dir, "lexdb"))
+		f := filepath.Join(dir, "main."+tg)
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := runner(f)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("[%s] run: %v\n%s", tg, err, out)
+		}
+		q := exec.Command("sqlite3", filepath.Join(dir, "lexicon.db"),
+			"SELECT * FROM lexicon ORDER BY strong IS NULL, strong, lemma, translit, lang, pos, root")
+		out, err := q.CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] query: %v\n%s", tg, err, out)
+		}
+		if strings.TrimSpace(string(out)) != strings.TrimSpace(string(want)) {
+			t.Errorf("[%s] lexicon dump mismatch:\n--- got ---\n%s\n--- want ---\n%s", tg, out, want)
+		}
+	}
+}
+
 func TestBibleDbApply(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 CLI not in PATH")
