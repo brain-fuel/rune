@@ -213,6 +213,24 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 		b.WriteString("fn _foldwalk(dir: &std::path::Path, sfx: &[u8], step: &Rc<V>, s: &mut Rc<V>) { let mut ents: Vec<_> = match std::fs::read_dir(dir) { Ok(e) => e.filter_map(|x| x.ok()).collect(), Err(_) => return }; ents.sort_by_key(|e| e.file_name()); for e in ents { let full = e.path(); if full.is_dir() { _foldwalk(&full, sfx, step, s); } else { let name = full.to_string_lossy().into_owned(); if name.as_bytes().ends_with(sfx) { if let Ok(data) = std::fs::read(&full) { *s = ap(ap(ap(step.clone(), s.clone()), _h2s(&data)), unit()); } } } } }\n")
 		b.WriteString("fn foldDir() -> Rc<V> { vfun(|_s: Rc<V>| vfun(move |dirc: Rc<V>| vfun(move |suf: Rc<V>| { let dirc = dirc.clone(); vfun(move |step: Rc<V>| { let dirc = dirc.clone(); let suf = suf.clone(); vfun(move |s0: Rc<V>| { let step = step.clone(); let s0 = s0.clone(); let dirc = dirc.clone(); let suf = suf.clone(); vfun(move |_u: Rc<V>| { let d = String::from_utf8_lossy(&_s2h(&dirc)).to_string(); let sfx = _s2h(&suf); let mut s = s0.clone(); _foldwalk(std::path::Path::new(&d), &sfx, &step, &mut s); s }) }) }) }))) }\n")
 	}
+	// WRITE-STREAM ops: Handle (opaque i64 token into a thread-local File table), openWrite/
+	// writeChunk/closeWrite, and sortFile (bytewise external line sort). The token pattern
+	// mirrors __SOCKS/__SOCKID for network handles.
+	if usesForeign(p, "openWrite") || usesForeign(p, "writeChunk") || usesForeign(p, "closeWrite") {
+		b.WriteString("thread_local! { static __WH: std::cell::RefCell<std::collections::HashMap<i64, std::fs::File>> = std::cell::RefCell::new(std::collections::HashMap::new()); static __WHID: std::cell::RefCell<i64> = std::cell::RefCell::new(0); }\n")
+	}
+	if usesForeign(p, "openWrite") {
+		b.WriteString("fn openWrite() -> Rc<V> { vfun(|path: Rc<V>| { let path = path.clone(); vfun(move |_u: Rc<V>| { let pth = String::from_utf8_lossy(&_s2h(&path)).to_string(); match std::fs::File::create(&pth) { Ok(f) => { let id = __WHID.with(|c| { let mut c = c.borrow_mut(); *c += 1; *c }); __WH.with(|m| { m.borrow_mut().insert(id, f); }); _nat_of_usize(id as usize) } Err(_) => _nat_of_usize(0) } }) }) }\n")
+	}
+	if usesForeign(p, "writeChunk") {
+		b.WriteString("fn writeChunk() -> Rc<V> { vfun(|h: Rc<V>| { let h = h.clone(); vfun(move |c: Rc<V>| { let h = h.clone(); vfun(move |_u: Rc<V>| { use std::io::Write; let id = _natusize(&h) as i64; let mut bytes = _s2h(&c); bytes.push(b'\\n'); __WH.with(|m| { if let Some(f) = m.borrow_mut().get_mut(&id) { let _ = f.write_all(&bytes); } }); h.clone() }) }) }) }\n")
+	}
+	if usesForeign(p, "closeWrite") {
+		b.WriteString("fn closeWrite() -> Rc<V> { vfun(|h: Rc<V>| { let h = h.clone(); vfun(move |_u: Rc<V>| { let id = _natusize(&h) as i64; __WH.with(|m| { m.borrow_mut().remove(&id); }); unit() }) }) }\n")
+	}
+	if usesForeign(p, "sortFile") {
+		b.WriteString("fn sortFile() -> Rc<V> { vfun(|inp: Rc<V>| { let inp = inp.clone(); vfun(move |outp: Rc<V>| { let inp = inp.clone(); let outp = outp.clone(); vfun(move |_u: Rc<V>| { let ip = String::from_utf8_lossy(&_s2h(&inp)).to_string(); let op = String::from_utf8_lossy(&_s2h(&outp)).to_string(); let data = match std::fs::read(&ip) { Ok(d) => d, Err(_) => { let _ = std::fs::write(&op, b\"\"); return unit(); } }; let mut lines: Vec<&[u8]> = data.split(|&z| z == b'\\n').collect(); if let Some(last) = lines.last() { if last.is_empty() { lines.pop(); } } lines.sort(); let mut out: Vec<u8> = Vec::new(); for ln in lines { out.extend_from_slice(ln); out.push(b'\\n'); } let _ = std::fs::write(&op, &out); unit() }) }) }) }\n")
+	}
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("fn printStrCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { println!(\"{}\", String::from_utf8_lossy(&_s2h(&c))); c.clone() }) }) }\n")
 	}

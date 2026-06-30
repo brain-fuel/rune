@@ -150,6 +150,24 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "foldDir") {
 		b.WriteString("def foldDir():\n    import os\n    def _f(_S):\n        def _g(dirc):\n            def _h(suf):\n                def _i(step):\n                    def _j(s0):\n                        def _t(_u):\n                            sfx = __s2h(suf)\n                            box = [s0]\n                            def walk(dd):\n                                try:\n                                    ents = sorted(os.listdir(dd))\n                                except Exception:\n                                    return\n                                for name in ents:\n                                    full = os.path.join(dd, name)\n                                    if os.path.isdir(full): walk(full)\n                                    elif full.endswith(sfx):\n                                        try:\n                                            data = open(full, 'rb').read().decode('latin1')\n                                        except Exception:\n                                            continue\n                                        box[0] = step(box[0])(__h2s(data))(_unit)\n                            walk(__s2h(dirc))\n                            return box[0]\n                        return _t\n                    return _j\n                return _i\n            return _h\n        return _g\n    return _f\n")
 	}
+	// WRITE-STREAM ops: Handle (opaque binary file object), openWrite/writeChunk/closeWrite,
+	// and sortFile (bytewise external line sort). The file object is carried directly through
+	// the curried closures; None signals an open failure.
+	if usesForeign(p, "Handle") {
+		b.WriteString("def Handle():\n    return None\n")
+	}
+	if usesForeign(p, "openWrite") {
+		b.WriteString("def openWrite():\n    def _f(path):\n        def _t(_u):\n            try:\n                return open(__s2h(path), 'wb')\n            except Exception:\n                return None\n        return _t\n    return _f\n")
+	}
+	if usesForeign(p, "writeChunk") {
+		b.WriteString("def writeChunk():\n    def _f(h):\n        def _g(c):\n            def _t(_u):\n                if h is not None: h.write((__s2h(c) + '\\n').encode('latin1'))\n                return h\n            return _t\n        return _g\n    return _f\n")
+	}
+	if usesForeign(p, "closeWrite") {
+		b.WriteString("def closeWrite():\n    def _f(h):\n        def _t(_u):\n            if h is not None: h.close()\n            return None\n        return _t\n    return _f\n")
+	}
+	if usesForeign(p, "sortFile") {
+		b.WriteString("def sortFile():\n    def _f(inp):\n        def _g(outp):\n            def _t(_u):\n                try:\n                    data = open(__s2h(inp), 'rb').read().decode('latin1')\n                except Exception:\n                    open(__s2h(outp), 'wb').write(b''); return None\n                lines = data.split('\\n')\n                if lines and lines[-1] == '': lines.pop()\n                lines.sort()\n                open(__s2h(outp), 'wb').write(('\\n'.join(lines) + ('\\n' if lines else '')).encode('latin1'))\n                return None\n            return _t\n        return _g\n    return _f\n")
+	}
 	// D3 machine floats (f64) + the BLAS dot kernel -- native float arithmetic.
 	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).
 	if usesForeign(p, "Float") {

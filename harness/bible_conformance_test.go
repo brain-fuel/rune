@@ -113,6 +113,13 @@ func TestBibleConformanceFold(t *testing.T) {
 	assertBibleAgreeFromTestdata(t, "ch554_fold_dir.rune", "main", "3\n3")
 }
 
+func TestBibleConformanceWriteStream(t *testing.T) {
+	// ch552: write two lines, read back with foldLines, print count -> 2\n2.
+	assertBibleAgree(t, "ch552_write_stream.rune", "main", "2\n2")
+	// ch553: write three lines, sortFile, read back first line's byteLen -> 5\n5.
+	assertBibleAgree(t, "ch553_sort_file.rune", "main", "5\n5")
+}
+
 // assertBibleAgreeFromTestdata runs (listing, main) on every available backend with
 // cwd = harness/testdata (so the listing's relative fixture path resolves) and asserts
 // they all produce `want`. The emitted source / compiled binary lives in a temp dir but

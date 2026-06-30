@@ -142,8 +142,8 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	if usesForeign(p, "byteLen") {
 		b.WriteString("ff_byteLen() -> fun(C) -> length(d6unpack(C)) end.\n")
 	}
-	// bsplit is also needed by foldLines (via blines), so gate it on either.
-	if usesForeign(p, "splitOn") || usesForeign(p, "foldLines") {
+	// bsplit is also needed by foldLines (via blines) and sortFile, so gate it on any of them.
+	if usesForeign(p, "splitOn") || usesForeign(p, "foldLines") || usesForeign(p, "sortFile") {
 		b.WriteString("bsplit(_Sep, []) -> [[]];\nbsplit(Sep, [H|T]) when H =:= Sep -> [[] | bsplit(Sep, T)];\nbsplit(Sep, [H|T]) -> [Cur|Rest] = bsplit(Sep, T), [[H|Cur]|Rest].\n")
 	}
 	if usesForeign(p, "splitOn") {
@@ -154,13 +154,32 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	// foldLines reads the file as a binary, converts to byte-list, splits on 10 (newline),
 	// drops a trailing empty element via blines, then folds. foldDir recursively walks the
 	// directory in sorted order (lists:sort) via fdwalk, applying the step to each matching file.
+	if usesForeign(p, "foldLines") || usesForeign(p, "sortFile") {
+		b.WriteString("blines(L) -> Parts = bsplit(10, L), case lists:reverse(Parts) of [[] | R] -> lists:reverse(R); _ -> Parts end.\n")
+	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("ff_foldLines() -> fun(_S) -> fun(Path) -> fun(Step) -> fun(S0) -> fun(_U) -> case file:read_file(d6unpack(Path)) of {ok, Bin} -> Lines = blines(binary_to_list(Bin)), lists:foldl(fun(Ln, S) -> ap(ap(ap(Step, S), d6pack(Ln)), unit) end, S0, Lines); _ -> S0 end end end end end end.\n")
-		b.WriteString("blines(L) -> Parts = bsplit(10, L), case lists:reverse(Parts) of [[] | R] -> lists:reverse(R); _ -> Parts end.\n")
 	}
 	if usesForeign(p, "foldDir") {
 		b.WriteString("ff_foldDir() -> fun(_S) -> fun(Dir) -> fun(Suf) -> fun(Step) -> fun(S0) -> fun(_U) -> Sfx = d6unpack(Suf), fdwalk(d6unpack(Dir), Sfx, Step, S0) end end end end end end.\n")
 		b.WriteString("fdwalk(Dir, Sfx, Step, S0) -> case file:list_dir(Dir) of {ok, Names} -> lists:foldl(fun(N, S) -> Full = filename:join(Dir, N), case filelib:is_dir(Full) of true -> fdwalk(Full, Sfx, Step, S); false -> case lists:suffix(Sfx, Full) of true -> case file:read_file(Full) of {ok, B} -> ap(ap(ap(Step, S), d6pack(binary_to_list(B))), unit); _ -> S end; false -> S end end end, S0, lists:sort(Names)); _ -> S0 end.\n")
+	}
+	// WRITE-STREAM ops: Handle (an IoDevice from file:open), openWrite/writeChunk/closeWrite,
+	// and sortFile (bytewise external line sort via lists:sort on char-lists).
+	if usesForeign(p, "Handle") {
+		b.WriteString("ff_Handle() -> unit.\n")
+	}
+	if usesForeign(p, "openWrite") {
+		b.WriteString("ff_openWrite() -> fun(Path) -> fun(_U) -> case file:open(d6unpack(Path), [write, raw, binary]) of {ok, Fd} -> Fd; _ -> nil end end end.\n")
+	}
+	if usesForeign(p, "writeChunk") {
+		b.WriteString("ff_writeChunk() -> fun(H) -> fun(C) -> fun(_U) -> case H of nil -> nil; _ -> file:write(H, list_to_binary(d6unpack(C) ++ [10])) end, H end end end.\n")
+	}
+	if usesForeign(p, "closeWrite") {
+		b.WriteString("ff_closeWrite() -> fun(H) -> fun(_U) -> case H of nil -> ok; _ -> file:close(H) end, unit end end.\n")
+	}
+	if usesForeign(p, "sortFile") {
+		b.WriteString("ff_sortFile() -> fun(Inp) -> fun(Outp) -> fun(_U) -> case file:read_file(d6unpack(Inp)) of {ok, Bin} -> Lines = blines(binary_to_list(Bin)), Sorted = lists:sort(Lines), Out = lists:flatmap(fun(L) -> L ++ [10] end, Sorted), file:write_file(d6unpack(Outp), list_to_binary(Out)); _ -> file:write_file(d6unpack(Outp), <<>>) end, unit end end end.\n")
 	}
 	if usesForeign(p, "jsonStrField") {
 		b.WriteString("ff_jsonStrField() -> fun(Field) -> fun(Doc) -> jsfield(d6unpack(Field), d6unpack(Doc)) end end.\n")
