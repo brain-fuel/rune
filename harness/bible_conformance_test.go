@@ -77,25 +77,27 @@ func runBibleBackend(t *testing.T, bk bibleBackend, listing, main, dir string) (
 	return strings.TrimSpace(string(out)), true
 }
 
-// assertBibleAgree runs (listing, main) on every available backend in its OWN temp dir
-// and asserts they all produce `want`. At least two backends must actually run.
+// assertBibleAgree runs (listing, main) on every backend in its OWN temp dir and
+// asserts they all produce `want`. If ANY backend's toolchain is absent the gate is
+// inconclusive -- t.Skipf is called naming the missing backend(s) so the run is
+// reported as SKIP rather than a false PASS on the reduced set.
 func assertBibleAgree(t *testing.T, listing, main, want string) {
 	t.Helper()
-	ran := 0
+	var skipped []string
 	for _, bk := range bibleBackends() {
 		dir := t.TempDir()
 		got, ok := runBibleBackend(t, bk, listing, main, dir)
 		if !ok {
 			t.Logf("[%s] skipped (%s not in PATH)", bk.name, bk.bin)
+			skipped = append(skipped, bk.name)
 			continue
 		}
-		ran++
 		if got != want {
 			t.Errorf("[%s] %s/%s = %q, want %q (backends must not diverge)", bk.name, listing, main, got, want)
 		}
 	}
-	if ran < 2 {
-		t.Skipf("fewer than 2 backends available (ran %d)", ran)
+	if len(skipped) > 0 {
+		t.Skipf("divergence gate inconclusive -- missing backend toolchain(s): %v", skipped)
 	}
 }
 
@@ -126,14 +128,18 @@ func TestBibleConformanceDbApply(t *testing.T) {
 	}
 	// ch558: main builds ch558.db from a 2-row .sql via dbApply; the db is the output.
 	// Run on each backend in its own temp dir, then query count(*) -> 2.
-	ran := 0
+	// If ANY backend toolchain is absent the result is inconclusive -- skip rather than
+	// silently pass on the reduced set.
+	var skipped []string
 	for _, bk := range bibleBackends() {
 		if _, err := exec.LookPath(bk.bin); err != nil {
+			skipped = append(skipped, bk.name)
 			continue
 		}
 		dir := t.TempDir()
 		_, ok := runBibleBackend(t, bk, "ch558_db_apply.rune", "main", dir)
 		if !ok {
+			skipped = append(skipped, bk.name)
 			continue
 		}
 		q := exec.Command("sqlite3", filepath.Join(dir, "ch558.db"), "SELECT count(*) FROM t")
@@ -141,25 +147,26 @@ func TestBibleConformanceDbApply(t *testing.T) {
 		if err != nil {
 			t.Fatalf("[%s] query: %v\n%s", bk.name, err, out)
 		}
-		ran++
 		if got := strings.TrimSpace(string(out)); got != "2" {
 			t.Errorf("[%s] ch558 db count = %q, want 2", bk.name, got)
 		}
 	}
-	if ran < 2 {
-		t.Skipf("fewer than 2 backends (ran %d)", ran)
+	if len(skipped) > 0 {
+		t.Skipf("divergence gate inconclusive -- missing backend toolchain(s): %v", skipped)
 	}
 }
 
-// assertBibleAgreeFromTestdata runs (listing, main) on every available backend with
+// assertBibleAgreeFromTestdata runs (listing, main) on every backend with
 // cwd = harness/testdata (so the listing's relative fixture path resolves) and asserts
 // they all produce `want`. The emitted source / compiled binary lives in a temp dir but
-// is referenced by ABSOLUTE path so cwd can be testdata.
+// is referenced by ABSOLUTE path so cwd can be testdata. If ANY backend toolchain is
+// absent the gate is inconclusive -- t.Skipf names the missing backend(s).
 func assertBibleAgreeFromTestdata(t *testing.T, listing, main, want string) {
 	t.Helper()
-	ran := 0
+	var skipped []string
 	for _, bk := range bibleBackends() {
 		if _, err := exec.LookPath(bk.bin); err != nil {
+			skipped = append(skipped, bk.name)
 			continue
 		}
 		s := loadListing(t, listing)
@@ -194,13 +201,12 @@ func assertBibleAgreeFromTestdata(t *testing.T, listing, main, want string) {
 			}
 			t.Fatalf("[%s] %s run: %v\n%s", bk.name, listing, err, stderr)
 		}
-		ran++
 		if got := strings.TrimSpace(string(out)); got != want {
 			t.Errorf("[%s] %s/%s = %q, want %q (backends must not diverge)", bk.name, listing, main, got, want)
 		}
 	}
-	if ran < 2 {
-		t.Skipf("fewer than 2 backends (ran %d)", ran)
+	if len(skipped) > 0 {
+		t.Skipf("divergence gate inconclusive -- missing backend toolchain(s): %v", skipped)
 	}
 }
 
@@ -247,18 +253,20 @@ func buildBibleFile(t *testing.T, bk bibleBackend, listing, main, fixture, destN
 }
 
 // assertBibleFilesAgree builds the file on every backend and asserts byte-identity to
-// the first backend that ran (and at least two ran).
+// the first backend that ran. If ANY backend toolchain is absent the gate is
+// inconclusive -- t.Skipf names the missing backend(s) rather than passing on the
+// reduced set.
 func assertBibleFilesAgree(t *testing.T, listing, main, fixture, destName, outFile string) {
 	t.Helper()
 	var ref []byte
 	var refName string
-	ran := 0
+	var skipped []string
 	for _, bk := range bibleBackends() {
 		data, ok := buildBibleFile(t, bk, listing, main, fixture, destName, outFile)
 		if !ok {
+			skipped = append(skipped, bk.name)
 			continue
 		}
-		ran++
 		if ref == nil {
 			ref = data
 			refName = bk.name
@@ -268,8 +276,8 @@ func assertBibleFilesAgree(t *testing.T, listing, main, fixture, destName, outFi
 			t.Errorf("[%s] %s differs from [%s] (backends diverge):\n%s vs\n%s", bk.name, outFile, refName, data, ref)
 		}
 	}
-	if ran < 2 {
-		t.Skipf("fewer than 2 backends (ran %d)", ran)
+	if len(skipped) > 0 {
+		t.Skipf("divergence gate inconclusive -- missing backend toolchain(s): %v", skipped)
 	}
 }
 
@@ -291,9 +299,10 @@ func TestBibleConformanceRealData(t *testing.T) {
 	const q = "SELECT * FROM lexicon ORDER BY strong IS NULL, strong, lemma, translit, lang, pos, root"
 	var refSQL []byte
 	var refName string
-	ran := 0
+	var skipped []string
 	for _, bk := range bibleBackends() {
 		if _, err := exec.LookPath(bk.bin); err != nil {
+			skipped = append(skipped, bk.name)
 			continue
 		}
 		dir := t.TempDir()
@@ -331,7 +340,6 @@ func TestBibleConformanceRealData(t *testing.T) {
 		if err != nil {
 			t.Fatalf("[%s] no lexicon.sql: %v", bk.name, err)
 		}
-		ran++
 		if refSQL == nil {
 			refSQL = sqlBytes
 			refName = bk.name
@@ -347,7 +355,7 @@ func TestBibleConformanceRealData(t *testing.T) {
 			t.Errorf("[%s] lexicon dump only %d rows -- build likely failed", bk.name, n)
 		}
 	}
-	if ran < 2 {
-		t.Skipf("fewer than 2 backends (ran %d)", ran)
+	if len(skipped) > 0 {
+		t.Skipf("divergence gate inconclusive -- missing backend toolchain(s): %v", skipped)
 	}
 }
