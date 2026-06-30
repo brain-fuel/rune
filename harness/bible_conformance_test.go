@@ -203,3 +203,151 @@ func assertBibleAgreeFromTestdata(t *testing.T, listing, main, want string) {
 		t.Skipf("fewer than 2 backends (ran %d)", ran)
 	}
 }
+
+// buildBibleFile runs a builder listing on one backend in a fresh temp dir seeded with
+// the fixture dir (copied to `destName`), and returns the named output file's bytes.
+func buildBibleFile(t *testing.T, bk bibleBackend, listing, main, fixture, destName, outFile string) ([]byte, bool) {
+	t.Helper()
+	if _, err := exec.LookPath(bk.bin); err != nil {
+		return nil, false
+	}
+	dir := t.TempDir()
+	copyTree(t, filepath.Join("testdata", fixture), filepath.Join(dir, destName))
+	s := loadListing(t, listing)
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		t.Fatalf("[%s] emit-program: %v", bk.name, err)
+	}
+	src, err := bk.emit(p)
+	if err != nil {
+		t.Fatalf("[%s] emit: %v", bk.name, err)
+	}
+	f := filepath.Join(dir, "main."+bk.ext)
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runFile := f
+	if bk.compile != nil {
+		bin := filepath.Join(dir, "m.bin")
+		if out, err := bk.compile(f, bin).CombinedOutput(); err != nil {
+			t.Fatalf("[%s] compile: %v\n%s", bk.name, err, out)
+		}
+		runFile = bin
+	}
+	cmd := bk.run(runFile)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("[%s] run: %v\n%s", bk.name, err, out)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, outFile))
+	if err != nil {
+		t.Fatalf("[%s] no output %s: %v", bk.name, outFile, err)
+	}
+	return data, true
+}
+
+// assertBibleFilesAgree builds the file on every backend and asserts byte-identity to
+// the first backend that ran (and at least two ran).
+func assertBibleFilesAgree(t *testing.T, listing, main, fixture, destName, outFile string) {
+	t.Helper()
+	var ref []byte
+	var refName string
+	ran := 0
+	for _, bk := range bibleBackends() {
+		data, ok := buildBibleFile(t, bk, listing, main, fixture, destName, outFile)
+		if !ok {
+			continue
+		}
+		ran++
+		if ref == nil {
+			ref = data
+			refName = bk.name
+			continue
+		}
+		if string(data) != string(ref) {
+			t.Errorf("[%s] %s differs from [%s] (backends diverge):\n%s vs\n%s", bk.name, outFile, refName, data, ref)
+		}
+	}
+	if ran < 2 {
+		t.Skipf("fewer than 2 backends (ran %d)", ran)
+	}
+}
+
+func TestBibleConformanceBuilders(t *testing.T) {
+	// shared-root JSONL builder (ch555) over the lexfix fixture -> shared-root.out.
+	assertBibleFilesAgree(t, "ch555_build_shared_root.rune", "main", "lexfix", "lexfix", "shared-root.out")
+	// lexicon-db builder (ch559) over the lexdbfix fixture -> lexicon.sql (the deterministic text).
+	assertBibleFilesAgree(t, "ch559_build_db_lexicon.rune", "main", "lexdbfix", "lexdb", "lexicon.sql")
+}
+
+func TestBibleConformanceRealData(t *testing.T) {
+	repo := os.Getenv("BIBLE_REPO")
+	if repo == "" {
+		t.Skip("set BIBLE_REPO for the cross-backend real-data gate")
+	}
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not in PATH")
+	}
+	const q = "SELECT * FROM lexicon ORDER BY strong IS NULL, strong, lemma, translit, lang, pos, root"
+	var refSQL []byte
+	var refName string
+	ran := 0
+	for _, bk := range bibleBackends() {
+		if _, err := exec.LookPath(bk.bin); err != nil {
+			continue
+		}
+		dir := t.TempDir()
+		if out, err := exec.Command("cp", "-r", filepath.Join(repo, "lexicon"), filepath.Join(dir, "lexdb")).CombinedOutput(); err != nil {
+			t.Fatalf("[%s] cp: %v\n%s", bk.name, err, out)
+		}
+		s := loadListing(t, "ch559_build_db_lexicon.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, err := bk.emit(p)
+		if err != nil {
+			t.Fatalf("[%s] emit: %v", bk.name, err)
+		}
+		f := filepath.Join(dir, "main."+bk.ext)
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runFile := f
+		if bk.compile != nil {
+			bin := filepath.Join(dir, "m.bin")
+			if out, err := bk.compile(f, bin).CombinedOutput(); err != nil {
+				t.Fatalf("[%s] compile: %v\n%s", bk.name, err, out)
+			}
+			runFile = bin
+		}
+		cmd := bk.run(runFile)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("[%s] build: %v\n%s", bk.name, err, out)
+		}
+		// the .sql text must be byte-identical across backends
+		sqlBytes, err := os.ReadFile(filepath.Join(dir, "lexicon.sql"))
+		if err != nil {
+			t.Fatalf("[%s] no lexicon.sql: %v", bk.name, err)
+		}
+		ran++
+		if refSQL == nil {
+			refSQL = sqlBytes
+			refName = bk.name
+		} else if string(sqlBytes) != string(refSQL) {
+			t.Errorf("[%s] lexicon.sql diverges from [%s] on real data", bk.name, refName)
+		}
+		// and the loaded db must be query-equivalent (sanity on the first backend)
+		dump, err := exec.Command("sqlite3", filepath.Join(dir, "lexicon.db"), q).CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] query: %v\n%s", bk.name, err, dump)
+		}
+		if n := strings.Count(strings.TrimSpace(string(dump)), "\n") + 1; n < 1000 {
+			t.Errorf("[%s] lexicon dump only %d rows -- build likely failed", bk.name, n)
+		}
+	}
+	if ran < 2 {
+		t.Skipf("fewer than 2 backends (ran %d)", ran)
+	}
+}
