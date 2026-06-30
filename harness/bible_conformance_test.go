@@ -120,6 +120,37 @@ func TestBibleConformanceWriteStream(t *testing.T) {
 	assertBibleAgree(t, "ch553_sort_file.rune", "main", "5\n5")
 }
 
+func TestBibleConformanceDbApply(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI not in PATH")
+	}
+	// ch558: main builds ch558.db from a 2-row .sql via dbApply; the db is the output.
+	// Run on each backend in its own temp dir, then query count(*) -> 2.
+	ran := 0
+	for _, bk := range bibleBackends() {
+		if _, err := exec.LookPath(bk.bin); err != nil {
+			continue
+		}
+		dir := t.TempDir()
+		_, ok := runBibleBackend(t, bk, "ch558_db_apply.rune", "main", dir)
+		if !ok {
+			continue
+		}
+		q := exec.Command("sqlite3", filepath.Join(dir, "ch558.db"), "SELECT count(*) FROM t")
+		out, err := q.CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] query: %v\n%s", bk.name, err, out)
+		}
+		ran++
+		if got := strings.TrimSpace(string(out)); got != "2" {
+			t.Errorf("[%s] ch558 db count = %q, want 2", bk.name, got)
+		}
+	}
+	if ran < 2 {
+		t.Skipf("fewer than 2 backends (ran %d)", ran)
+	}
+}
+
 // assertBibleAgreeFromTestdata runs (listing, main) on every available backend with
 // cwd = harness/testdata (so the listing's relative fixture path resolves) and asserts
 // they all produce `want`. The emitted source / compiled binary lives in a temp dir but

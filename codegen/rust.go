@@ -231,6 +231,9 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "sortFile") {
 		b.WriteString("fn sortFile() -> Rc<V> { vfun(|inp: Rc<V>| { let inp = inp.clone(); vfun(move |outp: Rc<V>| { let inp = inp.clone(); let outp = outp.clone(); vfun(move |_u: Rc<V>| { let ip = String::from_utf8_lossy(&_s2h(&inp)).to_string(); let op = String::from_utf8_lossy(&_s2h(&outp)).to_string(); let data = match std::fs::read(&ip) { Ok(d) => d, Err(_) => { let _ = std::fs::write(&op, b\"\"); return unit(); } }; let mut lines: Vec<&[u8]> = data.split(|&z| z == b'\\n').collect(); if let Some(last) = lines.last() { if last.is_empty() { lines.pop(); } } lines.sort(); let mut out: Vec<u8> = Vec::new(); for ln in lines { out.extend_from_slice(ln); out.push(b'\\n'); } let _ = std::fs::write(&op, &out); unit() }) }) }) }\n")
 	}
+	if usesForeign(p, "dbApply") {
+		b.WriteString("fn dbApply() -> Rc<V> { vfun(|db: Rc<V>| { let db = db.clone(); vfun(move |sql: Rc<V>| { let db = db.clone(); let sql = sql.clone(); vfun(move |_u: Rc<V>| { let d = String::from_utf8_lossy(&_s2h(&db)).to_string(); let s = String::from_utf8_lossy(&_s2h(&sql)).to_string(); let _ = std::process::Command::new(\"sqlite3\").arg(&d).arg(format!(\".read {}\", s)).output(); unit() }) }) }) }\n")
+	}
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("fn printStrCode() -> Rc<V> { vfun(|c: Rc<V>| { let c = c.clone(); vfun(move |_u: Rc<V>| { println!(\"{}\", String::from_utf8_lossy(&_s2h(&c))); c.clone() }) }) }\n")
 	}

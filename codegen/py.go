@@ -168,6 +168,9 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "sortFile") {
 		b.WriteString("def sortFile():\n    def _f(inp):\n        def _g(outp):\n            def _t(_u):\n                try:\n                    data = open(__s2h(inp), 'rb').read().decode('latin1')\n                except Exception:\n                    open(__s2h(outp), 'wb').write(b''); return None\n                lines = data.split('\\n')\n                if lines and lines[-1] == '': lines.pop()\n                lines.sort()\n                open(__s2h(outp), 'wb').write(('\\n'.join(lines) + ('\\n' if lines else '')).encode('latin1'))\n                return None\n            return _t\n        return _g\n    return _f\n")
 	}
+	if usesForeign(p, "dbApply") {
+		b.WriteString("def dbApply():\n    import subprocess\n    def _f(db):\n        def _g(sql):\n            def _t(_u):\n                try:\n                    subprocess.run(['sqlite3', __s2h(db), '.read ' + __s2h(sql)], capture_output=True)\n                except Exception:\n                    pass\n                return None\n            return _t\n        return _g\n    return _f\n")
+	}
 	// D3 machine floats (f64) + the BLAS dot kernel -- native float arithmetic.
 	// `Float` is a foreign type surviving erasure as ok/err's type arg (runtime-irrelevant).
 	if usesForeign(p, "Float") {

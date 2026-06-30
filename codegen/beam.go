@@ -181,6 +181,9 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	if usesForeign(p, "sortFile") {
 		b.WriteString("ff_sortFile() -> fun(Inp) -> fun(Outp) -> fun(_U) -> case file:read_file(d6unpack(Inp)) of {ok, Bin} -> Lines = blines(binary_to_list(Bin)), Sorted = lists:sort(Lines), Out = lists:flatmap(fun(L) -> L ++ [10] end, Sorted), file:write_file(d6unpack(Outp), list_to_binary(Out)); _ -> file:write_file(d6unpack(Outp), <<>>) end, unit end end end.\n")
 	}
+	if usesForeign(p, "dbApply") {
+		b.WriteString("ff_dbApply() -> fun(Db) -> fun(Sql) -> fun(_U) -> os:cmd(\"sqlite3 \" ++ d6unpack(Db) ++ \" '.read \" ++ d6unpack(Sql) ++ \"'\"), unit end end end.\n")
+	}
 	if usesForeign(p, "jsonStrField") {
 		b.WriteString("ff_jsonStrField() -> fun(Field) -> fun(Doc) -> jsfield(d6unpack(Field), d6unpack(Doc)) end end.\n")
 		b.WriteString("jsfield(Fn, Ds) -> Needle = [$\" | Fn] ++ [$\"], case string:find(Ds, Needle) of nomatch -> {c,0,none,[unit]}; Rest -> After = lists:nthtail(length(Needle), Rest), case jskip(After) of [$\" | R2] -> {Val, _} = jtake(R2, []), {c,1,some,[unit, d6pack(Val)]}; _ -> {c,0,none,[unit]} end end.\n")
