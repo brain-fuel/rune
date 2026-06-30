@@ -173,7 +173,7 @@ func (JS) Emit(p Program) (TargetSource, error) {
 		b.WriteString("const getEnvCode = () => c => () => __h2s(process.env[__s2h(c)] || '');\n")
 	}
 	if usesForeign(p, "readFileCode") {
-		b.WriteString("const readFileCode = () => c => () => { try { return __h2s(require('fs').readFileSync(__s2h(c), 'utf8')); } catch (e) { return 1n; } };\n")
+		b.WriteString("const readFileCode = () => c => () => { try { return __h2s(require('fs').readFileSync(__s2h(c), 'latin1')); } catch (e) { return 1n; } };\n")
 	}
 	if usesForeign(p, "writeFileCode") {
 		b.WriteString("const writeFileCode = () => p => c => () => { require('fs').writeFileSync(__s2h(p), Buffer.from(__s2h(c), 'latin1')); return c; };\n")

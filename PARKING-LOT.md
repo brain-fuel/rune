@@ -424,6 +424,15 @@ Still genuinely parked (capability provided otherwise / research): R-UFH (single
 R-GLUE G1 (derived-ua computes), cubical-coind (nuCons closed E2), the greatest-fixpoint
 Always-Eventually fairness + fully-general non-settling adequacy (the dfix wall, research).
 
+## JS printStrCode double-encodes non-ASCII on stdout (2026-06-30, bible Milestone C)
+The JS `printStrCode` body (codegen/js.go) does `console.log(__s2h(c))`, which re-encodes the
+latin1 byte-string as utf8 on stdout -- diverging from Go's raw-byte `fmt.Println` for any byte
+> 127. The Milestone-C write/read vocabulary (writeFileCode/writeChunk/sortFile/readFileCode) was
+made latin1-symmetric, but the STDOUT path was not (no non-ASCII stdout consumer in the bible port
+-- the builders write to files, not stdout). FIX before a non-ASCII stdout consumer: a stdout-
+encoding pass writing raw bytes (e.g. `process.stdout.write(Buffer.from(__s2h(c),'latin1'))`).
+Park (Standing Rule 1, no consumer).
+
 ## JS write vocabulary emits Node default utf8, not raw bytes (2026-06-29, bible Milestone B)
 The JS host bodies for the write ops -- `writeFileCode` (codegen/js.go), and the Milestone-B
 `writeChunk`/`sortFile` output -- pass the latin1 byte-string straight to `fs.writeSync`/
