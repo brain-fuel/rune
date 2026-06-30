@@ -406,3 +406,8 @@ func sampleLexicon(t *testing.T, repo, dest string, maxN int) {
 		t.Fatalf("no lexicon files sampled from %s", root)
 	}
 }
+
+func TestBibleConformanceCRLF(t *testing.T) {
+	// foldLines splits on \n only and keeps \r on EVERY backend: sum of line byteLens = 16.
+	assertBibleAgreeFromTestdata(t, "ch560_crlf_lines.rune", "main", "16\n16")
+}

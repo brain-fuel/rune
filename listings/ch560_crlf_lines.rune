@@ -1,0 +1,30 @@
+-- Chapter 560 -- foldLines splits on \n only, keeping \r (cross-backend lock).
+--
+-- foldLines over a CRLF fixture, summing each line's byteLen. With \n-only splitting (\r kept):
+-- "alpha\r"(6) + "beta\r"(5) + "gamma"(5) = 16 on EVERY backend. The old Go bufio.ScanLines
+-- stripped \r -> 14, the lone outlier this fixes. Run from harness/testdata (relative path).
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+add : Nat -> Nat -> Nat is
+  fn (a : Nat) is
+    NatElim (fn (w : Nat) is Nat -> Nat end)
+      (fn (b : Nat) is b end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (b : Nat) is succ (ih b) end end)
+      a
+  end
+end
+
+foreign foldLines : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign byteLen   : Nat -> Nat end
+foreign printNat  : Nat -> IO Nat end
+
+sumStep : Nat -> Nat -> IO Nat is fn (acc : Nat) (line : Nat) is pureIO Nat (add acc (byteLen line)) end end
+
+main : IO Nat is
+  bindIO Nat Nat (foldLines Nat (codeOf "crlf.txt") sumStep zero) (fn (n : Nat) is printNat n end)
+end

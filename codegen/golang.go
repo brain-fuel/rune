@@ -87,8 +87,8 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		addImp("net/http", "crypto/tls", "io")
 	}
 	if usesForeign(p, "foldLines") {
-		// The streaming fold opens a file and scans it line by line.
-		addImp("os", "bufio")
+		// The streaming fold slurps the file and splits on \n (keeps \r, no cap).
+		addImp("os")
 	}
 	if usesForeign(p, "foldDir") {
 		addImp("os", "path/filepath")
@@ -224,7 +224,7 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		b.WriteString("func sortFile() any { return func(inp any) any { return func(outp any) any { return func(_u any) any { data, err := os.ReadFile(__s2h(inp)); if err != nil { os.WriteFile(__s2h(outp), []byte{}, 0644); return nil }; lines := strings.Split(string(data), \"\\n\"); if len(lines) > 0 && lines[len(lines)-1] == \"\" { lines = lines[:len(lines)-1] }; sort.Strings(lines); var sb strings.Builder; for _, ln := range lines { sb.WriteString(ln); sb.WriteByte('\\n') }; os.WriteFile(__s2h(outp), []byte(sb.String()), 0644); return nil } } } }\n")
 	}
 	if usesForeign(p, "foldLines") {
-		b.WriteString("func foldLines() any { return func(_S any) any { return func(path any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { f, err := os.Open(__s2h(path)); if err != nil { return s0 }; defer f.Close(); sc := bufio.NewScanner(f); sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024); s := s0; for sc.Scan() { s = ap(ap(ap(step, s), __h2s(sc.Text())), nil) }; return s } } } } } }\n")
+		b.WriteString("func foldLines() any { return func(_S any) any { return func(path any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { data, err := os.ReadFile(__s2h(path)); if err != nil { return s0 }; lines := strings.Split(string(data), \"\\n\"); if len(lines) > 0 && lines[len(lines)-1] == \"\" { lines = lines[:len(lines)-1] }; s := s0; for _, ln := range lines { s = ap(ap(ap(step, s), __h2s(ln)), nil) }; return s } } } } } }\n")
 	}
 	if usesForeign(p, "foldDir") {
 		b.WriteString("func foldDir() any { return func(_S any) any { return func(dir any) any { return func(suf any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { sfx := __s2h(suf); s := s0; filepath.WalkDir(__s2h(dir), func(path string, d os.DirEntry, err error) error { if err != nil || d.IsDir() { return nil }; if !strings.HasSuffix(path, sfx) { return nil }; data, e := os.ReadFile(path); if e != nil { return nil }; s = ap(ap(ap(step, s), __h2s(string(data))), nil); return nil }); return s } } } } } } }\n")
