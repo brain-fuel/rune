@@ -187,6 +187,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "splitOn") {
 		b.WriteString("func splitOn() any { return func(sep any) any { return func(c any) any { sb := byte(new(big.Int).Set(sep.(*big.Int)).Int64()); parts := strings.Split(__s2h(c), string([]byte{sb})); lst := any(map[string]any{\"tag\": 0, \"name\": \"nil\", \"args\": []any{nil}}); for i := len(parts) - 1; i >= 0; i-- { lst = map[string]any{\"tag\": 1, \"name\": \"cons\", \"args\": []any{nil, __h2s(parts[i]), lst}} }; return lst } } }\n")
 	}
+	if usesForeign(p, "jsonStrField") {
+		b.WriteString("func jsonStrField() any { return func(field any) any { return func(doc any) any { fn := __s2h(field); ds := __s2h(doc); needle := \"\\\"\" + fn + \"\\\"\"; i := strings.Index(ds, needle); none := map[string]any{\"tag\": 0, \"name\": \"none\", \"args\": []any{nil}}; if i < 0 { return none }; j := i + len(needle); for j < len(ds) && (ds[j] == ' ' || ds[j] == '\\t' || ds[j] == ':') { j++ }; if j < len(ds) && ds[j] == '\"' { j++; k := j; for k < len(ds) && ds[k] != '\"' { k++ }; return map[string]any{\"tag\": 1, \"name\": \"some\", \"args\": []any{nil, __h2s(ds[j:k])}} }; return none } } }\n")
+	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("func foldLines() any { return func(_S any) any { return func(path any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { f, err := os.Open(__s2h(path)); if err != nil { return s0 }; defer f.Close(); sc := bufio.NewScanner(f); sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024); s := s0; for sc.Scan() { s = ap(ap(ap(step, s), __h2s(sc.Text())), nil) }; return s } } } } } }\n")
 	}

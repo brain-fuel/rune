@@ -139,6 +139,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "splitOn") {
 		b.WriteString("const splitOn = () => sep => c => { const parts = __s2h(c).split(globalThis.String.fromCharCode(Number(sep))); let lst = {tag:0,name:\"nil\",args:[null]}; for (let i = parts.length-1; i>=0; i--) lst = {tag:1,name:\"cons\",args:[null,__h2s(parts[i]),lst]}; return lst; };\n")
 	}
+	if usesForeign(p, "jsonStrField") {
+		b.WriteString("const jsonStrField = () => field => doc => { const fn = __s2h(field), ds = __s2h(doc); const needle = '\"'+fn+'\"'; const none = {tag:0,name:\"none\",args:[null]}; let i = ds.indexOf(needle); if (i<0) return none; let j = i+needle.length; while (j<ds.length && (ds[j]===' '||ds[j]==='\\t'||ds[j]===':')) j++; if (ds[j]==='\"') { j++; let k=j; while(k<ds.length && ds[k]!=='\"') k++; return {tag:1,name:\"some\",args:[null,__h2s(ds.slice(j,k))]}; } return none; };\n")
+	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("const foldLines = () => _S => path => step => s0 => () => { let data; try { data = require('fs').readFileSync(__s2h(path), 'latin1'); } catch (e) { return s0; } const lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); let s = s0; for (const ln of lines) s = step(s)(__h2s(ln))(); return s; };\n")
 	}
