@@ -424,6 +424,17 @@ Still genuinely parked (capability provided otherwise / research): R-UFH (single
 R-GLUE G1 (derived-ua computes), cubical-coind (nuCons closed E2), the greatest-fixpoint
 Always-Eventually fairness + fully-general non-settling adequacy (the dfix wall, research).
 
+## Go foldLines is the 1-of-5 outlier on CRLF / >1MB lines (2026-06-30, bible cross-backend tier 1)
+`codegen/golang.go` foldLines uses `bufio.Scanner`/`ScanLines`, which (a) strips a trailing `\r` and
+(b) caps a line at 1MB (an over-long line silently stops the scan, dropping it + everything after).
+The js/py/rust/beam foldLines split on `\n` only (keep `\r`, no cap) -- so 4 of 5 agree and GO is the
+lone outlier on CRLF input or any line >1MB. LATENT: no manifestation on the Unix/LF bible corpus, and
+Go IS in the byte-identity divergence-lock so any ACTIVE manifestation fails the build. Frozen this tier
+(golang.go untouched). FIX in the cross-backend tier that may touch golang.go: switch Go's foldLines to
+`split on \n` semantics (keep `\r`, raise/remove the line cap) so all 5 backends agree 5/5; optionally add
+a CRLF + a >1MB-line fixture to the conformance gate to make the divergence visible. Tracks the "no
+divergence" telos to its last latent corner.
+
 ## JS printStrCode double-encodes non-ASCII on stdout (2026-06-30, bible Milestone C)
 The JS `printStrCode` body (codegen/js.go) does `console.log(__s2h(c))`, which re-encodes the
 latin1 byte-string as utf8 on stdout -- diverging from Go's raw-byte `fmt.Println` for any byte
