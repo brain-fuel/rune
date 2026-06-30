@@ -426,6 +426,106 @@ func TestBibleBuildDbLexiconQuery(t *testing.T) {
 	}
 }
 
+// TestBibleLexiconQueryEquivalent builds the ch559 lexicon DB from the real
+// 23,681-file bible lexicon and asserts its lexicon table is query-equivalent
+// (same sorted dump + COUNT) to a freshly Python-built reference.
+// The committed data/tokens.sqlite is a 0-byte stub; the reference is built on
+// demand via Python's isolated stdlib-only _load_lexicon (no relations/tokens/
+// numpy deps). Skipped unless BIBLE_REPO is set and sqlite3 + python3 are in PATH.
+// The go-target build over the full lexicon takes ~6 minutes -- run with -timeout 900s.
+func TestBibleLexiconQueryEquivalent(t *testing.T) {
+	repo := os.Getenv("BIBLE_REPO")
+	if repo == "" {
+		t.Skip("set BIBLE_REPO to run the full lexicon query-equivalence gate")
+	}
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI not in PATH")
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not in PATH")
+	}
+
+	const q = "SELECT * FROM lexicon ORDER BY strong IS NULL, strong, lemma, translit, lang, pos, root"
+
+	// Build the Python reference: run build_db's _load_lexicon in isolation.
+	// _load_lexicon derives ROOT from build_db.py's __file__, so sys.path.insert
+	// makes it find ROOT = repo correctly, independent of cwd.
+	pyDir := t.TempDir()
+	pyOut := filepath.Join(pyDir, "py_lex.sqlite")
+	pyScript := "import sqlite3,sys; sys.path.insert(0,'" + repo + "'); " +
+		"from tools.build_db import _SCHEMA,_load_lexicon; " +
+		"con=sqlite3.connect('" + pyOut + "'); " +
+		"con.executescript(_SCHEMA); _load_lexicon(con); con.commit(); con.close()"
+	if out, err := exec.Command("python3", "-c", pyScript).CombinedOutput(); err != nil {
+		t.Fatalf("python3 build_db failed: %v\n%s", err, out)
+	}
+
+	// Query the Python reference.
+	pyRowsOut, err := exec.Command("sqlite3", pyOut, q).CombinedOutput()
+	if err != nil {
+		t.Fatalf("python db query failed: %v\n%s", err, pyRowsOut)
+	}
+	pyCountOut, err := exec.Command("sqlite3", pyOut, "SELECT count(*) FROM lexicon").CombinedOutput()
+	if err != nil {
+		t.Fatalf("python db count failed: %v\n%s", err, pyCountOut)
+	}
+
+	// Build the rune DB on the go target over the real lexicon (~6 min for 23,681 files).
+	s := loadListing(t, "ch559_build_db_lexicon.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatalf("emit: %v", err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatalf("emit go: %v", err)
+	}
+	dir := t.TempDir()
+	// Use cp -r, not a symlink: filepath.WalkDir does NOT descend a symlinked root.
+	cp := exec.Command("cp", "-r", filepath.Join(repo, "lexicon"), filepath.Join(dir, "lexdb"))
+	if out, err := cp.CombinedOutput(); err != nil {
+		t.Fatalf("copy lexicon: %v\n%s", err, out)
+	}
+	f := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	build := exec.Command("go", "run", f)
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("rune build failed: %v\n%s", err, out)
+	}
+
+	// Query the rune-built DB.
+	runeRowsOut, err := exec.Command("sqlite3", filepath.Join(dir, "lexicon.db"), q).CombinedOutput()
+	if err != nil {
+		t.Fatalf("rune db query failed: %v\n%s", err, runeRowsOut)
+	}
+	runeCountOut, err := exec.Command("sqlite3", filepath.Join(dir, "lexicon.db"), "SELECT count(*) FROM lexicon").CombinedOutput()
+	if err != nil {
+		t.Fatalf("rune db count failed: %v\n%s", err, runeCountOut)
+	}
+
+	// Assert COUNT(*) match.
+	if strings.TrimSpace(string(runeCountOut)) != strings.TrimSpace(string(pyCountOut)) {
+		t.Fatalf("lexicon COUNT(*) mismatch: rune %s, python %s",
+			strings.TrimSpace(string(runeCountOut)), strings.TrimSpace(string(pyCountOut)))
+	}
+
+	// Assert sorted dump match; on mismatch report COUNT + first differing row only.
+	if string(runeRowsOut) != string(pyRowsOut) {
+		rl := strings.Split(string(runeRowsOut), "\n")
+		pl := strings.Split(string(pyRowsOut), "\n")
+		t.Errorf("lexicon dump mismatch: rune %d rows, python %d rows", len(rl), len(pl))
+		for i := 0; i < len(rl) && i < len(pl); i++ {
+			if rl[i] != pl[i] {
+				t.Errorf("first diff at row %d:\n rune:   %s\n python: %s", i+1, rl[i], pl[i])
+				break
+			}
+		}
+	}
+}
+
 func TestBibleDbApply(t *testing.T) {
 	if _, err := exec.LookPath("sqlite3"); err != nil {
 		t.Skip("sqlite3 CLI not in PATH")
