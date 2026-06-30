@@ -186,6 +186,30 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 		b.WriteString("  static void _foldwalk(String dir, String sfx, V step, V[] box) { java.io.File d = new java.io.File(dir); java.io.File[] ents = d.listFiles(); if (ents == null) return; java.util.Arrays.sort(ents, (a, b2) -> a.getName().compareTo(b2.getName())); for (java.io.File e : ents) { if (e.isDirectory()) _foldwalk(e.getPath(), sfx, step, box); else if (e.getPath().endsWith(sfx)) { try { byte[] data = java.nio.file.Files.readAllBytes(e.toPath()); box[0] = ap(ap(ap(step, box[0]), __h2s(new String(data, java.nio.charset.StandardCharsets.ISO_8859_1))), unit()); } catch (Exception ex) {} } } }\n")
 		b.WriteString("  static V foldDir() { return fun(_S -> fun(dir -> fun(suf -> fun(step -> fun(s0 -> fun(_u -> { String sfx = __s2h(suf); V[] box = new V[]{s0}; _foldwalk(__s2h(dir), sfx, step, box); return box[0]; })))))); }\n")
 	}
+	// Write-stream handle family: mirrors the __socks/__sockId socket-handle pattern.
+	// The opaque handle is a VNat token (a long id) into a static ConcurrentHashMap.
+	if usesForeign(p, "openWrite") || usesForeign(p, "writeChunk") || usesForeign(p, "closeWrite") {
+		b.WriteString("  static java.util.concurrent.ConcurrentHashMap<Long, java.io.OutputStream> __wh = new java.util.concurrent.ConcurrentHashMap<>();\n")
+		b.WriteString("  static long __whId = 0;\n")
+	}
+	if usesForeign(p, "Handle") {
+		b.WriteString("  static V Handle() { return UNIT; }\n")
+	}
+	if usesForeign(p, "openWrite") {
+		b.WriteString("  static V openWrite() { return fun(path -> fun(_u -> { try { long id = ++__whId; java.io.OutputStream os = new java.io.FileOutputStream(__s2h(path)); __wh.put(id, os); return new VNat(java.math.BigInteger.valueOf(id)); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } })); }\n")
+	}
+	if usesForeign(p, "writeChunk") {
+		b.WriteString("  static V writeChunk() { return fun(h -> fun(c -> fun(_u -> { try { java.io.OutputStream os = __wh.get(_nat(h).longValue()); if (os != null) os.write((__s2h(c) + \"\\n\").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)); } catch (Exception e) {} return h; }))); }\n")
+	}
+	if usesForeign(p, "closeWrite") {
+		b.WriteString("  static V closeWrite() { return fun(h -> fun(_u -> { try { java.io.OutputStream os = __wh.remove(_nat(h).longValue()); if (os != null) os.close(); } catch (Exception e) {} return UNIT; })); }\n")
+	}
+	if usesForeign(p, "sortFile") {
+		b.WriteString("  static V sortFile() { return fun(inp -> fun(outp -> fun(_u -> { try { byte[] data = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(__s2h(inp))); String s = new String(data, java.nio.charset.StandardCharsets.ISO_8859_1); java.util.List<String> lines = new java.util.ArrayList<>(); int start = 0; for (int i = 0; i < s.length(); i++) { if (s.charAt(i) == '\\n') { lines.add(s.substring(start, i)); start = i + 1; } } lines.add(s.substring(start)); if (!lines.isEmpty() && lines.get(lines.size() - 1).isEmpty()) lines.remove(lines.size() - 1); java.util.Collections.sort(lines); StringBuilder o = new StringBuilder(); for (String ln : lines) { o.append(ln); o.append('\\n'); } java.nio.file.Files.write(java.nio.file.Path.of(__s2h(outp)), o.toString().getBytes(java.nio.charset.StandardCharsets.ISO_8859_1)); } catch (Exception e) { try { java.nio.file.Files.write(java.nio.file.Path.of(__s2h(outp)), new byte[0]); } catch (Exception e2) {} } return UNIT; }))); }\n")
+	}
+	if usesForeign(p, "dbApply") {
+		b.WriteString("  static V dbApply() { return fun(db -> fun(sql -> fun(_u -> { try { new ProcessBuilder(\"sqlite3\", __s2h(db), \".read \" + __s2h(sql)).start().waitFor(); } catch (Exception e) {} return UNIT; }))); }\n")
+	}
 	for _, d := range p.Datas {
 		if p.Nat != nil && d.ElimName == p.Nat.ElimName {
 			emitNatJVM(&b, *p.Nat)

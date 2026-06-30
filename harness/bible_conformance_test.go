@@ -470,3 +470,55 @@ func TestBibleJVMPureFold(t *testing.T) {
 		t.Skip("Java 25 not available")
 	}
 }
+
+func TestBibleJVMWriteStreamDb(t *testing.T) {
+	if _, _, ok := findJava25(); !ok {
+		t.Skip("Java 25 not available")
+	}
+	// ch552 / ch553 write+read relative files -- run each in its own temp cwd.
+	for _, c := range []struct{ listing, want string }{
+		{"ch552_write_stream.rune", "2\n2"},
+		{"ch553_sort_file.rune", "5\n5"},
+	} {
+		got, ok := runJVMListing(t, c.listing, "main", t.TempDir())
+		if !ok {
+			t.Skip("Java 25 not available")
+		}
+		if got != c.want {
+			t.Errorf("jvm %s = %q, want %q", c.listing, got, c.want)
+		}
+	}
+	// ch558 dbApply: build ch558.db in a temp cwd, then query count(*) -> 2.
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 not in PATH")
+	}
+	javac, java, _ := findJava25()
+	s := loadListing(t, "ch558_db_apply.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.JVM{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "main.java"), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(javac, "--release", "25", "-d", dir, filepath.Join(dir, "main.java")).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s", err, out)
+	}
+	run := exec.Command(java, "-cp", dir, "main")
+	run.Dir = dir
+	if out, err := run.CombinedOutput(); err != nil {
+		t.Fatalf("java run: %v\n%s", err, out)
+	}
+	q, err := exec.Command("sqlite3", filepath.Join(dir, "ch558.db"), "SELECT count(*) FROM t").CombinedOutput()
+	if err != nil {
+		t.Fatalf("query: %v\n%s", err, q)
+	}
+	if got := strings.TrimSpace(string(q)); got != "2" {
+		t.Errorf("jvm ch558 db count = %q, want 2", got)
+	}
+}
