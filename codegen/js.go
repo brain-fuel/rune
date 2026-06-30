@@ -160,6 +160,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "foldLines") {
 		b.WriteString("const foldLines = () => _S => path => step => s0 => () => { let data; try { data = require('fs').readFileSync(__s2h(path), 'latin1'); } catch (e) { return s0; } const lines = data.split('\\n'); if (lines.length && lines[lines.length-1] === '') lines.pop(); let s = s0; for (const ln of lines) s = step(s)(__h2s(ln))(); return s; };\n")
 	}
+	if usesForeign(p, "foldDir") {
+		b.WriteString("const foldDir = () => _S => dir => suf => step => s0 => () => { const fs = require('fs'); const path = require('path'); const sfx = __s2h(suf); let s = s0; const walk = (dd) => { let ents; try { ents = fs.readdirSync(dd, {withFileTypes:true}); } catch (e) { return; } ents.sort((a,b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0); for (const en of ents) { const full = path.join(dd, en.name); if (en.isDirectory()) walk(full); else if (full.endsWith(sfx)) { let data; try { data = fs.readFileSync(full, 'latin1'); } catch (_) { continue; } s = step(s)(__h2s(data))(); } } }; walk(__s2h(dir)); return s; };\n")
+	}
 	if usesForeign(p, "getEnvCode") {
 		b.WriteString("const getEnvCode = () => c => () => __h2s(process.env[__s2h(c)] || '');\n")
 	}

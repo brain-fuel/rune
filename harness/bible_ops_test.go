@@ -74,6 +74,21 @@ func TestBibleWriteStream(t *testing.T) {
 	}
 }
 
+func TestBibleFoldDir(t *testing.T) {
+	for _, tg := range []string{"js", "go"} {
+		cmd := exec.Command("go", "run", "../../cmd/rune", "run",
+			"../../listings/ch554_fold_dir.rune", "main", "--target", tg)
+		cmd.Dir = "testdata" // so the listing's relative "foldfix" resolves
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] run failed: %v\n%s", tg, err, out)
+		}
+		if got := strings.TrimSpace(string(out)); got != "3\n3" {
+			t.Errorf("[%s] .json file count = %q, want 3\\n3", tg, got)
+		}
+	}
+}
+
 func TestBibleSortFile(t *testing.T) {
 	s := loadListing(t, "ch553_sort_file.rune")
 	type bkSpec struct {

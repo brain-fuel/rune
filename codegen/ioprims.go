@@ -25,6 +25,7 @@ var ioPrims = map[string]bool{
 	"timeNanos":    true,
 	"readLineCode": true,
 	"foldLines":    true, // foldLines (S:U) path step s0 : (S:U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S
+	"foldDir":     true, // foldDir (S:U) dir suffix step s0 : (S:U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S
 	"splitOn":      true, // splitOn   sep line          : Nat -> Nat -> List Nat   (split packed line on a byte)
 	"byteLen":      true, // byteLen   line              : Nat -> Nat               (byte length of a packed line)
 	"jsonStrField": true, // jsonStrField field doc : Nat -> Nat -> Option Nat  (top-level string field)
@@ -102,7 +103,7 @@ func usesFileEnv(p Program) bool {
 }
 
 // streamPrims need the __s2h/__h2s String codec; foldLines additionally needs os+bufio.
-var streamPrims = []string{"foldLines", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "sortFile"}
+var streamPrims = []string{"foldLines", "foldDir", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "sortFile"}
 
 func usesStream(p Program) bool {
 	for _, n := range streamPrims {

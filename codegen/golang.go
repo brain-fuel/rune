@@ -87,6 +87,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		// The streaming fold opens a file and scans it line by line.
 		addImp("os", "bufio")
 	}
+	if usesForeign(p, "foldDir") {
+		addImp("os", "path/filepath")
+	}
 	if usesForeign(p, "sortFile") {
 		addImp("os", "sort")
 	}
@@ -213,6 +216,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "foldLines") {
 		b.WriteString("func foldLines() any { return func(_S any) any { return func(path any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { f, err := os.Open(__s2h(path)); if err != nil { return s0 }; defer f.Close(); sc := bufio.NewScanner(f); sc.Buffer(make([]byte, 0, 1024*1024), 1024*1024); s := s0; for sc.Scan() { s = ap(ap(ap(step, s), __h2s(sc.Text())), nil) }; return s } } } } } }\n")
+	}
+	if usesForeign(p, "foldDir") {
+		b.WriteString("func foldDir() any { return func(_S any) any { return func(dir any) any { return func(suf any) any { return func(step any) any { return func(s0 any) any { return func(_u any) any { sfx := __s2h(suf); s := s0; filepath.WalkDir(__s2h(dir), func(path string, d os.DirEntry, err error) error { if err != nil || d.IsDir() { return nil }; if !strings.HasSuffix(path, sfx) { return nil }; data, e := os.ReadFile(path); if e != nil { return nil }; s = ap(ap(ap(step, s), __h2s(string(data))), nil); return nil }); return s } } } } } } }\n")
 	}
 	if usesLiveKV(p) {
 		// E4: the LIVE data-plane binding. The in-process kv ops (kvPut/kvGetCode) are

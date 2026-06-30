@@ -1,0 +1,23 @@
+-- Chapter 554 -- foldDir: higher-order fold over files in a directory (Milestone B).
+--
+-- foldDir recursively visits files under a dir whose name ends with the suffix, applying a total
+-- step to each file's contents. Witness (run js+go): folding "foldfix" with suffix ".json" over a
+-- fixture of 3 .json files (one in a subdir) + 1 .txt counts 3 (the .txt is skipped). The data
+-- plane loop lives in the host -- the Rune step stays total.
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign foldDir  : (S : U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign printNat : Nat -> IO Nat end
+
+countStep : Nat -> Nat -> IO Nat is fn (acc : Nat) (content : Nat) is pureIO Nat (succ acc) end end
+
+main : IO Nat is
+  bindIO Nat Nat (foldDir Nat (codeOf "foldfix") (codeOf ".json") countStep zero) (fn (n : Nat) is
+    printNat n
+  end)
+end
