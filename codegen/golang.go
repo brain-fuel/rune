@@ -75,6 +75,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		// Phase 1: os/exec (run a subprocess, capture stdout).
 		addImp("os/exec")
 	}
+	if usesForeign(p, "dbApply") {
+		addImp("os/exec")
+	}
 	if usesCrypto(p) {
 		// Phase 3: crypto hashes (host sha256).
 		addImp("crypto/sha256")
@@ -213,6 +216,9 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "closeWrite") {
 		b.WriteString("func closeWrite() any { return func(h any) any { return func(_u any) any { if f, ok := h.(*os.File); ok { f.Close() }; return nil } } }\n")
+	}
+	if usesForeign(p, "dbApply") {
+		b.WriteString("func dbApply() any { return func(db any) any { return func(sql any) any { return func(_u any) any { exec.Command(\"sqlite3\", __s2h(db), \".read \"+__s2h(sql)).Run(); return nil } } } }\n")
 	}
 	if usesForeign(p, "sortFile") {
 		b.WriteString("func sortFile() any { return func(inp any) any { return func(outp any) any { return func(_u any) any { data, err := os.ReadFile(__s2h(inp)); if err != nil { os.WriteFile(__s2h(outp), []byte{}, 0644); return nil }; lines := strings.Split(string(data), \"\\n\"); if len(lines) > 0 && lines[len(lines)-1] == \"\" { lines = lines[:len(lines)-1] }; sort.Strings(lines); var sb strings.Builder; for _, ln := range lines { sb.WriteString(ln); sb.WriteByte('\\n') }; os.WriteFile(__s2h(outp), []byte(sb.String()), 0644); return nil } } } }\n")

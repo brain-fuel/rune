@@ -1,0 +1,32 @@
+-- Chapter 558 -- dbApply: load a .sql script into a SQLite db via the sqlite3 CLI (Milestone C).
+--
+-- main writes a 2-row .sql script (CREATE + two INSERTs), then dbApply loads it into "ch558.db".
+-- The harness gate (sqlite3-guarded) then queries SELECT count(*) -> 2. Builds the db with one
+-- `rune run`; no Go SQLite library. main : IO Unit (no printed witness -- the db file is the output).
+
+data Nat  : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Unit : U is unit : Unit end
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+
+foreign Handle     : U end
+foreign openWrite  : Nat -> IO Handle end
+foreign writeChunk : Handle -> Nat -> IO Handle end
+foreign closeWrite : Handle -> IO Unit end
+foreign dbApply    : Nat -> Nat -> IO Unit end
+
+main : IO Unit is
+  bindIO Handle Unit (openWrite (codeOf "ch558.sql")) (fn (h0 : Handle) is
+    bindIO Handle Unit (writeChunk h0 (codeOf "CREATE TABLE t (x INTEGER);")) (fn (h1 : Handle) is
+      bindIO Handle Unit (writeChunk h1 (codeOf "INSERT INTO t VALUES (1);")) (fn (h2 : Handle) is
+        bindIO Handle Unit (writeChunk h2 (codeOf "INSERT INTO t VALUES (2);")) (fn (h3 : Handle) is
+          bindIO Unit Unit (closeWrite h3) (fn (u : Unit) is
+            dbApply (codeOf "ch558.db") (codeOf "ch558.sql")
+          end)
+        end)
+      end)
+    end)
+  end)
+end

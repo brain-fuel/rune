@@ -145,6 +145,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "sqlQuote") {
 		b.WriteString("const sqlQuote = () => s => { const str = __s2h(s); let out = \"'\"; for (let i = 0; i < str.length; i++) { if (str[i] === \"'\") out += \"'\"; out += str[i]; } out += \"'\"; return __h2s(out); };\n")
 	}
+	if usesForeign(p, "dbApply") {
+		b.WriteString("const dbApply = () => db => sql => () => { try { require('child_process').execFileSync('sqlite3', [__s2h(db), '.read ' + __s2h(sql)]); } catch (e) {} return null; };\n")
+	}
 	if usesForeign(p, "Handle") {
 		b.WriteString("const Handle = () => null;\n")
 	}

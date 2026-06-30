@@ -326,3 +326,49 @@ func TestBibleSqlQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestBibleDbApply(t *testing.T) {
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI not in PATH")
+	}
+	for _, tg := range []string{"js", "go"} {
+		if _, err := exec.LookPath(map[string]string{"js": "node", "go": "go"}[tg]); err != nil {
+			t.Skipf("%s runtime not in PATH", tg)
+		}
+		s := loadListing(t, "ch558_db_apply.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatalf("emit: %v", err)
+		}
+		var src codegen.TargetSource
+		var runner func(string) *exec.Cmd
+		if tg == "js" {
+			src, err = codegen.JS{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("node", f) }
+		} else {
+			src, err = codegen.Go{}.Emit(p)
+			runner = func(f string) *exec.Cmd { return exec.Command("go", "run", f) }
+		}
+		if err != nil {
+			t.Fatalf("[%s] emit: %v", tg, err)
+		}
+		dir := t.TempDir()
+		f := filepath.Join(dir, "main."+tg)
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := runner(f)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("[%s] run: %v\n%s", tg, err, out)
+		}
+		q := exec.Command("sqlite3", filepath.Join(dir, "ch558.db"), "SELECT count(*) FROM t")
+		out, err := q.CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] query: %v\n%s", tg, err, out)
+		}
+		if got := strings.TrimSpace(string(out)); got != "2" {
+			t.Errorf("[%s] count = %q, want 2", tg, got)
+		}
+	}
+}

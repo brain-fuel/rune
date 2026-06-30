@@ -34,6 +34,7 @@ var ioPrims = map[string]bool{
 	"writeChunk": true, // writeChunk h chunk   : Handle -> Nat -> IO Handle  (writes chunk + "\n")
 	"closeWrite": true, // closeWrite h         : Handle -> IO Unit
 	"sortFile":   true, // sortFile inPath outPath : Nat -> Nat -> IO Unit  (bytewise line sort)
+	"dbApply": true, // dbApply dbPath sqlPath : Nat -> Nat -> IO Unit  (sqlite3 db ".read sql")
 	// D6 net/fs: env + file vocabulary, over the PACKED-String code (a bignum, B4).
 	// Each takes/returns a bare `Nat` code (first byte LSB, 0x01 sentinel) — the
 	// SAME representation `readLineCode` returns and `bytes`/`codeOf` wrap/unwrap on
@@ -104,7 +105,7 @@ func usesFileEnv(p Program) bool {
 }
 
 // streamPrims need the __s2h/__h2s String codec; foldLines additionally needs os+bufio.
-var streamPrims = []string{"foldLines", "foldDir", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "sortFile", "sqlQuote"}
+var streamPrims = []string{"foldLines", "foldDir", "splitOn", "byteLen", "jsonStrField", "openWrite", "writeChunk", "sortFile", "sqlQuote", "dbApply"}
 
 func usesStream(p Program) bool {
 	for _, n := range streamPrims {
