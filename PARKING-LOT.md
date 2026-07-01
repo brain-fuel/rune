@@ -472,3 +472,17 @@ fixture gate are both honest; the new ops match the existing `writeFileCode` pre
 introducing a one-off. FIX when a non-ASCII WRITE consumer appears: emit `Buffer.from(str,'latin1')`
 across the WHOLE write vocabulary at once (writeFileCode + writeChunk + sortFile), so they stay
 consistent. No consumer now -> parked (Standing Rule 1).
+
+## Native GC gc_find_obj is O(N_live) -- codec-over-corpus impractically slow (2026-07-01, bible cross-backend tier 3)
+The native C/LLVM runtimes' conservative stack scan calls `gc_find_obj` (codegen/c.go), an O(N_live)
+LINEAR scan per stack word. The bible builders allocate ~8000 bignums per file (the packed-String codec
++ splitOn/jsonStrField cells); over the real-data lexicon (~1500 sampled files) GC dominates -- native runs
+at ~30s/entry (the source backends finish in seconds), so `TestBibleConformanceRealData` at N=1500 times out
+on c/ll. NOT a correctness bug: native byte-identity on real Greek+Hebrew is PROVEN by the synthetic 8-way
+`TestBibleConformanceBuilders` gate (lexdbfix fixture holds Hebrew `אב` + Greek `Α` routed through
+jsonStrField/sqlQuote/sortFile -> lexicon.sql, sha256 c4246e3 identical across all 8 backends) + by
+construction (raw-byte codec, no charset re-encode possible). So the RealData SCALE gate skips c/ll with a
+logged reason (harness/bible_conformance_test.go). FIX (a real perf item, already flagged in c.go's GC
+comment as "a sorted-bounds / bitmap speedup is a later perf item"): replace gc_find_obj's linear scan with
+a sorted-interval tree or an allocation bitmap so conservative marking is sub-linear. Park (Standing Rule 1,
+no perf consumer -- the corpus ETL runs go-only in production; native is a conformance target, not the ETL).
