@@ -606,6 +606,95 @@ func runNativeListing(t *testing.T, backend, listing, main, cwd string) (string,
 	return strings.TrimSpace(string(out)), true
 }
 
+// TestBibleNativeWriteStreamDb verifies the write-stream ops (Handle/openWrite/writeChunk/
+// closeWrite/sortFile) and dbApply on both native backends (C and LLVM). ch552/ch553 write
+// relative files, so each runs in its own t.TempDir(). ch558 builds a SQLite db and is
+// gated on sqlite3 being in PATH. Mirrors TestBibleJVMWriteStreamDb.
+func TestBibleNativeWriteStreamDb(t *testing.T) {
+	for _, be := range []string{"c", "ll"} {
+		for _, c := range []struct{ listing, want string }{
+			{"ch552_write_stream.rune", "2\n2"},
+			{"ch553_sort_file.rune", "5\n5"},
+		} {
+			got, ok := runNativeListing(t, be, c.listing, "main", t.TempDir())
+			if !ok {
+				break
+			}
+			if got != c.want {
+				t.Errorf("%s %s = %q, want %q", be, c.listing, got, c.want)
+			}
+		}
+		// ch558 dbApply: build in a temp cwd, query count(*) -> 2 (skip if sqlite3 absent).
+		if _, err := exec.LookPath("sqlite3"); err != nil {
+			t.Skip("sqlite3 not in PATH")
+		}
+		s := loadListing(t, "ch558_db_apply.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatalf("[%s] ch558 emit-program: %v", be, err)
+		}
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "main.bin")
+		var built bool
+		switch be {
+		case "c":
+			if _, err := exec.LookPath("cc"); err != nil {
+				t.Logf("[c] cc not in PATH -- skip ch558")
+				continue
+			}
+			src, err := codegen.C{}.Emit(p)
+			if err != nil {
+				t.Fatalf("[c] ch558 Emit: %v", err)
+			}
+			f := filepath.Join(dir, "main.c")
+			if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+				t.Fatalf("[c] ch558 compile: %v\n%s", err, out)
+			}
+			built = true
+		case "ll":
+			if _, err := exec.LookPath("clang"); err != nil {
+				t.Logf("[ll] clang not in PATH -- skip ch558")
+				continue
+			}
+			ll, err := codegen.LL{}.Emit(p)
+			if err != nil {
+				t.Fatalf("[ll] ch558 Emit: %v", err)
+			}
+			rt := codegen.LL{}.EmitRuntimeFor(p)
+			llf := filepath.Join(dir, "program.ll")
+			rtf := filepath.Join(dir, "runtime.c")
+			if err := os.WriteFile(llf, []byte(ll), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(rtf, []byte(rt), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if out, err := exec.Command("clang", llf, rtf, "-o", bin).CombinedOutput(); err != nil {
+				t.Fatalf("[ll] ch558 compile: %v\n%s\n--- .ll ---\n%s", err, out, ll)
+			}
+			built = true
+		}
+		if !built {
+			continue
+		}
+		run := exec.Command(bin)
+		run.Dir = dir
+		if out, err := run.CombinedOutput(); err != nil {
+			t.Fatalf("[%s] ch558 run: %v\n%s", be, err, out)
+		}
+		q, err := exec.Command("sqlite3", filepath.Join(dir, "ch558.db"), "SELECT count(*) FROM t").CombinedOutput()
+		if err != nil {
+			t.Fatalf("[%s] ch558 query: %v\n%s", be, err, q)
+		}
+		if got := strings.TrimSpace(string(q)); got != "2" {
+			t.Errorf("[%s] ch558 db count = %q, want 2", be, got)
+		}
+	}
+}
+
 // TestBibleNativeFold verifies the two higher-order bible ops (foldLines/foldDir) on
 // both native backends (C and LLVM). cwd is "testdata" so relative fixture paths resolve.
 // Expected values match the source-backend gates: 11\n11 / 3\n3 / 16\n16.

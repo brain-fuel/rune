@@ -445,6 +445,47 @@ func emitStreamPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("static Value foldDir_c1(Value _s, Value* env) { (void)_s; (void)env; return rt_mkclo(&foldDir_c2, 0); }\n")
 		b.WriteString("Value foldDir(void) { return rt_mkclo(&foldDir_c1, 0); }\n")
 	}
+	// WRITE-STREAM ops: LLVM twin of the C equivalents. Same bodies with the delta:
+	// rt_mkclo/rt_clo_set/rt_big_from_long (rt_ prefix); big_nlimbs/big_limb/UNIT stay as-is.
+	// Accessor thunks (Handle/openWrite/writeChunk/closeWrite/sortFile/dbApply) are NON-static
+	// (external linkage) so the .ll's auto-declared foreign names resolve. Internal _c1/_c2/_c3
+	// steps + d6_sortsegs + the handle-table statics remain static.
+	if usesForeign(p, "openWrite") || usesForeign(p, "writeChunk") || usesForeign(p, "closeWrite") {
+		b.WriteString("#define D6_WH_MAX 256\nstatic FILE* d6_wh[D6_WH_MAX];\nstatic long d6_whid = 0;\n")
+	}
+	if usesForeign(p, "Handle") {
+		b.WriteString("Value Handle(void) { return UNIT; }\n")
+	}
+	if usesForeign(p, "openWrite") {
+		b.WriteString("static Value openWrite_c2(Value u, Value* env) { (void)u; size_t pl; unsigned char* pb = d6_s2h(env[0], &pl); char* path = (char*)malloc(pl + 1); memcpy(path, pb, pl); path[pl] = 0; free(pb); FILE* fp = fopen(path, \"wb\"); free(path); if (!fp || d6_whid + 1 >= D6_WH_MAX) { if (fp) fclose(fp); return rt_big_from_long(0); } long id = ++d6_whid; d6_wh[id] = fp; return rt_big_from_long(id); }\n")
+		b.WriteString("static Value openWrite_c1(Value path, Value* env) { (void)env; Value f = rt_mkclo(&openWrite_c2, 1); rt_clo_set(f, 0, path); return f; }\n")
+		b.WriteString("Value openWrite(void) { return rt_mkclo(&openWrite_c1, 0); }\n")
+	}
+	if usesForeign(p, "writeChunk") {
+		b.WriteString("static Value writeChunk_c3(Value u, Value* env) { (void)u; Value h = env[0]; long id = (big_nlimbs(h) == 0) ? 0 : big_limb(h, 0); size_t cl; unsigned char* cb = d6_s2h(env[1], &cl); if (id > 0 && id < D6_WH_MAX && d6_wh[id]) { fwrite(cb, 1, cl, d6_wh[id]); putc('\\n', d6_wh[id]); } free(cb); return h; }\n")
+		b.WriteString("static Value writeChunk_c2(Value c, Value* env) { Value f = rt_mkclo(&writeChunk_c3, 2); rt_clo_set(f, 0, env[0]); rt_clo_set(f, 1, c); return f; }\n")
+		b.WriteString("static Value writeChunk_c1(Value h, Value* env) { (void)env; Value f = rt_mkclo(&writeChunk_c2, 1); rt_clo_set(f, 0, h); return f; }\n")
+		b.WriteString("Value writeChunk(void) { return rt_mkclo(&writeChunk_c1, 0); }\n")
+	}
+	if usesForeign(p, "closeWrite") {
+		b.WriteString("static Value closeWrite_c2(Value u, Value* env) { (void)u; Value h = env[0]; long id = (big_nlimbs(h) == 0) ? 0 : big_limb(h, 0); if (id > 0 && id < D6_WH_MAX && d6_wh[id]) { fclose(d6_wh[id]); d6_wh[id] = NULL; } return UNIT; }\n")
+		b.WriteString("static Value closeWrite_c1(Value h, Value* env) { (void)env; Value f = rt_mkclo(&closeWrite_c2, 1); rt_clo_set(f, 0, h); return f; }\n")
+		b.WriteString("Value closeWrite(void) { return rt_mkclo(&closeWrite_c1, 0); }\n")
+	}
+	if usesForeign(p, "sortFile") {
+		// d6_sortsegs: insertion sort on parallel (st,ln) arrays comparing data+st[i] bytewise.
+		b.WriteString("static void d6_sortsegs(unsigned char* data, size_t* st, size_t* ln, size_t nseg) { for (size_t i = 1; i < nseg; i++) { size_t si = st[i], li = ln[i]; size_t j = i; while (j > 0) { size_t sp = st[j-1], lp = ln[j-1]; size_t m = lp < li ? lp : li; int c = memcmp(data + sp, data + si, m); if (c > 0 || (c == 0 && lp > li)) { st[j] = sp; ln[j] = lp; j--; } else break; } st[j] = si; ln[j] = li; } }\n")
+		b.WriteString("static Value sortFile_c3(Value u, Value* env) { (void)u; size_t il; unsigned char* ib = d6_s2h(env[0], &il); char* ip = (char*)malloc(il+1); memcpy(ip, ib, il); ip[il]=0; free(ib); size_t ol; unsigned char* ob = d6_s2h(env[1], &ol); char* op = (char*)malloc(ol+1); memcpy(op, ob, ol); op[ol]=0; free(ob); FILE* fp = fopen(ip, \"rb\"); free(ip); if (!fp) { FILE* o = fopen(op, \"wb\"); if (o) fclose(o); free(op); return UNIT; } size_t cap=1024,n=0; unsigned char* data=(unsigned char*)malloc(cap); int ch; while((ch=fgetc(fp))!=EOF){ if(n==cap){cap*=2;data=(unsigned char*)realloc(data,cap);} data[n++]=(unsigned char)ch; } fclose(fp); size_t* st=(size_t*)malloc(sizeof(size_t)*(n+2)); size_t* ln=(size_t*)malloc(sizeof(size_t)*(n+2)); size_t nseg=0, seg=0; for(size_t k=0;k<=n;k++){ if(k==n||data[k]=='\\n'){ st[nseg]=seg; ln[nseg]=k-seg; nseg++; seg=k+1; } } if(nseg>0 && ln[nseg-1]==0) nseg--; d6_sortsegs(data, st, ln, nseg); FILE* o=fopen(op,\"wb\"); if(o){ for(size_t k=0;k<nseg;k++){ fwrite(data+st[k],1,ln[k],o); putc('\\n',o); } fclose(o); } free(st); free(ln); free(data); free(op); return UNIT; }\n")
+		b.WriteString("static Value sortFile_c2(Value outp, Value* env) { Value f = rt_mkclo(&sortFile_c3, 2); rt_clo_set(f, 0, env[0]); rt_clo_set(f, 1, outp); return f; }\n")
+		b.WriteString("static Value sortFile_c1(Value inp, Value* env) { (void)env; Value f = rt_mkclo(&sortFile_c2, 1); rt_clo_set(f, 0, inp); return f; }\n")
+		b.WriteString("Value sortFile(void) { return rt_mkclo(&sortFile_c1, 0); }\n")
+	}
+	if usesForeign(p, "dbApply") {
+		b.WriteString("static Value dbApply_c3(Value u, Value* env) { (void)u; size_t dl; unsigned char* db = d6_s2h(env[0], &dl); char* dbp = (char*)malloc(dl+1); memcpy(dbp, db, dl); dbp[dl]=0; free(db); size_t sl; unsigned char* sb = d6_s2h(env[1], &sl); char* sqp = (char*)malloc(sl+1); memcpy(sqp, sb, sl); sqp[sl]=0; free(sb); size_t clen = dl + sl + 32; char* cmd = (char*)malloc(clen); snprintf(cmd, clen, \"sqlite3 '%s' '.read %s'\", dbp, sqp); int rc = system(cmd); (void)rc; free(dbp); free(sqp); free(cmd); return UNIT; }\n")
+		b.WriteString("static Value dbApply_c2(Value sql, Value* env) { Value f = rt_mkclo(&dbApply_c3, 2); rt_clo_set(f, 0, env[0]); rt_clo_set(f, 1, sql); return f; }\n")
+		b.WriteString("static Value dbApply_c1(Value db, Value* env) { (void)env; Value f = rt_mkclo(&dbApply_c2, 1); rt_clo_set(f, 0, db); return f; }\n")
+		b.WriteString("Value dbApply(void) { return rt_mkclo(&dbApply_c1, 0); }\n")
+	}
 }
 
 // emitBinPrimsLL bakes the Phase-0 real-byte-string (Bin) host bodies into the
