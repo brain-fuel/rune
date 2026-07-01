@@ -768,6 +768,38 @@ func emitStreamPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value exitWith_c1(Value n, Value* env) { (void)env; Value f = mkclo(&exitWith_c2, 1); clo_set(f, 0, n); return f; }\n")
 		b.WriteString("static Value exitWith(void) { return mkclo(&exitWith_c1, 0); }\n")
 	}
+	// Higher-order stream ops: host loop applying an erased Rune step per line / per file.
+	// foldLines reads raw bytes (fopen "rb"), splits on '\n' only (keeps '\r' -- the Tier-2
+	// uniform contract matching rust.go:207), drops a single trailing-empty segment iff the
+	// file ends with '\n'. Returns s0 unchanged if the file cannot be opened.
+	// env-slot wiring: c5 env[0]=step, env[1]=s0, env[2]=path-code.
+	if usesForeign(p, "foldLines") {
+		b.WriteString("static Value foldLines_c5(Value u, Value* env) { (void)u; Value step = env[0]; Value s0 = env[1]; size_t pl; unsigned char* pb = d6_s2h(env[2], &pl); char* path = (char*)malloc(pl + 1); memcpy(path, pb, pl); path[pl] = 0; free(pb); FILE* fp = fopen(path, \"rb\"); free(path); if (!fp) return s0; size_t cap = 1024, n = 0; unsigned char* data = (unsigned char*)malloc(cap); int ch; while ((ch = fgetc(fp)) != EOF) { if (n == cap) { cap *= 2; data = (unsigned char*)realloc(data, cap); } data[n++] = (unsigned char)ch; } fclose(fp); size_t nseg = 0, seg = 0; size_t* st = (size_t*)malloc(sizeof(size_t)*(n+2)); size_t* en = (size_t*)malloc(sizeof(size_t)*(n+2)); for (size_t k = 0; k <= n; k++) { if (k == n || data[k] == '\\n') { st[nseg]=seg; en[nseg]=k; nseg++; seg=k+1; } } if (nseg > 0 && en[nseg-1] == st[nseg-1]) nseg--; Value s = s0; for (size_t k = 0; k < nseg; k++) { Value line = d6_h2s(data + st[k], en[k]-st[k]); s = apply(apply(apply(step, s), line), UNIT); } free(st); free(en); free(data); return s; }\n")
+		b.WriteString("static Value foldLines_c4(Value s0, Value* env) { Value f = mkclo(&foldLines_c5, 3); clo_set(f, 0, env[0]); clo_set(f, 1, s0); clo_set(f, 2, env[1]); return f; }\n")
+		b.WriteString("static Value foldLines_c3(Value step, Value* env) { Value f = mkclo(&foldLines_c4, 2); clo_set(f, 0, step); clo_set(f, 1, env[0]); return f; }\n")
+		b.WriteString("static Value foldLines_c2(Value path, Value* env) { (void)env; Value f = mkclo(&foldLines_c3, 1); clo_set(f, 0, path); return f; }\n")
+		b.WriteString("static Value foldLines_c1(Value _s, Value* env) { (void)_s; (void)env; return mkclo(&foldLines_c2, 0); }\n")
+		b.WriteString("static Value foldLines(void) { return mkclo(&foldLines_c1, 0); }\n")
+	}
+	// foldDir recursively walks a directory sorted by name (strcmp byte order = UTF-8 byte
+	// order for ASCII filenames), suffix-filtered, depth-first pre-order -- matching
+	// filepath.WalkDir and rust.go:213. Needs <dirent.h> (opendir/readdir/closedir) and
+	// <sys/stat.h> (stat/S_ISDIR). d6_namecmp + d6_foldwalk are static helpers.
+	// env-slot wiring: c6 env[0]=step, env[1]=s0, env[2]=dirc-code, env[3]=suf-code.
+	// NOTE: non-ASCII filenames diverge vs Go (strcmp vs UTF-8 NFC) -- parked, no consumer.
+	if usesForeign(p, "foldDir") {
+		b.WriteString("#include <dirent.h>\n")
+		b.WriteString("#include <sys/stat.h>\n")
+		b.WriteString("static int d6_namecmp(const void* a, const void* b) { return strcmp(*(const char* const*)a, *(const char* const*)b); }\n")
+		b.WriteString("static Value d6_foldwalk(const char* dir, const unsigned char* sfx, size_t sfxlen, Value step, Value s) { DIR* dp = opendir(dir); if (!dp) return s; char** names = NULL; size_t cnt = 0, cap = 0; struct dirent* de; while ((de = readdir(dp)) != NULL) { if (strcmp(de->d_name, \".\") == 0 || strcmp(de->d_name, \"..\") == 0) continue; if (cnt == cap) { cap = cap ? cap * 2 : 8; names = (char**)realloc(names, cap * sizeof(char*)); } names[cnt++] = strdup(de->d_name); } closedir(dp); qsort(names, cnt, sizeof(char*), d6_namecmp); for (size_t i = 0; i < cnt; i++) { size_t dl = strlen(dir), nl = strlen(names[i]); char* full = (char*)malloc(dl + nl + 2); memcpy(full, dir, dl); full[dl] = '/'; memcpy(full + dl + 1, names[i], nl + 1); struct stat sb; if (stat(full, &sb) == 0 && S_ISDIR(sb.st_mode)) { s = d6_foldwalk(full, sfx, sfxlen, step, s); } else { size_t fl = strlen(full); if (fl >= sfxlen && memcmp(full + fl - sfxlen, sfx, sfxlen) == 0) { FILE* fp = fopen(full, \"rb\"); if (fp) { size_t bc = 1024, bn = 0; unsigned char* bd = (unsigned char*)malloc(bc); int ch; while ((ch = fgetc(fp)) != EOF) { if (bn == bc) { bc *= 2; bd = (unsigned char*)realloc(bd, bc); } bd[bn++] = (unsigned char)ch; } fclose(fp); Value content = d6_h2s(bd, bn); s = apply(apply(apply(step, s), content), UNIT); free(bd); } } } free(full); free(names[i]); } free(names); return s; }\n")
+		b.WriteString("static Value foldDir_c6(Value u, Value* env) { (void)u; Value step = env[0]; Value s0 = env[1]; size_t dl; unsigned char* db = d6_s2h(env[2], &dl); char* dir = (char*)malloc(dl + 1); memcpy(dir, db, dl); dir[dl] = 0; free(db); size_t sl; unsigned char* sfx = d6_s2h(env[3], &sl); Value r = d6_foldwalk(dir, sfx, sl, step, s0); free(dir); free(sfx); return r; }\n")
+		b.WriteString("static Value foldDir_c5(Value s0, Value* env) { Value f = mkclo(&foldDir_c6, 4); clo_set(f, 0, env[0]); clo_set(f, 1, s0); clo_set(f, 2, env[1]); clo_set(f, 3, env[2]); return f; }\n")
+		b.WriteString("static Value foldDir_c4(Value step, Value* env) { Value f = mkclo(&foldDir_c5, 3); clo_set(f, 0, step); clo_set(f, 1, env[0]); clo_set(f, 2, env[1]); return f; }\n")
+		b.WriteString("static Value foldDir_c3(Value suf, Value* env) { Value f = mkclo(&foldDir_c4, 2); clo_set(f, 0, env[0]); clo_set(f, 1, suf); return f; }\n")
+		b.WriteString("static Value foldDir_c2(Value dirc, Value* env) { (void)env; Value f = mkclo(&foldDir_c3, 1); clo_set(f, 0, dirc); return f; }\n")
+		b.WriteString("static Value foldDir_c1(Value _s, Value* env) { (void)_s; (void)env; return mkclo(&foldDir_c2, 0); }\n")
+		b.WriteString("static Value foldDir(void) { return mkclo(&foldDir_c1, 0); }\n")
+	}
 }
 
 // emitBinPrimsC bakes the Phase-0 real-byte-string (Bin) host bodies as curried

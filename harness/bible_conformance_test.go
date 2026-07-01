@@ -531,11 +531,12 @@ func TestBibleJVMWriteStreamDb(t *testing.T) {
 }
 
 // runNativeListing emits (listing, main) on backend "c" or "ll", compiles, runs
-// from cwd (relative to harness/testdata when non-empty), and returns trimmed
-// stdout + ok=true. ok=false when the required toolchain (cc / clang) is absent;
-// callers should break/skip on ok=false. Mirrors runLL (ll_test.go:22) for LLVM
-// and the C compile pattern from io_os_test.go. Uses EmitRuntimeFor so that the
-// codec (d6_s2h/d6_h2s) and pure bible ops land in the linked runtime.c.
+// from cwd (used as-is when non-empty; relative to the harness package dir), and
+// returns trimmed stdout + ok=true. ok=false when the required toolchain (cc /
+// clang) is absent; callers should break/skip on ok=false. Mirrors runLL
+// (ll_test.go:22) for LLVM and the C compile pattern from io_os_test.go. Uses
+// EmitRuntimeFor so that the codec (d6_s2h/d6_h2s) and pure bible ops land in the
+// linked runtime.c.
 func runNativeListing(t *testing.T, backend, listing, main, cwd string) (string, bool) {
 	t.Helper()
 	switch backend {
@@ -594,7 +595,7 @@ func runNativeListing(t *testing.T, backend, listing, main, cwd string) (string,
 
 	runDir := dir
 	if cwd != "" {
-		runDir = filepath.Join("testdata", cwd)
+		runDir = cwd
 	}
 	cmd := exec.Command(bin)
 	cmd.Dir = runDir
@@ -603,6 +604,28 @@ func runNativeListing(t *testing.T, backend, listing, main, cwd string) (string,
 		t.Fatalf("[%s] %s run: %v", backend, listing, err)
 	}
 	return strings.TrimSpace(string(out)), true
+}
+
+// TestBibleNativeFold verifies the two higher-order bible ops (foldLines/foldDir) on
+// both native backends (C and LLVM). cwd is "testdata" so relative fixture paths resolve.
+// Expected values match the source-backend gates: 11\n11 / 3\n3 / 16\n16.
+func TestBibleNativeFold(t *testing.T) {
+	cases := []struct{ listing, main, cwd, want string }{
+		{"ch549_conllu_count.rune", "main", "testdata", "11\n11"},
+		{"ch554_fold_dir.rune", "main", "testdata", "3\n3"},
+		{"ch560_crlf_lines.rune", "main", "testdata", "16\n16"},
+	}
+	for _, be := range []string{"c", "ll"} {
+		for _, c := range cases {
+			got, ok := runNativeListing(t, be, c.listing, c.main, c.cwd)
+			if !ok {
+				break
+			}
+			if got != c.want {
+				t.Errorf("%s %s = %q, want %q", be, c.listing, got, c.want)
+			}
+		}
+	}
 }
 
 // TestBibleNativePure verifies the 4 pure bible ops (byteLen/splitOn/jsonStrField/sqlQuote)
