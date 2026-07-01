@@ -20,27 +20,56 @@ type bibleBackend struct {
 	emit    func(codegen.Program) (codegen.TargetSource, error)
 	run     func(file string) *exec.Cmd
 	compile func(src, out string) *exec.Cmd // nil for interpreted
+	// runtime, when non-nil, produces a runtime.c written beside src before
+	// compile is called.  Used by the LLVM backend (clang prog.ll runtime.c -o out).
+	runtime func(codegen.Program) string
 }
 
 func bibleBackends() []bibleBackend {
 	bks := []bibleBackend{
 		{"js", "node", "js", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.JS{}.Emit(p) },
-			func(f string) *exec.Cmd { return exec.Command("node", f) }, nil},
+			func(f string) *exec.Cmd { return exec.Command("node", f) }, nil, nil},
 		{"go", "go", "go", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.Go{}.Emit(p) },
-			func(f string) *exec.Cmd { return exec.Command("go", "run", f) }, nil},
+			func(f string) *exec.Cmd { return exec.Command("go", "run", f) }, nil, nil},
 		{"py", "python3", "py", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.Py{}.Emit(p) },
-			func(f string) *exec.Cmd { return exec.Command("python3", f) }, nil},
+			func(f string) *exec.Cmd { return exec.Command("python3", f) }, nil, nil},
 		{"rs", "rustc", "rs", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.Rust{}.Emit(p) },
 			func(bin string) *exec.Cmd { return exec.Command(bin) },
-			func(src, out string) *exec.Cmd { return exec.Command("rustc", "--edition", "2021", "-o", out, src) }},
+			func(src, out string) *exec.Cmd { return exec.Command("rustc", "--edition", "2021", "-o", out, src) }, nil},
 		{"erl", "escript", "erl", func(p codegen.Program) (codegen.TargetSource, error) { return codegen.Beam{}.Emit(p) },
-			func(f string) *exec.Cmd { return exec.Command("escript", f) }, nil},
+			func(f string) *exec.Cmd { return exec.Command("escript", f) }, nil, nil},
 	}
 	if javac, java, ok := findJava25(); ok {
 		bks = append(bks, bibleBackend{"jvm", javac, "java",
 			func(p codegen.Program) (codegen.TargetSource, error) { return codegen.JVM{}.Emit(p) },
 			func(out string) *exec.Cmd { return exec.Command(java, "-cp", filepath.Dir(out), "main") },
-			func(src, out string) *exec.Cmd { return exec.Command(javac, "--release", "25", "-d", filepath.Dir(out), src) }})
+			func(src, out string) *exec.Cmd {
+				return exec.Command(javac, "--release", "25", "-d", filepath.Dir(out), src)
+			}, nil})
+	}
+	if cc, err := exec.LookPath("cc"); err == nil {
+		bks = append(bks, bibleBackend{
+			name:    "c",
+			bin:     cc,
+			ext:     "c",
+			emit:    func(p codegen.Program) (codegen.TargetSource, error) { return codegen.C{}.Emit(p) },
+			run:     func(bin string) *exec.Cmd { return exec.Command(bin) },
+			compile: func(src, out string) *exec.Cmd { return exec.Command(cc, "-o", out, src) },
+		})
+	}
+	if clang, err := exec.LookPath("clang"); err == nil {
+		bks = append(bks, bibleBackend{
+			name: "ll",
+			bin:  clang,
+			ext:  "ll",
+			emit: func(p codegen.Program) (codegen.TargetSource, error) { return codegen.LL{}.Emit(p) },
+			run:  func(bin string) *exec.Cmd { return exec.Command(bin) },
+			// compile assumes runtime.c is written beside src by the call sites below.
+			compile: func(src, out string) *exec.Cmd {
+				return exec.Command(clang, src, filepath.Join(filepath.Dir(src), "runtime.c"), "-o", out)
+			},
+			runtime: func(p codegen.Program) string { return codegen.LL{}.EmitRuntimeFor(p) },
+		})
 	}
 	return bks
 }
@@ -68,6 +97,11 @@ func runBibleBackend(t *testing.T, bk bibleBackend, listing, main, dir string) (
 	runFile := f
 	if bk.compile != nil {
 		bin := filepath.Join(dir, "main_"+bk.name+".bin")
+		if bk.runtime != nil {
+			if err := os.WriteFile(filepath.Join(dir, "runtime.c"), []byte(bk.runtime(p)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if out, err := bk.compile(f, bin).CombinedOutput(); err != nil {
 			t.Fatalf("[%s] %s compile: %v\n%s", bk.name, listing, err, out)
 		}
@@ -195,6 +229,11 @@ func assertBibleAgreeFromTestdata(t *testing.T, listing, main, want string) {
 		runFile := f
 		if bk.compile != nil {
 			bin := filepath.Join(dir, "m.bin")
+			if bk.runtime != nil {
+				if err := os.WriteFile(filepath.Join(dir, "runtime.c"), []byte(bk.runtime(p)), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if out, err := bk.compile(f, bin).CombinedOutput(); err != nil {
 				t.Fatalf("[%s] %s compile: %v\n%s", bk.name, listing, err, out)
 			}
@@ -244,6 +283,11 @@ func buildBibleFile(t *testing.T, bk bibleBackend, listing, main, fixture, destN
 	runFile := f
 	if bk.compile != nil {
 		bin := filepath.Join(dir, "m.bin")
+		if bk.runtime != nil {
+			if err := os.WriteFile(filepath.Join(dir, "runtime.c"), []byte(bk.runtime(p)), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if out, err := bk.compile(f, bin).CombinedOutput(); err != nil {
 			t.Fatalf("[%s] compile: %v\n%s", bk.name, err, out)
 		}
@@ -336,6 +380,11 @@ func TestBibleConformanceRealData(t *testing.T) {
 		runFile := f
 		if bk.compile != nil {
 			bin := filepath.Join(dir, "m.bin")
+			if bk.runtime != nil {
+				if err := os.WriteFile(filepath.Join(dir, "runtime.c"), []byte(bk.runtime(p)), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
 			if out, err := bk.compile(f, bin).CombinedOutput(); err != nil {
 				t.Fatalf("[%s] compile: %v\n%s", bk.name, err, out)
 			}
