@@ -89,6 +89,10 @@ func (C) Emit(p Program) (TargetSource, error) {
 	// D3 / R-FFI: bake the machine-float (f64) host bodies + the OpenBLAS dot kernel
 	// when referenced (defined before the program code blocks that call them).
 	emitFloatPrimsC(&b, p)
+	// D6 / R-EFFECT: bake the packed-String codec (d6_s2h/d6_h2s) + the 4 pure
+	// bible ops (byteLen/splitOn/jsonStrField/sqlQuote) when referenced. The codec
+	// is the shared contract for all native string ops (Task 1 of the native tier).
+	emitStreamPrimsC(&b, p)
 	// Phase 0: bake the real byte-string (Bin) host bodies when referenced.
 	emitBinPrimsC(&b, p)
 	// Phase 1: bake the POSIX socket host bodies when referenced.
@@ -678,6 +682,43 @@ func cstr(s string) string {
 	}
 	b.WriteByte('"')
 	return b.String()
+}
+
+// usesNativeStrCodec reports whether the program references any native string codec op
+// (stream prims, D6 file/env ops). Mirrors rust.go's equivalent gate.
+func usesNativeStrCodec(p Program) bool {
+	return usesStream(p) || usesForeign(p, "printStrCode") || usesForeign(p, "getEnvCode") ||
+		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode")
+}
+
+// emitStreamPrimsC bakes the packed-String codec (d6_s2h/d6_h2s) and the 4 pure
+// bible ops (byteLen/splitOn/jsonStrField/sqlQuote) as C static bodies. The codec
+// decodes a K_BIG bignum to raw bytes via repeated big_divmod-by-256 until quotient
+// == 1 (the sentinel), and encodes bytes back. All ops are strictly byte-level so
+// non-ASCII Greek/Hebrew passes through without any charset transform.
+func emitStreamPrimsC(b *strings.Builder, p Program) {
+	if usesNativeStrCodec(p) {
+		b.WriteString("static unsigned char* d6_s2h(Value code, size_t* outlen) { Value one = big_from_long(1); Value d256 = big_from_long(256); size_t cap = 16, n = 0; unsigned char* buf = (unsigned char*)malloc(cap); Value b = code; while (big_cmp(b, one) > 0) { Value rem; Value q = big_divmod(b, d256, &rem); int byte = (big_nlimbs(rem) == 0) ? 0 : (int)(big_limb(rem, 0) & 255); if (n == cap) { cap *= 2; buf = (unsigned char*)realloc(buf, cap); } buf[n++] = (unsigned char)byte; b = q; } *outlen = n; return buf; }\n")
+		b.WriteString("static Value d6_h2s(const unsigned char* s, size_t len) { Value n = big_from_long(1); Value m = big_from_long(256); size_t i = len; while (i-- > 0) { n = big_add(big_mul(n, m), big_from_long((long)s[i])); } return n; }\n")
+	}
+	if usesForeign(p, "byteLen") {
+		b.WriteString("static Value byteLen_c1(Value c, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(c, &len); free(buf); return big_from_long((long)len); }\n")
+		b.WriteString("static Value byteLen(void) { return mkclo(&byteLen_c1, 0); }\n")
+	}
+	if usesForeign(p, "splitOn") {
+		b.WriteString("static Value splitOn_c2(Value c, Value* env) { long sb = big_nlimbs(env[0]) == 0 ? 0 : (big_limb(env[0], 0) & 255); size_t len; unsigned char* data = d6_s2h(c, &len); Value lst = mkcon(0, \"nil\", 1); con_set(lst, 0, UNIT); size_t segstart = 0; size_t nsegs = 0; size_t* starts = (size_t*)malloc(sizeof(size_t) * (len + 2)); size_t* ends = (size_t*)malloc(sizeof(size_t) * (len + 2)); for (size_t i = 0; i <= len; i++) { if (i == len || data[i] == (unsigned char)sb) { starts[nsegs] = segstart; ends[nsegs] = i; nsegs++; segstart = i + 1; } } for (size_t s = nsegs; s-- > 0; ) { Value part = d6_h2s(data + starts[s], ends[s] - starts[s]); Value cons = mkcon(1, \"cons\", 3); con_set(cons, 0, UNIT); con_set(cons, 1, part); con_set(cons, 2, lst); lst = cons; } free(starts); free(ends); free(data); return lst; }\n")
+		b.WriteString("static Value splitOn_c1(Value sep, Value* env) { (void)env; Value f = mkclo(&splitOn_c2, 1); clo_set(f, 0, sep); return f; }\n")
+		b.WriteString("static Value splitOn(void) { return mkclo(&splitOn_c1, 0); }\n")
+	}
+	if usesForeign(p, "jsonStrField") {
+		b.WriteString("static Value jsonStrField_c2(Value doc, Value* env) { size_t fl; unsigned char* fnb = d6_s2h(env[0], &fl); size_t dl; unsigned char* ds = d6_s2h(doc, &dl); size_t nl = fl + 2; unsigned char* needle = (unsigned char*)malloc(nl); needle[0] = '\"'; memcpy(needle + 1, fnb, fl); needle[fl + 1] = '\"'; Value none = mkcon(0, \"none\", 1); con_set(none, 0, UNIT); Value result = none; long found = -1; if (nl <= dl) { for (size_t i = 0; i + nl <= dl; i++) { if (memcmp(ds + i, needle, nl) == 0) { found = (long)i; break; } } } if (found >= 0) { size_t j = (size_t)found + nl; while (j < dl && (ds[j] == ' ' || ds[j] == '\\t' || ds[j] == ':')) j++; if (j < dl && ds[j] == '\"') { j++; size_t k = j; while (k < dl && ds[k] != '\"') k++; Value val = d6_h2s(ds + j, k - j); Value some = mkcon(1, \"some\", 2); con_set(some, 0, UNIT); con_set(some, 1, val); result = some; } } free(fnb); free(ds); free(needle); return result; }\n")
+		b.WriteString("static Value jsonStrField_c1(Value field, Value* env) { (void)env; Value f = mkclo(&jsonStrField_c2, 1); clo_set(f, 0, field); return f; }\n")
+		b.WriteString("static Value jsonStrField(void) { return mkclo(&jsonStrField_c1, 0); }\n")
+	}
+	if usesForeign(p, "sqlQuote") {
+		b.WriteString("static Value sqlQuote_c1(Value s, Value* env) { (void)env; size_t len; unsigned char* in = d6_s2h(s, &len); unsigned char* out = (unsigned char*)malloc(len * 2 + 2); size_t o = 0; out[o++] = '\\''; for (size_t i = 0; i < len; i++) { if (in[i] == '\\'') out[o++] = '\\''; out[o++] = in[i]; } out[o++] = '\\''; Value r = d6_h2s(out, o); free(in); free(out); return r; }\n")
+		b.WriteString("static Value sqlQuote(void) { return mkclo(&sqlQuote_c1, 0); }\n")
+	}
 }
 
 // emitBinPrimsC bakes the Phase-0 real-byte-string (Bin) host bodies as curried

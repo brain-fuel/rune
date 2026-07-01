@@ -529,3 +529,104 @@ func TestBibleJVMWriteStreamDb(t *testing.T) {
 		t.Errorf("jvm ch558 db count = %q, want 2", got)
 	}
 }
+
+// runNativeListing emits (listing, main) on backend "c" or "ll", compiles, runs
+// from cwd (relative to harness/testdata when non-empty), and returns trimmed
+// stdout + ok=true. ok=false when the required toolchain (cc / clang) is absent;
+// callers should break/skip on ok=false. Mirrors runLL (ll_test.go:22) for LLVM
+// and the C compile pattern from io_os_test.go. Uses EmitRuntimeFor so that the
+// codec (d6_s2h/d6_h2s) and pure bible ops land in the linked runtime.c.
+func runNativeListing(t *testing.T, backend, listing, main, cwd string) (string, bool) {
+	t.Helper()
+	switch backend {
+	case "c":
+		if _, err := exec.LookPath("cc"); err != nil {
+			return "", false
+		}
+	case "ll":
+		if _, err := exec.LookPath("clang"); err != nil {
+			return "", false
+		}
+	default:
+		t.Fatalf("runNativeListing: unknown backend %q", backend)
+	}
+
+	s := loadListing(t, listing)
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		t.Fatalf("[%s] %s EmitProgram: %v", backend, listing, err)
+	}
+
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "main.bin")
+
+	switch backend {
+	case "c":
+		src, err := codegen.C{}.Emit(p)
+		if err != nil {
+			t.Fatalf("[c] %s Emit: %v", listing, err)
+		}
+		f := filepath.Join(dir, "main.c")
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+			t.Fatalf("[c] %s compile: %v\n%s", listing, err, out)
+		}
+	case "ll":
+		ll, err := codegen.LL{}.Emit(p)
+		if err != nil {
+			t.Fatalf("[ll] %s Emit: %v", listing, err)
+		}
+		rt := codegen.LL{}.EmitRuntimeFor(p)
+		llf := filepath.Join(dir, "program.ll")
+		rtf := filepath.Join(dir, "runtime.c")
+		if err := os.WriteFile(llf, []byte(ll), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(rtf, []byte(rt), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command("clang", llf, rtf, "-o", bin).CombinedOutput(); err != nil {
+			t.Fatalf("[ll] %s compile: %v\n%s\n--- .ll ---\n%s", listing, err, out, ll)
+		}
+	}
+
+	runDir := dir
+	if cwd != "" {
+		runDir = filepath.Join("testdata", cwd)
+	}
+	cmd := exec.Command(bin)
+	cmd.Dir = runDir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("[%s] %s run: %v", backend, listing, err)
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// TestBibleNativePure verifies the 4 pure bible ops (byteLen/splitOn/jsonStrField/sqlQuote)
+// on both native backends (C and LLVM). Expected values match the source-backend gates:
+// strongLen=5 (byteLen of "G0026") and quoteEmbedded=6 (byteLen of "'a''b'").
+func TestBibleNativePure(t *testing.T) {
+	cases := []struct{ listing, main, cwd, want string }{
+		{"ch551_json_field.rune", "strongLen", "", "5"},
+		{"ch557_sql_quote.rune", "quoteEmbedded", "", "6"},
+	}
+	for _, be := range []string{"c", "ll"} {
+		ran := false
+		for _, c := range cases {
+			got, ok := runNativeListing(t, be, c.listing, c.main, c.cwd)
+			if !ok {
+				break
+			}
+			ran = true
+			if got != c.want {
+				t.Errorf("%s %s/%s = %q, want %q", be, c.listing, c.main, got, c.want)
+			}
+		}
+		if !ran {
+			t.Logf("%s toolchain absent -- skipped", be)
+		}
+	}
+}
