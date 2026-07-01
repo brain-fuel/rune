@@ -554,3 +554,24 @@ int main(void) {
   return 0;
 }
 `
+
+// llRuntimeMainArgv is the argc/argv variant of llRuntimeMain, used when the
+// program references argCountCode or argAtCode. The rune_argc/rune_argv globals
+// are declared (as static) by emitStreamPrimsLL before this main, so we just
+// assign them here. The rest of the body is identical to llRuntimeMain.
+const llRuntimeMainArgv = `
+extern void rune_main(void);
+int main(int argc, char** argv) {
+  rune_argc = argc; rune_argv = argv;
+  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;
+  UNIT = mkunit();
+  rt_add_root(&UNIT);
+  rune_main();
+#ifdef RUNE_GC_STATS
+  fprintf(stderr, "rune-ll: gc collections=%ld\n", gc_n_collections);
+#else
+  (void)gc_n_collections;
+#endif
+  return 0;
+}
+`

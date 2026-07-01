@@ -169,8 +169,15 @@ func (C) Emit(p Program) (TargetSource, error) {
 	}
 
 	// main: evaluate the entry thunk and show it. An IO main is a deferred world
-	// thunk (unit -> A), forced by applying $unit.
-	b.WriteString("int main(void) {\n")
+	// thunk (unit -> A), forced by applying $unit. When argCountCode/argAtCode are
+	// used, main must accept argc/argv and capture them into the rune_argc/rune_argv
+	// globals (declared by emitStreamPrimsC above) before the program runs.
+	if usesForeign(p, "argCountCode") || usesForeign(p, "argAtCode") {
+		b.WriteString("int main(int argc, char** argv) {\n")
+		b.WriteString("  rune_argc = argc; rune_argv = argv;\n")
+	} else {
+		b.WriteString("int main(void) {\n")
+	}
 	// Capture the C stack bottom for the conservative GC root scan: every live
 	// Value used by the evaluation lives in a frame above this point, so the
 	// collector scans from the current SP up to here.
@@ -718,6 +725,48 @@ func emitStreamPrimsC(b *strings.Builder, p Program) {
 	if usesForeign(p, "sqlQuote") {
 		b.WriteString("static Value sqlQuote_c1(Value s, Value* env) { (void)env; size_t len; unsigned char* in = d6_s2h(s, &len); unsigned char* out = (unsigned char*)malloc(len * 2 + 2); size_t o = 0; out[o++] = '\\''; for (size_t i = 0; i < len; i++) { if (in[i] == '\\'') out[o++] = '\\''; out[o++] = in[i]; } out[o++] = '\\''; Value r = d6_h2s(out, o); free(in); free(out); return r; }\n")
 		b.WriteString("static Value sqlQuote(void) { return mkclo(&sqlQuote_c1, 0); }\n")
+	}
+	// D6 / R-EFFECT: the standard OS vocabulary on native C (env / file / argv /
+	// process-exit). Strings marshal through d6_s2h/d6_h2s; the empty/error sentinel
+	// is the packed bignum 1 (big_from_long(1)), matching all source backends.
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("static Value printStrCode_c2(Value u, Value* env) { (void)u; size_t len; unsigned char* buf = d6_s2h(env[0], &len); fwrite(buf, 1, len, stdout); putchar('\\n'); free(buf); return env[0]; }\n")
+		b.WriteString("static Value printStrCode_c1(Value c, Value* env) { (void)env; Value f = mkclo(&printStrCode_c2, 1); clo_set(f, 0, c); return f; }\n")
+		b.WriteString("static Value printStrCode(void) { return mkclo(&printStrCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "getEnvCode") {
+		b.WriteString("static Value getEnvCode_c2(Value u, Value* env) { (void)u; size_t kl; unsigned char* kb = d6_s2h(env[0], &kl); char* key = (char*)malloc(kl + 1); memcpy(key, kb, kl); key[kl] = 0; const char* val = getenv(key); if (!val) val = \"\"; Value r = d6_h2s((const unsigned char*)val, strlen(val)); free(kb); free(key); return r; }\n")
+		b.WriteString("static Value getEnvCode_c1(Value c, Value* env) { (void)env; Value f = mkclo(&getEnvCode_c2, 1); clo_set(f, 0, c); return f; }\n")
+		b.WriteString("static Value getEnvCode(void) { return mkclo(&getEnvCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "readFileCode") {
+		b.WriteString("static Value readFileCode_c2(Value u, Value* env) { (void)u; size_t pl; unsigned char* pb = d6_s2h(env[0], &pl); char* path = (char*)malloc(pl + 1); memcpy(path, pb, pl); path[pl] = 0; FILE* fp = fopen(path, \"rb\"); free(pb); free(path); if (!fp) return big_from_long(1); size_t cap = 1024, n = 0; unsigned char* data = (unsigned char*)malloc(cap); int ch; while ((ch = fgetc(fp)) != EOF) { if (n == cap) { cap *= 2; data = (unsigned char*)realloc(data, cap); } data[n++] = (unsigned char)ch; } fclose(fp); Value r = d6_h2s(data, n); free(data); return r; }\n")
+		b.WriteString("static Value readFileCode_c1(Value c, Value* env) { (void)env; Value f = mkclo(&readFileCode_c2, 1); clo_set(f, 0, c); return f; }\n")
+		b.WriteString("static Value readFileCode(void) { return mkclo(&readFileCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "writeFileCode") {
+		b.WriteString("static Value writeFileCode_c3(Value u, Value* env) { (void)u; size_t pl; unsigned char* pb = d6_s2h(env[0], &pl); char* path = (char*)malloc(pl + 1); memcpy(path, pb, pl); path[pl] = 0; size_t dl; unsigned char* data = d6_s2h(env[1], &dl); FILE* fp = fopen(path, \"wb\"); if (fp) { fwrite(data, 1, dl, fp); fclose(fp); } free(pb); free(path); free(data); return env[1]; }\n")
+		b.WriteString("static Value writeFileCode_c2(Value c, Value* env) { Value f = mkclo(&writeFileCode_c3, 2); clo_set(f, 0, env[0]); clo_set(f, 1, c); return f; }\n")
+		b.WriteString("static Value writeFileCode_c1(Value pth, Value* env) { (void)env; Value f = mkclo(&writeFileCode_c2, 1); clo_set(f, 0, pth); return f; }\n")
+		b.WriteString("static Value writeFileCode(void) { return mkclo(&writeFileCode_c1, 0); }\n")
+	}
+	// argCountCode + argAtCode need the rune_argc/rune_argv globals set by main.
+	if usesForeign(p, "argCountCode") || usesForeign(p, "argAtCode") {
+		b.WriteString("static int rune_argc = 0;\nstatic char** rune_argv = NULL;\n")
+	}
+	if usesForeign(p, "argCountCode") {
+		b.WriteString("static Value argCountCode_c1(Value u, Value* env) { (void)u; (void)env; long n = rune_argc > 1 ? rune_argc - 1 : 0; return big_from_long(n); }\n")
+		b.WriteString("static Value argCountCode(void) { return mkclo(&argCountCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "argAtCode") {
+		b.WriteString("static Value argAtCode_c2(Value u, Value* env) { (void)u; long idx = (big_nlimbs(env[0]) == 0 ? 0 : (long)big_limb(env[0], 0)) + 1; if (idx >= 1 && idx < rune_argc) { const char* a = rune_argv[idx]; return d6_h2s((const unsigned char*)a, strlen(a)); } return big_from_long(1); }\n")
+		b.WriteString("static Value argAtCode_c1(Value i, Value* env) { (void)env; Value f = mkclo(&argAtCode_c2, 1); clo_set(f, 0, i); return f; }\n")
+		b.WriteString("static Value argAtCode(void) { return mkclo(&argAtCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "exitWith") {
+		b.WriteString("static Value exitWith_c2(Value u, Value* env) { (void)u; long code = (big_nlimbs(env[0]) == 0 ? 0 : (long)big_limb(env[0], 0)); exit((int)code); }\n")
+		b.WriteString("static Value exitWith_c1(Value n, Value* env) { (void)env; Value f = mkclo(&exitWith_c2, 1); clo_set(f, 0, n); return f; }\n")
+		b.WriteString("static Value exitWith(void) { return mkclo(&exitWith_c1, 0); }\n")
 	}
 }
 

@@ -224,7 +224,13 @@ func (LL) EmitRuntimeFor(p Program) string {
 	emitProcPrimsLL(&b, p)
 	emitCryptoPrimsLL(&b, p)
 	emitTLSPrimsLL(&b, p)
-	b.WriteString(llRuntimeMain)
+	// When argCountCode/argAtCode are used, main must accept argc/argv and populate
+	// the rune_argc/rune_argv globals that were declared in emitStreamPrimsLL above.
+	if usesForeign(p, "argCountCode") || usesForeign(p, "argAtCode") {
+		b.WriteString(llRuntimeMainArgv)
+	} else {
+		b.WriteString(llRuntimeMain)
+	}
 	return b.String()
 }
 
@@ -367,6 +373,49 @@ func emitStreamPrimsLL(b *strings.Builder, p Program) {
 	if usesForeign(p, "sqlQuote") {
 		b.WriteString("static Value sqlQuote_c1(Value s, Value* env) { (void)env; size_t len; unsigned char* in = d6_s2h(s, &len); unsigned char* out = (unsigned char*)malloc(len * 2 + 2); size_t o = 0; out[o++] = '\\''; for (size_t i = 0; i < len; i++) { if (in[i] == '\\'') out[o++] = '\\''; out[o++] = in[i]; } out[o++] = '\\''; Value r = d6_h2s(out, o); free(in); free(out); return r; }\n")
 		b.WriteString("Value sqlQuote(void) { return rt_mkclo(&sqlQuote_c1, 0); }\n")
+	}
+	// D6 / R-EFFECT: the standard OS vocabulary on native LLVM (env / file / argv /
+	// process-exit). Accessors have EXTERNAL linkage (no static) so the .ll's
+	// auto-declared @name() resolves. Internal step functions stay static.
+	// The C↔LLVM delta: mkclo→rt_mkclo, clo_set→rt_clo_set, big_from_long→rt_big_from_long.
+	if usesForeign(p, "printStrCode") {
+		b.WriteString("static Value printStrCode_c2(Value u, Value* env) { (void)u; size_t len; unsigned char* buf = d6_s2h(env[0], &len); fwrite(buf, 1, len, stdout); putchar('\\n'); free(buf); return env[0]; }\n")
+		b.WriteString("static Value printStrCode_c1(Value c, Value* env) { (void)env; Value f = rt_mkclo(&printStrCode_c2, 1); rt_clo_set(f, 0, c); return f; }\n")
+		b.WriteString("Value printStrCode(void) { return rt_mkclo(&printStrCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "getEnvCode") {
+		b.WriteString("static Value getEnvCode_c2(Value u, Value* env) { (void)u; size_t kl; unsigned char* kb = d6_s2h(env[0], &kl); char* key = (char*)malloc(kl + 1); memcpy(key, kb, kl); key[kl] = 0; const char* val = getenv(key); if (!val) val = \"\"; Value r = d6_h2s((const unsigned char*)val, strlen(val)); free(kb); free(key); return r; }\n")
+		b.WriteString("static Value getEnvCode_c1(Value c, Value* env) { (void)env; Value f = rt_mkclo(&getEnvCode_c2, 1); rt_clo_set(f, 0, c); return f; }\n")
+		b.WriteString("Value getEnvCode(void) { return rt_mkclo(&getEnvCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "readFileCode") {
+		b.WriteString("static Value readFileCode_c2(Value u, Value* env) { (void)u; size_t pl; unsigned char* pb = d6_s2h(env[0], &pl); char* path = (char*)malloc(pl + 1); memcpy(path, pb, pl); path[pl] = 0; FILE* fp = fopen(path, \"rb\"); free(pb); free(path); if (!fp) return rt_big_from_long(1); size_t cap = 1024, n = 0; unsigned char* data = (unsigned char*)malloc(cap); int ch; while ((ch = fgetc(fp)) != EOF) { if (n == cap) { cap *= 2; data = (unsigned char*)realloc(data, cap); } data[n++] = (unsigned char)ch; } fclose(fp); Value r = d6_h2s(data, n); free(data); return r; }\n")
+		b.WriteString("static Value readFileCode_c1(Value c, Value* env) { (void)env; Value f = rt_mkclo(&readFileCode_c2, 1); rt_clo_set(f, 0, c); return f; }\n")
+		b.WriteString("Value readFileCode(void) { return rt_mkclo(&readFileCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "writeFileCode") {
+		b.WriteString("static Value writeFileCode_c3(Value u, Value* env) { (void)u; size_t pl; unsigned char* pb = d6_s2h(env[0], &pl); char* path = (char*)malloc(pl + 1); memcpy(path, pb, pl); path[pl] = 0; size_t dl; unsigned char* data = d6_s2h(env[1], &dl); FILE* fp = fopen(path, \"wb\"); if (fp) { fwrite(data, 1, dl, fp); fclose(fp); } free(pb); free(path); free(data); return env[1]; }\n")
+		b.WriteString("static Value writeFileCode_c2(Value c, Value* env) { Value f = rt_mkclo(&writeFileCode_c3, 2); rt_clo_set(f, 0, env[0]); rt_clo_set(f, 1, c); return f; }\n")
+		b.WriteString("static Value writeFileCode_c1(Value pth, Value* env) { (void)env; Value f = rt_mkclo(&writeFileCode_c2, 1); rt_clo_set(f, 0, pth); return f; }\n")
+		b.WriteString("Value writeFileCode(void) { return rt_mkclo(&writeFileCode_c1, 0); }\n")
+	}
+	// argCountCode + argAtCode need the rune_argc/rune_argv globals set by main.
+	if usesForeign(p, "argCountCode") || usesForeign(p, "argAtCode") {
+		b.WriteString("static int rune_argc = 0;\nstatic char** rune_argv = NULL;\n")
+	}
+	if usesForeign(p, "argCountCode") {
+		b.WriteString("static Value argCountCode_c1(Value u, Value* env) { (void)u; (void)env; long n = rune_argc > 1 ? rune_argc - 1 : 0; return rt_big_from_long(n); }\n")
+		b.WriteString("Value argCountCode(void) { return rt_mkclo(&argCountCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "argAtCode") {
+		b.WriteString("static Value argAtCode_c2(Value u, Value* env) { (void)u; long idx = (big_nlimbs(env[0]) == 0 ? 0 : (long)big_limb(env[0], 0)) + 1; if (idx >= 1 && idx < rune_argc) { const char* a = rune_argv[idx]; return d6_h2s((const unsigned char*)a, strlen(a)); } return rt_big_from_long(1); }\n")
+		b.WriteString("static Value argAtCode_c1(Value i, Value* env) { (void)env; Value f = rt_mkclo(&argAtCode_c2, 1); rt_clo_set(f, 0, i); return f; }\n")
+		b.WriteString("Value argAtCode(void) { return rt_mkclo(&argAtCode_c1, 0); }\n")
+	}
+	if usesForeign(p, "exitWith") {
+		b.WriteString("static Value exitWith_c2(Value u, Value* env) { (void)u; long code = (big_nlimbs(env[0]) == 0 ? 0 : (long)big_limb(env[0], 0)); exit((int)code); }\n")
+		b.WriteString("static Value exitWith_c1(Value n, Value* env) { (void)env; Value f = rt_mkclo(&exitWith_c2, 1); rt_clo_set(f, 0, n); return f; }\n")
+		b.WriteString("Value exitWith(void) { return rt_mkclo(&exitWith_c1, 0); }\n")
 	}
 }
 

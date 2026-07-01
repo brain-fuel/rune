@@ -3046,6 +3046,150 @@ func TestElemTyMixedDtype(t *testing.T) {
 	}
 }
 
+// TestD6NativeFileEnv is the native C+LLVM D6 file/env gate: ch215 writes a String to a
+// relative file, reads it back and prints it, then prints $RUNE_D6 — byte-identical to the
+// source-backend gate "hello, wootz\nok\nunit" on both c and ll. Skips cleanly when cc or
+// clang are absent. This closes native D6 string parity for the file+env ops.
+func TestD6NativeFileEnv(t *testing.T) {
+	const want = "hello, wootz\nok\nunit"
+	listing := "ch215_io_fs_env.rune"
+	for _, backend := range []string{"c", "ll"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			// Toolchain check.
+			tool := map[string]string{"c": "cc", "ll": "clang"}[backend]
+			if _, err := exec.LookPath(tool); err != nil {
+				t.Skipf("%s not in PATH", tool)
+			}
+			s := loadListing(t, listing)
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "main.bin")
+			switch backend {
+			case "c":
+				src, err := codegen.C{}.Emit(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f := filepath.Join(dir, "main.c")
+				if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+					t.Fatalf("[c] compile: %v\n%s", err, out)
+				}
+			case "ll":
+				ll, err := codegen.LL{}.Emit(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rt := codegen.LL{}.EmitRuntimeFor(p)
+				llf := filepath.Join(dir, "prog.ll")
+				rtf := filepath.Join(dir, "runtime.c")
+				if err := os.WriteFile(llf, []byte(ll), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(rtf, []byte(rt), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if out, err := exec.Command("clang", llf, rtf, "-o", bin).CombinedOutput(); err != nil {
+					t.Fatalf("[ll] compile: %v\n%s", err, out)
+				}
+			}
+			cmd := exec.Command(bin)
+			cmd.Dir = dir // relative path "d6.tmp" resolves in the temp dir
+			cmd.Env = append(os.Environ(), "RUNE_D6=ok")
+			out, err := cmd.Output()
+			if err != nil {
+				stderr := ""
+				if ee, ok := err.(*exec.ExitError); ok {
+					stderr = string(ee.Stderr)
+				}
+				t.Fatalf("[%s] run failed: %v\n%s", backend, err, stderr)
+			}
+			if got := strings.TrimSpace(string(out)); got != want {
+				t.Errorf("[%s] D6 native file+env: got %q, want %q", backend, got, want)
+			}
+		})
+	}
+}
+
+// TestD6NativeArgvExit is the native C+LLVM D6 argv+process gate: ch216 prints argc then
+// argv[0]/argv[1], then exits with status = argc. Run with `alpha beta` the stdout is
+// "2\nalpha\nbeta" and the exit status is 2, matching the source-backend gate. Skips
+// cleanly when cc or clang are absent.
+func TestD6NativeArgvExit(t *testing.T) {
+	const wantOut = "2\nalpha\nbeta"
+	const wantExit = 2
+	listing := "ch216_io_argv_exit.rune"
+	for _, backend := range []string{"c", "ll"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			tool := map[string]string{"c": "cc", "ll": "clang"}[backend]
+			if _, err := exec.LookPath(tool); err != nil {
+				t.Skipf("%s not in PATH", tool)
+			}
+			s := loadListing(t, listing)
+			p, err := s.EmitProgram("main")
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "main.bin")
+			switch backend {
+			case "c":
+				src, err := codegen.C{}.Emit(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				f := filepath.Join(dir, "main.c")
+				if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
+					t.Fatalf("[c] compile: %v\n%s", err, out)
+				}
+			case "ll":
+				ll, err := codegen.LL{}.Emit(p)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rt := codegen.LL{}.EmitRuntimeFor(p)
+				llf := filepath.Join(dir, "prog.ll")
+				rtf := filepath.Join(dir, "runtime.c")
+				if err := os.WriteFile(llf, []byte(ll), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(rtf, []byte(rt), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if out, err := exec.Command("clang", llf, rtf, "-o", bin).CombinedOutput(); err != nil {
+					t.Fatalf("[ll] compile: %v\n%s", err, out)
+				}
+			}
+			cmd := exec.Command(bin, "alpha", "beta")
+			out, err := cmd.Output()
+			exitCode := 0
+			if err != nil {
+				if ee, ok := err.(*exec.ExitError); ok {
+					exitCode = ee.ExitCode()
+				} else {
+					t.Fatalf("[%s] run failed: %v", backend, err)
+				}
+			}
+			if got := strings.TrimSpace(string(out)); got != wantOut {
+				t.Errorf("[%s] D6 native argv stdout: got %q, want %q", backend, got, wantOut)
+			}
+			if exitCode != wantExit {
+				t.Errorf("[%s] D6 native argv exit: got %d, want %d", backend, exitCode, wantExit)
+			}
+		})
+	}
+}
+
 // TestDTypeKitConformance deploys the DType kit (ch471, D4 rung 3): the dtype enum's typestr
 // `dtypeStr f64` is "<f8", the __array_interface__ tag a boundary dtype-guard compares a numpy
 // buffer against (the guard accept/reject and typestr proofs hold by refl at check time). It
