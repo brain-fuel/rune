@@ -687,9 +687,12 @@ func TestBibleNativeWriteStreamDb(t *testing.T) {
 				t.Errorf("%s %s = %q, want %q", be, c.listing, got, c.want)
 			}
 		}
-		// ch558 dbApply: build in a temp cwd, query count(*) -> 2 (skip if sqlite3 absent).
+		// ch558 dbApply: build in a temp cwd, query count(*) -> 2 (skip only the dbApply case if
+		// sqlite3 absent -- `continue`, not t.Skip, so the OTHER backend's write-stream/sortFile
+		// cases still run rather than halting the whole test on the first iteration).
 		if _, err := exec.LookPath("sqlite3"); err != nil {
-			t.Skip("sqlite3 not in PATH")
+			t.Logf("[%s] sqlite3 not in PATH -- skip ch558 dbApply", be)
+			continue
 		}
 		s := loadListing(t, "ch558_db_apply.rune")
 		p, err := s.EmitProgram("main")
