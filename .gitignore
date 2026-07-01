@@ -42,3 +42,6 @@ go.work.sum
 
 # Vendored BearSSL build artifacts (rebuild via bin/build-bearssl.sh)
 third_party/bearssl/build/
+
+# subagent-driven-development scratch (ledger, briefs, reports, diffs)
+.superpowers/
