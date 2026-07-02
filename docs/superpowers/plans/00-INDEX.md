@@ -11,10 +11,9 @@ session); `ref_docs/wootz/R-FFI.md` and `R-INTEROP.md` (the locked interop desig
 `R-INFRA.md` and the as-built `infra/` package; the verified CRDT and distributed corpus;
 `humble-humming-elephant.md` (the grand DAG); project memory and CLAUDE.md.
 
-Two gaps recorded honestly:
+One gap recorded honestly (a second, the unreachable `claude.ai` conversation, was
+resolved 2026-07-02: author confirmed nothing load-bearing was in it):
 
-- The referenced `claude.ai/chat/622e7420-...` conversation returned HTTP 403 and could not be
-  read. No plan assumes its content. If it held decisions, they must be supplied and reconciled.
 - The prior plan cited as CALM-related (`calm-soaring-mccarthy.md`) is in fact the
   mutual-recursion/trampoline plan (a slug collision). There is no inherited CALM design; plan #4
   is greenfield on top of the existing `infra/` model.
@@ -176,6 +175,6 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 
 ## Open items for the author
 
-1. Supply any decisions from the unreachable `claude.ai` conversation, or confirm none are load-bearing.
+1. RESOLVED 2026-07-02: author confirmed the unreachable `claude.ai` conversation held nothing load-bearing.
 2. Confirm WASM-hardening is in beta scope (forced by Plan 6) rather than deferring the browser facet.
 3. Confirm the one live cloud for Plan 5 (AWS is the working default).

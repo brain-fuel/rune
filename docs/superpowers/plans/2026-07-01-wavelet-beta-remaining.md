@@ -80,7 +80,7 @@ checklist of everything between HEAD and a shippable beta.
 
 ## Open items needing an author decision
 
-1. Confirm nothing load-bearing was lost in the unreachable claude.ai conversation
-   (index open item 1); if nothing, delete the caveat from the index.
+1. RESOLVED 2026-07-02: author confirmed nothing load-bearing was in the
+   unreachable claude.ai conversation; index caveat closed.
 2. Rename timing (item 12): before or after the demo artifact.
 3. Which cloud goes live first for item 8 (AWS is the working default).
