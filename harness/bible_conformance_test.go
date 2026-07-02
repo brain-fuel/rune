@@ -883,3 +883,31 @@ func TestBibleWasmPure(t *testing.T) {
 		}
 	}
 }
+
+// TestBibleWasmFold gates the 2 HIGHER-ORDER file/dir bible ops (foldLines/foldDir) on the
+// ninth backend: the WASI file-read helper ($d6_readfile via path_open/fd_read) + the
+// recursive dir walk ($d6_foldwalk via path_open O_DIRECTORY/fd_readdir) run under
+// `wasmtime run --dir=<cwd>` and produce the byte-identical cross-backend results --
+// ch549 -> 11\n11 (CoNLL-U token count over sample.conllu), ch554 -> 3\n3 (three .json
+// files, one in a subdir, sorted depth-first), ch560 -> 16\n16 (the \n-only split KEEPING
+// \r over the CRLF fixture). cwd is "testdata" so the listings' relative fixture paths
+// resolve; the wasmtime preopen is set from cwd by runWasmListing. Skips if wasmtime absent.
+func TestBibleWasmFold(t *testing.T) {
+	if wasmtimePathHarness() == "" {
+		t.Skip("wasmtime not available")
+	}
+	cases := []struct{ listing, main, cwd, want string }{
+		{"ch549_conllu_count.rune", "main", "testdata", "11\n11"},
+		{"ch554_fold_dir.rune", "main", "testdata", "3\n3"},
+		{"ch560_crlf_lines.rune", "main", "testdata", "16\n16"},
+	}
+	for _, c := range cases {
+		got, ok := runWasmListing(t, c.listing, c.main, c.cwd)
+		if !ok {
+			t.Skip("wasmtime not available")
+		}
+		if got != c.want {
+			t.Errorf("wasm %s/%s = %q, want %q", c.listing, c.main, got, c.want)
+		}
+	}
+}

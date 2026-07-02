@@ -41,15 +41,30 @@ const wasmRuntime = `
   ;; _start module, so an unused import in a non-IO module is harmless.
   (import "wasi_snapshot_preview1" "clock_time_get"
     (func $clock_time_get (param i32 i64 i32) (result i32)))
+  ;; ---- file/dir WASI (Task 3): read-open, streamed read, seek, close, readdir ----
+  ;; Declared unconditionally (like clock_time_get): wasmtime provides every preview1
+  ;; import for a _start module, so an unused import in a non-IO module is harmless. Their
+  ;; WAT bodies ($d6_readfile / $d6_foldwalk) are baked only when a file/dir foreign is
+  ;; present. All imports MUST precede the memory/func definitions.
+  (import "wasi_snapshot_preview1" "fd_read"    (func $fd_read    (param i32 i32 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_close"   (func $fd_close   (param i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_seek"    (func $fd_seek    (param i32 i64 i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "fd_readdir" (func $fd_readdir (param i32 i32 i32 i64 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "path_open"
+    (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
 
   ;; ---- linear memory + a bump allocator (no GC in v1) ----
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
-  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 262144):
+  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1572864):
   ;; iovec [16,24), timeNanos [24,32), fixed msgs [32,512), interned cstrs [512,4096),
-  ;; show buffer [4096,...), freelist [8192,8448), and the bible-codec byte buffers
-  ;; $D6BUF/$D6BUF2/$D6BUF3 (64 KiB each at 65536/131072/196608, declared in the codec).
-  ;; Heap allocation starts at 262144 so it never overwrites those scratch windows.
-  (global $hp (mut i32) (i32.const 262144))  ;; heap pointer; scratch below, heap above
+  ;; show buffer [4096,...), freelist [8192,8448), the bible-codec byte buffers
+  ;; $D6BUF/$D6BUF2/$D6BUF3 (64 KiB each at 65536/131072/196608, declared in the codec),
+  ;; and the Task-3 file/dir WASI scratch (declared in wasmBibleReadFile/wasmBibleFoldDir):
+  ;; $D6SYS syscall cells [262144,327680), $D6PATH path-build [327680,393216), $D6DIR
+  ;; dirent buffer [393216,458752), $D6NAMES foldwalk index [458752,524288), and the
+  ;; $D6SLURP 1 MiB whole-file slurp window [524288,1572864). Heap allocation starts at
+  ;; 1572864 so it never overwrites any of those scratch windows.
+  (global $hp (mut i32) (i32.const 1572864)) ;; heap pointer; scratch below, heap above
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
   (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
@@ -770,3 +785,269 @@ const wasmBibleCodec = `
 // $d6_h2s + the scratch-window globals). Exported for the external test package (a
 // divmod-order probe assembles it against WasmRuntime()).
 func WasmBibleCodec() string { return wasmBibleCodec }
+
+// wasmBibleReadFile is the WASI FILE-READ helper for the bible/D6 host-op family: open a
+// preopen-relative path READ-only, slurp its whole contents into a scratch window, and
+// return (buf_ptr, len) -- or (0,0) on any errno (the caller treats (0,0) as "missing",
+// mirroring the C `if (!fp) return s0`). It is the shared primitive foldLines/foldDir
+// (Task 3) and readFileCode (Task 5) build on.
+//
+// SYSCALL CELLS ($D6SYS, a 64 KiB block whose first 32 bytes hold the cells): the fd_read
+// iovec at [+0,+8) = [buf_ptr][buf_len], the path_open opened-fd out at [+8,+12), and the
+// fd_read nread out at [+24,+28). The whole file lands in $D6SLURP (1 MiB). These windows
+// sit ABOVE the codec windows ($D6BUF/2/3, which end at 262144) and BELOW the bumped $hp
+// (1572864), so they never collide with the heap, the codec byte buffers, the show
+// buffer, the freelist, the iovec, or the interned cstrs.
+//
+// WASI preview1 contract used here: path_open(fd=3 the first --dir preopen, dirflags=1
+// SYMLINK_FOLLOW, path_ptr, path_len, oflags=0, fs_rights_base=FD_READ|FD_SEEK=0x6,
+// fs_rights_inheriting=0, fdflags=0, opened_fd_out); fd_read(fd, iovs_ptr, iovs_len=1,
+// nread_out). The path bytes are the raw ASCII the caller decodes via $d6_s2h; path_open
+// reads them immediately, so the caller's decode window is free to reuse afterward.
+const wasmBibleReadFile = `
+  ;; ---- Task-3 file/dir WASI scratch: syscall cells + whole-file slurp window ----
+  (global $D6SYS   i32 (i32.const 262144))  ;; syscall cells (iovec/fd-out/nread), 64 KiB block
+  (global $D6SLURP i32 (i32.const 524288))  ;; whole-file slurp buffer (1 MiB, cap below)
+
+  ;; $d6_readfile: open $pbuf[0,$plen) READ-only under preopen fd 3, stream its bytes into
+  ;; $D6SLURP, close, and return (buf_ptr, len). Returns (0,0) on a path_open OR fd_read
+  ;; errno (missing/unreadable). The read loops until EOF (nread==0) so a short read is
+  ;; handled; a file exceeding the 1 MiB window is truncated at the cap (documented).
+  (func $d6_readfile (param $pbuf i32) (param $plen i32) (result i32 i32)
+    (local $fd i32) (local $n i32) (local $tot i32) (local $rc i32) (local $sys i32) (local $slurp i32)
+    (local.set $sys (global.get $D6SYS))
+    (local.set $slurp (global.get $D6SLURP))
+    ;; path_open(3, SYMLINK_FOLLOW=1, pbuf, plen, oflags=0, rights=FD_READ|FD_SEEK=0x6,
+    ;;   inheriting=0, fdflags=0, fd_out=$sys+8)
+    (local.set $rc (call $path_open
+      (i32.const 3) (i32.const 1)
+      (local.get $pbuf) (local.get $plen)
+      (i32.const 0)
+      (i64.const 6) (i64.const 0)
+      (i32.const 0)
+      (i32.add (local.get $sys) (i32.const 8))))
+    (if (local.get $rc) (then (return (i32.const 0) (i32.const 0))))
+    (local.set $fd (i32.load (i32.add (local.get $sys) (i32.const 8))))
+    (local.set $tot (i32.const 0))
+    (block $done (loop $lp
+      ;; iovec at $sys: buf = slurp+tot, len = remaining cap
+      (i32.store (local.get $sys) (i32.add (local.get $slurp) (local.get $tot)))
+      (i32.store (i32.add (local.get $sys) (i32.const 4))
+        (i32.sub (i32.const 1048576) (local.get $tot)))
+      (local.set $rc (call $fd_read (local.get $fd)
+        (local.get $sys) (i32.const 1) (i32.add (local.get $sys) (i32.const 24))))
+      (if (local.get $rc)
+        (then (drop (call $fd_close (local.get $fd))) (return (i32.const 0) (i32.const 0))))
+      (local.set $n (i32.load (i32.add (local.get $sys) (i32.const 24))))
+      (br_if $done (i32.eqz (local.get $n)))                          ;; EOF
+      (local.set $tot (i32.add (local.get $tot) (local.get $n)))
+      (br_if $done (i32.ge_u (local.get $tot) (i32.const 1048576)))   ;; cap reached
+      (br $lp)))
+    (drop (call $fd_close (local.get $fd)))
+    (local.get $slurp) (local.get $tot))
+`
+
+// WasmBibleReadFile returns the WAT file-read helper ($d6_readfile + its scratch globals).
+// Exported for the external test package's isolation harness (opens a known fixture under
+// `wasmtime run --dir=.` and checks the byte count matches `wc -c`).
+func WasmBibleReadFile() string { return wasmBibleReadFile }
+
+// wasmBibleFoldDir is the recursive directory-walk helper for foldDir: it opens a dir via
+// path_open(O_DIRECTORY), reads its entries via fd_readdir, copies each kept child's FULL
+// path (dir + "/" + name) into a bump region, bytewise-sorts them (== sorting by filename,
+// since every sibling shares the same dir prefix -- matches Go filepath.WalkDir per-dir
+// lexical order), then walks them depth-first PRE-order: a subdir recurses, a suffix-
+// matching file is slurped ($d6_readfile) and folded through the erased step. Skips
+// "."/"..". Depends on wasmBibleReadFile ($d6_readfile/$D6SYS) and the codec ($d6_h2s).
+//
+// RECURSION SAFETY: fd_readdir writes into the single $D6DIR window, so the dir fd is
+// CLOSED and every kept name is copied out (into the $D6PATH bump) BEFORE any recursion;
+// a child's fd_readdir then reuses $D6DIR freely. Both bumps ($d6_path_sp path bytes,
+// $d6_idx_sp the (off,len,type) index) are saved on entry and restored on exit, so a
+// child's entries never clobber a parent's pending ones. WASI filetype 3 = directory.
+//
+// $d6_foldwalk(dirPtr, dirLen, sfxPtr, sfxLen, step, s) -> s. `step` is BORROWED (owned by
+// foldDir's env); `s` is threaded by ownership (consumed by each apply, the fresh result
+// owned) exactly as foldLines folds -- the incoming s is owned, the returned s is owned.
+const wasmBibleFoldDir = `
+  ;; ---- foldDir dir-walk scratch (each 64 KiB, below $D6SLURP) ----
+  (global $D6PATH  i32 (i32.const 327680))  ;; full-path build bump (path bytes)
+  (global $D6DIR   i32 (i32.const 393216))  ;; fd_readdir dirent buffer
+  (global $D6NAMES i32 (i32.const 458752))  ;; foldwalk index: (pathOff,pathLen,type) x12B
+  (global $d6_path_sp (mut i32) (i32.const 327680))  ;; $D6PATH bump cursor
+  (global $d6_idx_sp  (mut i32) (i32.const 458752))  ;; $D6NAMES bump cursor
+
+  ;; $d6_pathcmp: bytewise compare [a,a+na) vs [b,b+nb); -1/0/1 (memcmp then length).
+  (func $d6_pathcmp (param $a i32) (param $na i32) (param $b i32) (param $nb i32) (result i32)
+    (local $i i32) (local $m i32) (local $x i32) (local $y i32)
+    (local.set $m (select (local.get $na) (local.get $nb) (i32.lt_s (local.get $na) (local.get $nb))))
+    (local.set $i (i32.const 0))
+    (block $done (loop $lp
+      (br_if $done (i32.ge_s (local.get $i) (local.get $m)))
+      (local.set $x (i32.load8_u (i32.add (local.get $a) (local.get $i))))
+      (local.set $y (i32.load8_u (i32.add (local.get $b) (local.get $i))))
+      (if (i32.ne (local.get $x) (local.get $y))
+        (then (return (select (i32.const -1) (i32.const 1) (i32.lt_u (local.get $x) (local.get $y))))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lp)))
+    (if (i32.ne (local.get $na) (local.get $nb))
+      (then (return (select (i32.const -1) (i32.const 1) (i32.lt_s (local.get $na) (local.get $nb))))))
+    (i32.const 0))
+
+  (func $d6_foldwalk (param $dirPtr i32) (param $dirLen i32)
+                     (param $sfxPtr i32) (param $sfxLen i32)
+                     (param $step i32) (param $s i32) (result i32)
+    (local $savePath i32) (local $saveIdx i32) (local $fd i32) (local $rc i32)
+    (local $cookie i64) (local $bufused i32) (local $off i32) (local $count i32)
+    (local $namlen i32) (local $dtype i32) (local $nameOff i32) (local $cp i32) (local $childLen i32)
+    (local $i i32) (local $j i32) (local $ei i32) (local $ej i32)
+    (local $pOff i32) (local $pLen i32) (local $pType i32)
+    (local $tOff i32) (local $tLen i32) (local $tType i32)
+    (local $sys i32) (local $dir i32) (local $names i32)
+    (local $buf i32) (local $len i32) (local $content i32) (local $ca i32) (local $cb i32) (local $k i32)
+    (local.set $sys (global.get $D6SYS))
+    (local.set $dir (global.get $D6DIR))
+    (local.set $names (global.get $D6NAMES))
+    (local.set $savePath (global.get $d6_path_sp))
+    (local.set $saveIdx (global.get $d6_idx_sp))
+    ;; open dir: path_open(3, 1, dirPtr, dirLen, oflags=O_DIRECTORY=2, rights=FD_READDIR=0x4000,
+    ;;   inheriting=0, fdflags=0, fd_out=$sys+8)
+    (local.set $rc (call $path_open
+      (i32.const 3) (i32.const 1)
+      (local.get $dirPtr) (local.get $dirLen)
+      (i32.const 2)
+      (i64.const 16384) (i64.const 0)
+      (i32.const 0)
+      (i32.add (local.get $sys) (i32.const 8))))
+    (if (local.get $rc) (then (return (local.get $s))))
+    (local.set $fd (i32.load (i32.add (local.get $sys) (i32.const 8))))
+    ;; readdir: collect kept entries' full paths + index. cookie starts 0.
+    (local.set $cookie (i64.const 0))
+    (local.set $count (i32.const 0))
+    (block $rddone (loop $rdlp
+      (local.set $rc (call $fd_readdir (local.get $fd) (local.get $dir) (i32.const 65536)
+        (local.get $cookie) (i32.add (local.get $sys) (i32.const 28))))
+      (if (local.get $rc) (then (br $rddone)))
+      (local.set $bufused (i32.load (i32.add (local.get $sys) (i32.const 28))))
+      (br_if $rddone (i32.eqz (local.get $bufused)))
+      (local.set $off (i32.const 0))
+      (block $eb (loop $el
+        ;; need a full 24-byte header
+        (br_if $eb (i32.gt_u (i32.add (local.get $off) (i32.const 24)) (local.get $bufused)))
+        (local.set $cookie (i64.load (i32.add (local.get $dir) (local.get $off))))       ;; d_next
+        (local.set $namlen (i32.load (i32.add (local.get $dir) (i32.add (local.get $off) (i32.const 16)))))
+        (local.set $dtype (i32.load8_u (i32.add (local.get $dir) (i32.add (local.get $off) (i32.const 20)))))
+        (local.set $nameOff (i32.add (local.get $off) (i32.const 24)))
+        ;; the name must be fully present in this buffer; else re-read from this cookie
+        (br_if $eb (i32.gt_u (i32.add (local.get $nameOff) (local.get $namlen)) (local.get $bufused)))
+        ;; skip "." and ".."
+        (if (i32.eqz (i32.and
+              (i32.eq (local.get $namlen) (i32.const 1))
+              (i32.eq (i32.load8_u (i32.add (local.get $dir) (local.get $nameOff))) (i32.const 46))))
+          (then
+            (if (i32.eqz (i32.and (i32.and
+                  (i32.eq (local.get $namlen) (i32.const 2))
+                  (i32.eq (i32.load8_u (i32.add (local.get $dir) (local.get $nameOff))) (i32.const 46)))
+                  (i32.eq (i32.load8_u (i32.add (local.get $dir) (i32.add (local.get $nameOff) (i32.const 1)))) (i32.const 46))))
+              (then
+                ;; build full child path = dir + "/" + name at $d6_path_sp
+                (local.set $cp (global.get $d6_path_sp))
+                (local.set $k (i32.const 0))
+                (block $cb1 (loop $cl1
+                  (br_if $cb1 (i32.ge_s (local.get $k) (local.get $dirLen)))
+                  (i32.store8 (i32.add (local.get $cp) (local.get $k))
+                    (i32.load8_u (i32.add (local.get $dirPtr) (local.get $k))))
+                  (local.set $k (i32.add (local.get $k) (i32.const 1)))
+                  (br $cl1)))
+                (i32.store8 (i32.add (local.get $cp) (local.get $dirLen)) (i32.const 47)) ;; '/'
+                (local.set $k (i32.const 0))
+                (block $cb2 (loop $cl2
+                  (br_if $cb2 (i32.ge_s (local.get $k) (local.get $namlen)))
+                  (i32.store8 (i32.add (local.get $cp) (i32.add (local.get $dirLen) (i32.add (i32.const 1) (local.get $k))))
+                    (i32.load8_u (i32.add (local.get $dir) (i32.add (local.get $nameOff) (local.get $k)))))
+                  (local.set $k (i32.add (local.get $k) (i32.const 1)))
+                  (br $cl2)))
+                (local.set $childLen (i32.add (local.get $dirLen) (i32.add (i32.const 1) (local.get $namlen))))
+                (global.set $d6_path_sp (i32.add (local.get $cp) (local.get $childLen)))
+                ;; index entry (pathOff, pathLen, type)
+                (i32.store (global.get $d6_idx_sp) (local.get $cp))
+                (i32.store (i32.add (global.get $d6_idx_sp) (i32.const 4)) (local.get $childLen))
+                (i32.store (i32.add (global.get $d6_idx_sp) (i32.const 8)) (local.get $dtype))
+                (global.set $d6_idx_sp (i32.add (global.get $d6_idx_sp) (i32.const 12)))
+                (local.set $count (i32.add (local.get $count) (i32.const 1)))))))
+        (local.set $off (i32.add (local.get $off) (i32.add (i32.const 24) (local.get $namlen))))
+        (br $el)))
+      (br_if $rddone (i32.lt_u (local.get $bufused) (i32.const 65536)))  ;; all entries fit
+      (br $rdlp)))
+    (drop (call $fd_close (local.get $fd)))
+    ;; insertion sort the index [saveIdx, saveIdx+count*12) by full-path bytes (== by name)
+    (local.set $i (i32.const 1))
+    (block $sb (loop $sl
+      (br_if $sb (i32.ge_s (local.get $i) (local.get $count)))
+      (local.set $ei (i32.add (local.get $saveIdx) (i32.mul (local.get $i) (i32.const 12))))
+      (local.set $tOff (i32.load (local.get $ei)))
+      (local.set $tLen (i32.load (i32.add (local.get $ei) (i32.const 4))))
+      (local.set $tType (i32.load (i32.add (local.get $ei) (i32.const 8))))
+      (local.set $j (i32.sub (local.get $i) (i32.const 1)))
+      (block $wb (loop $wl
+        (br_if $wb (i32.lt_s (local.get $j) (i32.const 0)))
+        (local.set $ej (i32.add (local.get $saveIdx) (i32.mul (local.get $j) (i32.const 12))))
+        (local.set $pOff (i32.load (local.get $ej)))
+        (local.set $pLen (i32.load (i32.add (local.get $ej) (i32.const 4))))
+        (br_if $wb (i32.le_s (call $d6_pathcmp (local.get $pOff) (local.get $pLen)
+                                               (local.get $tOff) (local.get $tLen)) (i32.const 0)))
+        ;; shift ej -> ej+12
+        (i32.store (i32.add (local.get $ej) (i32.const 12)) (local.get $pOff))
+        (i32.store (i32.add (local.get $ej) (i32.const 16)) (local.get $pLen))
+        (i32.store (i32.add (local.get $ej) (i32.const 20)) (i32.load (i32.add (local.get $ej) (i32.const 8))))
+        (local.set $j (i32.sub (local.get $j) (i32.const 1)))
+        (br $wl)))
+      (local.set $ej (i32.add (local.get $saveIdx) (i32.mul (i32.add (local.get $j) (i32.const 1)) (i32.const 12))))
+      (i32.store (local.get $ej) (local.get $tOff))
+      (i32.store (i32.add (local.get $ej) (i32.const 4)) (local.get $tLen))
+      (i32.store (i32.add (local.get $ej) (i32.const 8)) (local.get $tType))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $sl)))
+    ;; walk sorted entries depth-first pre-order
+    (local.set $i (i32.const 0))
+    (block $ib (loop $il
+      (br_if $ib (i32.ge_s (local.get $i) (local.get $count)))
+      (local.set $ei (i32.add (local.get $saveIdx) (i32.mul (local.get $i) (i32.const 12))))
+      (local.set $pOff (i32.load (local.get $ei)))
+      (local.set $pLen (i32.load (i32.add (local.get $ei) (i32.const 4))))
+      (local.set $pType (i32.load (i32.add (local.get $ei) (i32.const 8))))
+      (if (i32.eq (local.get $pType) (i32.const 3))
+        (then
+          ;; subdir: recurse (threads ownership of $s through)
+          (local.set $s (call $d6_foldwalk (local.get $pOff) (local.get $pLen)
+            (local.get $sfxPtr) (local.get $sfxLen) (local.get $step) (local.get $s))))
+        (else
+          ;; file: apply the step iff the name ends with the suffix
+          (if (i32.and (i32.ge_s (local.get $pLen) (local.get $sfxLen))
+                       (call $d6_memeq (i32.add (local.get $pOff) (i32.sub (local.get $pLen) (local.get $sfxLen)))
+                                       (local.get $sfxPtr) (local.get $sfxLen)))
+            (then
+              (call $d6_readfile (local.get $pOff) (local.get $pLen))
+              (local.set $len)
+              (local.set $buf)
+              (if (local.get $buf)
+                (then
+                  (local.set $content (call $d6_h2s (local.get $buf) (local.get $len)))
+                  ;; s = apply(apply(apply(step, s), content), unit)
+                  (local.set $ca (call $rt_apply (local.get $step) (local.get $s)))
+                  (local.set $cb (call $rt_apply (local.get $ca) (local.get $content)))
+                  (call $rt_release (local.get $ca))
+                  (local.set $s (call $rt_apply (local.get $cb) (call $rt_unit)))
+                  (call $rt_release (local.get $cb))))))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $il)))
+    ;; restore bump cursors (free this level's path bytes + index entries)
+    (global.set $d6_path_sp (local.get $savePath))
+    (global.set $d6_idx_sp (local.get $saveIdx))
+    (local.get $s))
+`
+
+// WasmBibleFoldDir returns the WAT recursive dir-walk helper ($d6_foldwalk + its scratch
+// globals). Exported for the external test package's isolation harness (walks the foldfix
+// fixture under `wasmtime run --dir=.` and checks the matched-file count).
+func WasmBibleFoldDir() string { return wasmBibleFoldDir }

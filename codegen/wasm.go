@@ -118,6 +118,9 @@ var wasmSupportedForeign = map[string]bool{
 	"splitOn":      true,
 	"jsonStrField": true,
 	"sqlQuote":     true,
+	// Task 3: the 2 HIGHER-ORDER file/dir bible ops (WASI file-read + fd_readdir).
+	"foldLines": true,
+	"foldDir":   true,
 }
 
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
@@ -1055,12 +1058,26 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 	if usesForeign(p, "sqlQuote") {
 		em.emitSqlQuoteWasm(b)
 	}
+	// Task 3: the file-read WASI helper + the 2 HIGHER-ORDER file/dir ops. $d6_readfile is
+	// baked once when any file/dir foreign is present (foldLines/foldDir both slurp files);
+	// $d6_foldwalk only when foldDir is present. The ops are curried IO-closure chains that
+	// run a host fold loop applying the erased Rune step per line / per file.
+	if usesForeign(p, "foldLines") || usesForeign(p, "foldDir") {
+		b.WriteString(wasmBibleReadFile)
+	}
+	if usesForeign(p, "foldLines") {
+		em.emitFoldLinesWasm(b)
+	}
+	if usesForeign(p, "foldDir") {
+		b.WriteString(wasmBibleFoldDir)
+		em.emitFoldDirWasm(b)
+	}
 }
 
 // usesBibleCodec reports whether p references any foreign op that decodes/encodes a
 // packed String via the codec ($d6_s2h/$d6_h2s), so the codec is baked exactly once.
 func usesBibleCodec(p Program) bool {
-	for _, op := range []string{"byteLen", "splitOn", "jsonStrField", "sqlQuote"} {
+	for _, op := range []string{"byteLen", "splitOn", "jsonStrField", "sqlQuote", "foldLines", "foldDir"} {
 		if usesForeign(p, op) {
 			return true
 		}
@@ -1265,6 +1282,169 @@ func (em *wasmEmitter) emitSqlQuoteWasm(b *strings.Builder) {
 	b.WriteString("    (call $rt_release (local.get $arg))\n")
 	b.WriteString("    (local.get $r))\n")
 	em.emitCachedThunk(b, "sqlQuote", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitFoldLinesWasm bakes `foldLines : (S:U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S` --
+// stream a file line by line, folding the erased Rune step over each line. 5-arg curried
+// IO-closure chain (_s)(path)(step)(s0)(world): the world step (c5, env={step,s0,path})
+// slurps the file via $d6_readfile, splits the bytes on '\n' KEEPING '\r' (drops the single
+// trailing empty segment iff the buffer ends in '\n' -- i.e. the final segment is applied
+// only when non-empty), and folds `s = apply(apply(apply(step, s), $d6_h2s(seg)), unit)`.
+// On a missing file ($d6_readfile -> (0,0)) it returns s0 unchanged. Ports rust.go:207 /
+// the C foldLines_c5 byte-for-byte.
+//
+// ARC: env slots (step/s0/path) are BORROWED -- never released here (rt_free reclaims them
+// when c5's closure dies). The fold's `s` is threaded by ownership: s0 is retained once so
+// the first apply consumes an owned ref, each rt_apply(step,s) consumes the current s and
+// yields a fresh owned intermediate (step stays borrowed), the intermediate apply closures
+// $ca/$cb are released, and the final s is returned owned. $d6_h2s lines are owned and
+// consumed by the apply chain (Perceus releases the arg inside the step body).
+func (em *wasmEmitter) emitFoldLinesWasm(b *strings.Builder) {
+	c1 := em.codeRef("foldLines_c1")
+	c2 := em.codeRef("foldLines_c2")
+	c3 := em.codeRef("foldLines_c3")
+	c4 := em.codeRef("foldLines_c4")
+	c5 := em.codeRef("foldLines_c5")
+	// c5: env={step,s0,path}, arg=world. Slurp + split + fold.
+	b.WriteString("  (func $foldLines_c5 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $path i32) (local $plen i32) (local $buf i32) (local $len i32)\n")
+	b.WriteString("    (local $s i32) (local $i i32) (local $segStart i32) (local $emit i32)\n")
+	b.WriteString("    (local $line i32) (local $ca i32) (local $cb i32)\n")
+	b.WriteString("    (local.set $path (call $rt_env (local.get $env) (i32.const 2)))\n")
+	b.WriteString("    (call $d6_s2h (local.get $path))\n")
+	b.WriteString("    (local.set $plen)\n") // pop len (top)
+	b.WriteString("    (drop)\n")            // pop buf ptr (D6BUF; readfile reuses its own window)
+	b.WriteString("    (call $d6_readfile (global.get $D6BUF) (local.get $plen))\n")
+	b.WriteString("    (local.set $len)\n") // pop len (top)
+	b.WriteString("    (local.set $buf)\n") // pop buf ptr
+	// s := s0 (env[1]); retain so it is an owned reference the fold can consume.
+	b.WriteString("    (local.set $s (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (call $rt_retain (local.get $s))\n")
+	// missing file: $d6_readfile returned (0,0) -> return s0 unchanged (already retained).
+	b.WriteString("    (if (i32.eqz (local.get $buf)) (then (return (local.get $s))))\n")
+	// stream-split on '\n', keeping '\r'; k runs 0..len INCLUSIVE (k==len emits the tail
+	// iff non-empty -- the single-trailing-empty drop).
+	b.WriteString("    (local.set $segStart (i32.const 0))\n")
+	b.WriteString("    (local.set $i (i32.const 0))\n")
+	b.WriteString("    (block $done (loop $lp\n")
+	b.WriteString("      (local.set $emit (i32.const 0))\n")
+	b.WriteString("      (if (i32.lt_s (local.get $i) (local.get $len))\n")
+	b.WriteString("        (then (if (i32.eq (i32.load8_u (i32.add (local.get $buf) (local.get $i))) (i32.const 10))\n")
+	b.WriteString("                (then (local.set $emit (i32.const 1)))))\n")
+	b.WriteString("        (else (if (i32.gt_s (local.get $len) (local.get $segStart)) (then (local.set $emit (i32.const 1))))))\n")
+	b.WriteString("      (if (local.get $emit)\n")
+	b.WriteString("        (then\n")
+	b.WriteString("          (local.set $line (call $d6_h2s (i32.add (local.get $buf) (local.get $segStart))\n")
+	b.WriteString("                                         (i32.sub (local.get $i) (local.get $segStart))))\n")
+	b.WriteString("          (local.set $ca (call $rt_apply (call $rt_env (local.get $env) (i32.const 0)) (local.get $s)))\n")
+	b.WriteString("          (local.set $cb (call $rt_apply (local.get $ca) (local.get $line)))\n")
+	b.WriteString("          (call $rt_release (local.get $ca))\n")
+	b.WriteString("          (local.set $s (call $rt_apply (local.get $cb) (call $rt_unit)))\n")
+	b.WriteString("          (call $rt_release (local.get $cb))\n")
+	b.WriteString("          (local.set $segStart (i32.add (local.get $i) (i32.const 1)))))\n")
+	b.WriteString("      (br_if $done (i32.ge_s (local.get $i) (local.get $len)))\n")
+	b.WriteString("      (local.set $i (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("      (br $lp)))\n")
+	b.WriteString("    (local.get $s))\n")
+	// c4: env={step,path}, arg=s0 (owned). Build c5 {step(retain),s0(move),path(retain)}.
+	fmt.Fprintf(b, "  (func $foldLines_c4 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 3)))\n", c5)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 2) (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c3: env={path}, arg=step (owned). Build c4 {step(move),path(retain)}.
+	fmt.Fprintf(b, "  (func $foldLines_c3 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 2)))\n", c4)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c2: arg=path (owned). Build c3 {path(move)}.
+	fmt.Fprintf(b, "  (func $foldLines_c2 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c3)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c1: arg=S (type/unit, discarded). Return mkclo(c2, 0).
+	fmt.Fprintf(b, "  (func $foldLines_c1 (param $arg i32) (param $env i32) (result i32)\n")
+	fmt.Fprintf(b, "    (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", c2)
+	em.emitCachedThunk(b, "foldLines", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitFoldDirWasm bakes `foldDir : (S:U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S`
+// -- recursively walk a directory (sorted, suffix-filtered, depth-first pre-order) folding
+// the erased step over each matching file's contents. 6-arg curried IO-closure chain
+// (_s)(dir)(suffix)(step)(s0)(world): the world step (c6) decodes the dir path into $D6BUF
+// and the suffix into $D6BUF2, retains s0, and runs the recursive $d6_foldwalk (which owns
+// + returns the threaded accumulator). Ports rust.go:213 / the C d6_foldwalk.
+//
+// ARC: env slots (step/s0/dirc/suf) are BORROWED; s0 is retained before it enters the fold
+// (foldwalk consumes it and returns an owned result). $d6_foldwalk applies the borrowed
+// step exactly as foldLines does. The decode windows $D6BUF (dir) / $D6BUF2 (suffix) stay
+// stable through the whole walk -- foldwalk touches only $D6DIR/$D6PATH/$D6NAMES/$D6SYS/
+// $D6SLURP + the heap, never the codec windows.
+func (em *wasmEmitter) emitFoldDirWasm(b *strings.Builder) {
+	c1 := em.codeRef("foldDir_c1")
+	c2 := em.codeRef("foldDir_c2")
+	c3 := em.codeRef("foldDir_c3")
+	c4 := em.codeRef("foldDir_c4")
+	c5 := em.codeRef("foldDir_c5")
+	c6 := em.codeRef("foldDir_c6")
+	// c6: env={step,s0,dirc,suf}, arg=world. Decode dir + suffix, walk.
+	b.WriteString("  (func $foldDir_c6 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $dirLen i32) (local $sufLen i32) (local $s i32)\n")
+	b.WriteString("    (local.set $dirLen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 2)) (global.get $D6BUF)))\n")
+	b.WriteString("    (local.set $sufLen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 3)) (global.get $D6BUF2)))\n")
+	b.WriteString("    (local.set $s (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (call $rt_retain (local.get $s))\n")
+	b.WriteString("    (call $d6_foldwalk (global.get $D6BUF) (local.get $dirLen) (global.get $D6BUF2) (local.get $sufLen)\n")
+	b.WriteString("      (call $rt_env (local.get $env) (i32.const 0)) (local.get $s)))\n")
+	// c5: env={step,dirc,suf}, arg=s0 (owned). Build c6 {step,s0,dirc,suf}.
+	fmt.Fprintf(b, "  (func $foldDir_c5 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 4)))\n", c6)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 2) (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 2)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 3) (call $rt_env (local.get $env) (i32.const 2)))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c4: env={dirc,suf}, arg=step (owned). Build c5 {step(move),dirc,suf}.
+	fmt.Fprintf(b, "  (func $foldDir_c4 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 3)))\n", c5)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 2) (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c3: env={dirc}, arg=suf (owned). Build c4 {dirc(retain),suf(move)}.
+	fmt.Fprintf(b, "  (func $foldDir_c3 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 2)))\n", c4)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c2: arg=dirc (owned). Build c3 {dirc(move)}.
+	fmt.Fprintf(b, "  (func $foldDir_c2 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c3)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c1: arg=S (type/unit, discarded). Return mkclo(c2, 0).
+	fmt.Fprintf(b, "  (func $foldDir_c1 (param $arg i32) (param $env i32) (result i32)\n")
+	fmt.Fprintf(b, "    (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", c2)
+	em.emitCachedThunk(b, "foldDir", func(f *wasmFunc, bb *strings.Builder) string {
 		r := f.fresh()
 		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
 		return "(local.get " + r + ")"
