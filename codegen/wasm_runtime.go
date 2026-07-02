@@ -66,7 +66,7 @@ const wasmRuntime = `
 
   ;; ---- linear memory + a bump allocator (no GC in v1) ----
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
-  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1837056):
+  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1968128):
   ;; iovec [16,24), timeNanos [24,32), fixed msgs [32,512), interned cstrs [512,4096),
   ;; show buffer [4096,...), freelist [8192,8448), the bible-codec byte buffers
   ;; $D6BUF/$D6BUF2/$D6BUF3 (64 KiB each at 65536/131072/196608, declared in the codec),
@@ -75,12 +75,15 @@ const wasmRuntime = `
   ;; dirent buffer [393216,458752), $D6NAMES foldwalk index [458752,524288),
   ;; $D6SLURP 1 MiB whole-file slurp window [524288,1572864), the Task-4 fd handle
   ;; table $D6WH (256 i32 slots = 1 KiB at [1572864,1573888), declared in wasmBibleWriteOps),
-  ;; and the Task-5 env/argv scratch (declared in wasmBibleEnvArgv): $D6ENVSYS syscall
+  ;; the Task-5 env/argv scratch (declared in wasmBibleEnvArgv): $D6ENVSYS syscall
   ;; cells [1573888,1574912), $D6ENVPTRS environ pointer array [1574912,1640448),
   ;; $D6ENVBUF environ KEY=VAL string buffer [1640448,1705984), $D6ARGVPTRS argv pointer
-  ;; array [1705984,1771520), $D6ARGVBUF argv string buffer [1771520,1837056).
-  ;; Heap allocation starts at 1837056 so it never overwrites any scratch windows.
-  (global $hp (mut i32) (i32.const 1837056)) ;; heap pointer; scratch below, heap above
+  ;; array [1705984,1771520), $D6ARGVBUF argv string buffer [1771520,1837056), and the
+  ;; Task-6 foldDir-private decode windows (declared in wasmBibleFoldDir, added when the
+  ;; 9-way divergence-lock caught the shared-$D6BUF2 clobber bug): $D6FDDIR dir-path
+  ;; decode [1837056,1902592), $D6FDSUF suffix decode [1902592,1968128).
+  ;; Heap allocation starts at 1968128 so it never overwrites any scratch windows.
+  (global $hp (mut i32) (i32.const 1968128)) ;; heap pointer; scratch below, heap above
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
   (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
@@ -892,6 +895,18 @@ const wasmBibleFoldDir = `
   (global $D6NAMES i32 (i32.const 458752))  ;; foldwalk index: (pathOff,pathLen,type) x12B
   (global $d6_path_sp (mut i32) (i32.const 327680))  ;; $D6PATH bump cursor
   (global $d6_idx_sp  (mut i32) (i32.const 458752))  ;; $D6NAMES bump cursor
+  ;; $D6FDDIR/$D6FDSUF (64 KiB each, at the TOP of the reserved low region, below $hp):
+  ;; foldDir's OWN decode targets for the walk's dir path / suffix, held stable for the
+  ;; ENTIRE recursive walk. They must NOT be the shared codec windows $D6BUF/$D6BUF2:
+  ;; the user's step closure runs INSIDE the walk and may itself call a codec-consuming
+  ;; op (jsonStrField/splitOn/sqlQuote/byteLen), which decodes into $D6BUF/$D6BUF2/$D6BUF3
+  ;; as throwaway scratch -- if foldDir's persistent suffix lived in $D6BUF2, the first
+  ;; matched file's step call would clobber it, so every SUBSEQUENT entry's suffix
+  ;; comparison would silently fail (bug: only the first file in a walk was ever folded
+  ;; when the step used jsonStrField -- caught by the 9-way TestBibleConformanceBuilders
+  ;; divergence-lock on ch555/ch559).
+  (global $D6FDDIR i32 (i32.const 1837056))  ;; foldDir's own dir-path decode window
+  (global $D6FDSUF i32 (i32.const 1902592))  ;; foldDir's own suffix decode window
 
   ;; $d6_pathcmp: bytewise compare [a,a+na) vs [b,b+nb); -1/0/1 (memcmp then length).
   (func $d6_pathcmp (param $a i32) (param $na i32) (param $b i32) (param $nb i32) (result i32)

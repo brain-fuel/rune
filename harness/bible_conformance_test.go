@@ -71,6 +71,21 @@ func bibleBackends() []bibleBackend {
 			runtime: func(p codegen.Program) string { return codegen.LL{}.EmitRuntimeFor(p) },
 		})
 	}
+	// Ninth (tier-4) backend: WASM/WAT run directly under `wasmtime run` -- no separate
+	// compile step. `--dir=.` preopens the run's cwd (set by callers via cmd.Dir) as the
+	// WASI sandbox root so the builders' relative file reads/writes resolve; harmless for
+	// listings that touch no files. dbApply is a documented WASM no-op (wasm.go), so any
+	// gate that needs a REAL .db from a WASM run must host-load the emitted .sql itself
+	// (see TestBibleWasmDbViaHost) rather than relying on this generic backend entry.
+	if wt := wasmtimePathHarness(); wt != "" {
+		bks = append(bks, bibleBackend{
+			name: "wasm",
+			bin:  wt,
+			ext:  "wat",
+			emit: func(p codegen.Program) (codegen.TargetSource, error) { return codegen.Wasm{}.Emit(p) },
+			run:  func(f string) *exec.Cmd { return exec.Command(wt, "run", "--dir=.", f) },
+		})
+	}
 	return bks
 }
 
@@ -175,6 +190,18 @@ func TestBibleConformanceDbApply(t *testing.T) {
 	// silently pass on the reduced set.
 	var skipped []string
 	for _, bk := range bibleBackends() {
+		if bk.name == "wasm" {
+			// WASM's dbApply is a documented sandbox no-op (wasmtime preview1 has no
+			// subprocess primitive): running ch558 under wasmtime writes ch558.sql but
+			// never creates ch558.db, so the in-sandbox `sqlite3 <dir>/ch558.db` query
+			// below would fail on a file that was never produced. This is NOT a missing
+			// toolchain (do not add to `skipped`, which would mark the whole gate
+			// inconclusive) -- it is the documented host-load split. See the dedicated
+			// TestBibleWasmDbViaHost, which builds ch558 under wasmtime then has the HOST
+			// run `sqlite3 ch558.db ".read ch558.sql"` and asserts the same count=2.
+			t.Log("[wasm] dbApply is a sandbox no-op -- host-load path covered by TestBibleWasmDbViaHost")
+			continue
+		}
 		if _, err := exec.LookPath(bk.bin); err != nil {
 			skipped = append(skipped, bk.name)
 			continue
@@ -372,6 +399,12 @@ func TestBibleConformanceRealData(t *testing.T) {
 			t.Logf("real-data scale gate excludes %s (byte-identity proven by TestBibleConformanceBuilders; native GC too slow at N=1500 -- PARKING-LOT)", bk.name)
 			continue
 		}
+		// WASM DELIBERATELY JOINS this scale gate (unlike native c/ll above): its allocator
+		// is ARC + a size-classed freelist with NO scanning GC (no O(N_live) sweep), so it does
+		// not share native's perf cliff. A local synthetic-scale timing (1500 lexicon-shaped
+		// fixtures, same ch559 builder, since BIBLE_REPO is not available in every environment)
+		// ran wasmtime in well under 1s -- an order of magnitude faster than the JS backend on
+		// the same input -- so excluding WASM here would be unwarranted, not merely cautious.
 		dir := t.TempDir()
 		// Sample real Greek+Hebrew lexicon entries (not the whole 23,681-file corpus:
 		// the per-backend bignum codec over every file totals >1hr across 5 backends).
@@ -420,7 +453,16 @@ func TestBibleConformanceRealData(t *testing.T) {
 		} else if string(sqlBytes) != string(refSQL) {
 			t.Errorf("[%s] lexicon.sql diverges from [%s] on real data", bk.name, refName)
 		}
-		// and the loaded db must be query-equivalent (sanity on the first backend)
+		// and the loaded db must be query-equivalent (sanity on every backend). WASM's
+		// dbApply is a documented sandbox no-op (see TestBibleConformanceDbApply / wasm.go
+		// emitDbApplyWasm), so lexicon.db was never created in-sandbox for wasm -- HOST-load
+		// the just-verified byte-identical lexicon.sql exactly as TestBibleWasmDbViaHost does
+		// for ch558, then run the same query every other backend's in-sandbox dbApply produced.
+		if bk.name == "wasm" {
+			if out, err := exec.Command("sqlite3", filepath.Join(dir, "lexicon.db"), ".read "+filepath.Join(dir, "lexicon.sql")).CombinedOutput(); err != nil {
+				t.Fatalf("[wasm] host sqlite3 .read lexicon.sql: %v\n%s", err, out)
+			}
+		}
 		dump, err := exec.Command("sqlite3", filepath.Join(dir, "lexicon.db"), q).CombinedOutput()
 		if err != nil {
 			t.Fatalf("[%s] query: %v\n%s", bk.name, err, dump)
@@ -993,5 +1035,42 @@ func TestBibleWasmFold(t *testing.T) {
 		if got != c.want {
 			t.Errorf("wasm %s/%s = %q, want %q", c.listing, c.main, got, c.want)
 		}
+	}
+}
+
+// TestBibleWasmDbViaHost is the HOST-LOAD half of the dbApply split documented at wasm.go
+// (emitDbApplyWasm): WASI preview1 has no subprocess primitive, so on WASM `dbApply` is a
+// no-op that leaves the .sql script on disk instead of shelling out to sqlite3. This test
+// proves that host-side .sql is still correct: it runs ch558_db_apply.rune under wasmtime
+// (writing ch558.sql, dbApply no-op'd), then has the HOST run
+// `sqlite3 ch558.db ".read ch558.sql"` to build the db exactly the way the OTHER eight
+// backends' in-sandbox dbApply would have, then asserts count(*) = 2 -- the same assertion
+// TestBibleConformanceDbApply makes for every other backend. WASM is deliberately excluded
+// from that shared in-sandbox loop (see the "wasm" case there) and covered here instead.
+func TestBibleWasmDbViaHost(t *testing.T) {
+	if wasmtimePathHarness() == "" {
+		t.Skip("wasmtime not available")
+	}
+	if _, err := exec.LookPath("sqlite3"); err != nil {
+		t.Skip("sqlite3 CLI not in PATH")
+	}
+	dir := t.TempDir()
+	if _, ok := runWasmListing(t, "ch558_db_apply.rune", "main", dir); !ok {
+		t.Skip("wasmtime not available")
+	}
+	sqlFile := filepath.Join(dir, "ch558.sql")
+	if _, err := os.Stat(sqlFile); err != nil {
+		t.Fatalf("wasm run did not produce ch558.sql: %v", err)
+	}
+	dbFile := filepath.Join(dir, "ch558.db")
+	if out, err := exec.Command("sqlite3", dbFile, ".read "+sqlFile).CombinedOutput(); err != nil {
+		t.Fatalf("host sqlite3 .read %s: %v\n%s", sqlFile, err, out)
+	}
+	q, err := exec.Command("sqlite3", dbFile, "SELECT count(*) FROM t").CombinedOutput()
+	if err != nil {
+		t.Fatalf("query: %v\n%s", err, q)
+	}
+	if got := strings.TrimSpace(string(q)); got != "2" {
+		t.Errorf("wasm (host-loaded) ch558 db count = %q, want 2", got)
 	}
 }

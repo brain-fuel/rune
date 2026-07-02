@@ -486,3 +486,18 @@ logged reason (harness/bible_conformance_test.go). FIX (a real perf item, alread
 comment as "a sorted-bounds / bitmap speedup is a later perf item"): replace gc_find_obj's linear scan with
 a sorted-interval tree or an allocation bitmap so conservative marking is sub-linear. Park (Standing Rule 1,
 no perf consumer -- the corpus ETL runs go-only in production; native is a conformance target, not the ETL).
+
+## WASM foldDir suffix window aliased the shared codec scratch -- FIXED (2026-07-02, bible cross-backend tier 4)
+`foldDir`'s WAT emission (`emitFoldDirWasm`, codegen/wasm.go) decoded the walk's dir path into `$D6BUF`
+and its suffix into `$D6BUF2` -- the SAME scratch windows `jsonStrField`/`splitOn`/`sqlQuote`/`byteLen`
+use as their own throwaway decode targets. Because the user's step closure runs INSIDE the recursive walk
+and (in ch555/ch559) calls `jsonStrField` per file, the first matched file's step call clobbered
+`$D6BUF2`, so `$d6_foldwalk`'s per-entry suffix comparison (`d6_memeq(..., sfxPtr=$D6BUF2, ...)`) silently
+failed for every entry after the first -- ONLY the first file in sort order was ever folded. Caught live
+by the new 9-way `TestBibleConformanceBuilders` divergence-lock (joining WASM to `bibleBackends()`):
+ch555's shared-root.out came back empty (a lone unpaired entry) and ch559's lexicon.sql held only the
+first INSERT, both diverging from the other 8 backends' byte-identical output. FIXED by giving foldDir
+its own dedicated, never-shared decode windows `$D6FDDIR`/`$D6FDSUF` (codegen/wasm_runtime.go, at the top
+of the reserved low region, `$hp` bumped from 1837056 to 1968128) that stay stable for the whole walk
+regardless of what the applied step decodes elsewhere. Verified: `TestBibleConformanceBuilders` now passes
+9-way byte-identical (sha256 cff27bc shared-root / c4246e3 lexicon.sql) with WASM included.

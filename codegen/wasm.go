@@ -1468,15 +1468,20 @@ func (em *wasmEmitter) emitFoldLinesWasm(b *strings.Builder) {
 // emitFoldDirWasm bakes `foldDir : (S:U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S`
 // -- recursively walk a directory (sorted, suffix-filtered, depth-first pre-order) folding
 // the erased step over each matching file's contents. 6-arg curried IO-closure chain
-// (_s)(dir)(suffix)(step)(s0)(world): the world step (c6) decodes the dir path into $D6BUF
-// and the suffix into $D6BUF2, retains s0, and runs the recursive $d6_foldwalk (which owns
-// + returns the threaded accumulator). Ports rust.go:213 / the C d6_foldwalk.
+// (_s)(dir)(suffix)(step)(s0)(world): the world step (c6) decodes the dir path into
+// $D6FDDIR and the suffix into $D6FDSUF, retains s0, and runs the recursive $d6_foldwalk
+// (which owns + returns the threaded accumulator). Ports rust.go:213 / the C d6_foldwalk.
 //
 // ARC: env slots (step/s0/dirc/suf) are BORROWED; s0 is retained before it enters the fold
 // (foldwalk consumes it and returns an owned result). $d6_foldwalk applies the borrowed
-// step exactly as foldLines does. The decode windows $D6BUF (dir) / $D6BUF2 (suffix) stay
-// stable through the whole walk -- foldwalk touches only $D6DIR/$D6PATH/$D6NAMES/$D6SYS/
-// $D6SLURP + the heap, never the codec windows.
+// step exactly as foldLines does. The decode windows MUST be foldDir's OWN dedicated
+// $D6FDDIR (dir) / $D6FDSUF (suffix) -- NOT the shared codec windows $D6BUF/$D6BUF2 -- since
+// the applied step runs INSIDE the walk and may itself invoke a codec-consuming op
+// (jsonStrField/splitOn/sqlQuote/byteLen), which would clobber $D6BUF/$D6BUF2 as its own
+// throwaway scratch after the first matched file, silently breaking every subsequent
+// entry's suffix comparison (the bug the 9-way TestBibleConformanceBuilders divergence-lock
+// caught on ch555/ch559: only the walk's first file was ever folded). foldwalk otherwise
+// touches only $D6DIR/$D6PATH/$D6NAMES/$D6SYS/$D6SLURP + the heap, never the codec windows.
 func (em *wasmEmitter) emitFoldDirWasm(b *strings.Builder) {
 	c1 := em.codeRef("foldDir_c1")
 	c2 := em.codeRef("foldDir_c2")
@@ -1487,11 +1492,11 @@ func (em *wasmEmitter) emitFoldDirWasm(b *strings.Builder) {
 	// c6: env={step,s0,dirc,suf}, arg=world. Decode dir + suffix, walk.
 	b.WriteString("  (func $foldDir_c6 (param $arg i32) (param $env i32) (result i32)\n")
 	b.WriteString("    (local $dirLen i32) (local $sufLen i32) (local $s i32)\n")
-	b.WriteString("    (local.set $dirLen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 2)) (global.get $D6BUF)))\n")
-	b.WriteString("    (local.set $sufLen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 3)) (global.get $D6BUF2)))\n")
+	b.WriteString("    (local.set $dirLen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 2)) (global.get $D6FDDIR)))\n")
+	b.WriteString("    (local.set $sufLen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 3)) (global.get $D6FDSUF)))\n")
 	b.WriteString("    (local.set $s (call $rt_env (local.get $env) (i32.const 1)))\n")
 	b.WriteString("    (call $rt_retain (local.get $s))\n")
-	b.WriteString("    (call $d6_foldwalk (global.get $D6BUF) (local.get $dirLen) (global.get $D6BUF2) (local.get $sufLen)\n")
+	b.WriteString("    (call $d6_foldwalk (global.get $D6FDDIR) (local.get $dirLen) (global.get $D6FDSUF) (local.get $sufLen)\n")
 	b.WriteString("      (call $rt_env (local.get $env) (i32.const 0)) (local.get $s)))\n")
 	// c5: env={step,dirc,suf}, arg=s0 (owned). Build c6 {step,s0,dirc,suf}.
 	fmt.Fprintf(b, "  (func $foldDir_c5 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
