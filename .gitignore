@@ -45,3 +45,5 @@ third_party/bearssl/build/
 
 # subagent-driven-development scratch (ledger, briefs, reports, diffs)
 .superpowers/
+.assayxport/
+assayxport.json
