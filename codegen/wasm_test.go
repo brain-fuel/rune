@@ -161,10 +161,12 @@ p : Pairing Nat Nat is mk Nat Nat (succ zero) (succ (succ zero)) end
 	}
 }
 
-// TestWasmRejectsUnsupported is the HONESTY gate: the v1 WASM backend returns a CLEAR
-// error for a form it cannot lower (a foreign axiom, a string/ptr literal, an IO main)
+// TestWasmRejectsUnsupported is the HONESTY gate: the WASM backend returns a CLEAR error
+// for a form it cannot lower (a NON-whitelisted foreign axiom, a string/ptr literal)
 // rather than emitting broken WAT. This is a pure emit-time check (no wasmtime needed),
-// so it runs even under -short.
+// so it runs even under -short. (IO main + the whitelisted foreign IO ops printNat/
+// timeNanos are now SUPPORTED -- see TestWasmPrintNatIOMain -- but an unknown foreign like
+// "id" still hard-errors, keeping the honesty guarantee meaningful.)
 func TestWasmRejectsUnsupported(t *testing.T) {
 	cases := []struct {
 		name string
@@ -180,9 +182,6 @@ func TestWasmRejectsUnsupported(t *testing.T) {
 		{"ptr", codegen.Program{
 			Defs: []codegen.DefSpec{{Name: "main", Body: codegen.ILit{Kind: codegen.LitPtr, Int: 1}}}, Main: "main",
 		}, "pointer"},
-		{"iomain", codegen.Program{
-			Defs: []codegen.DefSpec{{Name: "main", Body: codegen.IUnit{}}}, Main: "main", IOMain: true,
-		}, "IO main"},
 	}
 	for _, tc := range cases {
 		_, err := codegen.Wasm{}.Emit(tc.p)
@@ -192,6 +191,28 @@ func TestWasmRejectsUnsupported(t *testing.T) {
 		if !strings.Contains(err.Error(), tc.want) {
 			t.Fatalf("%s: error %q does not mention %q", tc.name, err.Error(), tc.want)
 		}
+	}
+}
+
+// TestWasmPrintNatIOMain is the Task-1 acceptance: the WASM backend now lowers an IO-main
+// program with foreign IO ops. ch210 reads the OS clock (timeNanos, discarded for
+// determinism), then prints 1 and 2 via printNat -- exercising the curried IO-closure
+// template, the bindIO/pureIO monad, fd_write console-out, and IO-main lowering (apply the
+// world token, show the yielded value). Its observable output must be byte-identical to
+// the JS reference (1\n2\n2).
+func TestWasmPrintNatIOMain(t *testing.T) {
+	srcBytes, err := os.ReadFile("../listings/ch210_io_os.rune")
+	if err != nil {
+		t.Skipf("cannot read ch210 listing: %v", err)
+	}
+	src := string(srcBytes)
+	jsOut := runNode(t, emitJS(t, src, "main"))
+	wasmOut := runWasm(t, emitWith(t, codegen.Wasm{}, src, "main"))
+	if wasmOut != jsOut {
+		t.Fatalf("ch210 printNat/IO-main: WASM output %q != JS reference %q", wasmOut, jsOut)
+	}
+	if jsOut != "1\n2\n2" {
+		t.Fatalf("ch210 unexpected reference output %q (want %q)", jsOut, "1\n2\n2")
 	}
 }
 

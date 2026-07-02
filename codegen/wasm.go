@@ -52,13 +52,28 @@ func (Wasm) Emit(p Program) (TargetSource, error) {
 	var body strings.Builder
 
 	em.emitDefs(&body)
+	// Bake the whitelisted foreign IO ops + the IO monad (bindIO/pureIO) into the module.
+	// This runs BEFORE emitTable so each op's code blocks are registered (codeRef) and
+	// land in the function table; WAT is order-agnostic across function references, so
+	// $rune_main below may forward-reference these thunks freely.
+	em.emitForeignPrimsWasm(&body, p)
 
-	// $rune_main: evaluate the entry thunk and show it.
+	// $rune_main: evaluate the entry thunk and show it. An IO main (p.IOMain) is a
+	// deferred world thunk (unit -> A): mirror C/JS by running the effect chain --
+	// apply the entry to the world token ($rt_unit) -- then show the yielded value.
 	body.WriteString("  (func $rune_main\n")
 	if p.Main != "" {
 		f := &wasmFunc{em: em}
-		mainV := f.emit(&body, CGlobal{Name: p.Main}, nil)
-		fmt.Fprintf(&body, "    (call $rt_show_line %s)\n", mainV)
+		var inner strings.Builder
+		mainV := f.emit(&inner, CGlobal{Name: p.Main}, nil)
+		if p.IOMain {
+			r := f.fresh()
+			fmt.Fprintf(&inner, "    (local.set %s (call $rt_apply %s (call $rt_unit)))\n", r, mainV)
+			mainV = "(local.get " + r + ")"
+		}
+		fmt.Fprintf(&inner, "    (call $rt_show_line %s)\n", mainV)
+		body.WriteString(f.localDecls())
+		body.WriteString(inner.String())
 	}
 	body.WriteString("  )\n")
 
@@ -86,6 +101,20 @@ func (Wasm) Emit(p Program) (TargetSource, error) {
 	return TargetSource(b.String()), nil
 }
 
+// wasmSupportedForeign lists the foreign ops with a WAT body in emitForeignPrimsWasm.
+// wasmCheckSupported allows these; any other foreign is still a hard, honest error.
+//
+// Task 1 (the D6/bible-ops WASM tier foundation) opens this whitelist with the two
+// foreign IO ops the ch210 demo exercises: printNat (console-out via fd_write) and
+// timeNanos (the OS monotonic clock via WASI clock_time_get). Both are baked in
+// emitForeignPrimsWasm as CURRIED IO-closure chains -- the load-bearing template every
+// later IO op (getEnvCode/readFileCode/foldLines/...) reuses. Later tasks append names
+// here as their WAT bodies land; an unknown foreign STILL hard-errors (the honesty gate).
+var wasmSupportedForeign = map[string]bool{
+	"printNat":  true,
+	"timeNanos": true,
+}
+
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
 // v1 WASM backend cannot lower (rather than emit broken WAT). Mirrors foreignNames'
 // walk over every node kind so a nested unsupported form is found.
@@ -98,7 +127,11 @@ func wasmCheckSupported(p Program) error {
 		}
 		switch x := t.(type) {
 		case IForeign:
-			err = fmt.Errorf("codegen(wasm): foreign %q is not supported in v1 (no WASI host vocabulary yet)", x.Name)
+			if !wasmSupportedForeign[x.Name] {
+				err = fmt.Errorf("codegen(wasm): foreign %q is not supported (no WASI/WAT body)", x.Name)
+				return
+			}
+			// whitelisted: a WAT body is baked by emitForeignPrimsWasm -- no error.
 		case ILit:
 			switch x.Kind {
 			case LitInt, LitNat:
@@ -138,9 +171,8 @@ func wasmCheckSupported(p Program) error {
 	if err != nil {
 		return err
 	}
-	if p.IOMain {
-		return fmt.Errorf("codegen(wasm): IO main is not supported in v1")
-	}
+	// IO-main is supported since Task 1 (the effect chain is run at $rune_main by
+	// applying the world token, then the final value is shown) -- see Emit().
 	return nil
 }
 
@@ -659,8 +691,10 @@ func (f *wasmFunc) emitIn(b *strings.Builder, t CIr, locals []string) string {
 	case CGlobal:
 		return fmt.Sprintf("(call $%s)", wasmThunkName(x.Name))
 	case CForeign:
-		// Guarded out by wasmCheckSupported; defensive.
-		return "(call $rt_unit)"
+		// A whitelisted foreign lowers to its baked accessor thunk (emitForeignPrimsWasm),
+		// named identically to a CGlobal thunk. The accessor returns the curried IO-closure
+		// chain; wasmCheckSupported has already rejected any non-whitelisted foreign.
+		return fmt.Sprintf("(call $%s)", wasmThunkName(x.Name))
 	case CUnit:
 		return "(call $rt_unit)"
 	case CLit:
@@ -968,6 +1002,148 @@ func (f *wasmFunc) accelDispatch(b *strings.Builder, app AppClosure, locals []st
 	fmt.Fprintf(b, "    (call $rt_release %s)\n", ea)
 	fmt.Fprintf(b, "    (call $rt_release %s)\n", eb)
 	return "(local.get " + r + ")", true
+}
+
+// emitForeignPrimsWasm bakes the WAT bodies for the supported foreign IO ops referenced
+// by p, plus the IO monad (bindIO/pureIO) when the program uses IO. It mirrors the JS
+// ioRuntime + the D6 host-body bake (js.go) and the C cIORuntime + printNat (c.go), but
+// over the WASM value rep + ARC. Each op is a CURRIED IO-CLOSURE CHAIN (the load-bearing
+// template Tasks 2-5 reuse verbatim):
+//
+//	accessor $def_<op>  : (result i32)                 -> mkclo(code_0, 0)   [the CGlobal thunk]
+//	  code_0 (arg=v0, env={})     -> mkclo(code_1, 1); slot0 = v0            [bind a value arg]
+//	  ...                                                                    [more value args]
+//	  code_k (arg=world, env={..}) -> <perform effect>; return <owned value> [the world step]
+//
+// The world token is $rt_unit (immortal: no retain/release). ARC discipline: a code block
+// receives its $arg OWNED (move it into a captured slot, or consume it) and its $env slots
+// BORROWED (retain before forwarding into a child closure that will be released; never
+// release the env here -- rt_free reclaims it when the closure dies). A world step that
+// returns a captured/borrowed value RETAINS it first so the yielded result is an
+// independent owned reference. Intermediate closures produced by rt_apply are released.
+func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
+	if usesIO(p) {
+		em.emitPureIOWasm(b)
+		em.emitBindIOWasm(b)
+	}
+	if usesForeign(p, "printNat") {
+		em.emitPrintNatWasm(b)
+	}
+	if usesForeign(p, "timeNanos") {
+		em.emitTimeNanosWasm(b)
+	}
+}
+
+// emitPrintNatWasm bakes `printNat : Nat -> IO Nat` -- the FIRST foreign IO op and the
+// documented curried template. accessor -> closure(Nat) -> closure(world) -> effect.
+// The world step renders the Nat's decimal + newline to stdout (fd 1) via $rt_show_line
+// (K_BIG -> emit_big is exactly the decimal), then RETAINS + returns the Nat.
+func (em *wasmEmitter) emitPrintNatWasm(b *strings.Builder) {
+	vIdx := em.codeRef("printNat_v")
+	wIdx := em.codeRef("printNat_w")
+	// world step: env={n}. Print n, return it as an owned reference.
+	b.WriteString("  (func $printNat_w (param $arg i32) (param $env i32) (result i32) (local $n i32)\n")
+	b.WriteString("    (local.set $n (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_show_line (local.get $n))\n")
+	b.WriteString("    (call $rt_retain (local.get $n))\n") // yield an independent owned ref
+	b.WriteString("    (local.get $n))\n")
+	// value step: capture the (owned) Nat arg into the world step's env (MOVE).
+	fmt.Fprintf(b, "  (func $printNat_v (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", wIdx)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// accessor thunk $def_printNat -> mkclo(printNat_v, 0).
+	em.emitCachedThunk(b, "printNat", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, vIdx)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitTimeNanosWasm bakes `timeNanos : IO Nat` -- the world-only arity of the template
+// (accessor -> closure(world) -> effect; no value arg). The world step reads the WASI
+// monotonic clock (clock_time_get, clock_id 1) into the [24,32) scratch cell and builds a
+// bignum from the i64 nanosecond count. The result is fresh/owned (no retain needed).
+func (em *wasmEmitter) emitTimeNanosWasm(b *strings.Builder) {
+	wIdx := em.codeRef("timeNanos_w")
+	b.WriteString("  (func $timeNanos_w (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (drop (call $clock_time_get (i32.const 1) (i64.const 0) (i32.const 24)))\n")
+	b.WriteString("    (call $rt_big_from_i64 (i64.load (i32.const 24))))\n")
+	em.emitCachedThunk(b, "timeNanos", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, wIdx)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitPureIOWasm bakes `pureIO A a u = a` (a constant world thunk). accessor -> closure(A)
+// -> closure(a) -> closure(world) -> a. The type arg A erases to $rt_unit (immortal). The
+// world step RETAINS + returns the captured value as an independent owned reference.
+func (em *wasmEmitter) emitPureIOWasm(b *strings.Builder) {
+	p0 := em.codeRef("io_pure0")
+	p1 := em.codeRef("io_pure1")
+	p2 := em.codeRef("io_pure2")
+	// io_pure2: env={a}, arg=world. Return a (owned).
+	b.WriteString("  (func $io_pure2 (param $arg i32) (param $env i32) (result i32) (local $a i32)\n")
+	b.WriteString("    (local.set $a (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_retain (local.get $a))\n")
+	b.WriteString("    (local.get $a))\n")
+	// io_pure1: arg=a (owned), build io_pure2 capturing a (MOVE).
+	fmt.Fprintf(b, "  (func $io_pure1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", p2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// io_pure0: arg=A (type/unit, discarded), return mkclo(io_pure1, 0).
+	fmt.Fprintf(b, "  (func $io_pure0 (param $arg i32) (param $env i32) (result i32)\n")
+	fmt.Fprintf(b, "    (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", p1)
+	em.emitCachedThunk(b, "pureIO", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, p0)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitBindIOWasm bakes `bindIO A B m k u = k (m ()) ()` -- the IO sequencing combinator.
+// accessor -> A -> B -> m -> k -> world -> effect. The world step (io_bind4, env={m,k})
+// runs m on the world (m borrowed from env), feeds its value to k (borrowed), runs the
+// resulting action on the world, RELEASES that fresh intermediate action, and yields its
+// value. io_bind3 RETAINS the forwarded m (env slot) into io_bind4 and MOVES the owned k.
+func (em *wasmEmitter) emitBindIOWasm(b *strings.Builder) {
+	i0 := em.codeRef("io_bind0")
+	i1 := em.codeRef("io_bind1")
+	i2 := em.codeRef("io_bind2")
+	i3 := em.codeRef("io_bind3")
+	i4 := em.codeRef("io_bind4")
+	// io_bind4: env={m,k}, arg=world. k (m ()) ().
+	b.WriteString("  (func $io_bind4 (param $arg i32) (param $env i32) (result i32) (local $v i32) (local $act i32) (local $r i32)\n")
+	b.WriteString("    (local.set $v (call $rt_apply (call $rt_env (local.get $env) (i32.const 0)) (call $rt_unit)))\n")
+	b.WriteString("    (local.set $act (call $rt_apply (call $rt_env (local.get $env) (i32.const 1)) (local.get $v)))\n")
+	b.WriteString("    (local.set $r (call $rt_apply (local.get $act) (call $rt_unit)))\n")
+	b.WriteString("    (call $rt_release (local.get $act))\n") // fresh action from k: reclaim
+	b.WriteString("    (local.get $r))\n")
+	// io_bind3: env={m}, arg=k. Build io_bind4 {m,k}: retain forwarded m, move owned k.
+	fmt.Fprintf(b, "  (func $io_bind3 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 2)))\n", i4)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// io_bind2: arg=m (owned), build io_bind3 capturing m (MOVE).
+	fmt.Fprintf(b, "  (func $io_bind2 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", i3)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// io_bind1: arg=B (type/unit, discarded), return mkclo(io_bind2, 0).
+	fmt.Fprintf(b, "  (func $io_bind1 (param $arg i32) (param $env i32) (result i32)\n")
+	fmt.Fprintf(b, "    (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", i2)
+	// io_bind0: arg=A (type/unit, discarded), return mkclo(io_bind1, 0).
+	fmt.Fprintf(b, "  (func $io_bind0 (param $arg i32) (param $env i32) (result i32)\n")
+	fmt.Fprintf(b, "    (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", i1)
+	em.emitCachedThunk(b, "bindIO", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, i0)
+		return "(local.get " + r + ")"
+	})
 }
 
 // wasmName sanitizes a rune identifier into a WAT-symbol fragment ([A-Za-z0-9_], shared

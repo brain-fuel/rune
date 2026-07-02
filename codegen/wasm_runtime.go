@@ -31,9 +31,16 @@ package codegen
 // program's own functions. The `$table`/`$elem` and `$rune_main` are emitted by wasm.go
 // (they depend on the program), as is the final `(start)`/export wiring.
 const wasmRuntime = `
-  ;; ---- WASI import: write the show buffer to stdout (fd 1) ----
+  ;; ---- WASI imports (all imports MUST precede the memory/func definitions) ----
+  ;; write the show buffer to stdout (fd 1)
   (import "wasi_snapshot_preview1" "fd_write"
     (func $fd_write (param i32 i32 i32 i32) (result i32)))
+  ;; read a clock: clock_time_get(clock_id, precision, time_out_ptr) -> errno; writes an
+  ;; i64 nanosecond count to *time_out_ptr. clock_id 1 = MONOTONIC. Used by timeNanos
+  ;; (Task 1). Declared unconditionally -- wasmtime provides every preview1 import for a
+  ;; _start module, so an unused import in a non-IO module is harmless.
+  (import "wasi_snapshot_preview1" "clock_time_get"
+    (func $clock_time_get (param i32 i64 i32) (result i32)))
 
   ;; ---- linear memory + a bump allocator (no GC in v1) ----
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
@@ -191,6 +198,28 @@ const wasmRuntime = `
     (block $b2 (loop $l2 (br_if $b2 (i32.le_s (local.get $t) (i32.const 0)))
       (call $big_setlimb (local.get $v) (local.get $k) (i32.rem_u (local.get $t) (i32.const 1000000000)))
       (local.set $t (i32.div_u (local.get $t) (i32.const 1000000000)))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br $l2)))
+    (local.get $v))
+
+  ;; build a bignum from an i64 magnitude (n >= 0; base-1e9 LE limbs). The i32 twin
+  ;; rt_big_from_long tops out at ~2e9; a clock reading (timeNanos, ~1e18 ns) needs the
+  ;; full 64-bit range, so this extracts limbs by i64 divmod-by-1e9.
+  (func $rt_big_from_i64 (param $n i64) (result i32)
+    (local $v i32) (local $k i32) (local $t i64)
+    (if (i64.le_s (local.get $n) (i64.const 0))
+      (then (return (call $big_alloc (i32.const 0)))))
+    (local.set $t (local.get $n)) (local.set $k (i32.const 0))
+    (block $b (loop $l (br_if $b (i64.le_s (local.get $t) (i64.const 0)))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (local.set $t (i64.div_u (local.get $t) (i64.const 1000000000)))
+      (br $l)))
+    (local.set $v (call $big_alloc (local.get $k)))
+    (local.set $t (local.get $n)) (local.set $k (i32.const 0))
+    (block $b2 (loop $l2 (br_if $b2 (i64.le_s (local.get $t) (i64.const 0)))
+      (call $big_setlimb (local.get $v) (local.get $k)
+        (i32.wrap_i64 (i64.rem_u (local.get $t) (i64.const 1000000000))))
+      (local.set $t (i64.div_u (local.get $t) (i64.const 1000000000)))
       (local.set $k (i32.add (local.get $k) (i32.const 1)))
       (br $l2)))
     (local.get $v))
