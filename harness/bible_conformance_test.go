@@ -808,3 +808,78 @@ func TestBibleNativePure(t *testing.T) {
 		}
 	}
 }
+
+// wasmtimePathHarness resolves the wasmtime binary (~/.wasmtime/bin/wasmtime or PATH);
+// "" when absent. The ninth backend's WAT modules run directly under `wasmtime run`.
+func wasmtimePathHarness() string {
+	if home, err := os.UserHomeDir(); err == nil {
+		cand := filepath.Join(home, ".wasmtime", "bin", "wasmtime")
+		if _, err := os.Stat(cand); err == nil {
+			return cand
+		}
+	}
+	if p, err := exec.LookPath("wasmtime"); err == nil {
+		return p
+	}
+	return ""
+}
+
+// runWasmListing emits (listing, main) to WAT (codegen.Wasm) and runs it under wasmtime,
+// returning trimmed stdout + ok=true. ok=false when wasmtime is absent (callers skip).
+// Pure ops need no sandbox flags; when cwd != "" it is passed as the wasmtime preopen
+// (--dir) and the process cwd, which later file/env/argv tasks require.
+func runWasmListing(t *testing.T, listing, main, cwd string) (string, bool) {
+	t.Helper()
+	wt := wasmtimePathHarness()
+	if wt == "" {
+		return "", false
+	}
+	s := loadListing(t, listing)
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		t.Fatalf("%s emit-program: %v", listing, err)
+	}
+	src, err := codegen.Wasm{}.Emit(p)
+	if err != nil {
+		t.Fatalf("%s wasm emit: %v", listing, err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "module.wat")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var cmd *exec.Cmd
+	if cwd != "" {
+		cmd = exec.Command(wt, "run", "--dir=.", f)
+		cmd.Dir = cwd
+	} else {
+		cmd = exec.Command(wt, "run", f)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%s wasmtime run: %v", listing, err)
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// TestBibleWasmPure gates the 4 PURE bible ops (byteLen/splitOn/jsonStrField/sqlQuote)
+// on the ninth backend: the packed-String codec + op bodies produce the byte-identical
+// cross-backend results under wasmtime (ch551 -> 5, ch557 -> 6). Skips if wasmtime absent.
+func TestBibleWasmPure(t *testing.T) {
+	if wasmtimePathHarness() == "" {
+		t.Skip("wasmtime not available")
+	}
+	cases := []struct{ listing, main, cwd, want string }{
+		{"ch551_json_field.rune", "strongLen", "", "5"},
+		{"ch557_sql_quote.rune", "quoteEmbedded", "", "6"},
+	}
+	for _, c := range cases {
+		got, ok := runWasmListing(t, c.listing, c.main, c.cwd)
+		if !ok {
+			t.Skip("wasmtime not available")
+		}
+		if got != c.want {
+			t.Errorf("wasm %s/%s = %q, want %q", c.listing, c.main, got, c.want)
+		}
+	}
+}

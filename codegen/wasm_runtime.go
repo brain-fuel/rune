@@ -44,7 +44,12 @@ const wasmRuntime = `
 
   ;; ---- linear memory + a bump allocator (no GC in v1) ----
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
-  (global $hp (mut i32) (i32.const 65536))  ;; heap pointer; below it: scratch + cstrs
+  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 262144):
+  ;; iovec [16,24), timeNanos [24,32), fixed msgs [32,512), interned cstrs [512,4096),
+  ;; show buffer [4096,...), freelist [8192,8448), and the bible-codec byte buffers
+  ;; $D6BUF/$D6BUF2/$D6BUF3 (64 KiB each at 65536/131072/196608, declared in the codec).
+  ;; Heap allocation starts at 262144 so it never overwrites those scratch windows.
+  (global $hp (mut i32) (i32.const 262144))  ;; heap pointer; scratch below, heap above
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
   (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
@@ -649,3 +654,119 @@ const wasmRuntime = `
 // const is unexported so the runtime cannot be modified from outside codegen; this
 // accessor gives the external test package read-only access.
 func WasmRuntime() string { return wasmRuntime }
+
+// wasmBibleCodec is the packed-String CODEC for the bible/D6 host-op family: the
+// base-256, leading-1-sentinel encoding shared byte-for-byte with the C (codegen/c.go)
+// and Rust (codegen/rust.go) _s2h/_h2s, over the existing base-1e9 bignum. A Rune
+// String is a K_BIG exactly as on C/LLVM, so byte-exactness is free -- the codec is
+// bignum <-> raw bytes with no charset/UTF-8 transform (Greek/Hebrew pass through raw).
+//
+// It is emitted (via emitBibleCodecWasm) only when the program uses a codec-consuming
+// foreign, gated by usesBibleCodec. The three byte scratch windows $D6BUF/$D6BUF2/
+// $D6BUF3 (64 KiB each) live below the bumped $hp (262144) so they never collide with
+// the heap, the show buffer, the freelist, the iovec, or the interned cstrs.
+const wasmBibleCodec = `
+  ;; ---- packed-String codec scratch windows (64 KiB each, below the heap at 262144) ----
+  (global $D6BUF  i32 (i32.const 65536))
+  (global $D6BUF2 i32 (i32.const 131072))
+  (global $D6BUF3 i32 (i32.const 196608))
+
+  ;; $big_divmod_small: divide K_BIG $v by a small i32 $d; returns (quotient K_BIG,
+  ;; remainder i32) -- classic base-1e9 long division, most-significant limb first,
+  ;; carrying the running remainder as an i64. Twin of the C big_divmod / Rust
+  ;; _big_divmod_small. RESULT ORDER: (quotient, remainder) -- big_norm(q) is pushed
+  ;; first (the deeper/first result), the remainder second (top). $big_alloc zero-inits
+  ;; limbs, so unset high limbs read as 0.
+  (func $big_divmod_small (param $v i32) (param $d i32) (result i32 i32)
+    (local $n i32) (local $i i32) (local $q i32) (local $rem i64) (local $cur i64) (local $dd i64)
+    (local.set $n (call $big_nlimbs (local.get $v)))
+    (local.set $q (call $big_alloc (local.get $n)))
+    (local.set $dd (i64.extend_i32_u (local.get $d)))
+    (local.set $rem (i64.const 0))
+    (local.set $i (local.get $n))
+    (block $done (loop $lp
+      (br_if $done (i32.eqz (local.get $i)))
+      (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+      (local.set $cur (i64.add (i64.mul (local.get $rem) (i64.const 1000000000))
+                               (i64.extend_i32_u (call $big_limb (local.get $v) (local.get $i)))))
+      (call $big_setlimb (local.get $q) (local.get $i)
+        (i32.wrap_i64 (i64.div_u (local.get $cur) (local.get $dd))))
+      (local.set $rem (i64.rem_u (local.get $cur) (local.get $dd)))
+      (br $lp)))
+    (call $big_norm (local.get $q))        ;; result 1: quotient (normalized)
+    (i32.wrap_i64 (local.get $rem)))       ;; result 2: remainder byte
+
+  ;; $d6_memeq: byte-compare [a,a+n) == [b,b+n)? (memcmp==0). 1 = equal.
+  (func $d6_memeq (param $a i32) (param $b i32) (param $n i32) (result i32)
+    (local $i i32)
+    (local.set $i (i32.const 0))
+    (block $done (loop $lp
+      (br_if $done (i32.ge_s (local.get $i) (local.get $n)))
+      (if (i32.ne (i32.load8_u (i32.add (local.get $a) (local.get $i)))
+                  (i32.load8_u (i32.add (local.get $b) (local.get $i))))
+        (then (return (i32.const 0))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lp)))
+    (i32.const 1))
+
+  ;; $d6_s2h_to: decode packed-String bignum $code -> raw bytes at $dst; returns length.
+  ;; while big_cmp(b,1) > 0: (q, rem) = divmod_small(b, 256); dst[n++] = rem; b = q.
+  ;; ARC: each divmod allocates a fresh quotient; release the previous $b (never $code,
+  ;; which is borrowed) before advancing, release the final $b (an owned quotient) and
+  ;; the intermediate $one.
+  (func $d6_s2h_to (param $code i32) (param $dst i32) (result i32)
+    (local $b i32) (local $n i32) (local $rem i32) (local $one i32) (local $q i32)
+    (local.set $b (local.get $code))
+    (local.set $one (call $rt_big_from_long (i32.const 1)))
+    (local.set $n (i32.const 0))
+    (block $done (loop $lp
+      (br_if $done (i32.le_s (call $big_cmp (local.get $b) (local.get $one)) (i32.const 0)))
+      (call $big_divmod_small (local.get $b) (i32.const 256))  ;; -> (q, rem); rem on top
+      (local.set $rem)                                         ;; pop rem (top)
+      (local.set $q)                                           ;; pop q (deeper)
+      (i32.store8 (i32.add (local.get $dst) (local.get $n)) (local.get $rem))
+      (local.set $n (i32.add (local.get $n) (i32.const 1)))
+      (if (i32.ne (local.get $b) (local.get $code))
+        (then (call $rt_release (local.get $b))))
+      (local.set $b (local.get $q))
+      (br $lp)))
+    (if (i32.ne (local.get $b) (local.get $code))
+      (then (call $rt_release (local.get $b))))
+    (call $rt_release (local.get $one))
+    (local.get $n))
+
+  ;; $d6_s2h: decode $code into the primary window $D6BUF; returns (buf_ptr, len).
+  (func $d6_s2h (param $code i32) (result i32 i32)
+    (global.get $D6BUF)
+    (call $d6_s2h_to (local.get $code) (global.get $D6BUF)))
+
+  ;; $d6_h2s: fold raw bytes [$buf, $buf+$len) -> a packed-String bignum. n = 1; for
+  ;; i = len-1..0: n = n*256 + buf[i]. Empty input -> the bignum 1 (the empty-String
+  ;; sentinel). ARC: release each iteration's product / digit / prior accumulator; the
+  ;; returned $n is owned by the caller.
+  (func $d6_h2s (param $buf i32) (param $len i32) (result i32)
+    (local $n i32) (local $m i32) (local $i i32) (local $byte i32)
+    (local $prod i32) (local $dig i32) (local $t i32)
+    (local.set $n (call $rt_big_from_long (i32.const 1)))
+    (local.set $m (call $rt_big_from_long (i32.const 256)))
+    (local.set $i (local.get $len))
+    (block $done (loop $lp
+      (br_if $done (i32.eqz (local.get $i)))
+      (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+      (local.set $byte (i32.load8_u (i32.add (local.get $buf) (local.get $i))))
+      (local.set $prod (call $rt_nat_mul (local.get $n) (local.get $m)))
+      (local.set $dig (call $rt_big_from_long (local.get $byte)))
+      (local.set $t (call $big_add (local.get $prod) (local.get $dig)))
+      (call $rt_release (local.get $prod))
+      (call $rt_release (local.get $dig))
+      (call $rt_release (local.get $n))
+      (local.set $n (local.get $t))
+      (br $lp)))
+    (call $rt_release (local.get $m))
+    (local.get $n))
+`
+
+// WasmBibleCodec returns the WAT packed-String codec ($big_divmod_small + $d6_s2h/
+// $d6_h2s + the scratch-window globals). Exported for the external test package (a
+// divmod-order probe assembles it against WasmRuntime()).
+func WasmBibleCodec() string { return wasmBibleCodec }

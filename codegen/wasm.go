@@ -113,6 +113,11 @@ func (Wasm) Emit(p Program) (TargetSource, error) {
 var wasmSupportedForeign = map[string]bool{
 	"printNat":  true,
 	"timeNanos": true,
+	// Task 2: the 4 PURE bible ops over the packed-String codec (no world token).
+	"byteLen":      true,
+	"splitOn":      true,
+	"jsonStrField": true,
+	"sqlQuote":     true,
 }
 
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
@@ -1032,6 +1037,238 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 	if usesForeign(p, "timeNanos") {
 		em.emitTimeNanosWasm(b)
 	}
+	// Task 2: the packed-String codec + the 4 PURE bible ops. The codec ($big_divmod_small
+	// + $d6_s2h/$d6_h2s) is baked once when any codec-consuming foreign is present; the
+	// ops are curried accessor -> closure(arg) -> result chains (PURE: no world token).
+	if usesBibleCodec(p) {
+		b.WriteString(wasmBibleCodec)
+	}
+	if usesForeign(p, "byteLen") {
+		em.emitByteLenWasm(b)
+	}
+	if usesForeign(p, "splitOn") {
+		em.emitSplitOnWasm(b)
+	}
+	if usesForeign(p, "jsonStrField") {
+		em.emitJsonStrFieldWasm(b)
+	}
+	if usesForeign(p, "sqlQuote") {
+		em.emitSqlQuoteWasm(b)
+	}
+}
+
+// usesBibleCodec reports whether p references any foreign op that decodes/encodes a
+// packed String via the codec ($d6_s2h/$d6_h2s), so the codec is baked exactly once.
+func usesBibleCodec(p Program) bool {
+	for _, op := range []string{"byteLen", "splitOn", "jsonStrField", "sqlQuote"} {
+		if usesForeign(p, op) {
+			return true
+		}
+	}
+	return false
+}
+
+// emitByteLenWasm bakes `byteLen : Nat -> Nat` -- decode the packed String, return its
+// raw byte length. PURE: accessor -> closure(code) -> Nat. The owned $arg is consumed
+// (released) since the returned value is a fresh bignum.
+func (em *wasmEmitter) emitByteLenWasm(b *strings.Builder) {
+	c1 := em.codeRef("byteLen_c1")
+	b.WriteString("  (func $byteLen_c1 (param $arg i32) (param $env i32) (result i32) (local $len i32) (local $r i32)\n")
+	b.WriteString("    (call $d6_s2h (local.get $arg))\n")
+	b.WriteString("    (local.set $len)\n") // pop len (top)
+	b.WriteString("    (drop)\n")            // pop buf (deeper, unused)
+	b.WriteString("    (local.set $r (call $rt_big_from_long (local.get $len)))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	em.emitCachedThunk(b, "byteLen", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitSplitOnWasm bakes `splitOn : Nat -> Nat -> List Nat` -- split the decoded String on
+// a single separator byte, returning a cons list of segment Strings. 2-arg curried:
+// accessor -> closure(sep) -> closure(code) -> list. The list is built in forward order
+// by scanning the byte buffer right-to-left and prepending each segment onto the tail.
+func (em *wasmEmitter) emitSplitOnWasm(b *strings.Builder) {
+	nilOff := em.intern("nil")
+	consOff := em.intern("cons")
+	c1 := em.codeRef("splitOn_c1")
+	c2 := em.codeRef("splitOn_c2")
+	// c2: env={sep}, arg=code. Decode + segment + build the list.
+	b.WriteString("  (func $splitOn_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $sep i32) (local $sb i32) (local $len i32) (local $buf i32)\n")
+	b.WriteString("    (local $lst i32) (local $i i32) (local $segEnd i32) (local $part i32) (local $cons i32)\n")
+	b.WriteString("    (local.set $sep (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (if (i32.gt_s (call $big_nlimbs (local.get $sep)) (i32.const 0))\n")
+	b.WriteString("      (then (local.set $sb (i32.and (call $big_limb (local.get $sep) (i32.const 0)) (i32.const 255))))\n")
+	b.WriteString("      (else (local.set $sb (i32.const 0))))\n")
+	b.WriteString("    (call $d6_s2h (local.get $arg))\n")
+	b.WriteString("    (local.set $len)\n")
+	b.WriteString("    (local.set $buf)\n")
+	fmt.Fprintf(b, "    (local.set $lst (call $rt_mkcon (i32.const 0) (i32.const %d) (i32.const 1)))\n", nilOff)
+	b.WriteString("    (call $rt_con_set (local.get $lst) (i32.const 0) (call $rt_unit))\n")
+	b.WriteString("    (local.set $segEnd (local.get $len))\n")
+	b.WriteString("    (local.set $i (local.get $len))\n")
+	b.WriteString("    (block $done (loop $lp\n")
+	b.WriteString("      (br_if $done (i32.eqz (local.get $i)))\n")
+	b.WriteString("      (local.set $i (i32.sub (local.get $i) (i32.const 1)))\n")
+	b.WriteString("      (if (i32.eq (i32.load8_u (i32.add (local.get $buf) (local.get $i))) (local.get $sb))\n")
+	b.WriteString("        (then\n")
+	b.WriteString("          (local.set $part (call $d6_h2s (i32.add (local.get $buf) (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("                                         (i32.sub (local.get $segEnd) (i32.add (local.get $i) (i32.const 1)))))\n")
+	fmt.Fprintf(b, "          (local.set $cons (call $rt_mkcon (i32.const 1) (i32.const %d) (i32.const 3)))\n", consOff)
+	b.WriteString("          (call $rt_con_set (local.get $cons) (i32.const 0) (call $rt_unit))\n")
+	b.WriteString("          (call $rt_con_set (local.get $cons) (i32.const 1) (local.get $part))\n")
+	b.WriteString("          (call $rt_con_set (local.get $cons) (i32.const 2) (local.get $lst))\n")
+	b.WriteString("          (local.set $lst (local.get $cons))\n")
+	b.WriteString("          (local.set $segEnd (local.get $i))))\n")
+	b.WriteString("      (br $lp)))\n")
+	// final segment [0, segEnd)
+	b.WriteString("    (local.set $part (call $d6_h2s (local.get $buf) (local.get $segEnd)))\n")
+	fmt.Fprintf(b, "    (local.set $cons (call $rt_mkcon (i32.const 1) (i32.const %d) (i32.const 3)))\n", consOff)
+	b.WriteString("    (call $rt_con_set (local.get $cons) (i32.const 0) (call $rt_unit))\n")
+	b.WriteString("    (call $rt_con_set (local.get $cons) (i32.const 1) (local.get $part))\n")
+	b.WriteString("    (call $rt_con_set (local.get $cons) (i32.const 2) (local.get $lst))\n")
+	b.WriteString("    (local.set $lst (local.get $cons))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $lst))\n")
+	// c1: arg=sep (owned), build c2 capturing sep (MOVE).
+	fmt.Fprintf(b, "  (func $splitOn_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "splitOn", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitJsonStrFieldWasm bakes `jsonStrField : Nat -> Nat -> Option Nat` -- extract a top-
+// level JSON string field's value. 2-arg curried: accessor -> closure(field) ->
+// closure(doc) -> Option. Builds needle = '"' + field + '"', finds it in doc, skips
+// whitespace/':' , and if the value is a quoted string returns some(value) else none.
+// Uses three scratch windows: field bytes in $D6BUF2, doc bytes in $D6BUF, needle in
+// $D6BUF3 (so field and doc decodes do not clobber each other).
+func (em *wasmEmitter) emitJsonStrFieldWasm(b *strings.Builder) {
+	noneOff := em.intern("none")
+	someOff := em.intern("some")
+	c1 := em.codeRef("jsonStrField_c1")
+	c2 := em.codeRef("jsonStrField_c2")
+	b.WriteString("  (func $jsonStrField_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $field i32) (local $fl i32) (local $dl i32) (local $nl i32)\n")
+	b.WriteString("    (local $needle i32) (local $ds i32) (local $found i32)\n")
+	b.WriteString("    (local $i i32) (local $j i32) (local $k i32) (local $ch i32)\n")
+	b.WriteString("    (local $result i32) (local $val i32) (local $some i32)\n")
+	b.WriteString("    (local.set $field (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (local.set $fl (call $d6_s2h_to (local.get $field) (global.get $D6BUF2)))\n")
+	b.WriteString("    (local.set $dl (call $d6_s2h_to (local.get $arg) (global.get $D6BUF)))\n")
+	b.WriteString("    (local.set $ds (global.get $D6BUF))\n")
+	// needle = '"' + field + '"' in D6BUF3
+	b.WriteString("    (local.set $needle (global.get $D6BUF3))\n")
+	b.WriteString("    (i32.store8 (local.get $needle) (i32.const 34))\n")
+	b.WriteString("    (local.set $i (i32.const 0))\n")
+	b.WriteString("    (block $cpb (loop $cpl\n")
+	b.WriteString("      (br_if $cpb (i32.ge_s (local.get $i) (local.get $fl)))\n")
+	b.WriteString("      (i32.store8 (i32.add (local.get $needle) (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("                  (i32.load8_u (i32.add (global.get $D6BUF2) (local.get $i))))\n")
+	b.WriteString("      (local.set $i (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("      (br $cpl)))\n")
+	b.WriteString("    (i32.store8 (i32.add (local.get $needle) (i32.add (local.get $fl) (i32.const 1))) (i32.const 34))\n")
+	b.WriteString("    (local.set $nl (i32.add (local.get $fl) (i32.const 2)))\n")
+	// result = none
+	fmt.Fprintf(b, "    (local.set $result (call $rt_mkcon (i32.const 0) (i32.const %d) (i32.const 1)))\n", noneOff)
+	b.WriteString("    (call $rt_con_set (local.get $result) (i32.const 0) (call $rt_unit))\n")
+	// search doc for needle
+	b.WriteString("    (local.set $found (i32.const -1))\n")
+	b.WriteString("    (if (i32.le_s (local.get $nl) (local.get $dl))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (local.set $i (i32.const 0))\n")
+	b.WriteString("        (block $sb (loop $sl\n")
+	b.WriteString("          (br_if $sb (i32.gt_s (i32.add (local.get $i) (local.get $nl)) (local.get $dl)))\n")
+	b.WriteString("          (if (call $d6_memeq (i32.add (local.get $ds) (local.get $i)) (local.get $needle) (local.get $nl))\n")
+	b.WriteString("            (then (local.set $found (local.get $i)) (br $sb)))\n")
+	b.WriteString("          (local.set $i (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("          (br $sl)))))\n")
+	b.WriteString("    (if (i32.ge_s (local.get $found) (i32.const 0))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (local.set $j (i32.add (local.get $found) (local.get $nl)))\n")
+	// skip ' ' | '\t' | ':'
+	b.WriteString("        (block $skb (loop $skl\n")
+	b.WriteString("          (br_if $skb (i32.ge_s (local.get $j) (local.get $dl)))\n")
+	b.WriteString("          (local.set $ch (i32.load8_u (i32.add (local.get $ds) (local.get $j))))\n")
+	b.WriteString("          (br_if $skb (i32.eqz (i32.or (i32.or (i32.eq (local.get $ch) (i32.const 32))\n")
+	b.WriteString("                                               (i32.eq (local.get $ch) (i32.const 9)))\n")
+	b.WriteString("                                       (i32.eq (local.get $ch) (i32.const 58)))))\n")
+	b.WriteString("          (local.set $j (i32.add (local.get $j) (i32.const 1)))\n")
+	b.WriteString("          (br $skl)))\n")
+	b.WriteString("        (if (i32.and (i32.lt_s (local.get $j) (local.get $dl))\n")
+	b.WriteString("                     (i32.eq (i32.load8_u (i32.add (local.get $ds) (local.get $j))) (i32.const 34)))\n")
+	b.WriteString("          (then\n")
+	b.WriteString("            (local.set $j (i32.add (local.get $j) (i32.const 1)))\n")
+	b.WriteString("            (local.set $k (local.get $j))\n")
+	b.WriteString("            (block $vb (loop $vl\n")
+	b.WriteString("              (br_if $vb (i32.ge_s (local.get $k) (local.get $dl)))\n")
+	b.WriteString("              (br_if $vb (i32.eq (i32.load8_u (i32.add (local.get $ds) (local.get $k))) (i32.const 34)))\n")
+	b.WriteString("              (local.set $k (i32.add (local.get $k) (i32.const 1)))\n")
+	b.WriteString("              (br $vl)))\n")
+	b.WriteString("            (local.set $val (call $d6_h2s (i32.add (local.get $ds) (local.get $j)) (i32.sub (local.get $k) (local.get $j))))\n")
+	fmt.Fprintf(b, "            (local.set $some (call $rt_mkcon (i32.const 1) (i32.const %d) (i32.const 2)))\n", someOff)
+	b.WriteString("            (call $rt_con_set (local.get $some) (i32.const 0) (call $rt_unit))\n")
+	b.WriteString("            (call $rt_con_set (local.get $some) (i32.const 1) (local.get $val))\n")
+	b.WriteString("            (call $rt_release (local.get $result))\n") // drop the none we built
+	b.WriteString("            (local.set $result (local.get $some))))))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n") // doc owned; field borrowed via env
+	b.WriteString("    (local.get $result))\n")
+	// c1: arg=field (owned), build c2 capturing field (MOVE).
+	fmt.Fprintf(b, "  (func $jsonStrField_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "jsonStrField", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitSqlQuoteWasm bakes `sqlQuote : Nat -> Nat` -- wrap the decoded String in single
+// quotes, doubling each embedded quote, then re-encode. PURE 1-arg: accessor ->
+// closure(s) -> String. Input bytes in $D6BUF, output built in $D6BUF2.
+func (em *wasmEmitter) emitSqlQuoteWasm(b *strings.Builder) {
+	c1 := em.codeRef("sqlQuote_c1")
+	b.WriteString("  (func $sqlQuote_c1 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $len i32) (local $buf i32) (local $out i32) (local $o i32) (local $i i32) (local $ch i32) (local $r i32)\n")
+	b.WriteString("    (local.set $len (call $d6_s2h_to (local.get $arg) (global.get $D6BUF)))\n")
+	b.WriteString("    (local.set $buf (global.get $D6BUF))\n")
+	b.WriteString("    (local.set $out (global.get $D6BUF2))\n")
+	b.WriteString("    (local.set $o (i32.const 0))\n")
+	b.WriteString("    (i32.store8 (i32.add (local.get $out) (local.get $o)) (i32.const 39))\n") // "'"
+	b.WriteString("    (local.set $o (i32.add (local.get $o) (i32.const 1)))\n")
+	b.WriteString("    (local.set $i (i32.const 0))\n")
+	b.WriteString("    (block $done (loop $lp\n")
+	b.WriteString("      (br_if $done (i32.ge_s (local.get $i) (local.get $len)))\n")
+	b.WriteString("      (local.set $ch (i32.load8_u (i32.add (local.get $buf) (local.get $i))))\n")
+	b.WriteString("      (if (i32.eq (local.get $ch) (i32.const 39))\n")
+	b.WriteString("        (then\n")
+	b.WriteString("          (i32.store8 (i32.add (local.get $out) (local.get $o)) (i32.const 39))\n")
+	b.WriteString("          (local.set $o (i32.add (local.get $o) (i32.const 1)))))\n")
+	b.WriteString("      (i32.store8 (i32.add (local.get $out) (local.get $o)) (local.get $ch))\n")
+	b.WriteString("      (local.set $o (i32.add (local.get $o) (i32.const 1)))\n")
+	b.WriteString("      (local.set $i (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("      (br $lp)))\n")
+	b.WriteString("    (i32.store8 (i32.add (local.get $out) (local.get $o)) (i32.const 39))\n")
+	b.WriteString("    (local.set $o (i32.add (local.get $o) (i32.const 1)))\n")
+	b.WriteString("    (local.set $r (call $d6_h2s (local.get $out) (local.get $o)))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	em.emitCachedThunk(b, "sqlQuote", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
 }
 
 // emitPrintNatWasm bakes `printNat : Nat -> IO Nat` -- the FIRST foreign IO op and the
