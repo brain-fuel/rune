@@ -202,6 +202,29 @@ func TestARCClosureRelease(t *testing.T) {
 // (rc=1, live=2 with UNIT), retained twice (rc=3), released three times (rc 0 -> freed,
 // live back to 1, just UNIT). An immediate int and the UNIT singleton are also passed
 // to retain/release and must be ignored (no crash, live unchanged).
+// TestARCBigBucketReuse: a 1KB payload (a big K_BIG) allocated, released, and
+// re-allocated must reuse the SAME block: hp does not advance across the second
+// alloc, and $live returns to baseline after each release. BEFORE Task 1 the
+// >=256B free is orphaned, so the second alloc bumps hp.
+func TestARCBigBucketReuse(t *testing.T) {
+	body := `
+    (local $a i32) (local $hp0 i32) (local $b i32)
+    ;; 1024-byte payload via big_alloc (254 limbs -> 8+1016 bytes, rounds to 1024)
+    (local.set $a (call $big_alloc (i32.const 254)))
+    (call $rt_release (local.get $a))
+    (local.set $hp0 (call $rt_hp))
+    (local.set $b (call $big_alloc (i32.const 254)))
+    (call $rt_release (local.get $b))
+    ;; result: 1 iff hp unchanged AND the two payloads were the same block
+    (call $rt_print_u32 (i32.and
+      (i32.eq (call $rt_hp) (local.get $hp0))
+      (i32.eq (local.get $a) (local.get $b))))`
+	out := runWasm(t, arcTestModule(body))
+	if out != "1" {
+		t.Fatalf("big payload not pooled: probe=%q want 1", out)
+	}
+}
+
 func TestARCLeafRetainRelease(t *testing.T) {
 	body := `
     (local $b i32) (local $imm i32)

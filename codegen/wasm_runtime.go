@@ -68,7 +68,9 @@ const wasmRuntime = `
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
   ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1968128):
   ;; iovec [16,24), timeNanos [24,32), fixed msgs [32,512), interned cstrs [512,4096),
-  ;; show buffer [4096,...), freelist [8192,8448), the bible-codec byte buffers
+  ;; show buffer [4096,...), freelist [8192,8484) (64 exact-size buckets [8192,8448) plus
+  ;; 9 big power-of-two buckets [8448,8484) for pooled payloads in [256B,64KB]),
+  ;; the bible-codec byte buffers
   ;; $D6BUF/$D6BUF2/$D6BUF3 (64 KiB each at 65536/131072/196608, declared in the codec),
   ;; the Task-3 file/dir WASI scratch (declared in wasmBibleReadFile/wasmBibleFoldDir):
   ;; $D6SYS syscall cells [262144,327680), $D6PATH path-build [327680,393216), $D6DIR
@@ -86,7 +88,9 @@ const wasmRuntime = `
   (global $hp (mut i32) (i32.const 1968128)) ;; heap pointer; scratch below, heap above
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
-  (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
+  (global $freelist (mut i32) (i32.const 8192)) ;; 73 i32 bucket heads at [8192, 8484): 64
+                                                 ;; exact-size (sub-256B) + 9 big power-of-two
+                                                 ;; (256B..64KB) at indices 64..72
 
   ;; ARC alloc: reserve an 8-byte hidden header [size][rc] below the payload. Rounds the
   ;; requested payload size to 4-byte alignment, stores the rounded size and rc=1, bumps
@@ -96,6 +100,11 @@ const wasmRuntime = `
   (func $alloc (param $n i32) (result i32)
     (local $base i32) (local $payload i32) (local $bkt i32) (local $head i32)
     (local.set $n (i32.and (i32.add (local.get $n) (i32.const 3)) (i32.const -4)))
+    ;; big-bucket rounding: pool sizes in [256, 65536] as powers of two
+    (if (i32.and (i32.ge_u (local.get $n) (i32.const 256))
+                 (i32.le_u (local.get $n) (i32.const 65536)))
+      (then (local.set $n (i32.shl (i32.const 1)
+        (i32.sub (i32.const 32) (i32.clz (i32.sub (local.get $n) (i32.const 1))))))))
     ;; try the size-classed free list first
     (local.set $bkt (call $rt_bucket_addr (local.get $n)))
     (if (local.get $bkt)
@@ -517,15 +526,30 @@ const wasmRuntime = `
   (func $rt_live (result i32) (global.get $live))
 
   ;; $rt_bucket_addr: return the $freelist bucket address for a rounded payload size, or 0
-  ;; if the size is out of range (index >= 64, i.e. size >= 256 bytes). The bucket holds
-  ;; the payload pointer of the first free block of that exact size (intrusive linked list:
-  ;; the link to the next block of the same size is stored at the freed payload's word 0).
+  ;; if the size is out of range. Sub-256-byte sizes (index < 64) hit the original exact-size
+  ;; buckets. Sizes in [256, 65536] that are already an exact power of two hit one of 9 big
+  ;; buckets (indices 64..72) -- $alloc rounds big requests up to a power of two, so every
+  ;; stored size reaching $rt_free in this range hits a bucket exactly. The bucket holds the
+  ;; payload pointer of the first free block of that exact size (intrusive linked list: the
+  ;; link to the next block of the same size is stored at the freed payload's word 0).
   (func $rt_bucket_addr (param $size i32) (result i32)
     (local $idx i32)
     (local.set $idx (i32.shr_u (local.get $size) (i32.const 2)))
-    (if (result i32) (i32.lt_u (local.get $idx) (i32.const 64))
-      (then (i32.add (global.get $freelist) (i32.shl (local.get $idx) (i32.const 2))))
-      (else (i32.const 0))))
+    (if (i32.lt_u (local.get $idx) (i32.const 64))
+      (then (return (i32.add (global.get $freelist) (i32.shl (local.get $idx) (i32.const 2))))))
+    ;; big buckets: exact power-of-two sizes 256..65536 -> indices 64..72.
+    ;; $alloc rounds big requests up to a power of two, so every stored size
+    ;; reaching $rt_free in this range hits a bucket exactly.
+    (if (i32.and
+          (i32.and (i32.ge_u (local.get $size) (i32.const 256))
+                   (i32.le_u (local.get $size) (i32.const 65536)))
+          (i32.eqz (i32.and (local.get $size) (i32.sub (local.get $size) (i32.const 1)))))
+      (then
+        ;; clz(256)=23 -> idx 64 ... clz(65536)=15 -> idx 72
+        (return (i32.add (global.get $freelist)
+          (i32.shl (i32.add (i32.const 64)
+            (i32.sub (i32.const 23) (i32.clz (local.get $size)))) (i32.const 2))))))
+    (i32.const 0))
 
   ;; $rt_hp: current heap pointer (for the free-list reuse test: hp must not advance under
   ;; same-size alloc/free churn once the free list is seeded).
