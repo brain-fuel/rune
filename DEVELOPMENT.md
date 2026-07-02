@@ -46,8 +46,13 @@ multi-backend conformance gates and the D3/D4/E4 tiers.
 # clone, then:
 asdf install            # java-25 + opentofu, per .tool-versions
 ./bin/setup.sh          # pip libs + report any missing system packages
-go test ./...           # full suite (skips a gate only if its dep is absent)
+go test -timeout 30m ./...   # full suite (skips a gate only if its dep is absent)
 ```
+
+The `-timeout 30m` matters: the `harness` package compiles hundreds of listings across
+seven real toolchains, so it can exceed Go's default 10-minute per-package timeout on a
+modest machine. That timeout surfaces as `FAIL ... 600.019s` with zero `--- FAIL:`
+assertion lines; it is a wall-clock artifact, not a correctness failure.
 
 System packages that require root (only if `bin/setup.sh` reports them missing):
 

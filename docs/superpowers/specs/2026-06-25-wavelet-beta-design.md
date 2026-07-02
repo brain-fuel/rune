@@ -1,7 +1,7 @@
 # Wavelet Beta: Design
 
 Date: 2026-06-25
-Status: Approved (brainstorming), pending spec review
+Status: In implementation (Plans 1-5 + 5b/5c + 6a/6b DONE per `../plans/00-INDEX.md`; remaining: 6b-2/6c/6d/6e/6f/6g + Plan 7 rename)
 Seed state: `goforge.dev/rune` @ v3.329.0 (kernel + 9 backends + distributed layer + Wavelet infra + ~537 stdlib listings)
 
 ## Premise

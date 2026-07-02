@@ -1,12 +1,18 @@
-// Command rune is the Phase-0 CLI for goforge.dev/rune.
+// Command rune is the CLI for goforge.dev/rune.
 //
-//	rune fmt <file>   parse, resolve to core, and pretty-print back to surface
-//	rune hash <file>  print the content hash of each definition
-//	rune repl         read -> resolve -> show loop (no evaluation; see internal/repl)
+//	rune fmt <file>                 parse, resolve to core, pretty-print back to surface
+//	rune hash <file>                print the content hash of each definition
+//	rune repl [--no-prelude]        elaborate/normalize/print loop (internal/repl)
+//	rune emit <file> [name]         emit target source for a definition (--target)
+//	rune run <file> <name>          emit and execute on a backend (--target)
+//	rune build <file> [name]        ship host artifacts (--kind app|library)
+//	rune simulate <file> ...        drive a protocol under fault schedules (internal/sim)
+//	rune deploy ...                 infra emit / workload run / --apply lifecycle
+//	rune ledger <file>              assurance-ledger report (--json, --check)
+//	rune calm <emit|validate> ...   FINOS CALM projection round-trip
 //
-// All three parse the surface, resolve it to locally-nameless core (name resolution is
-// the only elaboration in Phase 0 — no type checking), and either round-trip it through
-// the pretty-printer, report its structural content hash, or do so interactively.
+// Every command runs the shared parse -> resolve -> hash pipeline (internal/session);
+// the checking, codegen, infra, and ledger strata sit behind it.
 package main
 
 import (

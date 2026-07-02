@@ -111,11 +111,13 @@ gossiping actors on a real backend — proven, deployed, running, from one sourc
 
 The infra half is a provider-agnostic resource layer (`infra/`, the deploy-side dual of
 `codegen/`): one agnostic configuration → an **equivalent deployment on every cloud**.
-Eighteen resource kinds (queue, kv, object, compute, database, secret, nosql, dns, disk,
-kms, file, stream, iam, k8s, network, firewall, logs, registry) each lower to AWS /
+Twenty-seven resource kinds (queue, kv, object, compute, database, secret, nosql, dns,
+disk, kms, file, stream, cdn, lb, metrics, iam, k8s, network, firewall, logs, registry,
+paas, warehouse, inference, archive, serverless, devops) each lower to AWS /
 Azure / GCP as OpenTofu/Terraform HCL (canonical, `terraform fmt -check`-clean) and, for
-the data-plane kinds, to a self-hosted backend that runs locally under Podman
-(RabbitMQ/NATS, Valkey, Garage, Postgres). `rune deploy --manifest app.wav --backend
+every row with a sane self-hosted form, to a FOSS backend that runs locally under Podman
+(RabbitMQ/NATS, Valkey, Garage, Postgres, Vault, Redpanda, Loki, Prometheus, k3s, and
+more; 15+ in all). `rune deploy --manifest app.wav --backend
 aws` emits a whole app's graph as one `main.tf`, each provider's shared scaffolding
 de-duplicated; the same manifest lowers to the same *logical* resource set on every
 cloud (the equivalence gate). The three data-plane abstractions (queue/kv/object) also

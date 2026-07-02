@@ -1,9 +1,12 @@
 # Rune — Working Discipline
 
 `goforge.dev/rune/v3` — the kernel of a small, content-addressed, dependently typed
-language. The end goal is provably correct infrastructure code; the v1 release
-criterion is that every listing in the book *Specify & Verify* elaborates, checks,
-and runs against this core, and the core contains nothing the book does not use.
+language. The end goal is provably correct infrastructure code. The original v1
+release criterion (every listing in the book *Specify & Verify* elaborates, checks,
+and runs against this core) was met and the book is no longer the scope cap; the
+telos is now the mature verified language + the Wavelet verified-IaC product (see
+the Wootz roadmap section below and `~/.claude/plans/humble-humming-elephant.md`).
+The discipline is unchanged: the core contains nothing its consumers do not use.
 
 This file is authoritative for how work proceeds. The reference designs live in
 `ref_docs/` (`rune-v1-design.md`, `rune-v2-design.md`, `rune-v3-design.md`,

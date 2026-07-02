@@ -29,9 +29,12 @@ Two gaps recorded honestly:
   The gate is `harness/backend_conformance_test.go`: same source, byte-identical observable on
   every backend (pure, partial, IO, FFI, distributed).
 - **Backend count is 9 emitters, 8 full-featured.** JS, Py, Go, Rust, BEAM, JVM, C, LLVM are
-  full; WASM (added v3.328.49) emits and runs on wasmtime but is pure-compute only (no GC, strings,
-  FFI, or IO). Any plan claiming a behavior on "all targets" states which set, and WASM-hardening
-  is an explicit dependency where the demo needs it.
+  full; WASM (added v3.328.49) has since been hardened well past pure-compute: ARC heap runtime
+  (6a), Perceus ownership pass (6b), partial/general-recursion support, foreign-op mechanism +
+  printNat + IO-main, and the packed-String codec (feat/bible-ops-cross-backend-wasm). Bible-ops
+  parity for WASM is in flight; it is not yet in the divergence-lock gate. Any plan claiming a
+  behavior on "all targets" states which set, and the remaining WASM-hardening (6b-2, 6c) is an
+  explicit dependency where the demo needs it.
 - **Reuse, do not rebuild.** The Assurance Ledger reuses R-FFI's tier and `A`-set machinery; CALM
   round-trip reuses the `infra/` Resource model and the `equal-config -> equivalent-deployment`
   equivalence gate; the demo reuses the verified CvRDT corpus (`serveG`, G-Counter, MV-Register,
@@ -100,7 +103,7 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 
 ### Plan 4: CALM round-trip
 
-> STATUS: PLANNED. Task file: `2026-06-26-calm-round-trip.md`. 7 tasks: new `calm/` package (CALM v0.1 doc model + JSON; node-type map + ledger-backed Model + BuildModel; ToDoc/Reconstruct; Emit with nodes=logical-resource-set; Validate 1:1 structural + macro-micro assurance tie via Diagnostic); `rune calm emit|validate` CLI + `examples/wavelet_demo.wav`; e2e demo round-trip + live proof-change detection. Builds on infra/ (nodes), control/ (Plan 3, attachments), ledger/ (Plan 2, assurance). Greenfield, no kernel change.
+> STATUS: DONE (merged, `Merge feat/calm-round-trip` 64ce0af). `calm/` package (model + emit + validate + reconstruct, all tested) + `rune calm emit|validate` CLI + `examples/wavelet_demo.wav` + e2e demo round-trip with live macro-micro tie. Original scope: 7 tasks: new `calm/` package (CALM v0.1 doc model + JSON; node-type map + ledger-backed Model + BuildModel; ToDoc/Reconstruct; Emit with nodes=logical-resource-set; Validate 1:1 structural + macro-micro assurance tie via Diagnostic); `rune calm emit|validate` CLI + `examples/wavelet_demo.wav`; e2e demo round-trip + live proof-change detection. Builds on infra/ (nodes), control/ (Plan 3, attachments), ledger/ (Plan 2, assurance). Greenfield, no kernel change.
 
 - **Goal.** Language-to-CALM emit plus ingest-for-validation; 1:1 macro-to-micro traceability.
 - **Constraints.** Greenfield (no prior CALM plan). Build on the `infra/` Resource model and the
@@ -118,8 +121,8 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 > STATUS: DONE (v3.335.0). Task file: `2026-06-26-infra-one-cloud-live.md`. 7 tasks landed: Identity.Grants + scoped least-privilege policy on AWS (aws_iam_role_policy) / GCP (custom role) / Azure (role definition), manifest `grants=` option, `examples/wavelet_deploy.wav`, a 3-cloud fmt-clean + terraform-validate least-privilege HCL gate, and the one-cloud-live FOSS apply gate reusing infra.Apply. Grants correspond to ch538's least-priv-IAM `needed`. (Whole-branch review caught + fixed: GCP account_id underscore failed `terraform validate`.)
 >
 > FOLLOW-UPS (emulator apply-gates for the demo's IAM, no account):
-> - Plan 5b: `2026-06-27-aws-localstack-iam-apply.md` (PLANNED). 3 tasks: apply the demo's scoped AWS IAM on LocalStack no-account (provider accepts CreateRole+PutRolePolicy), then read the inline policy back via the IAM API and assert it is EXACTLY kv:Get/kv:Set (live-provider macro-micro tie), + doc. Reuses the TestApplyLocalStackBucketReallyCreated pattern.
-> - Plan 5c: `2026-06-27-azure-iam-noaccount-ceiling.md` (PLANNED). 2 tasks: pin Azure's honest no-account ceiling - the scoped role definition is terraform-validated no-account but emulator-apply is impossible-by-design (azurerm=ARM control plane; Azurite=storage data plane); FOSS-via-Podman covers data shapes not IAM. Test + doc, no fake emulator.
+> - Plan 5b: `2026-06-27-aws-localstack-iam-apply.md` (DONE, merged `Merge feat/iam-apply-gates` 787a586). The demo's scoped AWS IAM applies + tears down on LocalStack no-account; the inline policy read back via the IAM API is EXACTLY kv:Get/kv:Set (live-provider macro-micro tie); `infra/iam_localstack_apply_test.go`.
+> - Plan 5c: `2026-06-27-azure-iam-noaccount-ceiling.md` (DONE, same merge). Azure's honest no-account ceiling pinned: the scoped role definition terraform-validates no-account; emulator-apply refused as impossible-by-design (azurerm=ARM control plane; Azurite=storage data plane); FOSS-via-Podman covers data shapes not IAM. Test + doc, no fake emulator.
 
 - **Goal.** The demo infra (relay, store, region pin, minimal IAM) deploys live on one cloud; the
   other two emit HCL only.
@@ -161,6 +164,15 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
   are name-independent, so the rename does not perturb hashes. REPL acceptance for `wvl repl`.
 - **Criteria.** No user-facing `rune` remains; `wvl`, `wvli`, `wvlc` work; the module path and docs
   are consistent; the conformance suite stays green.
+
+## Companion docs
+
+- `2026-07-01-wavelet-beta-remaining.md`: the ordered checklist of everything between
+  HEAD and a shippable beta (tiers: artifact critical path / credibility gates /
+  productization), from the 2026-07-01 full-repo review.
+- `2026-07-01-wavelet-1.0-ideas.md`: post-beta 1.0 direction ideas (numeric-tower
+  fast lanes, ergonomics/errors/DX, IaC standalone-or-embedded, proofs-at-center
+  invariants). Ideas, not commitments.
 
 ## Open items for the author
 
