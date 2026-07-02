@@ -157,6 +157,52 @@ func TestIOParseCLIConformance(t *testing.T) {
 	}
 }
 
+// TestIOParseCLIJVM is the JVM parity gate for the compiled CLI parser (ch213):
+// readLineCode now has a Java 25 host body (BufferedReader.readLine + the inline
+// packed-bytes encode, EOF -> code 1), so the same TOTAL parse-or-sentinel program
+// observes byte-identical results on the JVM. Separate from ioCLIBackends because
+// the JVM needs a javac compile step (the TestD3FloatJVM pattern). Skips without a
+// JDK 25 (asdf temurin-25).
+func TestIOParseCLIJVM(t *testing.T) {
+	javac25, java25, ok := findJava25()
+	if !ok {
+		t.Skip("no JDK 25 (asdf temurin-25) — the JVM backend targets Java 25")
+	}
+	s := loadListing(t, "ch213_parse_cli.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.JVM{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "main.java")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(javac25, "--release", "25", "-d", dir, f).CombinedOutput(); err != nil {
+		t.Fatalf("javac: %v\n%s\n--- emitted ---\n%s", err, out, src)
+	}
+	cases := []struct{ in, want string }{
+		{"42\n", "42\n42"},
+		{"4x\n", "999\n999"},
+		{"1000000\n", "1000000\n1000000"},
+	}
+	for _, c := range cases {
+		cmd := exec.Command(java25, "-cp", dir, "main")
+		cmd.Stdin = strings.NewReader(c.in)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("java run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != c.want {
+			t.Errorf("[jvm] input %q gave %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestIOFileEnvConformance is the D6 net/fs gate: the file + environment vocabulary
 // (writeFileCode/readFileCode/getEnvCode/printStrCode) runs on a real OS, marshalling
 // packed `String` paths/contents across the host boundary in BOTH directions. ch215

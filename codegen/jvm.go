@@ -47,9 +47,18 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("  static V printNat() { return fun(n -> fun(u -> { System.out.println(_nat(n)); return n; })); }\n")
 	}
-	if usesForeign(p, "getNat") {
+	if usesForeign(p, "getNat") || usesForeign(p, "readLineCode") {
 		b.WriteString("  static java.io.BufferedReader __stdin = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));\n")
+	}
+	if usesForeign(p, "getNat") {
 		b.WriteString("  static V getNat() { return fun(u -> { try { return new VNat(new java.math.BigInteger(__stdin.readLine().trim())); } catch (Exception e) { return new VNat(java.math.BigInteger.ZERO); } }); }\n")
+	}
+	// readLineCode: read one stdin line, return its PACKED bytes (B4: first byte
+	// least-significant, 0x01 sentinel on top) — the same inline encode as the go/js
+	// bodies (no __h2s dependency, so a read-only program needs no codec block).
+	// EOF/error surfaces as the EMPTY string (code 1), the D6 failure convention.
+	if usesForeign(p, "readLineCode") {
+		b.WriteString("  static V readLineCode() { return fun(u -> { try { String s = __stdin.readLine(); if (s == null) s = \"\"; var n = java.math.BigInteger.ONE; var m = java.math.BigInteger.valueOf(256); for (int i = s.length() - 1; i >= 0; i--) { n = n.multiply(m).add(java.math.BigInteger.valueOf(s.charAt(i))); } return new VNat(n); } catch (Exception e) { return new VNat(java.math.BigInteger.ONE); } }); }\n")
 	}
 	// Phase 0 — real byte strings (Bin): the value domain gained a VBytes(int[])
 	// record (in jvmRuntime); these are its host ops. Nats are VNat BigIntegers.
