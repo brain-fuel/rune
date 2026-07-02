@@ -1126,7 +1126,8 @@ func WasmBibleWriteOps() string { return wasmBibleWriteOps }
 // wasmBibleEnvArgv is the Task-5 env/argv/process infrastructure: the WASI
 // environ_sizes_get/environ_get/args_sizes_get/args_get helpers ($d6_getenv/$d6_argat/
 // $d6_argcount) getEnvCode/argAtCode/argCountCode build on, over five dedicated scratch
-// windows below the bumped $hp (1837056): $D6ENVSYS (small syscall-result cells),
+// windows at [1573888,1837056), below the Task-6 foldDir-private windows and the bumped
+// $hp (1968128): $D6ENVSYS (small syscall-result cells),
 // $D6ENVPTRS/$D6ENVBUF (the environ pointer array + KEY=VAL string buffer), and
 // $D6ARGVPTRS/$D6ARGVBUF (the argv twins). Emitted when any of getEnvCode/argAtCode/
 // argCountCode is referenced -- independent of the Task-3/4 file windows (ch216 uses
@@ -1145,7 +1146,13 @@ func WasmBibleWriteOps() string { return wasmBibleWriteOps }
 const wasmBibleEnvArgv = `
   ;; ---- Task-5 env/argv scratch (below the Task-3/4 windows, above $D6WH) ----
   (global $D6ENVSYS   i32 (i32.const 1573888))  ;; syscall-result cells: env count/bufsize
-                                                 ;; at +0/+4, argv argc/bufsize at +8/+12
+                                                 ;; at +0/+4; argv argc/bufsize REUSE the
+                                                 ;; same +0/+4 cells (args_sizes_get writes
+                                                 ;; there too) -- safe because $d6_getenv and
+                                                 ;; $d6_argat/$d6_argcount each read the count
+                                                 ;; immediately after their own *_sizes_get
+                                                 ;; call, so an env sizes-get/read and an argv
+                                                 ;; sizes-get/read never interleave
   (global $D6ENVPTRS  i32 (i32.const 1574912))  ;; environ pointer array (64 KiB cap)
   (global $D6ENVBUF   i32 (i32.const 1640448))  ;; environ "KEY=VAL\0..." string buffer
   (global $D6ARGVPTRS i32 (i32.const 1705984))  ;; argv pointer array (64 KiB cap)

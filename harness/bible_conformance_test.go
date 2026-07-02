@@ -1038,6 +1038,70 @@ func TestBibleWasmFold(t *testing.T) {
 	}
 }
 
+// TestBibleWasmFoldDirCodecStep is a REGRESSION PIN for the $D6FDDIR/$D6FDSUF window-
+// clobber bug (see emitFoldDirWasm's dedicated-window comment in wasm.go): WASM foldDir
+// used to decode its PERSISTENT dir/suffix strings into the SHARED codec scratch windows
+// $D6BUF/$D6BUF2, which a codec-consuming step (jsonStrField, here) clobbers mid-walk, so
+// only the alphabetically-first matching file was ever folded and every subsequent file's
+// suffix comparison silently failed. TestBibleWasmFold does NOT catch this (its foldDir
+// case, ch554, uses a pure countStep with no codec op in the step body, so the shared
+// window never gets clobbered). The only OTHER test that would catch a reintroduction is
+// the 9-way TestBibleConformanceBuilders, which t.Skipf's its ENTIRE gate the moment any
+// one of the 9 backend toolchains is missing -- so on a machine (or CI lane) missing e.g.
+// rustc or clang, that gate never runs at all and a regression ships silent. This test
+// runs ONLY the wasmtime leg, standalone, so it always executes whenever wasmtime is
+// present, independent of the other 8 toolchains.
+//
+// Reuses the ch555 shared-root builder (foldDir -> extractStep, which calls jsonStrField
+// twice per file) over the committed "lexfix" fixture (testdata/lexfix, 7 files) and diffs
+// the resulting shared-root.out against the committed testdata/lexfix_expected.jsonl (4
+// edge lines derived from 6 of the 7 files -- e6.json's null root is excluded). This has
+// teeth: under the bug, only the alphabetically-first file (e1.json) is ever folded, its
+// solo root-group produces NO pairs (flushPairs needs >=2 keys sharing a root), so
+// shared-root.out comes out EMPTY instead of the 4 expected lines -- a stark, unmissable
+// mismatch, not an off-by-one. Skips if wasmtime is absent.
+func TestBibleWasmFoldDirCodecStep(t *testing.T) {
+	wt := wasmtimePathHarness()
+	if wt == "" {
+		t.Skip("wasmtime not available")
+	}
+	want, err := os.ReadFile("testdata/lexfix_expected.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := loadListing(t, "ch555_build_shared_root.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Wasm{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	copyTree(t, "testdata/lexfix", filepath.Join(dir, "lexfix"))
+	f := filepath.Join(dir, "module.wat")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(wt, "run", "--dir=.", f)
+	cmd.Dir = dir // builder reads "lexfix", writes "shared-root.out" here
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("wasmtime run: %v\n%s", err, out)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "shared-root.out"))
+	if err != nil {
+		t.Fatalf("no output shared-root.out: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("wasm shared-root.out mismatch (empty or truncated to 1 file's worth of\n"+
+			"output is the D6FDDIR/D6FDSUF window-clobber regression):\n--- got ---\n%s\n--- want ---\n%s",
+			got, want)
+	}
+}
+
 // TestBibleWasmDbViaHost is the HOST-LOAD half of the dbApply split documented at wasm.go
 // (emitDbApplyWasm): WASI preview1 has no subprocess primitive, so on WASM `dbApply` is a
 // no-op that leaves the .sql script on disk instead of shelling out to sqlite3. This test
