@@ -55,16 +55,17 @@ const wasmRuntime = `
 
   ;; ---- linear memory + a bump allocator (no GC in v1) ----
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
-  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1572864):
+  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1573888):
   ;; iovec [16,24), timeNanos [24,32), fixed msgs [32,512), interned cstrs [512,4096),
   ;; show buffer [4096,...), freelist [8192,8448), the bible-codec byte buffers
   ;; $D6BUF/$D6BUF2/$D6BUF3 (64 KiB each at 65536/131072/196608, declared in the codec),
-  ;; and the Task-3 file/dir WASI scratch (declared in wasmBibleReadFile/wasmBibleFoldDir):
+  ;; the Task-3 file/dir WASI scratch (declared in wasmBibleReadFile/wasmBibleFoldDir):
   ;; $D6SYS syscall cells [262144,327680), $D6PATH path-build [327680,393216), $D6DIR
-  ;; dirent buffer [393216,458752), $D6NAMES foldwalk index [458752,524288), and the
-  ;; $D6SLURP 1 MiB whole-file slurp window [524288,1572864). Heap allocation starts at
-  ;; 1572864 so it never overwrites any of those scratch windows.
-  (global $hp (mut i32) (i32.const 1572864)) ;; heap pointer; scratch below, heap above
+  ;; dirent buffer [393216,458752), $D6NAMES foldwalk index [458752,524288),
+  ;; $D6SLURP 1 MiB whole-file slurp window [524288,1572864), and the Task-4 fd handle
+  ;; table $D6WH (256 i32 slots = 1 KiB at [1572864,1573888), declared in wasmBibleWriteOps).
+  ;; Heap allocation starts at 1573888 so it never overwrites any scratch windows.
+  (global $hp (mut i32) (i32.const 1573888)) ;; heap pointer; scratch below, heap above
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
   (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
@@ -1051,3 +1052,43 @@ const wasmBibleFoldDir = `
 // globals). Exported for the external test package's isolation harness (walks the foldfix
 // fixture under `wasmtime run --dir=.` and checks the matched-file count).
 func WasmBibleFoldDir() string { return wasmBibleFoldDir }
+
+// wasmBibleWriteOps is the Task-4 write-stream infrastructure: a fixed 256-slot i32 fd
+// handle table at $D6WH (1572864, just below the bumped $hp=1573888), a monotonic counter
+// $d6_whid, and a write-open helper $d6_wopen. Emitted when any of openWrite/writeChunk/
+// closeWrite/sortFile is referenced; always follows wasmBibleReadFile (needs $D6SYS for the
+// path_open fd_out cell at $D6SYS+8 and for the fd_write iovec at $D6SYS+0/+4/+12/+24).
+//
+// Handle table layout: zero-initialized by WAT linear memory (every slot starts as 0,
+// meaning "no fd assigned"). Valid handle IDs are 1..255. openWrite allocates slots by
+// incrementing $d6_whid; the table is intentionally not recycled (simple + sufficient for
+// the bible builder's sequential write pattern). $d6_wopen uses $D6SYS+8 as the fd_out
+// cell -- safe because write-open and file-read never overlap (single-threaded module).
+const wasmBibleWriteOps = `
+  ;; ---- Task-4 write-stream: handle table (256 i32 fd slots at $D6WH) ----
+  ;; $D6WH: 256 i32 fd slots at offset 1572864. Zero-initialized by WAT linear memory;
+  ;; slot 0 is unused (0 = invalid handle). Valid IDs: 1..255. $d6_whid: the next-id counter.
+  (global $D6WH    i32 (i32.const 1572864))  ;; handle fd table: 256*4=1024 bytes
+  (global $d6_whid (mut i32) (i32.const 0))  ;; handle counter (0 = none assigned yet)
+
+  ;; $d6_wopen: create/truncate a file at $pbuf[0,$plen) for writing.
+  ;; Calls path_open(preopen=3, dirflags=SYMLINK_FOLLOW=1, oflags=O_CREAT|O_TRUNC=9,
+  ;;   rights=FD_WRITE=0x40, inheriting=0, fdflags=0, fd_out=$D6SYS+8).
+  ;; Returns the opened fd (>=0) on success, or -1 on any errno.
+  (func $d6_wopen (param $pbuf i32) (param $plen i32) (result i32)
+    (local $rc i32)
+    (local.set $rc (call $path_open
+      (i32.const 3) (i32.const 1)
+      (local.get $pbuf) (local.get $plen)
+      (i32.const 9)
+      (i64.const 64) (i64.const 0)
+      (i32.const 0)
+      (i32.add (global.get $D6SYS) (i32.const 8))))
+    (if (local.get $rc) (then (return (i32.const -1))))
+    (i32.load (i32.add (global.get $D6SYS) (i32.const 8))))
+`
+
+// WasmBibleWriteOps returns the Task-4 write-stream infrastructure WAT fragment: the fd
+// handle table globals ($D6WH/$d6_whid) and the write-open helper ($d6_wopen). Exported
+// for external tests; needs wasmBibleReadFile to precede it (uses $D6SYS).
+func WasmBibleWriteOps() string { return wasmBibleWriteOps }

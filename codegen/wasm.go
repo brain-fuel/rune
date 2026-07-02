@@ -121,6 +121,13 @@ var wasmSupportedForeign = map[string]bool{
 	// Task 3: the 2 HIGHER-ORDER file/dir bible ops (WASI file-read + fd_readdir).
 	"foldLines": true,
 	"foldDir":   true,
+	// Task 4: write-stream ops (WASI file-write + fd handle table) + dbApply (WASM no-op).
+	"Handle":     true,
+	"openWrite":  true,
+	"writeChunk": true,
+	"closeWrite": true,
+	"sortFile":   true,
+	"dbApply":    true,
 }
 
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
@@ -1059,10 +1066,13 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 		em.emitSqlQuoteWasm(b)
 	}
 	// Task 3: the file-read WASI helper + the 2 HIGHER-ORDER file/dir ops. $d6_readfile is
-	// baked once when any file/dir foreign is present (foldLines/foldDir both slurp files);
+	// baked once when any file/dir foreign is present (foldLines/foldDir both slurp files;
+	// write-stream ops reuse $D6SYS from this helper for their fd_write iovec cells).
 	// $d6_foldwalk only when foldDir is present. The ops are curried IO-closure chains that
 	// run a host fold loop applying the erased Rune step per line / per file.
-	if usesForeign(p, "foldLines") || usesForeign(p, "foldDir") {
+	if usesForeign(p, "foldLines") || usesForeign(p, "foldDir") ||
+		usesForeign(p, "openWrite") || usesForeign(p, "writeChunk") ||
+		usesForeign(p, "closeWrite") || usesForeign(p, "sortFile") {
 		b.WriteString(wasmBibleReadFile)
 	}
 	if usesForeign(p, "foldLines") {
@@ -1072,12 +1082,43 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 		b.WriteString(wasmBibleFoldDir)
 		em.emitFoldDirWasm(b)
 	}
+	// Task 4: write-stream ops (WASI file-write + linear-memory fd handle table). The
+	// wasmBibleWriteOps fragment ($D6WH/$d6_whid/$d6_wopen) is baked once when any
+	// write-stream op is present; it depends on wasmBibleReadFile ($D6SYS) above.
+	// dbApply is a documented WASM sandbox no-op: sqlite3 subprocess is unavailable in
+	// wasmtime without a WASI subprocess extension; the host (Task 6) runs sqlite3 instead.
+	if usesForeign(p, "openWrite") || usesForeign(p, "writeChunk") ||
+		usesForeign(p, "closeWrite") || usesForeign(p, "sortFile") {
+		b.WriteString(wasmBibleWriteOps)
+	}
+	if usesForeign(p, "Handle") {
+		em.emitHandleWasm(b)
+	}
+	if usesForeign(p, "openWrite") {
+		em.emitOpenWriteWasm(b)
+	}
+	if usesForeign(p, "writeChunk") {
+		em.emitWriteChunkWasm(b)
+	}
+	if usesForeign(p, "closeWrite") {
+		em.emitCloseWriteWasm(b)
+	}
+	if usesForeign(p, "sortFile") {
+		em.emitSortFileWasm(b)
+	}
+	if usesForeign(p, "dbApply") {
+		em.emitDbApplyWasm(b)
+	}
 }
 
 // usesBibleCodec reports whether p references any foreign op that decodes/encodes a
 // packed String via the codec ($d6_s2h/$d6_h2s), so the codec is baked exactly once.
 func usesBibleCodec(p Program) bool {
-	for _, op := range []string{"byteLen", "splitOn", "jsonStrField", "sqlQuote", "foldLines", "foldDir"} {
+	for _, op := range []string{
+		"byteLen", "splitOn", "jsonStrField", "sqlQuote", "foldLines", "foldDir",
+		// Task 4: write-stream ops all decode packed Strings (paths/content) via $d6_s2h.
+		"openWrite", "writeChunk", "closeWrite", "sortFile", "dbApply",
+	} {
 		if usesForeign(p, op) {
 			return true
 		}
@@ -1445,6 +1486,359 @@ func (em *wasmEmitter) emitFoldDirWasm(b *strings.Builder) {
 	fmt.Fprintf(b, "  (func $foldDir_c1 (param $arg i32) (param $env i32) (result i32)\n")
 	fmt.Fprintf(b, "    (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", c2)
 	em.emitCachedThunk(b, "foldDir", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitHandleWasm bakes `Handle : U` -- the opaque write-stream handle type. In the erased
+// program Handle is a foreign TYPE that evaluates to unit (it carries no runtime payload;
+// the actual handle is a bignum id threaded through the IO chain). The accessor thunk
+// returns $rt_unit (the immortal singleton).
+func (em *wasmEmitter) emitHandleWasm(b *strings.Builder) {
+	em.emitCachedThunk(b, "Handle", func(_ *wasmFunc, _ *strings.Builder) string {
+		return "(call $rt_unit)"
+	})
+}
+
+// emitOpenWriteWasm bakes `openWrite : Nat -> IO Handle` -- create/truncate a file and
+// return a handle (small-int id into the $D6WH fd table). 2-step curried IO-closure chain:
+// c1(path→captured) → c2(world→effect). The world step (c2) decodes the path via $d6_s2h
+// into $D6BUF, calls $d6_wopen, stores the fd in $D6WH[++$d6_whid], and returns an owned
+// bignum id. On path_open failure returns big(0) (the "null handle").
+//
+// ARC: path arg is MOVED into c2's env[0] by c1; c2 reads env[0] BORROWED (never released;
+// rt_free reclaims the env slot when c2's closure is freed). World arg ($rt_unit) is
+// immortal. The returned bignum (rt_big_from_long) is a freshly allocated owned ref.
+func (em *wasmEmitter) emitOpenWriteWasm(b *strings.Builder) {
+	c1 := em.codeRef("openWrite_c1")
+	c2 := em.codeRef("openWrite_c2")
+	// c2: env=[path], arg=world. Decode path, open file, return id bignum.
+	b.WriteString("  (func $openWrite_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $plen i32) (local $fd i32) (local $id i32)\n")
+	b.WriteString("    (call $d6_s2h (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (local.set $plen)\n") // pop len (top); d6_s2h returns (D6BUF, len)
+	b.WriteString("    (drop)\n")            // discard buf ptr (always $D6BUF)
+	// check table not full (slot 0 = invalid; slots 1..255 valid)
+	b.WriteString("    (if (i32.ge_s (global.get $d6_whid) (i32.const 255))\n")
+	b.WriteString("      (then (return (call $rt_big_from_long (i32.const 0)))))\n")
+	// path_open O_CREAT|O_TRUNC=9, rights=FD_WRITE=0x40=64
+	b.WriteString("    (local.set $fd (call $d6_wopen (global.get $D6BUF) (local.get $plen)))\n")
+	b.WriteString("    (if (i32.lt_s (local.get $fd) (i32.const 0))\n")
+	b.WriteString("      (then (return (call $rt_big_from_long (i32.const 0)))))\n")
+	// allocate slot: ++id, store fd at D6WH[id]
+	b.WriteString("    (local.set $id (i32.add (global.get $d6_whid) (i32.const 1)))\n")
+	b.WriteString("    (global.set $d6_whid (local.get $id))\n")
+	b.WriteString("    (i32.store\n")
+	b.WriteString("      (i32.add (global.get $D6WH) (i32.shl (local.get $id) (i32.const 2)))\n")
+	b.WriteString("      (local.get $fd))\n")
+	b.WriteString("    (call $rt_big_from_long (local.get $id)))\n")
+	// c1: arg=path (owned). Build c2 {path(move)}.
+	fmt.Fprintf(b, "  (func $openWrite_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "openWrite", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitWriteChunkWasm bakes `writeChunk : Handle -> Nat -> IO Handle` -- append content
+// bytes + '\n' to the file behind a handle. 3-step curried IO-closure chain: c1(h→env) →
+// c2(chunk→env) → c3(world→effect). The world step (c3) reads the handle id from env[0],
+// decodes the chunk string via $d6_s2h into $D6BUF, then issues TWO fd_write calls via
+// the $D6SYS iovec: one for the chunk bytes, one for the single '\n' (0x0A) byte stored
+// at $D6SYS+12. Returns h (env[0]) as an owned reference (RETAINED: env is borrowed; the
+// env slot decrement after the call would otherwise drop the only ref).
+//
+// ARC: h MOVED by c1 into c2's env[0]; c2 RETAINS env[0] (h) when building c3's env[0]
+// and MOVES chunk (arg) into c3's env[1]. c3 borrows both; retains h before returning.
+func (em *wasmEmitter) emitWriteChunkWasm(b *strings.Builder) {
+	c1 := em.codeRef("writeChunk_c1")
+	c2 := em.codeRef("writeChunk_c2")
+	c3 := em.codeRef("writeChunk_c3")
+	// c3: env=[h, chunk], arg=world. Write chunk+'\n', return h (owned).
+	b.WriteString("  (func $writeChunk_c3 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $h i32) (local $id i32) (local $fd i32) (local $clen i32)\n")
+	b.WriteString("    (local.set $h (call $rt_env (local.get $env) (i32.const 0)))\n")
+	// get handle id: if nlimbs==0 the bignum is 0 (error handle)
+	b.WriteString("    (if (i32.gt_s (call $big_nlimbs (local.get $h)) (i32.const 0))\n")
+	b.WriteString("      (then (local.set $id (call $big_limb (local.get $h) (i32.const 0))))\n")
+	b.WriteString("      (else (local.set $id (i32.const 0))))\n")
+	// decode chunk into $D6BUF
+	b.WriteString("    (call $d6_s2h (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (local.set $clen)\n")
+	b.WriteString("    (drop)\n")
+	// write if id valid (1..255) and slot is occupied (fd != 0)
+	b.WriteString("    (if (i32.and\n")
+	b.WriteString("          (i32.and (i32.gt_s (local.get $id) (i32.const 0))\n")
+	b.WriteString("                   (i32.lt_s (local.get $id) (i32.const 256)))\n")
+	b.WriteString("          (i32.ne (i32.load (i32.add (global.get $D6WH) (i32.shl (local.get $id) (i32.const 2)))) (i32.const 0)))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (local.set $fd (i32.load (i32.add (global.get $D6WH) (i32.shl (local.get $id) (i32.const 2)))))\n")
+	// fd_write iovec for chunk bytes: ptr=$D6BUF, len=$clen at $D6SYS+0/+4, nwritten at +24
+	b.WriteString("        (i32.store (global.get $D6SYS) (global.get $D6BUF))\n")
+	b.WriteString("        (i32.store (i32.add (global.get $D6SYS) (i32.const 4)) (local.get $clen))\n")
+	b.WriteString("        (drop (call $fd_write (local.get $fd) (global.get $D6SYS) (i32.const 1) (i32.add (global.get $D6SYS) (i32.const 24))))\n")
+	// fd_write '\n' (0x0A) stored at $D6SYS+12; iovec reused at $D6SYS+0/+4
+	b.WriteString("        (i32.store8 (i32.add (global.get $D6SYS) (i32.const 12)) (i32.const 10))\n")
+	b.WriteString("        (i32.store (global.get $D6SYS) (i32.add (global.get $D6SYS) (i32.const 12)))\n")
+	b.WriteString("        (i32.store (i32.add (global.get $D6SYS) (i32.const 4)) (i32.const 1))\n")
+	b.WriteString("        (drop (call $fd_write (local.get $fd) (global.get $D6SYS) (i32.const 1) (i32.add (global.get $D6SYS) (i32.const 24))))))\n")
+	// return h owned: retain (env is borrowed; rt_free releases env[0] when c3's closure dies)
+	b.WriteString("    (call $rt_retain (local.get $h))\n")
+	b.WriteString("    (local.get $h))\n")
+	// c2: env=[h], arg=chunk (owned). Build c3 {h(retain), chunk(move)}.
+	fmt.Fprintf(b, "  (func $writeChunk_c2 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 2)))\n", c3)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c1: arg=h (owned). Build c2 {h(move)}.
+	fmt.Fprintf(b, "  (func $writeChunk_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "writeChunk", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitCloseWriteWasm bakes `closeWrite : Handle -> IO Unit` -- flush + close the file
+// behind a handle. 2-step curried IO-closure chain: c1(h→env) → c2(world→effect). The
+// world step (c2) extracts the fd from $D6WH[id], calls fd_close, zeros the slot (so
+// subsequent writeChunk/closeWrite on a stale handle is a no-op), then returns $rt_unit.
+//
+// ARC: h MOVED into c2's env[0] by c1; c2 borrows env[0] (never released here). World arg
+// is immortal. Unit is the immortal singleton -- no allocation, no retain.
+func (em *wasmEmitter) emitCloseWriteWasm(b *strings.Builder) {
+	c1 := em.codeRef("closeWrite_c1")
+	c2 := em.codeRef("closeWrite_c2")
+	// c2: env=[h], arg=world. Close fd, clear slot, return unit.
+	b.WriteString("  (func $closeWrite_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $h i32) (local $id i32) (local $slot i32)\n")
+	b.WriteString("    (local.set $h (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (if (i32.gt_s (call $big_nlimbs (local.get $h)) (i32.const 0))\n")
+	b.WriteString("      (then (local.set $id (call $big_limb (local.get $h) (i32.const 0))))\n")
+	b.WriteString("      (else (local.set $id (i32.const 0))))\n")
+	b.WriteString("    (if (i32.and\n")
+	b.WriteString("          (i32.and (i32.gt_s (local.get $id) (i32.const 0))\n")
+	b.WriteString("                   (i32.lt_s (local.get $id) (i32.const 256)))\n")
+	b.WriteString("          (i32.ne (i32.load (i32.add (global.get $D6WH) (i32.shl (local.get $id) (i32.const 2)))) (i32.const 0)))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (local.set $slot (i32.add (global.get $D6WH) (i32.shl (local.get $id) (i32.const 2))))\n")
+	b.WriteString("        (drop (call $fd_close (i32.load (local.get $slot))))\n")
+	b.WriteString("        (i32.store (local.get $slot) (i32.const 0))))\n")
+	b.WriteString("    (call $rt_unit))\n")
+	// c1: arg=h (owned). Build c2 {h(move)}.
+	fmt.Fprintf(b, "  (func $closeWrite_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "closeWrite", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitSortFileWasm bakes `sortFile : Nat -> Nat -> IO Unit` -- read the input file path
+// (env[0]) via $d6_readfile into $D6SLURP, split on '\n' (keeping '\r'), drop the single
+// trailing-empty segment iff the file ended with '\n', bytewise insertion-sort the
+// segments via $d6_linecmp (which is identical to $d6_pathcmp but a separate function to
+// avoid duplicate-name conflicts when foldDir is also present), write-open the output path
+// (env[1]) via $d6_wopen, write each sorted line + '\n' via fd_write, close, return unit.
+// On read failure (file missing or unreadable): write-open + close the output (empty file).
+//
+// Segment index: stored in $D6BUF3 as (ptr i32)(len i32) pairs = 8 bytes each (up to 8192
+// segments; fine for any bible file). The ptr values are absolute pointers into $D6SLURP.
+// The $D6SYS iovec ($D6SYS+0/+4, nwritten at +24) and the '\n' scratch cell ($D6SYS+12)
+// are reused from the write-chunk pattern. Ports rust.go:213 / the C sortFile_c3 exactly.
+//
+// ARC: env=[inp,out] BORROWED. inp is READ only (used to call $d6_readfile). out is READ
+// only (used to call $d6_wopen). Neither is retained or released in this body (rt_free
+// reclaims both env slots when c3's closure dies). World arg and $rt_unit are immortal.
+func (em *wasmEmitter) emitSortFileWasm(b *strings.Builder) {
+	c1 := em.codeRef("sortFile_c1")
+	c2 := em.codeRef("sortFile_c2")
+	c3 := em.codeRef("sortFile_c3")
+	// $d6_linecmp: bytewise comparison for insertion sort (cf. $d6_pathcmp in foldDir;
+	// distinct name to avoid duplicate-function errors when foldDir is also present).
+	b.WriteString("  (func $d6_linecmp (param $a i32) (param $na i32) (param $b i32) (param $nb i32) (result i32)\n")
+	b.WriteString("    (local $i i32) (local $m i32) (local $x i32) (local $y i32)\n")
+	b.WriteString("    (local.set $m (select (local.get $na) (local.get $nb) (i32.lt_s (local.get $na) (local.get $nb))))\n")
+	b.WriteString("    (local.set $i (i32.const 0))\n")
+	b.WriteString("    (block $done (loop $lp\n")
+	b.WriteString("      (br_if $done (i32.ge_s (local.get $i) (local.get $m)))\n")
+	b.WriteString("      (local.set $x (i32.load8_u (i32.add (local.get $a) (local.get $i))))\n")
+	b.WriteString("      (local.set $y (i32.load8_u (i32.add (local.get $b) (local.get $i))))\n")
+	b.WriteString("      (if (i32.ne (local.get $x) (local.get $y))\n")
+	b.WriteString("        (then (return (select (i32.const -1) (i32.const 1) (i32.lt_u (local.get $x) (local.get $y))))))\n")
+	b.WriteString("      (local.set $i (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("      (br $lp)))\n")
+	b.WriteString("    (if (i32.ne (local.get $na) (local.get $nb))\n")
+	b.WriteString("      (then (return (select (i32.const -1) (i32.const 1) (i32.lt_s (local.get $na) (local.get $nb))))))\n")
+	b.WriteString("    (i32.const 0))\n")
+	// c3: env=[inp,out], arg=world. Read inp, sort, write out, return unit.
+	b.WriteString("  (func $sortFile_c3 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $iplen i32) (local $oplen i32) (local $buf i32) (local $len i32)\n")
+	b.WriteString("    (local $k i32) (local $nseg i32) (local $segStart i32) (local $fd i32)\n")
+	b.WriteString("    (local $si i32) (local $ta i32) (local $tl i32) (local $pa i32) (local $pl i32)\n")
+	b.WriteString("    (local $sj i32)\n")
+	// decode inp path into $D6BUF via $d6_s2h_to (returns len; buf at $D6BUF)
+	b.WriteString("    (local.set $iplen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 0)) (global.get $D6BUF)))\n")
+	// read input file: consumes path from $D6BUF (path_open inside d6_readfile reads it)
+	b.WriteString("    (call $d6_readfile (global.get $D6BUF) (local.get $iplen))\n")
+	b.WriteString("    (local.set $len)\n") // pop len (top)
+	b.WriteString("    (local.set $buf)\n") // pop buf ptr (= $D6SLURP on success, 0 on error)
+	// decode out path into $D6BUF (safe: inp path consumed by d6_readfile's path_open)
+	b.WriteString("    (local.set $oplen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 1)) (global.get $D6BUF)))\n")
+	// write-open out file
+	b.WriteString("    (local.set $fd (call $d6_wopen (global.get $D6BUF) (local.get $oplen)))\n")
+	// on read failure: write-open succeeded? close it (produces empty file), then return unit
+	b.WriteString("    (if (i32.eqz (local.get $buf))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (if (i32.ge_s (local.get $fd) (i32.const 0)) (then (drop (call $fd_close (local.get $fd)))))\n")
+	b.WriteString("        (return (call $rt_unit))))\n")
+	// collect segment index into $D6BUF3: (ptr i32)(len i32) = 8-byte entries
+	// scan k = 0..len inclusive: at '\n' emit segment; at k==len emit trailing iff nonempty
+	b.WriteString("    (local.set $nseg (i32.const 0))\n")
+	b.WriteString("    (local.set $segStart (i32.const 0))\n")
+	b.WriteString("    (local.set $k (i32.const 0))\n")
+	b.WriteString("    (block $sdb (loop $sdl\n")
+	b.WriteString("      (local.set $si (i32.add (global.get $D6BUF3) (i32.shl (local.get $nseg) (i32.const 3))))\n")
+	b.WriteString("      (if (i32.ge_s (local.get $k) (local.get $len))\n")
+	b.WriteString("        (then\n")
+	// trailing segment: add iff segStart < k (non-empty tail, i.e. file did NOT end with '\n')
+	b.WriteString("          (if (i32.gt_s (local.get $k) (local.get $segStart))\n")
+	b.WriteString("            (then\n")
+	b.WriteString("              (i32.store (local.get $si) (i32.add (local.get $buf) (local.get $segStart)))\n")
+	b.WriteString("              (i32.store (i32.add (local.get $si) (i32.const 4)) (i32.sub (local.get $k) (local.get $segStart)))\n")
+	b.WriteString("              (local.set $nseg (i32.add (local.get $nseg) (i32.const 1)))))\n")
+	b.WriteString("          (br $sdb))\n") // exit loop
+	b.WriteString("        (else\n")
+	b.WriteString("          (if (i32.eq (i32.load8_u (i32.add (local.get $buf) (local.get $k))) (i32.const 10))\n")
+	b.WriteString("            (then\n")
+	b.WriteString("              (i32.store (local.get $si) (i32.add (local.get $buf) (local.get $segStart)))\n")
+	b.WriteString("              (i32.store (i32.add (local.get $si) (i32.const 4)) (i32.sub (local.get $k) (local.get $segStart)))\n")
+	b.WriteString("              (local.set $nseg (i32.add (local.get $nseg) (i32.const 1)))\n")
+	b.WriteString("              (local.set $segStart (i32.add (local.get $k) (i32.const 1)))))))\n")
+	b.WriteString("      (local.set $k (i32.add (local.get $k) (i32.const 1)))\n")
+	b.WriteString("      (br $sdl)))\n")
+	// drop single trailing empty (file ended with '\n': last segment has len=0)
+	b.WriteString("    (if (i32.gt_s (local.get $nseg) (i32.const 0))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (local.set $si (i32.add (global.get $D6BUF3)\n")
+	b.WriteString("          (i32.shl (i32.sub (local.get $nseg) (i32.const 1)) (i32.const 3))))\n")
+	b.WriteString("        (if (i32.eqz (i32.load (i32.add (local.get $si) (i32.const 4))))\n")
+	b.WriteString("          (then (local.set $nseg (i32.sub (local.get $nseg) (i32.const 1)))))))\n")
+	// insertion sort: compare segments by $d6_linecmp (bytewise, like Go sort.Strings)
+	b.WriteString("    (local.set $k (i32.const 1))\n")
+	b.WriteString("    (block $isb (loop $isl\n")
+	b.WriteString("      (br_if $isb (i32.ge_s (local.get $k) (local.get $nseg)))\n")
+	b.WriteString("      (local.set $si (i32.add (global.get $D6BUF3) (i32.shl (local.get $k) (i32.const 3))))\n")
+	b.WriteString("      (local.set $ta (i32.load (local.get $si)))\n")
+	b.WriteString("      (local.set $tl (i32.load (i32.add (local.get $si) (i32.const 4))))\n")
+	b.WriteString("      (local.set $sj (i32.sub (local.get $k) (i32.const 1)))\n")
+	b.WriteString("      (block $ib (loop $il\n")
+	b.WriteString("        (br_if $ib (i32.lt_s (local.get $sj) (i32.const 0)))\n")
+	b.WriteString("        (local.set $si (i32.add (global.get $D6BUF3) (i32.shl (local.get $sj) (i32.const 3))))\n")
+	b.WriteString("        (local.set $pa (i32.load (local.get $si)))\n")
+	b.WriteString("        (local.set $pl (i32.load (i32.add (local.get $si) (i32.const 4))))\n")
+	b.WriteString("        (br_if $ib (i32.le_s (call $d6_linecmp (local.get $pa) (local.get $pl) (local.get $ta) (local.get $tl)) (i32.const 0)))\n")
+	// shift entry[j] to entry[j+1]
+	b.WriteString("        (local.set $si (i32.add (global.get $D6BUF3) (i32.shl (i32.add (local.get $sj) (i32.const 1)) (i32.const 3))))\n")
+	b.WriteString("        (i32.store (local.get $si) (local.get $pa))\n")
+	b.WriteString("        (i32.store (i32.add (local.get $si) (i32.const 4)) (local.get $pl))\n")
+	b.WriteString("        (local.set $sj (i32.sub (local.get $sj) (i32.const 1)))\n")
+	b.WriteString("        (br $il)))\n")
+	// place current element at sj+1
+	b.WriteString("      (local.set $si (i32.add (global.get $D6BUF3) (i32.shl (i32.add (local.get $sj) (i32.const 1)) (i32.const 3))))\n")
+	b.WriteString("      (i32.store (local.get $si) (local.get $ta))\n")
+	b.WriteString("      (i32.store (i32.add (local.get $si) (i32.const 4)) (local.get $tl))\n")
+	b.WriteString("      (local.set $k (i32.add (local.get $k) (i32.const 1)))\n")
+	b.WriteString("      (br $isl)))\n")
+	// write sorted lines to out file (if fd valid)
+	b.WriteString("    (if (i32.ge_s (local.get $fd) (i32.const 0))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (local.set $k (i32.const 0))\n")
+	b.WriteString("        (block $wb (loop $wl\n")
+	b.WriteString("          (br_if $wb (i32.ge_s (local.get $k) (local.get $nseg)))\n")
+	b.WriteString("          (local.set $si (i32.add (global.get $D6BUF3) (i32.shl (local.get $k) (i32.const 3))))\n")
+	b.WriteString("          (local.set $pa (i32.load (local.get $si)))\n")
+	b.WriteString("          (local.set $pl (i32.load (i32.add (local.get $si) (i32.const 4))))\n")
+	// fd_write iovec for line bytes
+	b.WriteString("          (i32.store (global.get $D6SYS) (local.get $pa))\n")
+	b.WriteString("          (i32.store (i32.add (global.get $D6SYS) (i32.const 4)) (local.get $pl))\n")
+	b.WriteString("          (drop (call $fd_write (local.get $fd) (global.get $D6SYS) (i32.const 1) (i32.add (global.get $D6SYS) (i32.const 24))))\n")
+	// fd_write '\n'
+	b.WriteString("          (i32.store8 (i32.add (global.get $D6SYS) (i32.const 12)) (i32.const 10))\n")
+	b.WriteString("          (i32.store (global.get $D6SYS) (i32.add (global.get $D6SYS) (i32.const 12)))\n")
+	b.WriteString("          (i32.store (i32.add (global.get $D6SYS) (i32.const 4)) (i32.const 1))\n")
+	b.WriteString("          (drop (call $fd_write (local.get $fd) (global.get $D6SYS) (i32.const 1) (i32.add (global.get $D6SYS) (i32.const 24))))\n")
+	b.WriteString("          (local.set $k (i32.add (local.get $k) (i32.const 1)))\n")
+	b.WriteString("          (br $wl)))\n")
+	b.WriteString("        (drop (call $fd_close (local.get $fd)))))\n")
+	b.WriteString("    (call $rt_unit))\n")
+	// c2: arg=out (owned), env=[inp]. Build c3 {inp(retain), out(move)}.
+	fmt.Fprintf(b, "  (func $sortFile_c2 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 2)))\n", c3)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c1: arg=inp (owned). Build c2 {inp(move)}.
+	fmt.Fprintf(b, "  (func $sortFile_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "sortFile", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitDbApplyWasm bakes `dbApply : Nat -> Nat -> IO Unit` as a DOCUMENTED NO-OP. The WASM
+// sandbox (wasmtime preview1) does not provide a subprocess/exec primitive, so dbApply
+// CANNOT call `sqlite3 db ".read sql"` from inside the module. The SQL script file is
+// already written by the builder's writeChunk/sortFile chain; the actual sqlite3 load
+// happens on the HOST side (Task 6). This keeps IO-main programs that call dbApply (e.g.
+// ch558/ch559) runnable under wasmtime without crashing -- they simply do not build the .db
+// in-sandbox (which is expected: WASM output is checked by the cross-backend lock, not the
+// actual sqlite3 content).
+//
+// ARC: db (env[0]) and sql (env[1]) are MOVED into c3's env by c2; c3 ignores them and
+// returns unit. rt_free releases both env slots when c3's closure is freed. World arg immortal.
+func (em *wasmEmitter) emitDbApplyWasm(b *strings.Builder) {
+	c1 := em.codeRef("dbApply_c1")
+	c2 := em.codeRef("dbApply_c2")
+	c3 := em.codeRef("dbApply_c3")
+	// c3: env=[db,sql], arg=world. WASM sandbox no-op: sqlite3 subprocess not available.
+	// The .sql file was written by the builder; the host (Task 6) runs sqlite3.
+	b.WriteString("  (func $dbApply_c3 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    ;; dbApply WASM no-op: sqlite3 subprocess unavailable in WASI preview1.\n")
+	b.WriteString("    ;; The .sql script is written by writeChunk/sortFile; host Task-6 loads it.\n")
+	b.WriteString("    (call $rt_unit))\n")
+	// c2: arg=sql (owned), env=[db]. Build c3 {db(retain), sql(move)}.
+	fmt.Fprintf(b, "  (func $dbApply_c2 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 2)))\n", c3)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	// c1: arg=db (owned). Build c2 {db(move)}.
+	fmt.Fprintf(b, "  (func $dbApply_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "dbApply", func(f *wasmFunc, bb *strings.Builder) string {
 		r := f.fresh()
 		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
 		return "(local.get " + r + ")"

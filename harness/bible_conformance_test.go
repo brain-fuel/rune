@@ -884,6 +884,33 @@ func TestBibleWasmPure(t *testing.T) {
 	}
 }
 
+// TestBibleWasmWriteStream gates the Task-4 write-stream ops (openWrite/writeChunk/
+// closeWrite/sortFile) on the ninth backend: the WASI file-write helper ($d6_wopen via
+// path_open O_CREAT|O_TRUNC + fd_write) + the $D6WH linear-memory fd handle table run
+// under `wasmtime run --dir=<tmp>` and produce the byte-identical cross-backend results:
+//   ch552 -> 2\n2 (write 2 lines, foldLines counts them)
+//   ch553 -> 5\n5 (write cherry/apple/banana, sortFile, foldLines first-line byteLen)
+// Each case gets its own t.TempDir() as the wasmtime preopen/cwd so files created inside
+// the module land in a fresh sandbox. Skips if wasmtime absent.
+func TestBibleWasmWriteStream(t *testing.T) {
+	if wasmtimePathHarness() == "" {
+		t.Skip("wasmtime not available")
+	}
+	cases := []struct{ listing, want string }{
+		{"ch552_write_stream.rune", "2\n2"},
+		{"ch553_sort_file.rune", "5\n5"},
+	}
+	for _, c := range cases {
+		got, ok := runWasmListing(t, c.listing, "main", t.TempDir())
+		if !ok {
+			t.Skip("wasmtime not available")
+		}
+		if got != c.want {
+			t.Errorf("wasm %s = %q, want %q", c.listing, got, c.want)
+		}
+	}
+}
+
 // TestBibleWasmFold gates the 2 HIGHER-ORDER file/dir bible ops (foldLines/foldDir) on the
 // ninth backend: the WASI file-read helper ($d6_readfile via path_open/fd_read) + the
 // recursive dir walk ($d6_foldwalk via path_open O_DIRECTORY/fd_readdir) run under
