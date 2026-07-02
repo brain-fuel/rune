@@ -18,8 +18,10 @@ checklist of everything between HEAD and a shippable beta.
 - Assurance Ledger, control catalog (4 proven flagships, over-broad IAM rejected at
   elaboration), CALM emit/validate round-trip. CLIs `rune ledger`, `rune calm`.
 - Eval model (Plan 1): do/par seeded frontier on Go+JS, order-independence proof.
-- WASM: ARC runtime (6a), Perceus ownership pass (6b), partials, foreign ops,
-  printNat, IO-main, packed-String codec.
+- WASM: ARC runtime (6a), Perceus ownership pass (6b), leak residuals closed +
+  PerceusBalanceable re-opened (6b-2, v3.337.0, verified 2026-07-02: realistic
+  programs steady-flat), partial support with ARC trampoline (v3.341.0), foreign
+  ops, printNat, IO-main, packed-String codec.
 
 ## Tier A: the headline artifact (critical path, in dependency order)
 
@@ -27,11 +29,12 @@ checklist of everything between HEAD and a shippable beta.
    Finish the tier-4 divergence-lock so WASM joins the 8-way byte-identical gate
    for the ops the demo touches. Acceptance: WASM row added to
    `harness/bible_conformance_test.go` (or the demo-relevant subset gate).
-2. **6b-2: leak residuals.** The 4 compounding leaks (natFold temps, curry-through
-   carve-out, saturated-constructor direct emit, big_parse digit temps) so a real
-   program is steady-flat. Plan exists: `2026-06-27-perceus-6b2-leak-residuals.md`.
+2. ~~6b-2: leak residuals~~ DONE (v3.337.0, verified 2026-07-02; all four
+   residuals closed, PerceusBalanceable re-opened, realistic programs steady-flat;
+   WASM partial support landed too, v3.341.0). Was listed here off the stale index.
 3. **6c: strings/bytes as refcounted heap objects** (Bin over ARC). Prerequisite
-   for any browser demo that touches text.
+   for any browser demo that touches text. Note: the packed-String codec (bignum
+   packing) landed for bible ops; 6c is the heap-object representation, still open.
 4. **6d: WebRTC FFI shim.** WASM imports; the sandbox/no-native interop class.
    Smallest sufficient surface: open channel, send bytes, receive callback.
 5. **6f: the two-tab CRDT browser app.** WASM merge + JS/WebRTC glue + two divs.
