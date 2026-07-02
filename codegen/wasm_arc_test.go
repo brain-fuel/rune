@@ -247,3 +247,25 @@ func TestARCBigBucketReuse(t *testing.T) {
 		t.Fatalf("big payload not pooled: probe=%q want 1", out)
 	}
 }
+
+// TestARCBinLeafRelease: build a 300-byte K_BIN (over the small-bucket line, so
+// it also exercises Task 1's big-bucket path), set/read two bytes and the length,
+// then release it. $live must return to baseline and the bytes must round-trip.
+func TestARCBinLeafRelease(t *testing.T) {
+	body := `
+    (local $b i32) (local $l0 i32) (local $ok i32)
+    (local.set $l0 (call $rt_live))
+    (local.set $b (call $rt_mkbin (i32.const 300)))
+    (call $rt_bin_set (local.get $b) (i32.const 0) (i32.const 65))
+    (call $rt_bin_set (local.get $b) (i32.const 299) (i32.const 90))
+    (local.set $ok (i32.and
+      (i32.and (i32.eq (call $rt_bin_at (local.get $b) (i32.const 0)) (i32.const 65))
+               (i32.eq (call $rt_bin_at (local.get $b) (i32.const 299)) (i32.const 90)))
+      (i32.eq (call $rt_bin_len (local.get $b)) (i32.const 300))))
+    (call $rt_release (local.get $b))
+    (call $rt_print_u32 (i32.and (local.get $ok) (i32.eq (call $rt_live) (local.get $l0))))`
+	out := runWasm(t, arcTestModule(body))
+	if out != "1" {
+		t.Fatalf("K_BIN leaf lifecycle broken: probe=%q want 1", out)
+	}
+}

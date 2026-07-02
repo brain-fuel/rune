@@ -19,6 +19,7 @@ package codegen
 //	K_PAIR [kind=2][a][b]
 //	K_UNIT [kind=5]                                    the boxed unit singleton
 //	K_BIG  [kind=6][nlimbs][limb0][limb1]...           base-1e9 little-endian bignum
+//	K_BIN  [kind=8][byte-len][raw bytes, 4-rounded]    packed real-byte Bin container
 //
 // All words are 4 bytes. The function table holds every code block + constructor/
 // eliminator code block; AppClosure loads the closure's code_idx and `call_indirect`s
@@ -403,6 +404,23 @@ const wasmRuntime = `
     (call $rt_release (local.get $ten))
     (local.get $acc))
 
+  ;; ---- bin: [K_BIN=8][byte-len][raw bytes, allocation 4-rounded] ----
+  ;; The real-byte Bin container (native K_BYTES=8 analogue, packed not
+  ;; slot-per-byte). A leaf: no child pointers, release never recurses.
+  (func $rt_mkbin (param $len i32) (result i32)
+    (local $o i32)
+    (local.set $o (call $alloc (i32.add (i32.const 8)
+      (i32.and (i32.add (local.get $len) (i32.const 3)) (i32.const -4)))))
+    (call $sw (local.get $o) (i32.const 0) (i32.const 8))
+    (call $sw (local.get $o) (i32.const 1) (local.get $len))
+    (local.get $o))
+  (func $rt_bin_len (param $b i32) (result i32)
+    (call $w (local.get $b) (i32.const 1)))
+  (func $rt_bin_set (param $b i32) (param $i i32) (param $c i32)
+    (i32.store8 (i32.add (i32.add (local.get $b) (i32.const 8)) (local.get $i)) (local.get $c)))
+  (func $rt_bin_at (param $b i32) (param $i i32) (result i32)
+    (i32.load8_u (i32.add (i32.add (local.get $b) (i32.const 8)) (local.get $i))))
+
   ;; ---- $show: render a value to the scratch buffer, then fd_write to stdout ----
   ;; The scratch buffer grows downward in the [0,65536) reserved region; we use a
   ;; cursor and append bytes, then emit it. Renders byte-identical to the C show.
@@ -589,7 +607,7 @@ const wasmRuntime = `
   ;; Kinds: K_CLO=0 env slots at word 3 (count at word 2);
   ;;        K_CON=1 field slots at word 4 (count at word 3);
   ;;        K_PAIR=2 halves at words 1 and 2;
-  ;;        K_BIG=6 and others: leaf -- limbs are raw ints, not pointers.
+  ;;        K_BIG=6, K_BIN=8, and others: leaf -- limbs/bytes are raw, not pointers.
   ;; $rt_free releases child pointers by kind (so the whole structure is reclaimed),
   ;; decrements $live, then pushes the block onto its size-class free list for reuse.
   (func $rt_free (param $v i32)
@@ -624,6 +642,7 @@ const wasmRuntime = `
           (local.set $n (call $w (local.get $v) (i32.const 2)))
           (local.set $base (i32.const 3))
           (br $done)))
+      ;; K_BIN=8: raw bytes, a leaf like K_BIG -- no child pointers to release
       ;; K_BIG and anything else: leaf, no child pointers
       (local.set $n (i32.const 0))
       (local.set $base (i32.const 0)))
