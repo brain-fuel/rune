@@ -501,3 +501,12 @@ its own dedicated, never-shared decode windows `$D6FDDIR`/`$D6FDSUF` (codegen/wa
 of the reserved low region, `$hp` bumped from 1837056 to 1968128) that stay stable for the whole walk
 regardless of what the applied step decodes elsewhere. Verified: `TestBibleConformanceBuilders` now passes
 9-way byte-identical (sha256 cff27bc shared-root / c4246e3 lexicon.sql) with WASM included.
+
+## `rune run` does not forward stdin to the child (2026-07-02)
+`echo 7 | rune run listings/ch211_io_stdin.rune main --target js` prints `0\n0` (the child's
+getNat reads EMPTY stdin), while emitting + running the same program directly under node prints
+`7\n7`. cmd/rune's run path does not wire os.Stdin into the child process, so INTERACTIVE
+programs must be `rune emit`ed and executed directly (which is how the conformance gates do it
+-- they were never affected). FIX when an interactive consumer appears: set cmd.Stdin = os.Stdin
+in the run child-process setup. Park (Standing Rule 1, no consumer -- all current stdin listings
+are gate-driven via direct execution).
