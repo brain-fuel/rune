@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -25,7 +27,10 @@ func TestPGWire(t *testing.T) {
 	if err := exec.Command("docker", "info").Run(); err != nil {
 		t.Skip("docker daemon not available")
 	}
-	const cname = "rune_pgwire_test"
+	// Pid-unique name: a fixed name lets two concurrent suites (parallel agent
+	// sessions, a worktree run beside a checkout run) docker-rm each other's
+	// container mid-test, which surfaces as a spurious `gave ""` failure.
+	cname := fmt.Sprintf("rune_pgwire_test_%d", os.Getpid())
 	_ = exec.Command("docker", "rm", "-f", cname).Run()
 	run := exec.Command("docker", "run", "-d", "--name", cname,
 		"-e", "POSTGRES_HOST_AUTH_METHOD=trust", "-e", "POSTGRES_USER=postgres",
