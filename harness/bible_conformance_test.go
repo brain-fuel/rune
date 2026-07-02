@@ -862,6 +862,63 @@ func runWasmListing(t *testing.T, listing, main, cwd string) (string, bool) {
 	return strings.TrimSpace(string(out)), true
 }
 
+// runWasmListingD6 is the Task-5 sibling of runWasmListing: it additionally passes
+// `--env=KEY=VAL` (one per entry) and the program's argv as trailing positional
+// arguments (wasmtime's `<WASM>...` accepts the module path followed directly by its
+// CLI arguments -- NO `--` separator; wasmtime's own clap parser treats a literal `--`
+// as argv[1] itself, which was caught by TestD6WasmArgvExit shifting argCountCode/
+// argAtCode by one entry) -- the two sandbox flags the D6 env/argv/exit layer needs
+// (getEnvCode/argAtCode read them; exitWith may terminate the module with a non-zero
+// status). Returns trimmed
+// stdout, the process exit code, and ok=true; ok=false when wasmtime is absent (callers
+// skip). Unlike runWasmListing, a non-zero exit is NOT fataled here -- exitWith
+// terminating the module with a caller-chosen status is the expected, tested behavior
+// (mirrors TestD6NativeArgvExit's *exec.ExitError handling for the native gate).
+func runWasmListingD6(t *testing.T, listing, main, cwd string, env, args []string) (string, int, bool) {
+	t.Helper()
+	wt := wasmtimePathHarness()
+	if wt == "" {
+		return "", 0, false
+	}
+	s := loadListing(t, listing)
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		t.Fatalf("%s emit-program: %v", listing, err)
+	}
+	src, err := codegen.Wasm{}.Emit(p)
+	if err != nil {
+		t.Fatalf("%s wasm emit: %v", listing, err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "module.wat")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wtArgs := []string{"run"}
+	if cwd != "" {
+		wtArgs = append(wtArgs, "--dir=.")
+	}
+	for _, e := range env {
+		wtArgs = append(wtArgs, "--env="+e)
+	}
+	wtArgs = append(wtArgs, f)
+	wtArgs = append(wtArgs, args...)
+	cmd := exec.Command(wt, wtArgs...)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	out, err := cmd.Output()
+	exitCode := 0
+	if err != nil {
+		ee, ok := err.(*exec.ExitError)
+		if !ok {
+			t.Fatalf("%s wasmtime run: %v", listing, err)
+		}
+		exitCode = ee.ExitCode()
+	}
+	return strings.TrimSpace(string(out)), exitCode, true
+}
+
 // TestBibleWasmPure gates the 4 PURE bible ops (byteLen/splitOn/jsonStrField/sqlQuote)
 // on the ninth backend: the packed-String codec + op bodies produce the byte-identical
 // cross-backend results under wasmtime (ch551 -> 5, ch557 -> 6). Skips if wasmtime absent.

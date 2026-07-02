@@ -3190,6 +3190,48 @@ func TestD6NativeArgvExit(t *testing.T) {
 	}
 }
 
+// TestD6WasmFileEnv is the WASM D6 file/env gate: ch215 writes "hello, wootz" to a
+// relative file under wasmtime's `--dir=.` preopen, reads it back and prints it, then
+// prints $RUNE_D6 (passed via `--env=RUNE_D6=ok`) -- byte-identical to the source/native
+// gates: "hello, wootz\nok\nunit". Exercises the Task-5 getEnvCode/readFileCode/
+// writeFileCode/printStrCode WAT bodies together (writeFileCode+readFileCode reuse the
+// Task-3/4 $d6_readfile/$d6_wopen; getEnvCode+printStrCode are Task-5's own). Skips
+// cleanly when wasmtime is absent.
+func TestD6WasmFileEnv(t *testing.T) {
+	const want = "hello, wootz\nok\nunit"
+	got, _, ok := runWasmListingD6(t, "ch215_io_fs_env.rune", "main", t.TempDir(), []string{"RUNE_D6=ok"}, nil)
+	if !ok {
+		t.Skip("wasmtime not available")
+	}
+	if got != want {
+		t.Errorf("wasm D6 file+env: got %q, want %q", got, want)
+	}
+}
+
+// TestD6WasmArgvExit is the WASM D6 argv+process gate: ch216 prints argc then argv[0]/
+// argv[1] (via argCountCode/argAtCode, passed as wasmtime's trailing module arguments --
+// no `--` separator; wasmtime's `<WASM>...` treats everything after the module path as
+// WASI argv directly), then exits with status = argc via exitWith's `proc_exit`. Run
+// with `alpha beta` the stdout
+// is "2\nalpha\nbeta" and the exit status is 2 -- byte-identical to the source/native
+// gates. No `--dir` preopen needed (no file op in ch216), which also proves the Task-5
+// env/argv scratch (wasmBibleEnvArgv) does not depend on the Task-3/4 file windows.
+// Skips cleanly when wasmtime is absent.
+func TestD6WasmArgvExit(t *testing.T) {
+	const wantOut = "2\nalpha\nbeta"
+	const wantExit = 2
+	got, exitCode, ok := runWasmListingD6(t, "ch216_io_argv_exit.rune", "main", "", nil, []string{"alpha", "beta"})
+	if !ok {
+		t.Skip("wasmtime not available")
+	}
+	if got != wantOut {
+		t.Errorf("wasm D6 argv stdout: got %q, want %q", got, wantOut)
+	}
+	if exitCode != wantExit {
+		t.Errorf("wasm D6 argv exit: got %d, want %d", exitCode, wantExit)
+	}
+}
+
 // TestDTypeKitConformance deploys the DType kit (ch471, D4 rung 3): the dtype enum's typestr
 // `dtypeStr f64` is "<f8", the __array_interface__ tag a boundary dtype-guard compares a numpy
 // buffer against (the guard accept/reject and typestr proofs hold by refl at check time). It

@@ -52,20 +52,35 @@ const wasmRuntime = `
   (import "wasi_snapshot_preview1" "fd_readdir" (func $fd_readdir (param i32 i32 i32 i64 i32) (result i32)))
   (import "wasi_snapshot_preview1" "path_open"
     (func $path_open (param i32 i32 i32 i32 i32 i64 i64 i32 i32) (result i32)))
+  ;; ---- env/argv/process WASI (Task 5): the D6 env/argv/exit layer ----
+  ;; Declared unconditionally (like clock_time_get/fd_read): wasmtime provides every
+  ;; preview1 import for a _start module, so an unused import in a non-D6 module is
+  ;; harmless. Their WAT bodies ($d6_getenv/$d6_argat/$d6_argcount) are baked only when
+  ;; getEnvCode/argAtCode/argCountCode is present (wasmBibleEnvArgv). proc_exit has no
+  ;; result (it terminates the module) -- its WASM import type is (param i32).
+  (import "wasi_snapshot_preview1" "environ_sizes_get" (func $environ_sizes_get (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "environ_get"       (func $environ_get       (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "args_sizes_get"    (func $args_sizes_get    (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "args_get"          (func $args_get          (param i32 i32) (result i32)))
+  (import "wasi_snapshot_preview1" "proc_exit"         (func $proc_exit         (param i32)))
 
   ;; ---- linear memory + a bump allocator (no GC in v1) ----
   (memory (export "memory") 256)        ;; 256 pages = 16 MiB initial
-  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1573888):
+  ;; heap pointer; below it: scratch + cstrs. The reserved low region is [0, 1837056):
   ;; iovec [16,24), timeNanos [24,32), fixed msgs [32,512), interned cstrs [512,4096),
   ;; show buffer [4096,...), freelist [8192,8448), the bible-codec byte buffers
   ;; $D6BUF/$D6BUF2/$D6BUF3 (64 KiB each at 65536/131072/196608, declared in the codec),
   ;; the Task-3 file/dir WASI scratch (declared in wasmBibleReadFile/wasmBibleFoldDir):
   ;; $D6SYS syscall cells [262144,327680), $D6PATH path-build [327680,393216), $D6DIR
   ;; dirent buffer [393216,458752), $D6NAMES foldwalk index [458752,524288),
-  ;; $D6SLURP 1 MiB whole-file slurp window [524288,1572864), and the Task-4 fd handle
-  ;; table $D6WH (256 i32 slots = 1 KiB at [1572864,1573888), declared in wasmBibleWriteOps).
-  ;; Heap allocation starts at 1573888 so it never overwrites any scratch windows.
-  (global $hp (mut i32) (i32.const 1573888)) ;; heap pointer; scratch below, heap above
+  ;; $D6SLURP 1 MiB whole-file slurp window [524288,1572864), the Task-4 fd handle
+  ;; table $D6WH (256 i32 slots = 1 KiB at [1572864,1573888), declared in wasmBibleWriteOps),
+  ;; and the Task-5 env/argv scratch (declared in wasmBibleEnvArgv): $D6ENVSYS syscall
+  ;; cells [1573888,1574912), $D6ENVPTRS environ pointer array [1574912,1640448),
+  ;; $D6ENVBUF environ KEY=VAL string buffer [1640448,1705984), $D6ARGVPTRS argv pointer
+  ;; array [1705984,1771520), $D6ARGVBUF argv string buffer [1771520,1837056).
+  ;; Heap allocation starts at 1837056 so it never overwrites any scratch windows.
+  (global $hp (mut i32) (i32.const 1837056)) ;; heap pointer; scratch below, heap above
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
   (global $freelist (mut i32) (i32.const 8192)) ;; 64 i32 bucket heads at [8192, 8448)
@@ -1092,3 +1107,123 @@ const wasmBibleWriteOps = `
 // handle table globals ($D6WH/$d6_whid) and the write-open helper ($d6_wopen). Exported
 // for external tests; needs wasmBibleReadFile to precede it (uses $D6SYS).
 func WasmBibleWriteOps() string { return wasmBibleWriteOps }
+
+// wasmBibleEnvArgv is the Task-5 env/argv/process infrastructure: the WASI
+// environ_sizes_get/environ_get/args_sizes_get/args_get helpers ($d6_getenv/$d6_argat/
+// $d6_argcount) getEnvCode/argAtCode/argCountCode build on, over five dedicated scratch
+// windows below the bumped $hp (1837056): $D6ENVSYS (small syscall-result cells),
+// $D6ENVPTRS/$D6ENVBUF (the environ pointer array + KEY=VAL string buffer), and
+// $D6ARGVPTRS/$D6ARGVBUF (the argv twins). Emitted when any of getEnvCode/argAtCode/
+// argCountCode is referenced -- independent of the Task-3/4 file windows (ch216 uses
+// argCountCode/argAtCode/exitWith/printStrCode with NO file op, so this fragment must
+// not depend on wasmBibleReadFile/wasmBibleWriteOps being present).
+//
+// $d6_getenv / $d6_argat return (buf,len) with len=0 on "not found" / "out of range" --
+// $d6_h2s(buf,0) always yields the packed-empty sentinel bignum 1 regardless of buf (the
+// decode loop never dereferences buf when len=0), so callers never special-case the
+// failure buffer pointer, matching the Global Constraint "empty/error sentinel = 1".
+//
+// WASI preview1 contract used here: environ_sizes_get(count_out,bufsize_out) / environ_get
+// (ptrs_out,buf_out) fills $D6ENVPTRS with `count` pointers into $D6ENVBUF, each pointing
+// at a NUL-terminated "KEY=VAL" cstring; args_sizes_get/args_get are the identical shape
+// for argv (argv[0] is the WASI module/program name, skipped by $d6_argat's `idx+1`).
+const wasmBibleEnvArgv = `
+  ;; ---- Task-5 env/argv scratch (below the Task-3/4 windows, above $D6WH) ----
+  (global $D6ENVSYS   i32 (i32.const 1573888))  ;; syscall-result cells: env count/bufsize
+                                                 ;; at +0/+4, argv argc/bufsize at +8/+12
+  (global $D6ENVPTRS  i32 (i32.const 1574912))  ;; environ pointer array (64 KiB cap)
+  (global $D6ENVBUF   i32 (i32.const 1640448))  ;; environ "KEY=VAL\0..." string buffer
+  (global $D6ARGVPTRS i32 (i32.const 1705984))  ;; argv pointer array (64 KiB cap)
+  (global $D6ARGVBUF  i32 (i32.const 1771520))  ;; argv string buffer (64 KiB cap)
+
+  ;; $d6_strlen: the NUL-terminated byte length starting at $p (WASI cstrings are NUL
+  ;; terminated inside the environ_get/args_get buffers).
+  (func $d6_strlen (param $p i32) (result i32)
+    (local $n i32)
+    (block $done (loop $lp
+      (br_if $done (i32.eqz (i32.load8_u (i32.add (local.get $p) (local.get $n)))))
+      (local.set $n (i32.add (local.get $n) (i32.const 1)))
+      (br $lp)))
+    (local.get $n))
+
+  ;; $d6_envmemeq: byte-compare [a,a+n) == [b,b+n)? (memcmp==0). 1 = equal. A PRIVATE
+  ;; copy of the codec's $d6_memeq (cf. $d6_linecmp vs $d6_pathcmp in the Task-3/4
+  ;; fragments): wasmBibleEnvArgv is gated independently of usesBibleCodec (a program
+  ;; using ONLY argCountCode needs this fragment but not wasmBibleCodec), so it must not
+  ;; reference a symbol wasmBibleCodec owns.
+  (func $d6_envmemeq (param $a i32) (param $b i32) (param $n i32) (result i32)
+    (local $i i32)
+    (local.set $i (i32.const 0))
+    (block $done (loop $lp
+      (br_if $done (i32.ge_s (local.get $i) (local.get $n)))
+      (if (i32.ne (i32.load8_u (i32.add (local.get $a) (local.get $i)))
+                  (i32.load8_u (i32.add (local.get $b) (local.get $i))))
+        (then (return (i32.const 0))))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lp)))
+    (i32.const 1))
+
+  ;; $d6_getenv (kbuf,klen) -> (val_buf,val_len). Calls environ_sizes_get + environ_get,
+  ;; then linear-scans the environ block for an entry whose "KEY=" prefix (up to the first
+  ;; '=') byte-equals [kbuf,kbuf+klen); returns the value span (after '=', NUL-terminated
+  ;; length via $d6_strlen). Not found (or an empty environ) -> (D6ENVBUF,0).
+  (func $d6_getenv (param $kbuf i32) (param $klen i32) (result i32 i32)
+    (local $count i32) (local $i i32) (local $eptr i32) (local $j i32) (local $elen i32) (local $match i32)
+    (drop (call $environ_sizes_get (global.get $D6ENVSYS) (i32.add (global.get $D6ENVSYS) (i32.const 4))))
+    (local.set $count (i32.load (global.get $D6ENVSYS)))
+    (if (local.get $count)
+      (then
+        (drop (call $environ_get (global.get $D6ENVPTRS) (global.get $D6ENVBUF)))
+        (local.set $i (i32.const 0))
+        (block $done (loop $lp
+          (br_if $done (i32.ge_u (local.get $i) (local.get $count)))
+          (local.set $eptr (i32.load (i32.add (global.get $D6ENVPTRS) (i32.shl (local.get $i) (i32.const 2)))))
+          (local.set $j (i32.const 0))
+          (block $fnd (loop $fl
+            (br_if $fnd (i32.eq (i32.load8_u (i32.add (local.get $eptr) (local.get $j))) (i32.const 61))) ;; '='
+            (local.set $j (i32.add (local.get $j) (i32.const 1)))
+            (br $fl)))
+          (local.set $elen (local.get $j))
+          (local.set $match (i32.const 0))
+          (if (i32.eq (local.get $elen) (local.get $klen))
+            (then (local.set $match (call $d6_envmemeq (local.get $eptr) (local.get $kbuf) (local.get $klen)))))
+          (if (local.get $match)
+            (then
+              (local.set $j (i32.add (i32.add (local.get $eptr) (local.get $elen)) (i32.const 1)))
+              (return (local.get $j) (call $d6_strlen (local.get $j)))))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br $lp)))))
+    (global.get $D6ENVBUF) (i32.const 0))
+
+  ;; $d6_argat (idx) -> (buf,len). $idx is the RAW 0-based Rune argv index (argAtCode's
+  ;; caller-visible index; argv[0] under WASI is the module/program name, so the WASI
+  ;; index is idx+1). Out of range -> (D6ARGVBUF,0).
+  (func $d6_argat (param $idx i32) (result i32 i32)
+    (local $count i32) (local $wi i32) (local $ptr i32)
+    (drop (call $args_sizes_get (global.get $D6ENVSYS) (i32.add (global.get $D6ENVSYS) (i32.const 4))))
+    (local.set $count (i32.load (global.get $D6ENVSYS)))
+    (local.set $wi (i32.add (local.get $idx) (i32.const 1)))
+    (if (i32.and (i32.ge_s (local.get $wi) (i32.const 1)) (i32.lt_u (local.get $wi) (local.get $count)))
+      (then
+        (drop (call $args_get (global.get $D6ARGVPTRS) (global.get $D6ARGVBUF)))
+        (local.set $ptr (i32.load (i32.add (global.get $D6ARGVPTRS) (i32.shl (local.get $wi) (i32.const 2)))))
+        (return (local.get $ptr) (call $d6_strlen (local.get $ptr)))))
+    (global.get $D6ARGVBUF) (i32.const 0))
+
+  ;; $d6_argcount: the number of USER argv entries (argv[0], the program name, excluded),
+  ;; saturating at 0.
+  (func $d6_argcount (result i32)
+    (local $count i32)
+    (drop (call $args_sizes_get (global.get $D6ENVSYS) (i32.add (global.get $D6ENVSYS) (i32.const 4))))
+    (local.set $count (i32.load (global.get $D6ENVSYS)))
+    (if (i32.gt_s (local.get $count) (i32.const 0))
+      (then (return (i32.sub (local.get $count) (i32.const 1)))))
+    (i32.const 0))
+`
+
+// WasmBibleEnvArgv returns the Task-5 env/argv/process infrastructure WAT fragment: the
+// scratch globals + $d6_getenv/$d6_argat/$d6_argcount. Exported for external tests. Fully
+// self-contained (its own $d6_envmemeq) -- does NOT depend on wasmBibleCodec, since it is
+// gated independently (a program using only argCountCode needs this fragment but not the
+// codec).
+func WasmBibleEnvArgv() string { return wasmBibleEnvArgv }

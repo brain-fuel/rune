@@ -128,6 +128,14 @@ var wasmSupportedForeign = map[string]bool{
 	"closeWrite": true,
 	"sortFile":   true,
 	"dbApply":    true,
+	// Task 5: the D6 env/argv/exit layer (environ_*/args_*/proc_exit WASI + the codec).
+	"getEnvCode":    true,
+	"readFileCode":  true,
+	"writeFileCode": true,
+	"printStrCode":  true,
+	"argAtCode":     true,
+	"argCountCode":  true,
+	"exitWith":      true,
 }
 
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
@@ -1072,7 +1080,8 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 	// run a host fold loop applying the erased Rune step per line / per file.
 	if usesForeign(p, "foldLines") || usesForeign(p, "foldDir") ||
 		usesForeign(p, "openWrite") || usesForeign(p, "writeChunk") ||
-		usesForeign(p, "closeWrite") || usesForeign(p, "sortFile") {
+		usesForeign(p, "closeWrite") || usesForeign(p, "sortFile") ||
+		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") {
 		b.WriteString(wasmBibleReadFile)
 	}
 	if usesForeign(p, "foldLines") {
@@ -1088,7 +1097,8 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 	// dbApply is a documented WASM sandbox no-op: sqlite3 subprocess is unavailable in
 	// wasmtime without a WASI subprocess extension; the host (Task 6) runs sqlite3 instead.
 	if usesForeign(p, "openWrite") || usesForeign(p, "writeChunk") ||
-		usesForeign(p, "closeWrite") || usesForeign(p, "sortFile") {
+		usesForeign(p, "closeWrite") || usesForeign(p, "sortFile") ||
+		usesForeign(p, "writeFileCode") {
 		b.WriteString(wasmBibleWriteOps)
 	}
 	if usesForeign(p, "Handle") {
@@ -1109,6 +1119,36 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 	if usesForeign(p, "dbApply") {
 		em.emitDbApplyWasm(b)
 	}
+	// Task 5: the D6 env/argv/exit layer. wasmBibleEnvArgv ($d6_getenv/$d6_argat/
+	// $d6_argcount + their scratch windows) is baked once when any of getEnvCode/
+	// argAtCode/argCountCode is present -- independent of the Task-3/4 file windows
+	// (ch216 uses argCountCode/argAtCode/exitWith/printStrCode with no file op).
+	// readFileCode/writeFileCode instead reuse the Task-3/4 $d6_readfile/$d6_wopen
+	// (already baked above by the wasmBibleReadFile/wasmBibleWriteOps gates).
+	if usesForeign(p, "getEnvCode") || usesForeign(p, "argAtCode") || usesForeign(p, "argCountCode") {
+		b.WriteString(wasmBibleEnvArgv)
+	}
+	if usesForeign(p, "printStrCode") {
+		em.emitPrintStrCodeWasm(b)
+	}
+	if usesForeign(p, "getEnvCode") {
+		em.emitGetEnvCodeWasm(b)
+	}
+	if usesForeign(p, "readFileCode") {
+		em.emitReadFileCodeWasm(b)
+	}
+	if usesForeign(p, "writeFileCode") {
+		em.emitWriteFileCodeWasm(b)
+	}
+	if usesForeign(p, "argCountCode") {
+		em.emitArgCountCodeWasm(b)
+	}
+	if usesForeign(p, "argAtCode") {
+		em.emitArgAtCodeWasm(b)
+	}
+	if usesForeign(p, "exitWith") {
+		em.emitExitWithWasm(b)
+	}
 }
 
 // usesBibleCodec reports whether p references any foreign op that decodes/encodes a
@@ -1118,6 +1158,9 @@ func usesBibleCodec(p Program) bool {
 		"byteLen", "splitOn", "jsonStrField", "sqlQuote", "foldLines", "foldDir",
 		// Task 4: write-stream ops all decode packed Strings (paths/content) via $d6_s2h.
 		"openWrite", "writeChunk", "closeWrite", "sortFile", "dbApply",
+		// Task 5: the D6 env/argv/exit layer decodes/encodes packed Strings too (exitWith
+		// and argCountCode are the only two that carry no String, so they are excluded).
+		"getEnvCode", "readFileCode", "writeFileCode", "printStrCode", "argAtCode",
 	} {
 		if usesForeign(p, op) {
 			return true
@@ -1839,6 +1882,226 @@ func (em *wasmEmitter) emitDbApplyWasm(b *strings.Builder) {
 	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
 	b.WriteString("    (local.get $c))\n")
 	em.emitCachedThunk(b, "dbApply", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitPrintStrCodeWasm bakes `printStrCode : Nat -> IO Nat` -- decode the packed String
+// and write its RAW bytes (no re-encode; the codec IS the byte-exact representation) plus
+// a trailing '\n' to stdout via the runtime's `$puts` helper (the SAME iovec `$show` uses,
+// at [16,24)) -- unlike the Task-3/4 file ops, printStrCode must work standalone (ch216
+// uses it with no file op present, so it cannot depend on $D6SYS from wasmBibleReadFile).
+// 2-step curried IO-closure chain: c1(s->env) -> c2(world->effect).
+//
+// ARC: s (env[0]) is BORROWED (never released; rt_free reclaims it when c2's closure
+// dies). The '\n' byte is written by clobbering $D6BUF[0] AFTER the content write (safe:
+// the content bytes have already been consumed by the first $puts call). The returned s
+// is RETAINED (env is borrowed) to yield an independent owned reference, matching printNat.
+func (em *wasmEmitter) emitPrintStrCodeWasm(b *strings.Builder) {
+	c1 := em.codeRef("printStrCode_c1")
+	c2 := em.codeRef("printStrCode_c2")
+	b.WriteString("  (func $printStrCode_c2 (param $arg i32) (param $env i32) (result i32) (local $s i32) (local $len i32)\n")
+	b.WriteString("    (local.set $s (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $d6_s2h (local.get $s))\n")
+	b.WriteString("    (local.set $len)\n") // pop len (top)
+	b.WriteString("    (drop)\n")            // pop buf ptr (always $D6BUF)
+	b.WriteString("    (call $puts (i32.const 1) (global.get $D6BUF) (local.get $len))\n")
+	b.WriteString("    (i32.store8 (global.get $D6BUF) (i32.const 10))\n") // '\n'
+	b.WriteString("    (call $puts (i32.const 1) (global.get $D6BUF) (i32.const 1))\n")
+	b.WriteString("    (call $rt_retain (local.get $s))\n")
+	b.WriteString("    (local.get $s))\n")
+	fmt.Fprintf(b, "  (func $printStrCode_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "printStrCode", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitGetEnvCodeWasm bakes `getEnvCode : Nat -> IO Nat` -- decode the packed String key,
+// look it up via $d6_getenv, and h2s-encode the value (an unset key naturally h2s-encodes
+// to the packed-empty sentinel 1, since $d6_getenv returns len=0 on "not found"). 2-step
+// curried IO-closure chain: c1(key->env) -> c2(world->effect). Ports rust.go:239.
+//
+// ARC: key (env[0]) is BORROWED (never released here; rt_free reclaims it when c2's
+// closure dies). The h2s result is a fresh owned bignum.
+func (em *wasmEmitter) emitGetEnvCodeWasm(b *strings.Builder) {
+	c1 := em.codeRef("getEnvCode_c1")
+	c2 := em.codeRef("getEnvCode_c2")
+	b.WriteString("  (func $getEnvCode_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $klen i32) (local $vbuf i32) (local $vlen i32)\n")
+	b.WriteString("    (call $d6_s2h (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (local.set $klen)\n") // pop len (top)
+	b.WriteString("    (drop)\n")            // pop buf ptr (always $D6BUF)
+	b.WriteString("    (call $d6_getenv (global.get $D6BUF) (local.get $klen))\n")
+	b.WriteString("    (local.set $vlen)\n") // pop len (top)
+	b.WriteString("    (local.set $vbuf)\n") // pop buf ptr
+	b.WriteString("    (call $d6_h2s (local.get $vbuf) (local.get $vlen)))\n")
+	fmt.Fprintf(b, "  (func $getEnvCode_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "getEnvCode", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitReadFileCodeWasm bakes `readFileCode : Nat -> IO Nat` -- decode the packed String
+// path, slurp the file via the Task-3 $d6_readfile, and h2s-encode its bytes. A missing/
+// unreadable file ($d6_readfile -> (0,0)) returns the packed-empty sentinel bignum 1
+// DIRECTLY (mirrors the C/Rust `if (!fp) return big_from_long(1)` branch, taken before the
+// codec is even consulted). 2-step curried IO-closure chain: c1(path->env) -> c2(world->
+// effect). Depends on wasmBibleReadFile ($d6_readfile/$D6SYS/$D6SLURP). Ports rust.go:243.
+//
+// ARC: path (env[0]) is BORROWED. The (0,0)-branch bignum and the h2s result are both
+// fresh owned values.
+func (em *wasmEmitter) emitReadFileCodeWasm(b *strings.Builder) {
+	c1 := em.codeRef("readFileCode_c1")
+	c2 := em.codeRef("readFileCode_c2")
+	b.WriteString("  (func $readFileCode_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $plen i32) (local $buf i32) (local $len i32)\n")
+	b.WriteString("    (call $d6_s2h (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (local.set $plen)\n")
+	b.WriteString("    (drop)\n")
+	b.WriteString("    (call $d6_readfile (global.get $D6BUF) (local.get $plen))\n")
+	b.WriteString("    (local.set $len)\n")
+	b.WriteString("    (local.set $buf)\n")
+	b.WriteString("    (if (i32.eqz (local.get $buf)) (then (return (call $rt_big_from_long (i32.const 1)))))\n")
+	b.WriteString("    (call $d6_h2s (local.get $buf) (local.get $len)))\n")
+	fmt.Fprintf(b, "  (func $readFileCode_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "readFileCode", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitWriteFileCodeWasm bakes `writeFileCode : Nat -> Nat -> IO Nat` -- decode the packed
+// String path, write-open it (O_CREAT|O_TRUNC) via the Task-4 $d6_wopen, fd_write the
+// decoded content bytes, close, and return the content code unchanged. 3-step curried
+// IO-closure chain: c1(path->env) -> c2(content->env) -> c3(world->effect). Depends on
+// wasmBibleReadFile ($D6SYS) + wasmBibleWriteOps ($d6_wopen). Ports rust.go:247.
+//
+// Both path and content decode through the SAME $D6BUF window sequentially: $d6_wopen's
+// path_open call reads the path bytes synchronously before returning, so $D6BUF is safe
+// to reuse for the content decode afterward (the sortFile_c3 precedent).
+//
+// ARC: path (env[0]) and content (env[1]) are BORROWED (never released; rt_free reclaims
+// both when c3's closure dies). The returned content is RETAINED (env is borrowed) to
+// yield an independent owned reference, matching writeChunk's `h` return.
+func (em *wasmEmitter) emitWriteFileCodeWasm(b *strings.Builder) {
+	c1 := em.codeRef("writeFileCode_c1")
+	c2 := em.codeRef("writeFileCode_c2")
+	c3 := em.codeRef("writeFileCode_c3")
+	b.WriteString("  (func $writeFileCode_c3 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $plen i32) (local $clen i32) (local $fd i32) (local $c i32)\n")
+	b.WriteString("    (local.set $plen (call $d6_s2h_to (call $rt_env (local.get $env) (i32.const 0)) (global.get $D6BUF)))\n")
+	b.WriteString("    (local.set $fd (call $d6_wopen (global.get $D6BUF) (local.get $plen)))\n")
+	b.WriteString("    (local.set $c (call $rt_env (local.get $env) (i32.const 1)))\n")
+	b.WriteString("    (if (i32.ge_s (local.get $fd) (i32.const 0))\n")
+	b.WriteString("      (then\n")
+	b.WriteString("        (call $d6_s2h (local.get $c))\n")
+	b.WriteString("        (local.set $clen)\n")
+	b.WriteString("        (drop)\n")
+	b.WriteString("        (i32.store (global.get $D6SYS) (global.get $D6BUF))\n")
+	b.WriteString("        (i32.store (i32.add (global.get $D6SYS) (i32.const 4)) (local.get $clen))\n")
+	b.WriteString("        (drop (call $fd_write (local.get $fd) (global.get $D6SYS) (i32.const 1) (i32.add (global.get $D6SYS) (i32.const 24))))\n")
+	b.WriteString("        (drop (call $fd_close (local.get $fd)))))\n")
+	b.WriteString("    (call $rt_retain (local.get $c))\n")
+	b.WriteString("    (local.get $c))\n")
+	fmt.Fprintf(b, "  (func $writeFileCode_c2 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 2)))\n", c3)
+	b.WriteString("    (call $rt_retain (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 1) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	fmt.Fprintf(b, "  (func $writeFileCode_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "writeFileCode", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitArgCountCodeWasm bakes `argCountCode : IO Nat` -- the user argv count (WASI argv[0],
+// the program name, excluded), via $d6_argcount. World-only arity (no value arg), like
+// timeNanos: accessor -> closure(world) -> effect.
+func (em *wasmEmitter) emitArgCountCodeWasm(b *strings.Builder) {
+	wIdx := em.codeRef("argCountCode_w")
+	b.WriteString("  (func $argCountCode_w (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (call $rt_big_from_long (call $d6_argcount)))\n")
+	em.emitCachedThunk(b, "argCountCode", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, wIdx)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitArgAtCodeWasm bakes `argAtCode : Nat -> IO Nat` -- argv[i] (0-based, argv[0] the
+// program name skipped internally by $d6_argat) as a packed String code; out of range
+// h2s-encodes to the packed-empty sentinel 1 ($d6_argat returns len=0). 2-step curried
+// IO-closure chain: c1(i->env) -> c2(world->effect). Ports rust.go:255.
+//
+// ARC: i (env[0]) is BORROWED; big_nlimbs/big_limb only READ it (no allocation). The h2s
+// result is a fresh owned bignum.
+func (em *wasmEmitter) emitArgAtCodeWasm(b *strings.Builder) {
+	c1 := em.codeRef("argAtCode_c1")
+	c2 := em.codeRef("argAtCode_c2")
+	b.WriteString("  (func $argAtCode_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $i i32) (local $idx i32) (local $buf i32) (local $len i32)\n")
+	b.WriteString("    (local.set $i (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (if (i32.gt_s (call $big_nlimbs (local.get $i)) (i32.const 0))\n")
+	b.WriteString("      (then (local.set $idx (call $big_limb (local.get $i) (i32.const 0))))\n")
+	b.WriteString("      (else (local.set $idx (i32.const 0))))\n")
+	b.WriteString("    (call $d6_argat (local.get $idx))\n")
+	b.WriteString("    (local.set $len)\n")
+	b.WriteString("    (local.set $buf)\n")
+	b.WriteString("    (call $d6_h2s (local.get $buf) (local.get $len)))\n")
+	fmt.Fprintf(b, "  (func $argAtCode_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "argAtCode", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitExitWithWasm bakes `exitWith : Nat -> IO Unit` -- terminate the process via the
+// WASI `proc_exit` import with the Nat's low limb as the exit status. 2-step curried
+// IO-closure chain: c1(n->env) -> c2(world->effect). `proc_exit` never returns (wasmtime
+// terminates the module); the trailing `unreachable` satisfies the func's declared
+// `(result i32)` type without fabricating a value that is never produced. Ports rust.go:263.
+func (em *wasmEmitter) emitExitWithWasm(b *strings.Builder) {
+	c1 := em.codeRef("exitWith_c1")
+	c2 := em.codeRef("exitWith_c2")
+	b.WriteString("  (func $exitWith_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $n i32) (local $code i32)\n")
+	b.WriteString("    (local.set $n (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (if (i32.gt_s (call $big_nlimbs (local.get $n)) (i32.const 0))\n")
+	b.WriteString("      (then (local.set $code (call $big_limb (local.get $n) (i32.const 0))))\n")
+	b.WriteString("      (else (local.set $code (i32.const 0))))\n")
+	b.WriteString("    (call $proc_exit (local.get $code))\n")
+	b.WriteString("    unreachable)\n")
+	fmt.Fprintf(b, "  (func $exitWith_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "exitWith", func(f *wasmFunc, bb *strings.Builder) string {
 		r := f.fresh()
 		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
 		return "(local.get " + r + ")"
