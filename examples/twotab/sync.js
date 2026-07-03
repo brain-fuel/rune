@@ -19,7 +19,13 @@ export function createSync({ signal, rtcFactory, onPeerState, onStatus, getState
     dc.binaryType = "arraybuffer";
     dc.onopen = () => { onStatus("connected"); sendState(getState()); };
     dc.onmessage = (e) => onPeerState(new Uint8Array(e.data));
-    dc.onclose = () => onStatus("peer left");
+    // On close, RESET the pairing state, not just the status: the survivor of
+    // a killed tab must accept the reopened tab's fresh hello (otherwise the
+    // `if (peerId) return` guards below would ignore it forever and the
+    // kill-reopen re-sync RUN.md promises would never happen). The newcomer
+    // always broadcasts hello on start, so the survivor only needs to become
+    // pairable again, not to re-announce itself.
+    dc.onclose = () => { onStatus("peer left"); peerId = null; pc = null; dc = null; };
   };
   const makeOffer = async () => {
     pc = rtcFactory();
