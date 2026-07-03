@@ -476,35 +476,71 @@ func (s *Session) AddDefGroup(g surface.DefGroup) ([]string, error) {
 // LoadSource parses a file of top-level items (definitions and datatype
 // declarations) and adds each in order, returning the names added. On the
 // first error the names added so far are returned alongside it.
+//
+// Import and alias directives are scoped to this call: they reset per LoadSource
+// invocation and are not session state. Each directive is validated at the point
+// it appears (the imported/aliased module must have >= 1 definition in the session
+// or defined later in this same source). After a directive, name references in
+// subsequent items are rewritten through the active scope before elaboration.
 func (s *Session) LoadSource(src string) ([]string, error) {
 	items, err := surface.ParseProgram(src)
 	if err != nil {
-		// A file is never "incomplete" — a parse failure here is terminal, so render
+		// A file is never "incomplete" -- a parse failure here is terminal, so render
 		// it with a source caret (REPL handles ErrIncomplete itself, before this).
 		return nil, errors.New(surface.RenderParseError(src, err))
 	}
+
+	// Collect all names this source defines up front so that an 'import' or 'alias'
+	// directive can reference a module defined LATER in the same file.
+	local := definedNames(items)
+	sc := newImportScope(s, local)
+
 	var added []string
 	for _, it := range items {
 		switch d := it.(type) {
+		case surface.Import:
+			if err := sc.addImport(d.Module); err != nil {
+				return added, err
+			}
+		case surface.Alias:
+			if err := sc.addAlias(d.Module, d.As); err != nil {
+				return added, err
+			}
 		case surface.Def:
+			d, err = sc.rewriteDef(d)
+			if err != nil {
+				return added, err
+			}
 			rd, err := s.AddDef(d)
 			if err != nil {
 				return added, err
 			}
 			added = append(added, rd.Name)
 		case surface.DataDef:
+			d, err = sc.rewriteDataDef(d)
+			if err != nil {
+				return added, err
+			}
 			names, err := s.AddData(d)
 			if err != nil {
 				return added, err
 			}
 			added = append(added, names...)
 		case surface.DefGroup:
+			d, err = sc.rewriteDefGroup(d)
+			if err != nil {
+				return added, err
+			}
 			names, err := s.AddDefGroup(d)
 			if err != nil {
 				return added, err
 			}
 			added = append(added, names...)
 		case surface.DataGroup:
+			d, err = sc.rewriteDataGroup(d)
+			if err != nil {
+				return added, err
+			}
 			names, err := s.AddDataGroup(d)
 			if err != nil {
 				return added, err

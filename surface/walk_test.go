@@ -2,6 +2,7 @@ package surface
 
 import (
 	"math/big"
+	"strings"
 	"testing"
 )
 
@@ -81,5 +82,83 @@ func TestWalkExpLeaves(t *testing.T) {
 		if count != 1 {
 			t.Errorf("leaf %T: expected 1 visit, got %d", leaf, count)
 		}
+	}
+}
+
+// TestMapExpNamesRenamesVars verifies that MapExpNames rewrites EVar names.
+func TestMapExpNamesRenamesVars(t *testing.T) {
+	ren := func(n string) string {
+		if n == "x" {
+			return "M.x"
+		}
+		return n
+	}
+	e := ELam{Param: "p", Dom: EVar{Name: "x"}, Body: EVar{Name: "x"}}
+	got := MapExpNames(e, ren).(ELam)
+	if got.Dom.(EVar).Name != "M.x" {
+		t.Errorf("Dom not rewritten: %v", got.Dom)
+	}
+	if got.Body.(EVar).Name != "M.x" {
+		t.Errorf("Body not rewritten: %v", got.Body)
+	}
+	if got.Param != "p" {
+		t.Errorf("Param must not be rewritten, got %q", got.Param)
+	}
+}
+
+// TestMapExpNamesRenamesCaseCtors verifies that MapExpNames rewrites ECase
+// clause constructor heads as well as the scrutinee and clause bodies.
+func TestMapExpNamesRenamesCaseCtors(t *testing.T) {
+	ren := func(n string) string { return "M." + n }
+	e := ECase{
+		Scrut: EVar{Name: "s"},
+		Clauses: []CaseClause{
+			{Ctor: "c", Binders: []string{"x"}, Body: EVar{Name: "x"}},
+		},
+	}
+	got := MapExpNames(e, ren).(ECase)
+	if got.Scrut.(EVar).Name != "M.s" {
+		t.Errorf("Scrut not rewritten: %v", got.Scrut)
+	}
+	if got.Clauses[0].Ctor != "M.c" {
+		t.Errorf("Ctor not rewritten: %v", got.Clauses[0].Ctor)
+	}
+	if got.Clauses[0].Body.(EVar).Name != "M.x" {
+		t.Errorf("Clause body not rewritten: %v", got.Clauses[0].Body)
+	}
+	if !strings.EqualFold(got.Clauses[0].Binders[0], "x") {
+		t.Errorf("Binders must not be rewritten, got %v", got.Clauses[0].Binders)
+	}
+}
+
+// TestMapExpNamesLeavesStructure verifies that non-name structural fields
+// (Icit, Qty, binder names) are preserved unchanged.
+func TestMapExpNamesLeavesStructure(t *testing.T) {
+	ren := func(n string) string { return "R." + n }
+	orig := EApp{Fn: EVar{Name: "f"}, Arg: EVar{Name: "a"}}
+	got := MapExpNames(orig, ren).(EApp)
+	if got.Fn.(EVar).Name != "R.f" || got.Arg.(EVar).Name != "R.a" {
+		t.Errorf("MapExpNames EApp: got fn=%v arg=%v", got.Fn, got.Arg)
+	}
+}
+
+// TestMapExpNamesLeafsDontPanic verifies that every leaf Exp type is handled
+// without panic (the exhaustive-with-panic discipline).
+func TestMapExpNamesLeafsDontPanic(t *testing.T) {
+	id := func(n string) string { return n }
+	leaves := []Exp{
+		EUniv{Lvl: 0},
+		EHole{},
+		EProp{},
+		EEq{},
+		ERefl{},
+		ECast{},
+		ESubst{},
+		ESig{},
+		EPair{},
+		ENum{Val: big.NewInt(1), Pos: 0},
+	}
+	for _, leaf := range leaves {
+		_ = MapExpNames(leaf, id) // must not panic
 	}
 }
