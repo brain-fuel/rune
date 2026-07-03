@@ -1,0 +1,22 @@
+-- Chapter 568 — dotted-foreign end-to-end: a `foreign` declared inside a module
+-- block carries a qualified name (e.g. "Std.Demo.printNat") in the erased IR.
+-- primName strips the qualifier so the prim identity is the last segment, and
+-- every backend emits the host body under that bare name. This listing exercises
+-- the FULL dotted path: module Std.Demo wraps the foreign, main calls it via the
+-- qualified reference, and the program runs unaided (the baked-in host body is
+-- the same printNat the unqualified form would invoke). Observable output: "42\n42".
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+builtin nat Nat zero succ
+
+module Std.Demo is
+  foreign printNat : Nat -> IO Nat end
+end
+
+main : IO Nat is
+  Std.Demo.printNat 42
+end

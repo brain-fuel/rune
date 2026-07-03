@@ -94,3 +94,43 @@ end
 		t.Errorf("def name: want M.even, got %q", def.Name)
 	}
 }
+
+// TestModuleBuiltinNatQualifiesRefs checks that a `builtin nat` declaration
+// inside a module block has its type/zero/succ references qualified to refer to
+// the module-local names (the qualLocal rule in parseModule). After parsing,
+// BuiltinNat.TyName/Zero/Succ must all carry the module prefix.
+func TestModuleBuiltinNatQualifiesRefs(t *testing.T) {
+	src := `module M is
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+end
+`
+	items, err := surface.ParseProgram(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Expect 2 items: DataDef "M.Nat" and BuiltinNat with qualified fields.
+	if len(items) != 2 {
+		t.Fatalf("want 2 items, got %d: %v", len(items), items)
+	}
+	dd, ok := items[0].(surface.DataDef)
+	if !ok {
+		t.Fatalf("item[0]: want DataDef, got %T", items[0])
+	}
+	if dd.Name != "M.Nat" {
+		t.Errorf("DataDef name: want M.Nat, got %q", dd.Name)
+	}
+	bn, ok := items[1].(surface.BuiltinNat)
+	if !ok {
+		t.Fatalf("item[1]: want BuiltinNat, got %T", items[1])
+	}
+	if bn.TyName != "M.Nat" {
+		t.Errorf("BuiltinNat.TyName: want M.Nat, got %q", bn.TyName)
+	}
+	if bn.Zero != "M.zero" {
+		t.Errorf("BuiltinNat.Zero: want M.zero, got %q", bn.Zero)
+	}
+	if bn.Succ != "M.succ" {
+		t.Errorf("BuiltinNat.Succ: want M.succ, got %q", bn.Succ)
+	}
+}

@@ -1,12 +1,23 @@
 package codegen
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // primName returns the last dot-segment of a (possibly qualified) foreign name.
 // A plain (unqualified) name is returned unchanged.
 // Used to extract the prim identity from a module-qualified foreign axiom:
 // "Std.Float.getFloat" -> "getFloat", "printNat" -> "printNat".
-// Every prim gate and every backend IForeign call site uses this so that a
+//
+// INVARIANT: prim identity is the last dot-segment. Two distinct qualified
+// foreign names (e.g. "A.send" and "B.send") share a prim identity if and only
+// if their last segments are equal. A program must not contain two IForeign
+// nodes with distinct qualified names but the same last segment where EITHER
+// segment is a known ioPrim -- use CheckPrimCollisions to enforce this before
+// emitting.
+//
+// Every prim gate and every backend IForeign call site uses primName so that a
 // foreign axiom declared inside a module block (e.g. `module Std.Float is
 // foreign getFloat : IO Float end end`) is recognised as the same prim as if
 // it were declared at the top level.
@@ -15,6 +26,61 @@ func primName(n string) string {
 		return n[i+1:]
 	}
 	return n
+}
+
+// CheckPrimCollisions reports an error when a program contains two distinct
+// IForeign names whose last dot-segments collide AND at least one of the
+// colliding segments is a known ioPrim. Such a collision would cause one prim
+// body to silently gate for a different foreign axiom, producing wrong output.
+//
+// Call this immediately after EmitProgram (or before Emit) to surface the
+// problem with a clear message rather than a runtime surprise.
+func CheckPrimCollisions(p Program) error {
+	// Collect the mapping from prim-segment -> full IForeign name, walking all defs.
+	seen := map[string]string{} // primName -> first full foreign name that produced it
+	var collisions []string
+	var walk func(Ir)
+	walk = func(t Ir) {
+		switch x := t.(type) {
+		case IForeign:
+			pn := primName(x.Name)
+			if !ioPrims[pn] {
+				return
+			}
+			first, ok := seen[pn]
+			if !ok {
+				seen[pn] = x.Name
+				return
+			}
+			if first != x.Name {
+				collisions = append(collisions,
+					fmt.Sprintf("foreign %q and %q share prim segment %q", first, x.Name, pn))
+			}
+		case ILam:
+			walk(x.Body)
+		case IApp:
+			walk(x.Fn)
+			walk(x.Arg)
+		case ILet:
+			walk(x.Val)
+			walk(x.Body)
+		case IPair:
+			walk(x.A)
+			walk(x.B)
+		case IFst:
+			walk(x.P)
+		case ISnd:
+			walk(x.P)
+		}
+	}
+	for _, d := range p.Defs {
+		walk(d.Body)
+	}
+	if len(collisions) > 0 {
+		return fmt.Errorf("prim name collision(s) in emitted program: %s",
+			strings.Join(collisions, "; "))
+	}
+	return nil
 }
 
 // D6 / R-EFFECT — the standard OS/IO primitive vocabulary, shipped WITH the

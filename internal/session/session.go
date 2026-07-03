@@ -1165,6 +1165,11 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		p.Main = main
 		p.IOMain = s.isIOType(s.byHash[s.refs[main]].Ty)
 	}
+	// Guard against two distinct qualified foreigns sharing a prim segment that
+	// maps to a known ioPrim -- that would silently gate the wrong host body.
+	if err := codegen.CheckPrimCollisions(p); err != nil {
+		return p, err
+	}
 	return p, nil
 }
 

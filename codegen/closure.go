@@ -555,7 +555,9 @@ func (cc *closureConverter) liftBody(t Ir, slotOf map[int]int) CIr {
 		case IGlobal:
 			return CGlobal{Name: x.Name}
 		case IForeign:
-			return CForeign{Name: x.Name}
+			// Strip any module qualifier so the emitted C/LL symbol matches the prim
+			// body name (mirrors the convert case above).
+			return CForeign{Name: primName(x.Name)}
 		case IUnit:
 			return CUnit{}
 		case ILit:

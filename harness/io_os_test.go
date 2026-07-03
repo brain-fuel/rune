@@ -3299,3 +3299,21 @@ func TestDTypeKitConformance(t *testing.T) {
 		})
 	}
 }
+
+// TestDottedForeignRunJS is the end-to-end gate for a `foreign` axiom declared
+// inside a module block (ch568_dotted_foreign_run.rune). The qualified IForeign
+// name "Std.Demo.printNat" must be mapped to the same host body as the plain
+// "printNat": primName strips the qualifier and the backend emits the correct
+// host accessor. The program calls Std.Demo.printNat 42 and prints "42\n42" (the
+// printed line plus the IO return value). Runs under node; skipped if node is not
+// in PATH.
+func TestDottedForeignRunJS(t *testing.T) {
+	const want = "42\n42"
+	jsBackend := ioOSBackends[0] // js / node
+	if _, err := exec.LookPath(jsBackend.bin); err != nil {
+		t.Skipf("%s not in PATH", jsBackend.bin)
+	}
+	if got := runIOListing(t, jsBackend, "ch568_dotted_foreign_run.rune", "main", ""); got != want {
+		t.Fatalf("[js] dotted-foreign run gave %q, want %q", got, want)
+	}
+}
