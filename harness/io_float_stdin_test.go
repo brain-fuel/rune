@@ -211,6 +211,75 @@ func TestIOFloatFormatConformance(t *testing.T) {
 			t.Errorf("[ll] format lock gave %q, want %q", got, want)
 		}
 	})
+	// WASM (ninth) backend, run under wasmtime. No stdin, no files.
+	t.Run("wasm", func(t *testing.T) {
+		got, ok := runWasmListing(t, "ch567_float_format.rune", "main", "")
+		if !ok {
+			t.Skip("wasmtime not available")
+		}
+		if got != want {
+			t.Errorf("[wasm] format lock gave %q, want %q", got, want)
+		}
+	})
+}
+
+// runWasmListingFloatStdin emits (listing, main) to WAT (codegen.Wasm), writes it, and
+// runs it under wasmtime with stdin piped. Mirrors runWasmListing (bible_conformance_test.go)
+// but pipes stdin for ch566 (getFloat reads fd 0). No --dir preopen: the float IO listings
+// touch no files. Returns trimmed stdout + ok=true; ok=false when wasmtime is absent.
+func runWasmListingFloatStdin(t *testing.T, listing, main, stdin string) (string, bool) {
+	t.Helper()
+	wt := wasmtimePathHarness()
+	if wt == "" {
+		return "", false
+	}
+	s := loadListing(t, listing)
+	p, err := s.EmitProgram(main)
+	if err != nil {
+		t.Fatalf("%s emit-program: %v", listing, err)
+	}
+	src, err := codegen.Wasm{}.Emit(p)
+	if err != nil {
+		t.Fatalf("%s wasm emit: %v", listing, err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "module.wat")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(wt, "run", f)
+	cmd.Stdin = strings.NewReader(stdin)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("%s wasmtime run: %v", listing, err)
+	}
+	return strings.TrimSpace(string(out)), true
+}
+
+// TestIOFloatStdinWasm is the WASM (ninth) backend gate for ch566_float_io.rune (stdin):
+// feed "3.14\n", expect "6.28\n999\n999\n999". Skips cleanly when wasmtime is absent.
+func TestIOFloatStdinWasm(t *testing.T) {
+	const want = "6.28\n999\n999\n999"
+	got, ok := runWasmListingFloatStdin(t, "ch566_float_io.rune", "main", "3.14\n")
+	if !ok {
+		t.Skip("wasmtime not available")
+	}
+	if got != want {
+		t.Errorf("[wasm] float stdin gave %q, want %q", got, want)
+	}
+}
+
+// TestIOFloatStdinCRLFWasm is the WASM CRLF variant: getFloat must strip the trailing
+// '\r' from "3.14\r\n" before validating/parsing.
+func TestIOFloatStdinCRLFWasm(t *testing.T) {
+	const want = "6.28\n999\n999\n999"
+	got, ok := runWasmListingFloatStdin(t, "ch566_float_io.rune", "main", "3.14\r\n")
+	if !ok {
+		t.Skip("wasmtime not available")
+	}
+	if got != want {
+		t.Errorf("[wasm] float stdin CRLF gave %q, want %q", got, want)
+	}
 }
 
 // TestIOFloatStdinC is the C native backend gate for ch566_float_io.rune (stdin).

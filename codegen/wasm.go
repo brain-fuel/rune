@@ -166,6 +166,13 @@ var wasmSupportedForeign = map[string]bool{
 	"binLen":   true,
 	"binAt":    true,
 	"printBin": true,
+	// Task 4b: machine-float (f64) IO host ops + the base D3 kit the listings need.
+	"Float":      true,
+	"fromNat":    true,
+	"fmul":       true,
+	"parseFloat": true,
+	"getFloat":   true,
+	"printFloat": true,
 }
 
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
@@ -1194,6 +1201,32 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 		em.emitBinAtWasm(b)
 		em.emitPrintBinWasm(b)
 	}
+	// Task 4b: machine-float (f64) IO host ops (parseFloat/getFloat/printFloat) + the base
+	// D3 kit the float listings need (the Float TYPE, fromNat, fmul). The K_FLOAT box +
+	// validate/atof/format runtime is baked once (emitFloatRuntimeWasm), before the per-op
+	// emitters, so $D6FLT/$flt_* are declared ahead of their uses. parseFloat additionally
+	// leans on the codec (usesBibleCodec includes it, so $d6_s2h_to/$D6BUF are present).
+	if usesFloatWasm(p) {
+		em.emitFloatRuntimeWasm(b)
+	}
+	if usesForeign(p, "Float") {
+		em.emitFloatTypeWasm(b)
+	}
+	if usesForeign(p, "fromNat") {
+		em.emitFromNatWasm(b)
+	}
+	if usesForeign(p, "fmul") {
+		em.emitFmulWasm(b)
+	}
+	if usesForeign(p, "parseFloat") {
+		em.emitParseFloatWasm(b)
+	}
+	if usesForeign(p, "getFloat") {
+		em.emitGetFloatWasm(b)
+	}
+	if usesForeign(p, "printFloat") {
+		em.emitPrintFloatWasm(b)
+	}
 }
 
 // usesBibleCodec reports whether p references any foreign op that decodes/encodes a
@@ -1206,6 +1239,8 @@ func usesBibleCodec(p Program) bool {
 		// Task 5: the D6 env/argv/exit layer decodes/encodes packed Strings too (exitWith
 		// and argCountCode are the only two that carry no String, so they are excluded).
 		"getEnvCode", "readFileCode", "writeFileCode", "printStrCode", "argAtCode",
+		// Task 4b: parseFloat decodes its packed-String code via $d6_s2h_to into $D6BUF.
+		"parseFloat",
 	} {
 		if usesForeign(p, op) {
 			return true

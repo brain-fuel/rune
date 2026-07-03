@@ -84,9 +84,11 @@ const wasmRuntime = `
   ;; array [1705984,1771520), $D6ARGVBUF argv string buffer [1771520,1837056), and the
   ;; Task-6 foldDir-private decode windows (declared in wasmBibleFoldDir, added when the
   ;; 9-way divergence-lock caught the shared-$D6BUF2 clobber bug): $D6FDDIR dir-path
-  ;; decode [1837056,1902592), $D6FDSUF suffix decode [1902592,1968128).
-  ;; Heap allocation starts at 1968128 so it never overwrites any scratch windows.
-  (global $hp (mut i32) (i32.const 1968128)) ;; heap pointer; scratch below, heap above
+  ;; decode [1837056,1902592), $D6FDSUF suffix decode [1902592,1968128), and the Task-4b
+  ;; float-ops scratch (declared in wasmFloatRuntime): $D6FLT [1968128,2033664) -- getFloat
+  ;; stdin/fd_read cells + line buffer, printFloat format-output + digit-string buffers.
+  ;; Heap allocation starts at 2033664 so it never overwrites any scratch windows.
+  (global $hp (mut i32) (i32.const 2033664)) ;; heap pointer; scratch below, heap above
   (global $UNIT (mut i32) (i32.const 0))    ;; the boxed unit singleton (set in init)
   (global $live (mut i32) (i32.const 0))   ;; count of live heap blocks (ARC leak probe)
   (global $freelist (mut i32) (i32.const 8192)) ;; 73 i32 bucket heads at [8192, 8484): 64
