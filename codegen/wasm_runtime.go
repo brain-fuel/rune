@@ -425,9 +425,27 @@ const wasmRuntime = `
   ;; The scratch buffer grows downward in the [0,65536) reserved region; we use a
   ;; cursor and append bytes, then emit it. Renders byte-identical to the C show.
   (global $sbuf (mut i32) (i32.const 4096))   ;; show cursor (scratch starts at 4096)
+  ;; $emit_byte is the SHARED bottleneck every show/emit_* helper writes through, so the
+  ;; window clamp lives here once. The show buffer occupies [4096,8192); immediately past
+  ;; it, at [8192,8484), sit the ARC freelist bucket heads (see the $freelist comment
+  ;; above). Before this clamp, a value whose rendering exceeded 4096 bytes (a large Bin's
+  ;; \xNN expansion, or in principle a huge K_BIG) walked the cursor straight through the
+  ;; freelist heads and overwrote them; the next allocation then popped a corrupted bucket
+  ;; head and wasmtime trapped (a real repro: a 2000-byte all-0xFF Bin shown via printBin
+  ;; is ~8000 emitted bytes, almost double the window). The clamp stops writing once the
+  ;; cursor reaches the 8192 ceiling and, just as importantly, stops the cursor from
+  ;; advancing past it, so $rt_show_line's length computation (sbuf minus 4096) still
+  ;; reads a value that stays inside the window. An oversized show TRUNCATES on WASM instead of
+  ;; corrupting the heap -- a deliberate divergence from the other backends (which render
+  ;; the value in full): truncation is an honest, recoverable degradation, heap corruption
+  ;; is not. See PARKING-LOT.md ("the WASM show buffer is fixed-size (4096 bytes) --
+  ;; oversized values truncate") for the growable/heap-allocated buffer this would take to
+  ;; lift, parked for lack of a consumer.
   (func $emit_byte (param $b i32)
-    (i32.store8 (global.get $sbuf) (local.get $b))
-    (global.set $sbuf (i32.add (global.get $sbuf) (i32.const 1))))
+    (if (i32.lt_u (global.get $sbuf) (i32.const 8192))
+      (then
+        (i32.store8 (global.get $sbuf) (local.get $b))
+        (global.set $sbuf (i32.add (global.get $sbuf) (i32.const 1))))))
   (func $emit_cstr (param $p i32)
     (local $c i32)
     (block $b (loop $l
@@ -686,7 +704,8 @@ const wasmRuntime = `
       (local.set $i (i32.add (local.get $i) (i32.const 1)))
       (br $lp)))
     (global.set $live (i32.sub (global.get $live) (i32.const 1)))
-    ;; push onto the size-classed free list (if poolable: rounded size < 256 bytes)
+    ;; push onto the size-classed free list (if poolable: rounded size in the small
+    ;; exact-size buckets [0,256) or an exact power-of-two big bucket [256,65536])
     (local.set $size (i32.load (i32.sub (local.get $v) (i32.const 8))))
     (local.set $bkt (call $rt_bucket_addr (local.get $size)))
     (if (local.get $bkt)

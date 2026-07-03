@@ -174,11 +174,8 @@ func TestBytesWasm(t *testing.T) {
 	if wt == "" {
 		t.Skip("wasmtime not found")
 	}
-	got, ok := runWasmListing(t, "ch483_bytes.rune", "main", "")
-	if !ok {
-		t.Skip("wasmtime absent")
-	}
-	if got != strings.TrimSpace(binWant) {
+	got, _ := runWasmListing(t, "ch483_bytes.rune", "main", "")
+	if got != binWant {
 		t.Fatalf("wasm bin divergence:\n got %q\nwant %q", got, binWant)
 	}
 }

@@ -270,6 +270,55 @@ func TestARCBinLeafRelease(t *testing.T) {
 	}
 }
 
+// TestARCBinShowClampNoCorruption: showing a value whose rendering overflows the
+// [4096,8192) show window must NOT corrupt the ARC freelist bucket heads that sit
+// immediately past it at [8192,8484). A 2000-byte all-0xFF Bin renders as ~8000
+// emitted bytes (each 0xFF byte expands to the 4-byte "\xff" escape), almost double
+// the window -- BEFORE the $emit_byte clamp this walked straight through the freelist
+// heads and overwrote them, so the next allocation popped a corrupted bucket head and
+// wasmtime trapped (exit 134). This pins the fix: show the oversized Bin (truncating
+// on WASM, per the $emit_byte doc comment), release it, then allocate + round-trip a
+// fresh 300-byte Bin -- if a freelist head were corrupted this either traps or reads
+// back garbage. $live must also return to its pre-test baseline.
+func TestARCBinShowClampNoCorruption(t *testing.T) {
+	body := `
+    (local $l0 i32) (local $b i32) (local $i i32) (local $c i32) (local $ok i32)
+    (local.set $l0 (call $rt_live))
+    ;; a 2000-byte Bin, every byte 0xFF (the non-printable escape path, 4 emitted
+    ;; bytes per input byte -- the window-busting shape)
+    (local.set $b (call $rt_mkbin (i32.const 2000)))
+    (local.set $i (i32.const 0))
+    (block $brk (loop $lp
+      (br_if $brk (i32.ge_u (local.get $i) (i32.const 2000)))
+      (call $rt_bin_set (local.get $b) (local.get $i) (i32.const 255))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $lp)))
+    ;; show it: without the $emit_byte clamp this overruns [4096,8192) into the
+    ;; freelist bucket heads at [8192,8484) and corrupts them
+    (call $rt_show_line (local.get $b))
+    (call $rt_release (local.get $b))
+    ;; allocate again: if a freelist bucket head was corrupted by the overrun, this
+    ;; pops a garbage pointer and wasmtime traps
+    (local.set $c (call $rt_mkbin (i32.const 300)))
+    (call $rt_bin_set (local.get $c) (i32.const 0) (i32.const 42))
+    (local.set $ok (i32.and
+      (i32.eq (call $rt_bin_at (local.get $c) (i32.const 0)) (i32.const 42))
+      (i32.eq (call $rt_bin_len (local.get $c)) (i32.const 300))))
+    (call $rt_release (local.get $c))
+    (local.set $ok (i32.and (local.get $ok) (i32.eq (call $rt_live) (local.get $l0))))
+    (call $rt_print_u32 (local.get $ok))`
+	out := runWasm(t, arcTestModule(body))
+	// out is the truncated show text (only '\', 'x', 'f', '"' bytes -- no digits)
+	// immediately followed by the ok flag, so a bare digit suffix is unambiguous.
+	if !strings.HasSuffix(out, "1") {
+		tail := out
+		if len(tail) > 40 {
+			tail = tail[len(tail)-40:]
+		}
+		t.Fatalf("post-show allocation broken or unbalanced: probe tail=%q want ...1", tail)
+	}
+}
+
 // TestARCBinHugeOrphanBalanced: a >64KB K_BIN is above the big-bucket ceiling
 // ($alloc only power-of-two-rounds sizes in [256, 65536]): released memory is NOT
 // pooled ($hp does not rewind, the block is orphaned) but $live still balances. Pins

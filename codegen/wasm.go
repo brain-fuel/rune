@@ -1199,7 +1199,7 @@ func (em *wasmEmitter) emitByteLenWasm(b *strings.Builder) {
 	b.WriteString("  (func $byteLen_c1 (param $arg i32) (param $env i32) (result i32) (local $len i32) (local $r i32)\n")
 	b.WriteString("    (call $d6_s2h (local.get $arg))\n")
 	b.WriteString("    (local.set $len)\n") // pop len (top)
-	b.WriteString("    (drop)\n")            // pop buf (deeper, unused)
+	b.WriteString("    (drop)\n")           // pop buf (deeper, unused)
 	b.WriteString("    (local.set $r (call $rt_big_from_long (local.get $len)))\n")
 	b.WriteString("    (call $rt_release (local.get $arg))\n")
 	b.WriteString("    (local.get $r))\n")
@@ -1933,7 +1933,7 @@ func (em *wasmEmitter) emitPrintStrCodeWasm(b *strings.Builder) {
 	b.WriteString("    (local.set $s (call $rt_env (local.get $env) (i32.const 0)))\n")
 	b.WriteString("    (call $d6_s2h (local.get $s))\n")
 	b.WriteString("    (local.set $len)\n") // pop len (top)
-	b.WriteString("    (drop)\n")            // pop buf ptr (always $D6BUF)
+	b.WriteString("    (drop)\n")           // pop buf ptr (always $D6BUF)
 	b.WriteString("    (call $puts (i32.const 1) (global.get $D6BUF) (local.get $len))\n")
 	b.WriteString("    (i32.store8 (global.get $D6BUF) (i32.const 10))\n") // '\n'
 	b.WriteString("    (call $puts (i32.const 1) (global.get $D6BUF) (i32.const 1))\n")
@@ -2251,7 +2251,7 @@ func (em *wasmEmitter) emitBinAtWasm(b *strings.Builder) {
 
 // emitPrintBinWasm bakes `printBin : Bin -> IO Unit` (NOT `IO Bin` -- ch483's foreign
 // signature is `Bin -> IO Unit`, mirroring the JS/C bodies which return $unit/mkunit()
-// too). 3-step curried IO-closure chain: c1(b->env) -> w(world->effect). The world step
+// too). 2-step curried IO-closure chain: c1(b->env) -> w(world->effect). The world step
 // borrows b from env (read-only: $rt_show_line renders it via the K_BIN `$show` arm, no
 // mutation), then returns the immortal $rt_unit -- no retain-and-return of b is needed
 // (unlike printNat, which hands its Nat argument back). b is left untouched: it is owned

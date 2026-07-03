@@ -510,3 +510,22 @@ programs must be `rune emit`ed and executed directly (which is how the conforman
 -- they were never affected). FIX when an interactive consumer appears: set cmd.Stdin = os.Stdin
 in the run child-process setup. Park (Standing Rule 1, no consumer -- all current stdin listings
 are gate-driven via direct execution).
+
+## WASM show buffer is fixed-size (4096 bytes) -- oversized values TRUNCATE (2026-07-02, 6c final review)
+`$show`'s scratch buffer occupies the fixed window [4096,8192); the freelist bucket heads sit
+immediately past it at [8192,8484) (see the $freelist layout comment in codegen/wasm_runtime.go).
+Before this review `$emit_byte` had no ceiling, so a value whose rendering exceeded the 4096-byte
+window (e.g. a 2000-byte all-0xFF `Bin` shown via `printBin`, whose `\xNN` expansion is ~8000
+emitted bytes) walked the cursor straight through the freelist heads, corrupting them; the next
+allocation then popped a garbage bucket head and wasmtime trapped. FIXED by clamping `$emit_byte`
+(the shared bottleneck every show/emit_* helper writes through) to stop writing -- and stop
+advancing the cursor -- once it reaches the 8192 ceiling, so an oversized show TRUNCATES instead
+of corrupting the heap (a deliberate divergence from the other backends, which render the value in
+full: truncation beats heap corruption). Regression: codegen/wasm_arc_test.go
+`TestARCBinShowClampNoCorruption` (a 2000-byte 0xFF Bin, show, release, then allocate + round-trip
+a fresh Bin -- traps without the clamp, passes with it). REMAINING (honest limitation, not fixed
+here): the window is still fixed-size, so a show that needs more than 4096 bytes on WASM will not
+match the other backends' full-length output. FIX if a large-show consumer appears: a growable or
+heap-allocated show buffer (bump-allocate a scratch block sized to the value instead of a fixed
+low-memory window). Park (Standing Rule 1, no consumer today -- the 8-way conformance corpus, incl.
+ch483, fits the window).
