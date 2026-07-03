@@ -1031,3 +1031,21 @@ func TestREPLScribeGeom(t *testing.T) {
 		t.Errorf("output missing %q\n--- tail ---\n%s", "41 : Nat", got[max(0, len(got)-600):])
 	}
 }
+
+// TestREPLScribeRaster loads the ch563 exact rasterizer into a REPL session
+// and evaluates the half-coverage theorem in-session: alpha exactly 128.
+func TestREPLScribeRaster(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "listings", "ch563_scribe_raster.rune"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(src) + "\nnthN maskHalf 9\n:quit\n"
+	in := strings.NewReader(script)
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "128 : Nat") {
+		t.Errorf("output missing %q\n--- tail ---\n%s", "128 : Nat", got[max(0, len(got)-600):])
+	}
+}

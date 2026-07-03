@@ -591,6 +591,10 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// roundrect flattens to the same point count (41) the kernel pins by
 		// refl, so the kernel and the backend agree on the exact geometry.
 		{"ch562_scribe_geom.rune", "answer", "41"},
+		// ch563: the exact-rational rasterizer — the lock instance's alpha
+		// sum, agreeing with the Go engine (see TestScribeLockL3 for the
+		// full alpha-for-alpha lock).
+		{"ch563_scribe_raster.rune", "answer", "138376"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {
