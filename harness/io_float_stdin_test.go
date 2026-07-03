@@ -75,9 +75,10 @@ func runExampleWithPrelude(t *testing.T, bk ioBackend, example, mainName, stdin 
 // TestIOFloatDoubleDemo is the 9-backend acceptance gate for examples/double.rune:
 // reads a float from stdin, doubles it, prints and returns it.
 // Feed "3.14" → expect "6.28\n6.28" (printFloat side-effect + the shown IO result).
-// Source backends: js, py, go, erl (CLI); rs (compile step); jvm (separate, needs JDK 25).
-// WASM (ninth backend) runs under wasmtime. Native C/LLVM have no stdin runner and are
-// excluded here; they are covered by native-backend float IO tests in this file.
+// Source backends: js, py, go, erl (CLI); rs (compile step); jvm (needs JDK 25);
+// WASM under wasmtime; native C (cc) and LL (clang) compiled binaries with stdin
+// piped, mirroring TestIOFloatStdinC/TestIOFloatStdinLL. Clean skips when a
+// toolchain is missing. All nine backends, byte-identical.
 func TestIOFloatDoubleDemo(t *testing.T) {
 	const (
 		input = "3.14\n"
@@ -158,6 +159,19 @@ func TestIOFloatDoubleDemo(t *testing.T) {
 			t.Errorf("[wasm] double demo gave %q, want %q", got, want)
 		}
 	})
+	// Native C and LL (LLVM) backends: compiled binaries with stdin piped.
+	for _, backend := range []string{"c", "ll"} {
+		backend := backend
+		t.Run(backend, func(t *testing.T) {
+			got, ok := runNativeExampleStdin(t, backend, "double.rune", "main", input)
+			if !ok {
+				t.Skipf("[%s] native toolchain not in PATH", backend)
+			}
+			if got != want {
+				t.Errorf("[%s] double demo gave %q, want %q", backend, got, want)
+			}
+		})
+	}
 }
 
 // floatIOBackends returns the 5 source backends covered by float IO host ops:
@@ -251,6 +265,23 @@ func TestIOFloatStdinCRLFJVM(t *testing.T) {
 // also pipes stdin. Used for ch566 which reads a float from stdin.
 func runNativeListingStdin(t *testing.T, backend, listing, main, stdin string) (string, bool) {
 	t.Helper()
+	s := loadListing(t, listing)
+	return runNativeSessionStdin(t, backend, listing, s, main, stdin)
+}
+
+// runNativeExampleStdin is runNativeListingStdin over examples/<example> with the
+// shared prelude pre-loaded (Std.Float etc.). Used by the double-demo native gate.
+func runNativeExampleStdin(t *testing.T, backend, example, main, stdin string) (string, bool) {
+	t.Helper()
+	s := loadExampleWithPrelude(t, example)
+	return runNativeSessionStdin(t, backend, "examples/"+example, s, main, stdin)
+}
+
+// runNativeSessionStdin compiles main from an already-loaded session on the given
+// native backend (c via cc, ll via clang), runs the binary with stdin piped, and
+// returns trimmed stdout. ok=false means the toolchain is missing (caller skips).
+func runNativeSessionStdin(t *testing.T, backend, label string, s *session.Session, main, stdin string) (string, bool) {
+	t.Helper()
 	switch backend {
 	case "c":
 		if _, err := exec.LookPath("cc"); err != nil {
@@ -261,13 +292,12 @@ func runNativeListingStdin(t *testing.T, backend, listing, main, stdin string) (
 			return "", false
 		}
 	default:
-		t.Fatalf("runNativeListingStdin: unknown backend %q", backend)
+		t.Fatalf("runNativeSessionStdin: unknown backend %q", backend)
 	}
 
-	s := loadListing(t, listing)
 	p, err := s.EmitProgram(main)
 	if err != nil {
-		t.Fatalf("[%s] %s EmitProgram: %v", backend, listing, err)
+		t.Fatalf("[%s] %s EmitProgram: %v", backend, label, err)
 	}
 
 	dir := t.TempDir()
@@ -277,19 +307,19 @@ func runNativeListingStdin(t *testing.T, backend, listing, main, stdin string) (
 	case "c":
 		src, err := codegen.C{}.Emit(p)
 		if err != nil {
-			t.Fatalf("[c] %s Emit: %v", listing, err)
+			t.Fatalf("[c] %s Emit: %v", label, err)
 		}
 		f := filepath.Join(dir, "main.c")
 		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		if out, err := exec.Command("cc", "-o", bin, f).CombinedOutput(); err != nil {
-			t.Fatalf("[c] %s compile: %v\n%s\n--- src ---\n%s", listing, err, out, src)
+			t.Fatalf("[c] %s compile: %v\n%s\n--- src ---\n%s", label, err, out, src)
 		}
 	case "ll":
 		ll, err := codegen.LL{}.Emit(p)
 		if err != nil {
-			t.Fatalf("[ll] %s Emit: %v", listing, err)
+			t.Fatalf("[ll] %s Emit: %v", label, err)
 		}
 		rt := codegen.LL{}.EmitRuntimeFor(p)
 		llf := filepath.Join(dir, "program.ll")
@@ -301,7 +331,7 @@ func runNativeListingStdin(t *testing.T, backend, listing, main, stdin string) (
 			t.Fatal(err)
 		}
 		if out, err := exec.Command("clang", llf, rtf, "-o", bin).CombinedOutput(); err != nil {
-			t.Fatalf("[ll] %s compile: %v\n%s\n--- .ll ---\n%s", listing, err, out, ll)
+			t.Fatalf("[ll] %s compile: %v\n%s\n--- .ll ---\n%s", label, err, out, ll)
 		}
 	}
 
@@ -311,7 +341,7 @@ func runNativeListingStdin(t *testing.T, backend, listing, main, stdin string) (
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("[%s] %s run: %v", backend, listing, err)
+		t.Fatalf("[%s] %s run: %v", backend, label, err)
 	}
 	return strings.TrimSpace(string(out)), true
 }
