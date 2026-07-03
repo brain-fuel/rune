@@ -274,3 +274,15 @@ func TestWasmBounceUnforcedRelease(t *testing.T) {
 		t.Fatalf("unforced-bounce release live delta = %q, want 0 (arg freed once via full-free)", got)
 	}
 }
+
+// TestWasmShowSentinelPresent: the show sentinel used in emitWasmRuntime is present
+// in the wasmRuntime constant. If the sentinel drifts out of the constant, this test
+// catches the drift at test time rather than silently breaking float show rendering
+// at emit time.
+func TestWasmShowSentinelPresent(t *testing.T) {
+	const sentinel = "      ;; default: \"()\"\n"
+	rt := codegen.WasmRuntime()
+	if !strings.Contains(rt, sentinel) {
+		t.Fatalf("show sentinel missing from wasmRuntime constant")
+	}
+}

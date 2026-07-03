@@ -814,6 +814,9 @@ func emitWasmRuntime(b *strings.Builder, withFloat bool) {
 		"            (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $l)))\n" +
 		"          (return)))\n" +
 		sentinel
+	if !strings.Contains(wasmRuntime, sentinel) {
+		panic("emitWasmRuntime: show sentinel missing from wasmRuntime; update the sentinel or the runtime")
+	}
 	b.WriteString(strings.Replace(wasmRuntime, sentinel, floatArm, 1))
 }
 
