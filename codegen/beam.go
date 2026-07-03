@@ -380,8 +380,8 @@ func (em *beamEmitter) expr(t Ir, env []string) string {
 	case IGlobal:
 		return beamFn(x.Name) + "()"
 	case IForeign:
-		// Host-linked accessor: the host defines a 0-arity `ff_<name>/0` function.
-		return beamForeign(x.Name) + "()"
+		// Host-linked accessor: the host defines a 0-arity `ff_<primname>/0` function.
+		return beamForeign(primName(x.Name)) + "()"
 	case IUnit:
 		return "unit"
 	case ILit:
@@ -618,7 +618,7 @@ func usesOTP(p Program) bool {
 	walk = func(t Ir) bool {
 		switch x := t.(type) {
 		case IForeign:
-			return otpPrims[x.Name]
+			return otpPrims[primName(x.Name)]
 		case ILam:
 			return walk(x.Body)
 		case IApp:

@@ -670,8 +670,10 @@ func (em *jsEmitter) expr(t Ir, env []string) string {
 	case IGlobal:
 		return jsName(x.Name)
 	case IForeign:
-		// Host-linked accessor: the host defines `function <name>(){ return … }`.
-		return jsName(x.Name) + "()"
+		// Host-linked accessor: the host defines `function <primname>(){ return … }`.
+		// primName strips any module qualifier (e.g. "Std.Float.getFloat" -> "getFloat")
+		// so module-wrapped foreigns call the same host body as unqualified ones.
+		return jsName(primName(x.Name)) + "()"
 	case IUnit:
 		return "$unit"
 	case ILit:

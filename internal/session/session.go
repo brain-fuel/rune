@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 
 	"goforge.dev/rune/v3/codegen"
 	"goforge.dev/rune/v3/core"
@@ -494,6 +495,28 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 	// directive can reference a module defined LATER in the same file.
 	local := definedNames(items)
 	sc := newImportScope(s, local)
+
+	// Self-import: for every module whose items appear in this source (detected by
+	// qualified names in the local set), pre-install an implicit import so that
+	// unqualified references inside module bodies resolve to their siblings.
+	// Example: `module M is data Flag ... end; lit : Flag is on end end` -- `Flag`
+	// and `on` in `lit`'s body resolve to `M.Flag`/`M.on` via import M.
+	// We add self-modules BEFORE user imports so they have the first pick; ambiguity
+	// with an explicit import is still reported (two distinct modules both defining a
+	// name the user references unqualified).
+	{
+		seen := map[string]bool{}
+		for n := range local {
+			if i := strings.LastIndex(n, "."); i > 0 {
+				mod := n[:i]
+				if !seen[mod] {
+					seen[mod] = true
+					// Direct insert: no need to validate (local contains mod.* so it is known).
+					sc.imports = append(sc.imports, mod)
+				}
+			}
+		}
+	}
 
 	var added []string
 	for _, it := range items {

@@ -416,8 +416,8 @@ func (em *pyEmitter) expr(t Ir, env []string) string {
 	case IGlobal:
 		return pyName(x.Name)
 	case IForeign:
-		// Host-linked accessor: the host defines `def <name>(): return …`.
-		return pyName(x.Name) + "()"
+		// Host-linked accessor: the host defines `def <primname>(): return …`.
+		return pyName(primName(x.Name)) + "()"
 	case IUnit:
 		return "_unit"
 	case ILit:

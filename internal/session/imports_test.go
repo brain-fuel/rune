@@ -171,3 +171,58 @@ end
 		t.Errorf("pred (succ zero) = %q, want %q (import case binder capture?)", got, "zero")
 	}
 }
+
+// TestModuleSelfImport checks that a module's own definitions can reference
+// sibling names unqualified within the module body (the self-import mechanism).
+// "lit : Flag is on end" inside "module M is ... end" should elaborate because
+// `on` is resolved to `M.on` via the implicit self-import of M.
+func TestModuleSelfImport(t *testing.T) {
+	src := `module M is
+data Flag : U is on : Flag | off : Flag end
+lit : Flag is on end
+end
+`
+	s := New()
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatalf("module with self-referencing body should load: %v", err)
+	}
+	if _, ok := s.Lookup("M.lit"); !ok {
+		t.Fatal("M.lit was not added to session")
+	}
+}
+
+// TestModuleForeignQualified checks that a foreign inside a module block
+// elaborates to a qualified name in the session.
+func TestModuleForeignQualified(t *testing.T) {
+	src := `data Nat : U is zero : Nat | succ : Nat -> Nat end
+module M is
+foreign mystery : Nat end
+end
+`
+	s := New()
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatalf("module with foreign should load: %v", err)
+	}
+	if _, ok := s.Lookup("M.mystery"); !ok {
+		t.Fatal("M.mystery was not added to session")
+	}
+}
+
+// TestModuleDataForeignSelfImport checks that a module containing both a
+// datatype and a foreign whose type references a sibling data type elaborates
+// correctly (the self-import lets the foreign's type expression see the
+// qualified data type without the user spelling out M.Flag).
+func TestModuleDataForeignSelfImport(t *testing.T) {
+	src := `module M is
+data Flag : U is on : Flag | off : Flag end
+foreign mystery : Flag end
+end
+`
+	s := New()
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatalf("module with data+foreign should load: %v", err)
+	}
+	if _, ok := s.Lookup("M.mystery"); !ok {
+		t.Fatal("M.mystery was not added to session")
+	}
+}

@@ -156,9 +156,10 @@ func foreignNames(p Program) []string {
 	walk = func(t Ir) {
 		switch x := t.(type) {
 		case IForeign:
-			if !seen[x.Name] {
-				seen[x.Name] = true
-				out = append(out, x.Name)
+			pn := primName(x.Name)
+			if !seen[pn] {
+				seen[pn] = true
+				out = append(out, pn)
 			}
 		case ILam:
 			walk(x.Body)

@@ -433,7 +433,8 @@ func (cc *closureConverter) convert(t Ir, depth int) CIr {
 	case IGlobal:
 		return CGlobal{Name: x.Name}
 	case IForeign:
-		return CForeign{Name: x.Name}
+		// Strip any module qualifier so the emitted call matches the prim body name.
+		return CForeign{Name: primName(x.Name)}
 	case IUnit:
 		return CUnit{}
 	case ILit:

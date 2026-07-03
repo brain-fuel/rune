@@ -504,9 +504,9 @@ func (em *goEmitter) expr(t Ir, env []string) string {
 	case IGlobal:
 		return goThunk(x.Name) + "()"
 	case IForeign:
-		// Host-linked accessor: the host defines `func <name>() any { return … }`.
+		// Host-linked accessor: the host defines `func <primname>() any { return … }`.
 		// A plain name (no _d suffix) keeps the FFI ABI distinct from def thunks.
-		return goLocal(x.Name) + "()"
+		return goLocal(primName(x.Name)) + "()"
 	case IUnit:
 		return "nil"
 	case ILit:

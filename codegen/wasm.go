@@ -187,7 +187,7 @@ func wasmCheckSupported(p Program) error {
 		}
 		switch x := t.(type) {
 		case IForeign:
-			if !wasmSupportedForeign[x.Name] {
+			if !wasmSupportedForeign[primName(x.Name)] {
 				err = fmt.Errorf("codegen(wasm): foreign %q is not supported (no WASI/WAT body)", x.Name)
 				return
 			}

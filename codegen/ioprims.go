@@ -1,5 +1,22 @@
 package codegen
 
+import "strings"
+
+// primName returns the last dot-segment of a (possibly qualified) foreign name.
+// A plain (unqualified) name is returned unchanged.
+// Used to extract the prim identity from a module-qualified foreign axiom:
+// "Std.Float.getFloat" -> "getFloat", "printNat" -> "printNat".
+// Every prim gate and every backend IForeign call site uses this so that a
+// foreign axiom declared inside a module block (e.g. `module Std.Float is
+// foreign getFloat : IO Float end end`) is recognised as the same prim as if
+// it were declared at the top level.
+func primName(n string) string {
+	if i := strings.LastIndex(n, "."); i >= 0 {
+		return n[i+1:]
+	}
+	return n
+}
+
 // D6 / R-EFFECT — the standard OS/IO primitive vocabulary, shipped WITH the
 // compiler. A `foreign` axiom named one of these gets a real host body baked into
 // the backend runtime, exactly as D5's OTP primitives get beamOTPRuntime — no test
@@ -266,7 +283,7 @@ func usesForeign(p Program, name string) bool {
 	walk = func(t Ir) bool {
 		switch x := t.(type) {
 		case IForeign:
-			return x.Name == name
+			return primName(x.Name) == name
 		case ILam:
 			return walk(x.Body)
 		case IApp:

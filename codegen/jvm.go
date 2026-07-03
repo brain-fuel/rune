@@ -318,8 +318,8 @@ func (em *jvmEmitter) expr(t Ir, env []string) string {
 	case IGlobal:
 		return jvmThunk(x.Name) + "()"
 	case IForeign:
-		// Host-linked accessor: the host defines `static V <name>() { … }`.
-		return jvmName(x.Name) + "()"
+		// Host-linked accessor: the host defines `static V <primname>() { … }`.
+		return jvmName(primName(x.Name)) + "()"
 	case IUnit:
 		return "unit()"
 	case ILit:

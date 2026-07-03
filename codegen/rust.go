@@ -491,9 +491,9 @@ func (em *rustEmitter) expr(t Ir, env []string) string {
 	case IGlobal:
 		return rustThunk(x.Name) + "()"
 	case IForeign:
-		// Host-linked accessor: the host defines `fn <name>() -> Rc<V> { … }`.
+		// Host-linked accessor: the host defines `fn <primname>() -> Rc<V> { … }`.
 		// A plain name (no _d suffix) keeps the FFI ABI distinct from def thunks.
-		return rustName(x.Name) + "()"
+		return rustName(primName(x.Name)) + "()"
 	case IUnit:
 		return "unit()"
 	case ILit:

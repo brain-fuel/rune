@@ -429,13 +429,13 @@ func (p *parser) parseAlias() (Alias, error) {
 	return Alias{Module: mod.text, As: localName, Pos: kw.pos}, nil
 }
 
-// parseModule parses `module Name is <Def>* end` (C6): a namespace block. Each
-// inner definition's name is prefixed with `Name.`, and it is otherwise an
-// ordinary top-level def — references write the qualified name `Name.member`
-// (one identifier token, since the lexer absorbs `.member` segments). Modules
-// nest by name concatenation; only definitions (not datatypes) live inside for
-// now. A module is just sugar over qualified-named defs — no new core.
-func (p *parser) parseModule() ([]Def, error) {
+// parseModule parses `module Name is <Item>* end` (C6): a namespace block. Each
+// inner item's definition name(s) are prefixed with `Name.`. The block now
+// accepts the full item grammar: plain defs, datatypes, foreign axioms, builtin
+// bindings, and mutual groups. Body expressions are NOT rewritten here; the
+// session installs an implicit self-import of the module so unqualified
+// sibling references resolve at elaboration time.
+func (p *parser) parseModule() ([]Item, error) {
 	if _, err := p.expect(tModule); err != nil {
 		return nil, err
 	}
@@ -447,20 +447,101 @@ func (p *parser) parseModule() ([]Def, error) {
 	if _, err := p.expect(tIs); err != nil {
 		return nil, err
 	}
-	var defs []Def
+	// First pass: collect the local names defined by each raw item so we can
+	// qualify builtin-binding references that point to module-local names.
+	// We re-parse in a second pass below; this is a lightweight peek approach:
+	// just parse items and collect names, then qualify everything uniformly.
+	prefix := name.text + "."
+	var raw []Item
 	for p.peek().kind != tEnd {
 		if p.peek().kind == tEOF {
 			return nil, fmt.Errorf("%w: module %q is missing its 'end'", ErrIncomplete, name.text)
 		}
-		d, err := p.parseDef()
+		it, err := p.parseItem()
 		if err != nil {
 			return nil, err
 		}
-		d.Name = name.text + "." + d.Name
-		defs = append(defs, d)
+		raw = append(raw, it)
 	}
 	p.next() // consume 'end'
-	return defs, nil
+
+	// Collect names defined locally (before qualification) so builtin bindings
+	// that reference them can be qualified.
+	localDefined := map[string]bool{}
+	for _, it := range raw {
+		switch d := it.(type) {
+		case Def:
+			localDefined[d.Name] = true
+		case DataDef:
+			localDefined[d.Name] = true
+			for _, c := range d.Ctors {
+				localDefined[c.Name] = true
+			}
+		case DefGroup:
+			for _, m := range d.Members {
+				localDefined[m.Name] = true
+			}
+		case DataGroup:
+			for _, m := range d.Members {
+				localDefined[m.Name] = true
+				for _, c := range m.Ctors {
+					localDefined[c.Name] = true
+				}
+			}
+		}
+	}
+
+	// qualLocal qualifies a name if it is module-local; otherwise unchanged.
+	qualLocal := func(n string) string {
+		if localDefined[n] {
+			return prefix + n
+		}
+		return n
+	}
+
+	// Second pass: qualify all declaration-level names.
+	var out []Item
+	for _, it := range raw {
+		switch d := it.(type) {
+		case Def:
+			d.Name = prefix + d.Name
+			out = append(out, d)
+		case DataDef:
+			d.Name = prefix + d.Name
+			for i := range d.Ctors {
+				d.Ctors[i].Name = prefix + d.Ctors[i].Name
+			}
+			out = append(out, d)
+		case DefGroup:
+			for i := range d.Members {
+				d.Members[i].Name = prefix + d.Members[i].Name
+			}
+			out = append(out, d)
+		case DataGroup:
+			for i := range d.Members {
+				d.Members[i].Name = prefix + d.Members[i].Name
+				for j := range d.Members[i].Ctors {
+					d.Members[i].Ctors[j].Name = prefix + d.Members[i].Ctors[j].Name
+				}
+			}
+			out = append(out, d)
+		case BuiltinNat:
+			d.TyName = qualLocal(d.TyName)
+			d.Zero = qualLocal(d.Zero)
+			d.Succ = qualLocal(d.Succ)
+			out = append(out, d)
+		case BuiltinNatOp:
+			d.DefName = qualLocal(d.DefName)
+			out = append(out, d)
+		case BuiltinNumInj:
+			d.TyName = qualLocal(d.TyName)
+			d.InjName = qualLocal(d.InjName)
+			out = append(out, d)
+		default:
+			out = append(out, it)
+		}
+	}
+	return out, nil
 }
 
 // parseItem parses ONE top-level item that is not a block (foreign axiom, datatype,
