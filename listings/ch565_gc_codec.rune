@@ -1,0 +1,490 @@
+-- Chapter 565 — THE G-COUNTER WIRE CODEC (proven round-trip + the foreign Bin edge).
+--
+-- The WASM browser library (6d) ships a G-Counter CRDT whose state is serialised
+-- to a byte string, sent over the wire, and parsed back on the peer. This chapter
+-- is the PROVEN heart of that codec: a total, injective, byte-shaped serialisation
+-- of the counter state with a machine-checked round-trip theorem
+--
+--     codecRoundTrip : (s : GC) -> Eq GC (decodeGC (encodeGC s)) s
+--
+-- proven for ALL states, no postulate.
+--
+-- PROOF HONESTY (spec Decision 4). Foreign operations are permanently neutral in
+-- the kernel, so the machine-checked theorem CANNOT cross the foreign boundary. It
+-- therefore lives entirely over an IN-LANGUAGE byte list `NList` (a `List Nat`):
+-- `encodeGC : GC -> NList`, `decodeGC : NList -> GC`. The `NList <-> Bin` edge is
+-- two thin, UNPROVEN wrappers (`gcToBin` folds `binCons`; `gcFromBin` walks
+-- `binAt`), exercised end-to-end by the runtime gate (TestGCCodecRuns), never by
+-- the kernel. Do not read the theorem as covering the foreign edge; it does not.
+--
+-- BASE CHOICE: base-2 (positional binary), length-prefixed frame. WHY, on the
+-- survey evidence:
+--   * There is NO existing reusable `natOf (digitsOf n) = n` inverse lemma in the
+--     corpus (ch194/ch501 divmod, ch201 to_radix have no inverse; ch512 bignum is
+--     a Pos datatype without a List codec). A base-256 inverse would be proven from
+--     scratch, and its digit extraction (`divmod 256`) is NOT structural on `n`, so
+--     it needs a fuel bound + an absurdity elimination at fuel exhaustion.
+--   * base-2 has the SAME non-structural halving problem for a raw `digitsOf`, BUT
+--     ch14 already proves `roundTrip : toNat (fromNat n) = n` over its positional
+--     `Pos`/`BN` binary datatype by STRUCTURAL induction on `n` (via `bnsucc`),
+--     fuel-free and absurdity-free. We reuse that theorem for the hard half.
+-- So a Nat is serialised as its little-endian bit list (from `fromNat`'s `Pos`
+-- spine), length-prefixed; decode walks the bits back with a Horner fold and reuses
+-- ch14's inverse. Every new lemma here is a plain structural induction. The wire is
+-- a demo counter, so byte-shaped-base-2 is realistic and the sizes are tiny.
+--
+-- The ch14 kit (Nat/+/double, Pos/BN, toNat/fromNat, roundTrip) is redeclared
+-- verbatim so the chapter is self-contained; ch14 is NOT modified.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- Addition, recursion on the left: add zero n = n and add (succ zero) n = succ n
+-- DEFINITIONALLY (both leaned on by the bit-fold lemmas below).
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+-- double n = n + n, by its own recursion so double (succ k) = succ (succ (double k)).
+double : Nat -> Nat is
+  fn (n : Nat) is
+    case n of
+    | zero -> zero
+    | succ k with ih -> succ (succ ih)
+    end
+  end
+end
+
+-- The equality toolkit (ch14).
+sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> Eq A x y -> Eq B (f x) (f y) is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) (refl (f x))
+  end
+end
+
+cong2 : {A : U} -> {B : U} -> {C : U} -> (f : A -> B -> C)
+     -> {x : A} -> {y : A} -> {u : B} -> {v : B}
+     -> Eq A x y -> Eq B u v -> Eq C (f x u) (f y v) is
+  fn {A : U} {B : U} {C : U} (f : A -> B -> C)
+     {x : A} {y : A} {u : B} {v : B} (p : Eq A x y) (q : Eq B u v) is
+    trans (cong (fn (z : A) is f z u end) p) (cong (fn (z : B) is f y z end) q)
+  end
+end
+
+-- ============================================================================
+-- ch14's positional binary, redeclared verbatim. Pos: 1 | 2p | 2p+1 (least
+-- significant decision outermost, the leading 1 = pH innermost). BN adjoins zero.
+-- ============================================================================
+
+data Pos : U is
+  pH : Pos
+| pO : Pos -> Pos
+| pI : Pos -> Pos
+end
+
+psucc : Pos -> Pos is
+  fn (p : Pos) is
+    case p of
+    | pH -> pO pH
+    | pO a -> pI a
+    | pI a with ih -> pO ih
+    end
+  end
+end
+
+data BN : U is
+  bn0 : BN
+| bnP : Pos -> BN
+end
+
+bnsucc : BN -> BN is
+  fn (b : BN) is
+    case b of
+    | bn0 -> bnP pH
+    | bnP p -> bnP (psucc p)
+    end
+  end
+end
+
+toNatP : Pos -> Nat is
+  fn (p : Pos) is
+    case p of
+    | pH -> succ zero
+    | pO a with ih -> double ih
+    | pI a with ih -> succ (double ih)
+    end
+  end
+end
+
+toNat : BN -> Nat is
+  fn (b : BN) is
+    case b of
+    | bn0 -> zero
+    | bnP p -> toNatP p
+    end
+  end
+end
+
+fromNat : Nat -> BN is
+  fn (n : Nat) is
+    case n of
+    | zero -> bn0
+    | succ k with ih -> bnsucc ih
+    end
+  end
+end
+
+-- The ch14 agreement chain: toNat (fromNat n) = n, by structural induction on n.
+psuccAgree : (p : Pos) -> Eq Nat (toNatP (psucc p)) (succ (toNatP p)) is
+  fn (p : Pos) is
+    case p of
+    | pH -> refl (succ (succ zero))
+    | pO a -> refl (succ (double (toNatP a)))
+    | pI a with ih -> cong double ih
+    end
+  end
+end
+
+bnsuccAgree : (b : BN) -> Eq Nat (toNat (bnsucc b)) (succ (toNat b)) is
+  fn (b : BN) is
+    case b of
+    | bn0 -> refl (succ zero)
+    | bnP p -> psuccAgree p
+    end
+  end
+end
+
+roundTrip : (n : Nat) -> Eq Nat (toNat (fromNat n)) n is
+  fn (n : Nat) is
+    case n of
+    | zero -> refl zero
+    | succ k with ih -> trans (bnsuccAgree (fromNat k)) (cong succ ih)
+    end
+  end
+end
+
+-- ============================================================================
+-- The wire: an in-language byte list, and the paired result of a frame parse.
+-- ============================================================================
+
+data NList : U is
+  nnil  : NList
+| ncons : Nat -> NList -> NList
+end
+
+data PNL : U is
+  pnl : Nat -> NList -> PNL
+end
+
+pnlFst : PNL -> Nat is
+  fn (x : PNL) is case x of | pnl v r -> v end end
+end
+
+pnlSnd : PNL -> NList is
+  fn (x : PNL) is case x of | pnl v r -> r end end
+end
+
+len : NList -> Nat is
+  fn (l : NList) is
+    case l of
+    | nnil -> zero
+    | ncons b bs with ih -> succ ih
+    end
+  end
+end
+
+append : NList -> NList -> NList is
+  fn (xs : NList) is
+    case xs of
+    | nnil -> fn (ys : NList) is ys end
+    | ncons b bs with ih -> fn (ys : NList) is ncons b (ih ys) end
+    end
+  end
+end
+
+-- append xs nnil = xs, by structural induction on xs.
+appendNilR : (xs : NList) -> Eq NList (append xs nnil) xs is
+  fn (xs : NList) is
+    case xs of
+    | nnil -> refl nnil
+    | ncons b bs with ih -> cong (fn (t : NList) is ncons b t end) ih
+    end
+  end
+end
+
+-- Little-endian Horner fold: natOf (b0 :: b1 :: ...) = b0 + 2*(b1 + 2*(...)).
+natOf : NList -> Nat is
+  fn (l : NList) is
+    case l of
+    | nnil -> zero
+    | ncons b bs with ih -> add b (double ih)
+    end
+  end
+end
+
+-- ============================================================================
+-- Nat <-> bit list, structural on the Pos spine (no fuel, no bound).
+-- posToBits emits the little-endian bits ending in the leading 1 (pH).
+-- ============================================================================
+
+posToBits : Pos -> NList is
+  fn (p : Pos) is
+    case p of
+    | pH -> ncons (succ zero) nnil
+    | pO a with ih -> ncons zero ih
+    | pI a with ih -> ncons (succ zero) ih
+    end
+  end
+end
+
+bnBits : BN -> NList is
+  fn (b : BN) is
+    case b of
+    | bn0 -> nnil
+    | bnP p -> posToBits p
+    end
+  end
+end
+
+-- natOf reads back exactly toNatP on a Pos spine, by structural induction on p.
+natOfPosBits : (p : Pos) -> Eq Nat (natOf (posToBits p)) (toNatP p) is
+  fn (p : Pos) is
+    case p of
+    | pH -> refl (succ zero)
+    | pO a with ih -> cong double ih
+    | pI a with ih -> cong (fn (s : Nat) is succ (double s) end) ih
+    end
+  end
+end
+
+-- ...and hence natOf (bnBits b) = toNat b, casing on the BN.
+natOfBits : (b : BN) -> Eq Nat (natOf (bnBits b)) (toNat b) is
+  fn (b : BN) is
+    case b of
+    | bn0 -> refl zero
+    | bnP p -> natOfPosBits p
+    end
+  end
+end
+
+-- ============================================================================
+-- The framed codec. encodeNat prepends the bit count; decode reads the count and
+-- Horner-folds that many bits, returning (value, leftover).
+-- ============================================================================
+
+frameNL : NList -> NList is
+  fn (bs : NList) is ncons (len bs) bs end
+end
+
+encodeNat : Nat -> NList is
+  fn (n : Nat) is frameNL (bnBits (fromNat n)) end
+end
+
+-- Consume exactly `count` bits (LSB first) via a Horner fold, returning the value
+-- paired with the leftover list.
+takeNat : Nat -> NList -> PNL is
+  fn (c : Nat) is
+    case c of
+    | zero -> fn (l : NList) is pnl zero l end
+    | succ k with ih -> fn (l : NList) is
+        case l of
+        | nnil -> pnl zero nnil
+        | ncons b bs -> case (ih bs) of | pnl v r -> pnl (add b (double v)) r end
+        end
+      end
+    end
+  end
+end
+
+decodeNatFrame : NList -> PNL is
+  fn (l : NList) is
+    case l of
+    | nnil -> pnl zero nnil
+    | ncons c tl -> takeNat c tl
+    end
+  end
+end
+
+-- FRAME LEMMA: taking exactly (len bits) from (bits ++ rest) reconstructs the
+-- Horner value of bits and leaves rest, by structural induction on bits.
+takeFrame : (bits : NList) -> (rest : NList)
+   -> Eq PNL (takeNat (len bits) (append bits rest)) (pnl (natOf bits) rest) is
+  fn (bits : NList) (rest : NList) is
+    case bits of
+    | nnil -> refl (pnl zero rest)
+    | ncons b bs with ih ->
+        cong (fn (x : PNL) is case x of | pnl v r -> pnl (add b (double v)) r end end) ih
+    end
+  end
+end
+
+-- PER-NAT ROUND-TRIP: decoding the frame of n prepended to rest yields (n, rest).
+-- takeFrame lines up the walk; natOfBits + ch14's roundTrip collapse the value to n.
+decodeNatRT : (n : Nat) -> (rest : NList)
+   -> Eq PNL (decodeNatFrame (append (encodeNat n) rest)) (pnl n rest) is
+  fn (n : Nat) (rest : NList) is
+    trans (takeFrame (bnBits (fromNat n)) rest)
+      (cong (fn (v : Nat) is pnl v rest end)
+        (trans (natOfBits (fromNat n)) (roundTrip n)))
+  end
+end
+
+-- The tail frame decodes exactly (no leftover), from decodeNatRT at rest = nnil
+-- after collapsing append (encodeNat n) nnil to encodeNat n.
+decodeNatExact : (n : Nat) -> Eq PNL (decodeNatFrame (encodeNat n)) (pnl n nnil) is
+  fn (n : Nat) is
+    subst NList (append (encodeNat n) nnil) (encodeNat n) (appendNilR (encodeNat n))
+      (fn (l : NList) is Eq PNL (decodeNatFrame l) (pnl n nnil) end)
+      (decodeNatRT n nnil)
+  end
+end
+
+-- ============================================================================
+-- The G-Counter and its codec. encodeGC concatenates the two slots' frames;
+-- decodeGC parses the first frame, then the second from the leftover.
+-- ============================================================================
+
+data GC : U is
+  gc : Nat -> Nat -> GC
+end
+
+-- The named operations later 6d tasks rely on (re-declared from ch72's shape;
+-- ch72 is not modified).
+initGC : GC is gc zero zero end
+
+bump : GC -> GC is
+  fn (s : GC) is case s of | gc a b -> gc (succ a) b end end
+end
+
+value : GC -> Nat is
+  fn (s : GC) is case s of | gc a b -> add a b end end
+end
+
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is n end
+    | succ k with ih -> fn (n : Nat) is
+        case n of
+        | zero -> succ k
+        | succ j -> succ (ih j)
+        end
+      end
+    end
+  end
+end
+
+merge : GC -> GC -> GC is
+  fn (s : GC) (t : GC) is
+    case s of
+    | gc a b -> case t of | gc c d -> gc (max a c) (max b d) end
+    end
+  end
+end
+
+encodeGC : GC -> NList is
+  fn (s : GC) is
+    case s of | gc a b -> append (encodeNat a) (encodeNat b) end
+  end
+end
+
+decodeGC : NList -> GC is
+  fn (l : NList) is
+    gc (pnlFst (decodeNatFrame l))
+       (pnlFst (decodeNatFrame (pnlSnd (decodeNatFrame l))))
+  end
+end
+
+-- THE THEOREM: decode inverts encode for every G-Counter state, no postulate.
+-- Rewriting each of the two frames by decodeNatRT / decodeNatExact drives both
+-- projections back to the original slots; cong2 gc reassembles the state.
+codecRoundTrip : (s : GC) -> Eq GC (decodeGC (encodeGC s)) s is
+  fn (s : GC) is
+    case s of
+    | gc a b ->
+        cong2 (fn (x : Nat) (y : Nat) is gc x y end)
+          -- first slot: pnlFst (decodeNatFrame (encodeNat a ++ encodeNat b)) = a
+          (cong pnlFst (decodeNatRT a (encodeNat b)))
+          -- second slot: decode the leftover (= encodeNat b) exactly, project = b
+          (cong pnlFst
+            (trans (cong decodeNatFrame (cong pnlSnd (decodeNatRT a (encodeNat b))))
+                   (decodeNatExact b)))
+    end
+  end
+end
+
+-- ============================================================================
+-- The FOREIGN Bin edge — two UNPROVEN wrappers (ch483's host ops). The kernel
+-- says nothing about these; the runtime gate exercises them.
+-- ============================================================================
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+
+-- binCons PREPENDS, so folding the byte list right-to-left keeps element order:
+-- the first NList byte lands at Bin index 0.
+nlToBin : NList -> Bin is
+  fn (l : NList) is
+    case l of
+    | nnil -> binEmpty
+    | ncons b bs with ih -> binCons b ih
+    end
+  end
+end
+
+gcToBin : GC -> Bin is
+  fn (s : GC) is nlToBin (encodeGC s) end
+end
+
+-- Walk binAt 0 .. len-1 into an NList (fuel = the byte length).
+binGo : Nat -> Nat -> Bin -> NList is
+  fn (f : Nat) is
+    case f of
+    | zero -> fn (i : Nat) (b : Bin) is nnil end
+    | succ k with ih -> fn (i : Nat) (b : Bin) is
+        ncons (binAt b i) (ih (succ i) b)
+      end
+    end
+  end
+end
+
+binToNL : Bin -> NList is
+  fn (b : Bin) is binGo (binLen b) zero b end
+end
+
+gcFromBin : Bin -> GC is
+  fn (b : Bin) is decodeGC (binToNL b) end
+end
+
+-- ============================================================================
+-- Runnable scenarios for the cross-backend gate (TestGCCodecRuns).
+-- gc 2 1: value = 3. `demo` is the in-language round trip; `demoBin` crosses the
+-- foreign Bin edge (encode -> Bin -> parse -> decode). Both observe 3.
+-- ============================================================================
+
+demo : Nat is value (decodeGC (encodeGC (gc (succ (succ zero)) (succ zero)))) end
+
+demoBin : Nat is value (gcFromBin (gcToBin (gc (succ (succ zero)) (succ zero)))) end
