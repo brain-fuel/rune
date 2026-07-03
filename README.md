@@ -235,6 +235,8 @@ in any order is safe.
 in the current source file. `alias M as G` makes them visible as `G.name`.
 Both directives are per-file (they reset between files in a compilation set)
 and are validated: a reference to an unknown module is an error at load time.
+Session-global names, including the prelude's, take precedence over imported
+names; use the qualified form (`M.name`) or an alias to force the module's binding.
 
 ### The double demo
 
@@ -255,6 +257,7 @@ end
 ```sh
 rune run examples/double.rune main --target js <<< "3.14"
 # 6.28
+# 6.28
 ```
 
 The program is 9-way byte-identical across js/py/go/rs/erl/jvm/c/ll/wasm.
@@ -264,7 +267,7 @@ The program is 9-way byte-identical across js/py/go/rs/erl/jvm/c/ll/wasm.
 `rune repl --no-prelude` and `rune run FILE NAME --no-prelude` skip the standard
 prelude. Use this when the source defines `builtin nat` or its own numeric tower,
 as the listings chapters do. The prelude is always-on by default so that user
-programs can reference `Std.Float`, `Std.IO`, and the IO monad without extra
+programs can reference `Std.Float` and the IO monad without extra
 boilerplate.
 
 ## The listings

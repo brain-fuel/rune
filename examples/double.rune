@@ -3,6 +3,7 @@
 -- Depends on the standard prelude (Std.Float module + IO monad).
 -- Run: rune run examples/double.rune main --target js <<< "3.14"
 -- Output: 6.28
+--         6.28
 
 import Std.Float
 

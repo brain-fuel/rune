@@ -553,16 +553,24 @@ scenario. (2) equal-session-id deadlock (`examples/twotab/sync.js:14`: two tabs 
 offerer election); probability ~1e-17 per pair, inherent to single-random-id negotiation, cosmetic
 for a demo.
 
-- **WASM off-corpus float rounding.** The WASM backend's printFloat uses the
-  host JavaScript engine's Number::toString which matches the ECMAScript
-  spec on corpus inputs but may diverge on edge-case floats outside the
-  divergence-lock corpus (ch566-ch568); parked until a WASM consumer exposes a
-  concrete mismatch.
+- **WASM off-corpus float rounding.** The WASM backend's printFloat uses a
+  hand-built WAT precision-search formatter in `codegen/wasm_float.go` that
+  matches ECMAScript's Number::toString on the divergence-lock corpus
+  (ch566-ch568). Parked residue: `p >= 16` formatting paths and `|k| > 22`
+  parsing are not correctly rounded on edge-case inputs outside the lock corpus;
+  parked until a WASM consumer exposes a concrete mismatch.
 
 - **Native show %g vs __fmtf divergence.** The C/LLVM backends use printf %g
   for float display which can differ from the ECMAScript canonical form on
   some values (subnormals, trailing zeros); parked, no native-backend consumer
   for float IO display parity.
+
+- **Go backend getFloat (bufio __stdinRdr) vs getNat (fmt.Scan) stdin mixing.**
+  The Go backend uses a `bufio.Reader` (__stdinRdr) for `getFloat` and `fmt.Scan`
+  for `getNat`; mixing the two in one program can drop buffered bytes already read
+  by the bufio reader before `fmt.Scan` sees them. No current consumer mixes them
+  (ch566 and the double demo use only `getFloat`); parked until a consumer that
+  calls both in one program appears.
 
 - **Prelude Std namespacing.** The always-on prelude exports Float ops as
   Std.Float.fromNat etc.; a future cleanup would shorten these to Float.fromNat
