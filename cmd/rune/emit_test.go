@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"goforge.dev/rune/v3/internal/session"
@@ -177,5 +176,4 @@ func TestSourcesHaveBuiltinNatSubstring(t *testing.T) {
 	if sourcesHaveBuiltinNat(clean) {
 		t.Error("false positive on clean source")
 	}
-	_ = strings.Contains // keep import
 }
