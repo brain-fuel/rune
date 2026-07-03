@@ -385,14 +385,21 @@ git commit -m "feat(io): float IO host ops on rust, beam, jvm backends" -- codeg
 - [ ] **Step 1: Write the corpus listing**
 
 Create `listings/ch567_float_format.rune`: same header pattern as ch566
-(Nat, Option, foreigns for Float/fromNat/fdiv/fsub/parseFloat/printFloat),
-plus packed-string constants for each corpus input. Compute packed constants
+(Nat, Option, foreigns for Float/parseFloat/printFloat/printNat), plus
+packed-string constants for each corpus input. Compute packed constants
 with the bytes-LSB-first + 0x01-sentinel rule (e.g. "0" = 0x0130 = 304;
 compute each in a scratch Go snippet, do not guess). The program printFloats,
 in order, the parse of: "0", "2", "3.14", "-0.5", "1e7", "1e20", "1e21",
-"1e-6", "1e-7", "1.5e-9", "0.1", then `fdiv (fromNat 1) (fromNat 0)`
-(Infinity), `fsub (fromNat 0) (fdiv (fromNat 1) (fromNat 0))` (-Infinity),
-`fdiv (fromNat 0) (fromNat 0)` (NaN). Chain with bindIO exactly as ch566.
+"1e-6", "1e-7", "1.5e-9", "0.1", then probes THREE parse rejects (printNat
+999 on none, 111 on some): "..", "1e", "5 5".
+
+AMENDMENT (2026-07-03, during Task 3): the original corpus produced
+Infinity/-Infinity/NaN via fdiv. Erlang floats cannot represent IEEE
+inf/NaN (arithmetic raises badarith), so those three rows are
+unrepresentable on the beam backend and are replaced with parse-reject
+rows. The formatter's NaN/Infinity branches remain on the backends whose
+floats can hold them, covered by each language's standalone probe table,
+not by this cross-backend corpus.
 
 Expected stdout (before the harness's shown-result tail):
 
@@ -408,9 +415,9 @@ Expected stdout (before the harness's shown-result tail):
 1e-7
 1.5e-9
 0.1
-Infinity
--Infinity
-NaN
+999
+999
+999
 ```
 
 - [ ] **Step 2: Add `TestIOFloatFormatConformance` over the 6 working backends; verify pass**
