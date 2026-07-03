@@ -222,6 +222,51 @@ rune deploy --manifest app.wav --backend aws # a whole app's graph -> one main.t
 Everything `rune` touches is TYPE CHECKED first; ill-typed files are rejected with
 the mismatch, not silently processed.
 
+### Multi-file compilation sets
+
+`rune run <path...> [name]` accepts multiple paths. A directory expands to all
+`*.rune` files in that directory (sorted, non-recursive). Files are topo-sorted
+by defined/referenced-name edges and loaded in dependency order, so passing them
+in any order is safe.
+
+### Import and alias
+
+`import M` makes every `M.name` definition visible as the unqualified `name`
+in the current source file. `alias M as G` makes them visible as `G.name`.
+Both directives are per-file (they reset between files in a compilation set)
+and are validated: a reference to an unknown module is an error at load time.
+
+### The double demo
+
+`examples/double.rune` is a 7-line program that reads a float from stdin,
+doubles it, and prints the result using `Std.Float.fmul` and `Std.Float.fromNat`
+from the always-on prelude:
+
+```rune
+-- examples/double.rune
+import Std.Float
+
+main : IO Float is
+  bindIO Float Float getFloat
+    (fn (x : Float) is printFloat (fmul x (fromNat 2)) end)
+end
+```
+
+```sh
+rune run examples/double.rune main --target js <<< "3.14"
+# 6.28
+```
+
+The program is 9-way byte-identical across js/py/go/rs/erl/jvm/c/ll/wasm.
+
+### The --no-prelude flag
+
+`rune repl --no-prelude` and `rune run FILE NAME --no-prelude` skip the standard
+prelude. Use this when the source defines `builtin nat` or its own numeric tower,
+as the listings chapters do. The prelude is always-on by default so that user
+programs can reference `Std.Float`, `Std.IO`, and the IO monad without extra
+boilerplate.
+
 ## The listings
 
 `listings/` is the book-in-progress (*Specify & Verify*) as runnable code:

@@ -552,3 +552,19 @@ scenario. (2) equal-session-id deadlock (`examples/twotab/sync.js:14`: two tabs 
 `Math.random().toString(36).slice(2)` id drop each other's hello as self-echo and neither wins the
 offerer election); probability ~1e-17 per pair, inherent to single-random-id negotiation, cosmetic
 for a demo.
+
+- **WASM off-corpus float rounding.** The WASM backend's printFloat uses the
+  host JavaScript engine's Number::toString which matches the ECMAScript
+  spec on corpus inputs but may diverge on edge-case floats outside the
+  divergence-lock corpus (ch566-ch568); parked until a WASM consumer exposes a
+  concrete mismatch.
+
+- **Native show %g vs __fmtf divergence.** The C/LLVM backends use printf %g
+  for float display which can differ from the ECMAScript canonical form on
+  some values (subnormals, trailing zeros); parked, no native-backend consumer
+  for float IO display parity.
+
+- **Prelude Std namespacing.** The always-on prelude exports Float ops as
+  Std.Float.fromNat etc.; a future cleanup would shorten these to Float.fromNat
+  without breaking existing listings; parked until a user-facing DX complaint
+  arises.

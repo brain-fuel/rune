@@ -1006,6 +1006,24 @@ first and forces only on mismatch, so the fast path logs nothing.
       released constructor spines -- the arity>=3 use-after-free caught in review).
       `PerceusBalanceable` re-opened: ch39 countdown is balanceable + steady-flat,
       byte-identical 9/9. No core change, no hash bump. See `ref_docs/wootz/R-PERCEUS.md`.
+    - **Script ergonomics (feat/script-ergonomics).** Float IO stdin/CRLF/
+      garbage/format corpora on 9 backends (py/go/rust/js/beam/jvm/c/ll/wasm),
+      divergence-locked via ch566-ch568 (printFloat ECMAScript Number::toString
+      canonical, getFloat garbage->0.0, CRLF-stripped, 9-way byte-identical).
+      Compilation sets: LoadSet topo-sorts multi-file programs by defined/
+      referenced name edges; directories expand to sorted *.rune files in
+      parseEmitArgs. Import/alias: import-scope binder-safe name resolution
+      (lambda+case binders shadow imports, no rewrite); addImport/addAlias/
+      resolveName in session/imports.go; alias short-name rewrite + multi-import
+      ambiguity detection listing both candidates. Data/foreign/builtin inside
+      module blocks qualify to M.name; primName last-segment identity is the
+      canonical prim key; CheckPrimCollisions guards against shadowed prim bodies.
+      Shared internal/prelude always-on in the CLI (LoadSource before LoadSet);
+      --no-prelude flag and builtin-nat detection skip it for legacy listings;
+      Shake tree-shakes to the Main-reachable set before emit; examples/double.rune
+      is the 7-line demo (fromNat + fmul via Std.Float, 9-way). Parked:
+      WASM off-corpus float rounding; native show %g vs __fmtf divergence;
+      prelude Std namespacing follow-up.
 
 ## Standing rules
 
