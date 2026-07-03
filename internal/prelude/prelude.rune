@@ -1264,3 +1264,33 @@ strDropGo : Whole -> Bytes -> Bytes is
 end
 -- all but the first n bytes (or the empty string if shorter).
 strDrop : Whole -> Bytes -> Bytes is fn (n : Whole) (s : Bytes) is strDropGo n s end end
+
+-- ====================================================================
+-- Option: a standard maybe type. Constructor order matches the primName
+-- encoding: tag 0 = none (1 arg, the erased type A), tag 1 = some (2 args,
+-- type A + value). This order is load-bearing for parseFloat/Option Float.
+-- ====================================================================
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+-- ====================================================================
+-- Std.Float: machine-float (f64) IO and arithmetic. Names declared as
+-- foreign inside the module so primName (last segment) resolves to the
+-- same ioPrims keys as bare foreign declarations.
+-- fromNat accepts Whole (the builtin-nat type) so numeric literals like 2
+-- elaborate to Whole and fromNat 2 type-checks without a cast.
+-- parseFloat accepts a packed-string Nat (same encoding as Bytes/codeOf).
+-- ====================================================================
+module Std.Float is
+  foreign Float : U end
+  foreign fromNat : Whole -> Float end
+  foreign fadd : Float -> Float -> Float end
+  foreign fsub : Float -> Float -> Float end
+  foreign fmul : Float -> Float -> Float end
+  foreign fdiv : Float -> Float -> Float end
+  foreign parseFloat : Whole -> Option Float end
+  foreign getFloat : IO Float end
+  foreign printFloat : Float -> IO Float end
+end

@@ -16,17 +16,17 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"fmt"
 	"goforge.dev/rune/v3/codegen"
-	"os"
-
 	"goforge.dev/rune/v3/infra"
+	"goforge.dev/rune/v3/internal/prelude"
 	"goforge.dev/rune/v3/internal/repl"
 	"goforge.dev/rune/v3/internal/session"
 	"goforge.dev/rune/v3/internal/sim"
@@ -71,35 +71,26 @@ func main() {
 			fatal(err)
 		}
 	case "emit", "run":
-		files, mainName, target, parseErr := parseEmitArgs(os.Args[2:])
+		files, mainName, target, noPrelude, parseErr := parseEmitArgs(os.Args[2:])
 		if parseErr != nil {
 			fmt.Fprintln(os.Stderr, "rune:", parseErr)
 			usage()
 			os.Exit(2)
 		}
+		// Read all source files.
+		sources, readErr := readNamedSources(files)
+		if readErr != nil {
+			fatal(readErr)
+		}
+		// Determine whether to load the prelude: skip when --no-prelude is set
+		// or when any user source declares `builtin nat` (so existing listings
+		// that define their own numeric tower continue to work unchanged).
+		usePrelude := !noPrelude && !sourcesHaveBuiltinNat(sources)
 		var runErr error
-		if len(files) == 1 {
-			// Single-file path: byte-identical to the pre-multi-file behaviour.
-			src, readErr := os.ReadFile(files[0])
-			if readErr != nil {
-				fatal(readErr)
-			}
-			if os.Args[1] == "emit" {
-				runErr = runEmit(string(src), mainName, target, os.Stdout)
-			} else {
-				runErr = runTarget(string(src), mainName, target)
-			}
+		if os.Args[1] == "emit" {
+			runErr = runEmitSet(sources, mainName, target, os.Stdout, usePrelude)
 		} else {
-			// Multi-file path: read all sources and route through LoadSet.
-			sources, readErr := readNamedSources(files)
-			if readErr != nil {
-				fatal(readErr)
-			}
-			if os.Args[1] == "emit" {
-				runErr = runEmitSet(sources, mainName, target, os.Stdout)
-			} else {
-				runErr = runTargetSet(sources, mainName, target)
-			}
+			runErr = runTargetSet(sources, mainName, target, usePrelude)
 		}
 		if runErr != nil {
 			fatal(runErr)
@@ -305,20 +296,22 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  deploy backends: %s\n", strings.Join(infra.Targets(), ", "))
 }
 
-// parseEmitArgs reads positional <path...> [name] and an optional
-// `--target NAME` (or `--target=NAME`) flag, in any order, for emit/run.
+// parseEmitArgs reads positional <path...> [name] and optional flags
+// `--target NAME` (or `--target=NAME`) and `--no-prelude`, for emit/run.
 // The last positional is the main name iff at least one earlier positional
 // names an existing file or directory and the last one does not.
 // Directory paths expand non-recursively to their *.rune files, sorted.
-func parseEmitArgs(args []string) (files []string, main, target string, err error) {
+func parseEmitArgs(args []string) (files []string, main, target string, noPrelude bool, err error) {
 	target = codegen.Default().Target()
 	var pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--no-prelude":
+			noPrelude = true
 		case a == "--target", a == "-target":
 			if i+1 >= len(args) {
-				return nil, "", "", fmt.Errorf("--target needs a value")
+				return nil, "", "", false, fmt.Errorf("--target needs a value")
 			}
 			i++
 			target = args[i]
@@ -329,10 +322,7 @@ func parseEmitArgs(args []string) (files []string, main, target string, err erro
 		}
 	}
 	if len(pos) == 0 {
-		return nil, "", "", fmt.Errorf("emit/run needs a file")
-	}
-	if _, ok := codegen.ByTarget(target); !ok {
-		return nil, "", "", fmt.Errorf("unknown target %q (have %s)", target, strings.Join(codegen.Targets(), ", "))
+		return nil, "", "", false, fmt.Errorf("emit/run needs a file")
 	}
 	// Determine whether the last positional is a main name or a file/dir path.
 	// It is treated as a name when at least one earlier positional is an existing
@@ -356,14 +346,17 @@ func parseEmitArgs(args []string) (files []string, main, target string, err erro
 	for _, p := range paths {
 		expanded, expErr := expandRunePath(p)
 		if expErr != nil {
-			return nil, "", "", expErr
+			return nil, "", "", false, expErr
 		}
 		files = append(files, expanded...)
 	}
 	if len(files) == 0 {
-		return nil, "", "", fmt.Errorf("no .rune source files found in the given paths")
+		return nil, "", "", false, fmt.Errorf("no .rune source files found in the given paths")
 	}
-	return files, main, target, nil
+	if _, ok := codegen.ByTarget(target); !ok {
+		return nil, "", "", false, fmt.Errorf("unknown target %q (have %s)", target, strings.Join(codegen.Targets(), ", "))
+	}
+	return files, main, target, noPrelude, nil
 }
 
 // pathExists reports whether p names an existing file or directory.
@@ -399,17 +392,6 @@ func expandRunePath(p string) ([]string, error) {
 func fatal(err error) {
 	fmt.Fprintln(os.Stderr, "rune:", err)
 	os.Exit(1)
-}
-
-// runEmit type checks a file and writes its erased shadow for the named target
-// to w (default target is JavaScript).
-func runEmit(src, main, target string, w io.Writer) error {
-	out, _, err := emitFor(src, main, target)
-	if err != nil {
-		return err
-	}
-	_, err = io.WriteString(w, out)
-	return err
 }
 
 // emitFor checks the source and emits the erased shadow for the target backend,
@@ -455,10 +437,31 @@ func readNamedSources(files []string) ([]session.NamedSource, error) {
 	return sources, nil
 }
 
+// sourcesHaveBuiltinNat returns true when any source text contains the token
+// sequence "builtin nat", indicating the user's set declares its own numeric
+// tower. In that case the CLI skips the always-on prelude to avoid shadowing
+// conflicts, preserving the behaviour of listings like ch211 that define their
+// own Nat type with builtin acceleration.
+func sourcesHaveBuiltinNat(sources []session.NamedSource) bool {
+	for _, ns := range sources {
+		if strings.Contains(ns.Src, "builtin nat") {
+			return true
+		}
+	}
+	return false
+}
+
 // programForSet topo-sorts and loads a set of named sources via session.LoadSet,
 // then emits the erased program for the named main (may be "").
-func programForSet(sources []session.NamedSource, main string) (codegen.Program, error) {
+// When withPrelude is true the standard prelude is loaded first (before the topo
+// sort), so user files can shadow prelude names by latest-wins.
+func programForSet(sources []session.NamedSource, main string, withPrelude bool) (codegen.Program, error) {
 	s := session.New()
+	if withPrelude {
+		if _, err := s.LoadSource(prelude.Source()); err != nil {
+			return codegen.Program{}, fmt.Errorf("loading prelude: %w", err)
+		}
+	}
 	if err := session.LoadSet(s, sources); err != nil {
 		return codegen.Program{}, err
 	}
@@ -466,12 +469,12 @@ func programForSet(sources []session.NamedSource, main string) (codegen.Program,
 }
 
 // runEmitSet emits the erased shadow for a set of source files via LoadSet.
-func runEmitSet(sources []session.NamedSource, main, target string, w io.Writer) error {
+func runEmitSet(sources []session.NamedSource, main, target string, w io.Writer, withPrelude bool) error {
 	bk, ok := codegen.ByTarget(target)
 	if !ok {
 		return fmt.Errorf("unknown target %q", target)
 	}
-	p, err := programForSet(sources, main)
+	p, err := programForSet(sources, main, withPrelude)
 	if err != nil {
 		return err
 	}
@@ -484,7 +487,7 @@ func runEmitSet(sources []session.NamedSource, main, target string, w io.Writer)
 }
 
 // runTargetSet emits and executes a set of source files via LoadSet.
-func runTargetSet(sources []session.NamedSource, main, target string) error {
+func runTargetSet(sources []session.NamedSource, main, target string, withPrelude bool) error {
 	if main == "" {
 		return fmt.Errorf("rune run needs a definition to evaluate: rune run FILE NAME")
 	}
@@ -492,7 +495,7 @@ func runTargetSet(sources []session.NamedSource, main, target string) error {
 	if !ok {
 		return fmt.Errorf("unknown target %q", target)
 	}
-	p, err := programForSet(sources, main)
+	p, err := programForSet(sources, main, withPrelude)
 	if err != nil {
 		return err
 	}
@@ -527,7 +530,7 @@ func runTargetSet(sources []session.NamedSource, main, target string) error {
 		runFile = binFile
 	}
 	cmd := r.run(runFile)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }
 
@@ -613,6 +616,6 @@ func runTarget(src, main, target string) error {
 		runFile = binFile
 	}
 	cmd := r.run(runFile)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return cmd.Run()
 }
