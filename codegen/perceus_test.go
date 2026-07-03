@@ -1986,3 +1986,87 @@ func TestPerceusBinMessageLoopFlat(t *testing.T) {
 	p := mustProgram(t, perceusBinLoopSrc, "mainBinLoop")
 	assertSteadyFlatInts(t, p, 5)
 }
+
+// ---------------------------------------------------------------------------
+// CLet double-free guard (cirConsumesArg): a let-bound heap local whose Val
+// MOVES it into a consuming callee and that is DEAD in the body must NOT be
+// dead-dropped -- the callee already released it, so ownScope's drop is a
+// second rt_release (an ARC over-release). This is the ch559 extractStep shape
+// (a Bin fed to a consuming foreign, last use in Val only, dead in the body).
+// ---------------------------------------------------------------------------
+
+// perceusCLetConsumeVocab is the shared Bin vocabulary + a two-argument
+// consumer whose body uses only its FIRST argument (the second is dead and
+// dead-dropped by the code block -- both arguments are consumed).
+const perceusCLetConsumeVocab = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binAt    : Bin -> Nat -> Nat end
+`
+
+// perceusCLetDeadConsumeSrc is the ch559-faithful shape: content is consumed in
+// TWO sibling let Vals (binAt content ...), each moving it into the consuming
+// binAt foreign, and is DEAD in the innermost body (`keep a b` returns a). The
+// cross-consume CDup balances the two moves to rc 0; without the guard ownScope
+// adds a spurious body CDrop (a 3rd release). Correct output is 5.
+const perceusCLetDeadConsumeSrc = perceusCLetConsumeVocab + `
+keep : Nat -> Nat -> Nat is
+  fn (x : Nat) (y : Nat) is x end
+end
+extractDead : Bin -> Nat is
+  fn (content : Bin) is
+    let a : Nat = binAt content 0 in
+    let b : Nat = binAt content 1 in
+    keep a b
+  end
+end
+mainDeadConsume : Nat is extractDead (binCons 5 (binCons 7 binEmpty)) end
+`
+
+// perceusCLetReuseWindowSrc is the shape that makes the over-release a HARD
+// FAILURE (not merely an unbalanced count): content is freed by (binAt content
+// 0), THEN a same-size Bin (binCons 9 binEmpty) is allocated -- reusing
+// content's just-freed block -- and BECOMES the let's result r. On the pre-guard
+// pass the stale body CDrop of content then frees r (a live block), which
+// wasmtime observes as an `undefined element: out of bounds table access` trap.
+// With the guard, content is not dead-dropped and the program runs. Correct
+// output is 9 (the byte of the surviving one-byte Bin).
+const perceusCLetReuseWindowSrc = perceusCLetConsumeVocab + `
+sndBin : Nat -> Bin -> Bin is
+  fn (x : Nat) (y : Bin) is y end
+end
+extractReuse : Bin -> Bin is
+  fn (content : Bin) is
+    let r : Bin = sndBin (binAt content 0) (binCons 9 binEmpty) in
+    r
+  end
+end
+mainReuse : Nat is binAt (extractReuse (binCons 5 binEmpty)) 0 end
+`
+
+// TestPerceusCLetDeadConsumeNoDoubleFree pins the cirConsumesArg CLet guard.
+// Two shapes, both with a let-bound local consumed in Val and dead in the body:
+//   - the ch559 multi-consume shape (output 5, steady-flat): the guard removes
+//     the spurious body drop so the ARC count balances (no over-release, no leak);
+//   - the reuse-window shape (output 9): the pre-guard stale drop frees a REUSED
+//     live block -- a wasmtime table-access trap -- so this asserts the guard
+//     turns a hard corruption into correct, steady-flat execution.
+// Teeth: on main (no cirConsumesArg guard) the reuse case TRAPS and the
+// multi-consume case over-releases; with the guard both are correct and flat.
+func TestPerceusCLetDeadConsumeNoDoubleFree(t *testing.T) {
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, perceusCLetDeadConsumeSrc, "mainDeadConsume")); got != "5" {
+		t.Fatalf("dead-consume: got %q, want 5", got)
+	}
+	assertSteadyFlatInts(t, mustProgram(t, perceusCLetDeadConsumeSrc, "mainDeadConsume"), 5)
+
+	if got := runWasm(t, emitWith(t, cg.Wasm{}, perceusCLetReuseWindowSrc, "mainReuse")); got != "9" {
+		t.Fatalf("reuse-window double-free: got %q, want 9", got)
+	}
+	assertSteadyFlatInts(t, mustProgram(t, perceusCLetReuseWindowSrc, "mainReuse"), 5)
+}

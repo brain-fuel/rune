@@ -158,6 +158,73 @@ func consumeOwning(t CIr) CIr {
 	}
 }
 
+// cirConsumesArg reports whether evaluating t (as an expression whose RESULT is
+// itself consumed by an owning context) MOVES/RELEASES the owned local i -- i.e.
+// i's incoming reference is transferred into a callee/constructor that frees it.
+// It is the OWNING-POSITION restriction of cirUsesArg (its structural dual): a bare
+// CVar{i} reaching an AppClosure Arg, a CVar-headed AppClosure Clo (the $clo release
+// after the call), a MkClosure Env slot, or a CPair component is CONSUMED; a
+// projection/scrutinee (CField/CFst/CSnd on a bare CVar, CCase's scrutinee) BORROWS
+// its source (rt_con_get / rt_pair_fst return aliases; consumeOwning dups a borrowed
+// leaf, so the local's OWN reference survives) and does NOT consume it.
+//
+// It underwrites the CLet double-free guard (ownScope must not dead-drop a local the
+// bound value already moved into a callee). It is CONSERVATIVE toward NOT claiming a
+// consume: a CCase Val returns false (arm-level ownership is handled by annotateCase,
+// and false merely keeps ownScope's drop, never introducing one), so the guard can
+// only ever SUPPRESS a spurious drop, never elide a needed one.
+func cirConsumesArg(t CIr, i int) bool {
+	switch x := t.(type) {
+	case CVar:
+		// A bare owned local moved into the consuming context.
+		return x.Idx == i
+	case AppClosure:
+		// Arg is consumeOwning'd (moved); a CVar-headed Clo is $clo-released after the
+		// call. Both are owning; nested spines recurse to the leaf operand.
+		return cirConsumesArg(x.Clo, i) || cirConsumesArg(x.Arg, i)
+	case MkClosure:
+		// Each env slot stores its term (an owning move).
+		for _, e := range x.Env {
+			if cirConsumesArg(e, i) {
+				return true
+			}
+		}
+		return false
+	case CPair:
+		// Both components are moved into the pair (store = MOVE).
+		return cirConsumesArg(x.A, i) || cirConsumesArg(x.B, i)
+	case CLet:
+		// The let's result is its Body (consumed); Val is evaluated first. i sits one
+		// binder deeper in Body.
+		return cirConsumesArg(x.Val, i) || cirConsumesArg(x.Body, i+1)
+	case CBounce:
+		// The bounce object owns its eagerly-evaluated args (moved into the step applies).
+		return cirConsumesArg(x.Call, i)
+	case CField:
+		// rt_con_get returns an ALIAS: a bare-CVar scrutinee is BORROWED, not consumed.
+		// A compound scrutinee may still consume i while producing the projected value.
+		if _, ok := x.Scrut.(CVar); ok {
+			return false
+		}
+		return cirConsumesArg(x.Scrut, i)
+	case CFst:
+		if _, ok := x.P.(CVar); ok {
+			return false
+		}
+		return cirConsumesArg(x.P, i)
+	case CSnd:
+		if _, ok := x.P.(CVar); ok {
+			return false
+		}
+		return cirConsumesArg(x.P, i)
+	default:
+		// CGlobal / CForeign / CUnit / CLit / CEnv (a capture, not a local) contain no
+		// local i. CCase is conservatively NOT a consume (annotateCase owns its arms;
+		// see the docstring). CDup/CDrop never occur on the pre-annotation input.
+		return false
+	}
+}
+
 // pairProjSrc returns the de Bruijn index k if t is CFst{CVar{k}} or CSnd{CVar{k}}
 // where owned[k] = true (the pair source is an owned local). Returns -1 otherwise.
 // Used by the CLet case to detect a projection of an owned pair local and insert the
@@ -336,6 +403,31 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 			}
 			if cvB, ok2 := cv.B.(CVar); ok2 && cvB.Idx >= 0 && cvB.Idx < len(owned) && owned[cvB.Idx] {
 				bodyOwned[cvB.Idx+1] = false
+			}
+		}
+
+		// DOUBLE-FREE GUARD (the CLet consume-vs-use fix). The bare-var-rebind and CPair
+		// markings above are two special cases of one rule: when Val MOVES an owned local
+		// into a callee/constructor that releases it, and that local is DEAD in the body,
+		// the reference was ALREADY freed in Val -- ownScope must NOT dead-drop it again.
+		// This generalizes the marking to an arbitrary OWNING position deep in a spine --
+		// e.g. `content` fed as an AppClosure arg to jsonStrField several times (ch559's
+		// extractStep), where the LAST use is in Val only (no cross-consume CDup, since the
+		// CDup below fires only when the local is used in BOTH Val and Body). Without this,
+		// ownScope emits a spurious CDrop -> a second rt_release on a reference the callee
+		// already released: content arrives owned (rc 1), the 5 cross-consume CDups bring it
+		// to rc 6, the 6 jsonStrField calls each rt_release it (rc 6 -> 0), and the spurious
+		// body CDrop is a 7th release on 6 references -- an ARC over-release (R-PERCEUS
+		// balance violation). The guard fires only when the local is dead in the body, so it
+		// can never suppress a drop the body still needs (no leak); the cross-consume CDup
+		// handles the used-in-both case, which this condition excludes. The over-release is
+		// a latent heap corruption: TestPerceusCLetDeadConsumeNoDoubleFree exhibits a variant
+		// where the freed block is REUSED for the let's result before the stale drop fires,
+		// so the spurious rt_release frees a live block -- a WASM `out of bounds table access`
+		// trap on the pre-guard pass.
+		for i := 0; i < len(owned); i++ {
+			if owned[i] && cirConsumesArg(x.Val, i) && !cirUsesArg(x.Body, i+1) {
+				bodyOwned[i+1] = false
 			}
 		}
 
