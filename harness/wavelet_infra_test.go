@@ -14,7 +14,7 @@ import (
 // REPL prelude, so the wavelet abstractions are real, checked wootz — not sketches.
 // The foreign ops are assume-tier axioms here; `rune deploy` binds them per backend.
 func TestWaveletInfraInterfaces(t *testing.T) {
-	prelude, err := os.ReadFile(filepath.Join("..", "internal", "repl", "prelude.rune"))
+	prelude, err := os.ReadFile(filepath.Join("..", "internal", "prelude", "prelude.rune"))
 	if err != nil {
 		t.Fatalf("read prelude: %v", err)
 	}
