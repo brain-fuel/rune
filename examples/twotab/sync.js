@@ -13,7 +13,17 @@
 export function createSync({ signal, rtcFactory, onPeerState, onStatus, getState }) {
   const id = Math.random().toString(36).slice(2);
   let pc = null, dc = null, peerId = null;
-  const say = (m) => signal.postMessage({ ...m, from: id });
+  // JSON round-trip before postMessage: a real RTCSessionDescription/
+  // RTCIceCandidate (carried in m.sdp/m.c) is a host object whose own toJSON()
+  // JSON.stringify invokes automatically (the WebRTC spec defines both), but
+  // structured clone (what BroadcastChannel.postMessage actually uses) does
+  // NOT know how to clone either type and throws DataCloneError -- caught
+  // empirically driving two real puppeteer pages through this file. The
+  // round-trip yields a plain object both for the real objects (via their
+  // toJSON) and for sync_test.mjs's plain-object fakes (a no-op), so
+  // setRemoteDescription/addIceCandidate on the receiving side, which accept
+  // the *Init plain-object shape per spec, need no change.
+  const say = (m) => signal.postMessage(JSON.parse(JSON.stringify({ ...m, from: id })));
   const wire = (channel) => {
     dc = channel;
     dc.binaryType = "arraybuffer";
