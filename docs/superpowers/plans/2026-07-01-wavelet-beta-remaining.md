@@ -54,15 +54,26 @@ checklist of everything between HEAD and a shippable beta.
    instances gossip a G-Counter's state as plain bytes and converge under both
    gossip orders, live-delta 0. 6f's remaining surface: WebRTC signaling + DOM +
    two tabs consuming `glue.js` verbatim.
-5. **6f: the two-tab CRDT browser app.** WASM merge + JS/WebRTC glue + two divs.
-   Reuses a proven CvRDT (G-Counter or MV-Register) and the convergence proof.
+5. ~~6f: the two-tab CRDT browser app~~ DONE (branch `feat/twotab-demo`,
+   `7049c63`..`209ca42`). `examples/twotab`: a static page (`index.html`/
+   `app.js`) driving a G-Counter compiled to `counter.wasm` via 6d's
+   `EmitLibrary`, BroadcastChannel signaling paired with a real
+   `RTCDataChannel` (`sync.js`), and an optional puppeteer gate
+   (`TestTwoTabDemo`) that opens two real headless-chrome tabs and asserts DOM
+   convergence. The browser gate caught a real bug the node-only fakes missed:
+   a `DataCloneError` in the signaling payload, fixed by JSON-encoding the wire
+   messages before `postMessage`.
+
+The remaining Tier A:
+
 6. **Five-outputs integration.** One demo source producing, from the same content
    hashes: (1) proof + ledger view, (2) fault sim run, (3) 3-cloud Terraform,
    (4) the running two-tab app, (5) a CALM doc that re-validates 1:1. The pieces
    all exist; the wiring and a single gate test do not. Acceptance = design-spec
    criteria 2 and 3.
 7. **6g: the GTM script / book chapter.** The proven-minimal-IAM diff moment and
-   the Ledger view moment, scripted. Depends on 6f and the rename decision (below).
+   the Ledger view moment, scripted. Depends on 6f (now done) and the rename
+   decision (below).
 
 ## Tier B: credibility gates (parallelizable with Tier A)
 

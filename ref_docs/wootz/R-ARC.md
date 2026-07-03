@@ -216,6 +216,13 @@ any balanced program must return `$live` to its baseline after main.
   missing (invisible until Task 4 became the first consumer to drive a
   2-argument export, `merge`, across the external ABI).
 - Plan 6e: port the ARC discipline to C and LLVM runtimes (replace mark-sweep GC).
-- Plan 6f: the two-tab CRDT browser app (WASM merge + JS/WebRTC glue + two divs).
+- **Plan 6f DONE** (branch `feat/twotab-demo`, `7049c63`..`209ca42`): the two-tab
+  CRDT browser app. `examples/twotab`: a static page (`index.html`/`app.js`)
+  driving a G-Counter compiled to `counter.wasm` via 6d's `EmitLibrary`,
+  BroadcastChannel signaling paired with a real `RTCDataChannel` (`sync.js`),
+  and an optional puppeteer gate (`TestTwoTabDemo`) that opens two real
+  headless-chrome tabs and asserts DOM convergence. The browser gate caught a
+  real bug the node-only fakes missed: a `DataCloneError` in the signaling
+  payload, fixed by JSON-encoding the wire messages before `postMessage`.
 - Plan 6g: the go-to-market script / book chapter (the proven-minimal-IAM + Ledger
   moments).

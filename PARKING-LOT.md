@@ -529,3 +529,19 @@ match the other backends' full-length output. FIX if a large-show consumer appea
 heap-allocated show buffer (bump-allocate a scratch block sized to the value instead of a fixed
 low-memory window). Park (Standing Rule 1, no consumer today -- the 8-way conformance corpus, incl.
 ch483, fits the window).
+
+## Real-WASM-state-through-initial-sync is untested in a real browser (2026-07-03, 6f Task-3 review follow-up)
+The puppeteer gate (`examples/twotab/e2e.mjs`) waits for both pages to report "connected" before it
+clicks bump on either page, so the DOM is never asserted at the moment the initial G-Counter state
+(the WASM-encoded bytes from `gcToBin`) actually crosses the wire -- only post-bump convergence is
+checked. The initial send happens in the data channel's real `onopen` handler
+(`examples/twotab/sync.js:30`: `dc.onopen = () => { onStatus("connected"); sendState(getState()); };`).
+`sync_test.mjs` scenario B (`examples/twotab/sync_test.mjs`, `scenarioB`) does cover the PROTOCOL path
+-- each side's `getState` is called once and delivered to the peer's `onPeerState` on open -- but it
+runs entirely under node with fake string state (`"state-A"`/`"state-B"`), not real wasm-encoded `Bin`
+bytes through a real `RTCDataChannel`. So a regression that corrupted the pre-connect state bump (e.g.
+an ownership bug in `app.js`'s retain-before-consume discipline specific to the very first send) could
+slip past both gates. FIX if initial-sync ever regresses: add a puppeteer scenario that asserts each
+page's `#count` immediately after "connected" (before either page's bump button is clicked), so the
+real `onopen` send is exercised end-to-end. Park (Standing Rule 1, no manifested bug -- e2e's post-bump
+assertions pass and sync_test's scenario B covers the protocol shape).
