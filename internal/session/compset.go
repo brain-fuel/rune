@@ -43,7 +43,7 @@ func LoadSet(s *Session, sources []NamedSource) error {
 	}
 
 	// Build the dependency graph. File i depends on file j when i references
-	// a name that j defines (and j != i — self-references do not create edges).
+	// a name that j defines (and j != i; self-references do not create edges).
 	adj := make([][]int, len(ps))   // adj[j] = files that depend on j
 	indeg := make([]int, len(ps))
 	for i, p := range ps {
@@ -122,7 +122,7 @@ func definedNames(items []surface.Item) map[string]bool {
 				defs[m.Name+"Elim"] = true
 			}
 		case surface.BuiltinNat, surface.BuiltinNatOp, surface.BuiltinNumInj:
-			// session-state declarations — no new store entries
+			// session-state declarations: no new store entries
 		}
 	}
 	return defs
@@ -185,7 +185,9 @@ func referencedNames(items []surface.Item) map[string]bool {
 				}
 			}
 		case surface.BuiltinNat, surface.BuiltinNatOp, surface.BuiltinNumInj:
-			// no expressions to walk
+			// no expressions to walk.
+			// Assumption: builtin declarations are co-located with the definitions
+			// they name; a cross-file builtin would require reference extraction here.
 		}
 	}
 	return refs

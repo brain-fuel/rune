@@ -9,7 +9,7 @@ func WalkExp(e Exp, fn func(Exp)) {
 	fn(e)
 	switch x := e.(type) {
 	case EVar, EUniv, EHole, EProp, EEq, ERefl, ECast, ESubst, ESig, EPair, ENum:
-		// leaf nodes — no sub-expressions to recurse into
+		// leaf nodes: no sub-expressions to recurse into
 	case EFst:
 		WalkExp(x.P, fn)
 	case ESnd:
@@ -44,6 +44,6 @@ func WalkExp(e Exp, fn func(Exp)) {
 			WalkExp(cl.Body, fn)
 		}
 	default:
-		panic(fmt.Sprintf("surface.WalkExp: unknown Exp type %T — update walk.go", e))
+		panic(fmt.Sprintf("surface.WalkExp: unknown Exp type %T; update walk.go", e))
 	}
 }

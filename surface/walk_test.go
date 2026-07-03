@@ -1,11 +1,12 @@
 package surface
 
 import (
+	"math/big"
 	"testing"
 )
 
 func TestWalkExpCollectsVars(t *testing.T) {
-	// fn (x : A) is x end — ELam with Dom=EVar{A}, Body=EVar{x}
+	// fn (x : A) is x end; ELam with Dom=EVar{A}, Body=EVar{x}
 	e := ELam{
 		Param: "x",
 		Dom:   EVar{Name: "A"},
@@ -37,7 +38,7 @@ func TestWalkExpCountsNodes(t *testing.T) {
 }
 
 func TestWalkExpCaseClauseBodies(t *testing.T) {
-	// case s of | c x -> x end — clause body EVar{x} must be visited
+	// case s of | c x -> x end; clause body EVar{x} must be visited
 	e := ECase{
 		Scrut: EVar{Name: "s"},
 		Clauses: []CaseClause{
@@ -72,6 +73,7 @@ func TestWalkExpLeaves(t *testing.T) {
 		ESubst{},
 		ESig{},
 		EPair{},
+		ENum{Val: big.NewInt(42), Pos: 0},
 	}
 	for _, leaf := range leaves {
 		count := 0
