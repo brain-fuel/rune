@@ -55,9 +55,16 @@ func WasmSteadyModule(t *testing.T, p Program, runs int) string {
 		}
 	}
 
-	// Emit all code blocks + def thunks into `defs`.
+	// Emit all code blocks + def thunks into `defs`, then the whitelisted foreign IO
+	// ops + the IO monad -- mirrors Wasm.Emit's own two-step bake (emitDefs then
+	// emitForeignPrimsWasm). Every prior steady receiver was foreign-op-free (pure
+	// Nat/closure/pair/ctor programs), so this call was never exercised until a
+	// program referencing a `foreign` axiom (e.g. the Bin vocabulary) needed a
+	// steady-state gate; without it, a foreign accessor like $def_binCons is
+	// referenced but never baked, and wasmtime rejects the module.
 	var defs strings.Builder
 	em.emitDefs(&defs)
+	em.emitForeignPrimsWasm(&defs, p)
 
 	// Emit the main body into a temp buffer to collect fresh locals.
 	// These locals are hoisted into the $_start function header below.

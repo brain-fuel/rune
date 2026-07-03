@@ -107,9 +107,12 @@ func shiftCIr(t CIr, minDepth, amount int) CIr {
 //   - A BORROWED value is retained first with a CDup so the owner keeps its reference
 //     and the consumer takes a fresh one. A bare capture name (CEnv) is dup'd in place
 //     (CDup.V/K both name the slot). A borrowed leaf that is NOT a bare variable
-//     (CGlobal thunk-cached root, or a CField/CFst/CSnd projection aliasing its
-//     parent) is let-bound first, then the binding is dup'd -- CDup.V must name a
-//     CVar/CEnv, never an allocating or projecting expression.
+//     (CGlobal thunk-cached root, a bare-VALUE CForeign reference -- e.g. Task 3's
+//     nullary `binEmpty`, memoized via the SAME emitCachedThunk mechanism as a
+//     CGlobal def and therefore just as much a shared cache -- or a CField/CFst/CSnd
+//     projection aliasing its parent) is let-bound first, then the binding is
+//     dup'd -- CDup.V must name a CVar/CEnv, never an allocating or projecting
+//     expression.
 //
 // The result value of a CLet/CDup/CDrop is its continuation (Body/K), so consumeOwning
 // reaches the TAIL through those wrappers: a let- or closure-release-wrapped borrowed
@@ -122,11 +125,24 @@ func consumeOwning(t CIr) CIr {
 	case CEnv:
 		// A bare capture name: retain the slot, then yield it.
 		return CDup{V: x, K: x}
-	case CGlobal, CField, CFst, CSnd:
+	case CGlobal, CForeign, CField, CFst, CSnd:
 		// A borrowed leaf that is not a bare variable: let-bind it, dup the binding.
 		// The CLet's Val is evaluated in the enclosing context (the borrowed leaf's
 		// own free vars stay put); its Body is closed (only CVar{0}), so wrapping the
 		// leaf in this CLet does not shift any enclosing de Bruijn index.
+		//
+		// CForeign joins CGlobal here (6c fix): `annotate`'s leaf case (above) already
+		// groups CForeign WITH CGlobal as "borrowed, dup at the consuming position" --
+		// but this switch previously fell through CForeign to the default "already
+		// owned" arm, an inconsistency invisible for every FUNCTION-arity foreign
+		// (binCons/binAt/printNat/...), which only ever appears as an AppClosure's
+		// Clo head (never consumeOwning'd bare), but corrupting for a bare-VALUE
+		// foreign like Task 3's nullary `binEmpty : Bin` -- emitted as a memoized
+		// $cache_binEmpty/$done_binEmpty thunk (the SAME emitCachedThunk convention as
+		// any CGlobal def), so consuming it as "already owned" let the first fold step
+		// (`binCons k binEmpty`) rt_release the SHARED cached pointer, freeing it out
+		// from under every later reference (a genuine use-after-free, reproduced by
+		// TestPerceusBinMessageLoopFlat's steady counts shrinking instead of growing).
 		return CLet{Name: "$own", Val: t, Body: CDup{V: CVar{Idx: 0}, K: CVar{Idx: 0}}}
 	case CLet:
 		return CLet{Name: x.Name, Val: x.Val, Body: consumeOwning(x.Body)}
@@ -136,8 +152,8 @@ func consumeOwning(t CIr) CIr {
 		return CDrop{V: x.V, K: consumeOwning(x.K)}
 	default:
 		// CVar (owned local), MkClosure / AppClosure / CPair (fresh allocations),
-		// CUnit / CLit / CForeign, and CCase / CBounce (out of the Task 3.5 transfer
-		// fragment): already owned, or owned at their own owning positions.
+		// CUnit / CLit (already owned, or owned at their own owning positions), and
+		// CCase / CBounce (out of the Task 3.5 transfer fragment).
 		return t
 	}
 }

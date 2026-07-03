@@ -269,3 +269,27 @@ func TestARCBinLeafRelease(t *testing.T) {
 		t.Fatalf("K_BIN leaf lifecycle broken: probe=%q want 1", out)
 	}
 }
+
+// TestARCBinHugeOrphanBalanced: a >64KB K_BIN is above the big-bucket ceiling
+// ($alloc only power-of-two-rounds sizes in [256, 65536]): released memory is NOT
+// pooled ($hp does not rewind, the block is orphaned) but $live still balances. Pins
+// the documented boundary from Task 1/4 -- a >64KB payload is deliberately excluded
+// from the free list, not silently mishandled.
+func TestARCBinHugeOrphanBalanced(t *testing.T) {
+	body := `
+    (local $l0 i32) (local $b i32) (local $hp0 i32) (local $c i32)
+    (local.set $l0 (call $rt_live))
+    (local.set $b (call $rt_mkbin (i32.const 70000)))
+    (call $rt_release (local.get $b))
+    (local.set $hp0 (call $rt_hp))
+    (local.set $c (call $rt_mkbin (i32.const 70000)))
+    (call $rt_release (local.get $c))
+    ;; balanced live AND the second alloc did NOT reuse (hp advanced): the
+    ;; orphan boundary, documented not hidden
+    (call $rt_print_u32 (i32.and (i32.eq (call $rt_live) (local.get $l0))
+             (i32.gt_u (call $rt_hp) (local.get $hp0))))`
+	out := runWasm(t, arcTestModule(body))
+	if out != "1" {
+		t.Fatalf("orphan boundary moved: probe=%q want 1", out)
+	}
+}

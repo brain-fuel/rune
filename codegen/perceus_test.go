@@ -1929,3 +1929,60 @@ func TestPerceusPartialSharedFlat(t *testing.T) {
 		t.Fatalf("shared: got %q, want 0", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Plan 6c Task 4: the message-loop payoff receiver.
+// ---------------------------------------------------------------------------
+
+// perceusBinLoopSrc is the 6f message-loop shape: a "message" is a ~300-byte Bin
+// built from binEmpty via a SATURATED 4-arg NatElim fold (buildMsg), read once
+// (binAt 0), then discarded. The fold is the recognized satElimDispatch spine (a
+// literal `NatElim mot z step n` inside buildMsg's own code block), so it lowers to
+// a single b3 fold closure released after the call -- no leaked curry K_CLOs, no
+// stored motive -- exactly like the corpus `three`/`two`/`big`/`bigger`/`product`
+// folds. Each of the 300 binCons calls is O(n) (Task 3's copy-and-prepend body): the
+// intermediate Bin it consumes is an owned argument, released by binCons's own body
+// under the normal owned-arg discipline, so the 299 intermediate Bins never survive
+// past the cons that supersedes them. Only the final 300-byte Bin plus the K_BIG
+// byte result of binAt momentarily coexist, and both are released before the next
+// run -- WasmSteadyModule calls mainBinLoop once per run, so "one iteration of the
+// outer loop per run" is exactly what the steady harness measures.
+const perceusBinLoopSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binAt    : Bin -> Nat -> Nat end
+buildMsg : Nat -> Bin is
+  fn (n : Nat) is
+    NatElim (fn (x : Nat) is Bin end) binEmpty
+      (fn (k : Nat) (ih : Bin) is binCons k ih end) n
+  end
+end
+mainBinLoop : Nat is binAt (buildMsg 300) 0 end
+`
+
+// binLoopWant is the byte at index 0 of the 300-byte Bin buildMsg 300 constructs.
+// NatElim folds bottom-up: fold(0) = binEmpty, fold(k+1) = binCons k (fold k), so the
+// LAST (outermost) cons applied is binCons 299, prepending byte 299 & 255 = 43 at
+// index 0.
+const binLoopWant = "43"
+
+// TestPerceusBinMessageLoopFlat is the Task 4 payoff receiver: each "message" builds
+// a >256B Bin (forcing Task 1's big-bucket path, since 300 bytes + the K_BIN header
+// rounds to the 512B power-of-two bucket), reads it, and drops it. Per-run $live
+// increment must be ZERO across runs 2..5: large payload churn is steady-flat, tying
+// together the big-bucket free list (Task 1), the K_BIN leaf release (Task 2), and
+// binCons's owned-argument discipline (Task 3).
+func TestPerceusBinMessageLoopFlat(t *testing.T) {
+	got := runWasm(t, emitWith(t, cg.Wasm{}, perceusBinLoopSrc, "mainBinLoop"))
+	if got != binLoopWant {
+		t.Fatalf("output changed: got %q want %q", got, binLoopWant)
+	}
+	p := mustProgram(t, perceusBinLoopSrc, "mainBinLoop")
+	assertSteadyFlatInts(t, p, 5)
+}

@@ -47,11 +47,14 @@ and to the kind-word layout below.
 
 - `$rt_free(v)` -- releases the object's child pointers by kind (so the whole
   immutable structure is reclaimed transitively), decrements `$live`, then pushes the
-  block onto its size-class bucket for reuse. Child dispatch by kind word (word 0):
+  block onto its size-class bucket for reuse (Task 1's power-of-two rounding makes a
+  BIG payload's stored size hit a bucket too, not just the sub-256B ones -- see below).
+  Child dispatch by kind word (word 0):
   - K_CLO = 0: env slots start at word 3, count at word 2; releases each slot.
   - K_CON = 1: field slots start at word 4, count at word 3; releases each slot.
   - K_PAIR = 2: releases words 1 and 2 (the two halves).
-  - K_BIG = 6 and anything else: leaf -- limbs are raw ints, no child pointers.
+  - K_BIG = 6, K_BIN = 8 (Plan 6c's packed-byte `Bin` container), and anything else:
+    leaf -- limbs/bytes are raw, no child pointers.
 
 - `$w(o, i)` -- the word accessor: loads the i32 at object offset i*4. Used by
   `$rt_free` and the kind-inspection paths.
@@ -68,19 +71,44 @@ and to the kind-word layout below.
 
 ### Size-classed free list
 
-64 buckets, indexed `rounded_size / 4` (index range 0..63, covering payload sizes 0
-to 252 bytes). Bucket head pointers are stored in a reserved low-memory region at
-base 8192 (global `$freelist`), occupying `[8192, 8448)` (64 * 4 bytes).
+73 buckets total, stored in a reserved low-memory region at base 8192 (global
+`$freelist`), occupying `[8192, 8484)`:
+
+- **64 exact-size buckets**, indices 0..63 at `[8192, 8448)`, indexed
+  `rounded_size / 4` (covering payload sizes 0 to 252 bytes).
+- **9 big power-of-two buckets** (Plan 6c Task 1), indices 64..72 at `[8448, 8484)`,
+  one per power of two from 256B to 64KB (256, 512, 1024, 2048, 4096, 8192, 16384,
+  32768, 65536). `$rt_bucket_addr` maps a size in `[256, 65536]` that is already an
+  exact power of two to `64 + (23 - clz(size))` (`clz(256) = 23`, `clz(65536) = 15`).
 
 The list is intrusive and singly-linked: the first word of the freed payload block
 holds the next-block link. Push stores the old head at the freed block's word 0 and
 writes the payload pointer as the new bucket head. Pop reads the head, advances the
 bucket to the link at the head block's word 0, resets rc=1, and returns the head.
 
-Exact-size reuse only -- no splitting or coalescing in v1. Payload sizes >= 256 bytes
-(index >= 64) are not pooled; they are bump-allocated and left unreachable after free
-(acceptable because the runtime allocates only small, few-sized records: closures,
-constructors, pairs, and bignums).
+**Big-bucket rounding.** `$alloc` rounds any request landing in `[256, 65536]` UP to
+the next power of two before the size-class lookup, so every payload that reaches the
+big-bucket range hits one of the 9 buckets exactly (no partial-fit waste beyond the
+power-of-two rounding itself) -- this is what makes a large payload (the `Bin`
+message-loop shape: a few-hundred-byte buffer built and dropped every "message")
+reach the SAME free block on every subsequent allocation, not a fresh bump each time.
+Below 256B, allocation is exact-size (no rounding); the two regimes meet at 256B,
+the smallest big bucket.
+
+**The >64KB orphan boundary.** A payload requesting MORE than 65536 bytes is
+deliberately NOT power-of-two-rounded and NOT pooled: `$rt_bucket_addr` returns 0 for
+any size outside `[256, 65536]`, so `$rt_free` skips the free-list push for it. The
+block is still correctly released (`$live` decrements, any child pointers recurse)
+but its memory is orphaned -- `$hp` never rewinds to reclaim it, and a later
+same-size request bump-allocates a fresh block rather than reusing the freed one.
+This is a DOCUMENTED boundary, not a silent gap: v1's runtime allocates only small,
+few-sized records (closures, constructors, pairs, bignums, and now `Bin` payloads),
+so a >64KB single value is rare, and capping the bucket table at 9 entries keeps the
+free-list scan O(1) without an unbounded size-class table. `TestARCBinHugeOrphanBalanced`
+(`codegen/wasm_arc_test.go`) pins the boundary: `$live` balances across two 70000-byte
+alloc/release cycles, but `$hp` strictly advances between them (no reuse).
+
+Exact-size reuse only -- no splitting or coalescing in v1.
 
 ### The four wasmtime tests (codegen/wasm_arc_test.go)
 
@@ -139,8 +167,31 @@ any balanced program must return `$live` to its baseline after main.
 
 ## Downstream (the demo path)
 
-- Plan 6c: strings and bytes as refcounted heap objects in WASM (Bin over the ARC
-  heap).
+- **Plan 6c DONE** (`f4f49d3`..`571cdd4` + the Task 4 payoff commit, branch
+  `feat/wasm-bin-arc`): bytes as a refcounted heap object in WASM. `K_BIN = 8`, a
+  packed-byte leaf container (`[kind][byte-len][raw bytes, 4-rounded]`), plus the
+  power-of-two big buckets above (Task 1) so a `Bin` payload over 256B still gets
+  pooled. Full op parity -- `binEmpty`/`binCons`/`binLen`/`binAt`/`printBin`, the
+  `b"..."` `LitBytes` literal, and the `$show` arm -- joins the ch483 cross-backend
+  conformance gate. The Task 4 payoff:
+  `TestPerceusBinMessageLoopFlat` (`codegen/perceus_test.go`) proves the 6f message-
+  loop shape -- build a ~300-byte `Bin` via a saturated `NatElim` fold, read one byte,
+  drop it -- is TRUE steady-flat (zero `$live` delta across runs 2..5), and
+  `TestARCBinHugeOrphanBalanced` (`codegen/wasm_arc_test.go`) pins the >64KB orphan
+  boundary. Two fixes surfaced along the way, both outside Tasks 1-3's own bodies: (1)
+  `WasmSteadyModule` (`codegen/wasm_steady_test.go`), the steady-state test harness,
+  never called `emitForeignPrimsWasm` -- no prior steady receiver used a `foreign` op,
+  so the gap was latent until a program under the loop referenced `binCons`/`binEmpty`;
+  fixed by mirroring `Wasm.Emit`'s own two-step bake. (2) `consumeOwning`
+  (`codegen/perceus.go`) grouped `CForeign` with the "already owned" default arm
+  instead of the borrowed-leaf arm alongside `CGlobal`, even though `annotate`'s leaf
+  case already treated the two identically; harmless for every FUNCTION-arity foreign
+  (always consumed via an AppClosure result, never a bare consumeOwning'd leaf) but a
+  genuine use-after-free for a bare-VALUE nullary foreign like `binEmpty` -- a
+  memoized `$cache_binEmpty` thunk exactly like a `CGlobal` def, so treating it as
+  freshly owned let the first fold step release the SHARED cached pointer out from
+  under every later reference. Fixed by adding `CForeign` to `consumeOwning`'s
+  dup-on-consume-borrowed case.
 - Plan 6d: the WebRTC FFI shim (the sandbox/no-native interop class) as WASM imports.
 - Plan 6e: port the ARC discipline to C and LLVM runtimes (replace mark-sweep GC).
 - Plan 6f: the two-tab CRDT browser app (WASM merge + JS/WebRTC glue + two divs).

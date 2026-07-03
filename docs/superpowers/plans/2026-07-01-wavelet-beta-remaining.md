@@ -21,7 +21,9 @@ checklist of everything between HEAD and a shippable beta.
 - WASM: ARC runtime (6a), Perceus ownership pass (6b), leak residuals closed +
   PerceusBalanceable re-opened (6b-2, v3.337.0, verified 2026-07-02: realistic
   programs steady-flat), partial support with ARC trampoline (v3.341.0), foreign
-  ops, printNat, IO-main, packed-String codec.
+  ops, printNat, IO-main, packed-String codec, and `Bin` refcounted bytes over ARC
+  (6c, branch `feat/wasm-bin-arc`: `K_BIN` leaf kind + big buckets + full op parity,
+  the message-loop shape steady-flat, the >64KB orphan boundary pinned).
 
 ## Tier A: the headline artifact (critical path, in dependency order)
 
@@ -32,9 +34,16 @@ checklist of everything between HEAD and a shippable beta.
 2. ~~6b-2: leak residuals~~ DONE (v3.337.0, verified 2026-07-02; all four
    residuals closed, PerceusBalanceable re-opened, realistic programs steady-flat;
    WASM partial support landed too, v3.341.0). Was listed here off the stale index.
-3. **6c: strings/bytes as refcounted heap objects** (Bin over ARC). Prerequisite
-   for any browser demo that touches text. Note: the packed-String codec (bignum
-   packing) landed for bible ops; 6c is the heap-object representation, still open.
+3. ~~6c: strings/bytes as refcounted heap objects~~ DONE (branch `feat/wasm-bin-arc`,
+   `f4f49d3`..`571cdd4` + the Task 4 payoff commit). `K_BIN = 8` packed-byte ARC leaf
+   kind + power-of-two big buckets [256B,64KB] in the free list (so a `Bin` payload
+   over 256B is still pooled) + full op parity (`binEmpty`/`binCons`/`binLen`/
+   `binAt`/`printBin`, the `b"..."` literal, `$show`) joining the ch483 cross-backend
+   gate; the steady-flat payoff (`TestPerceusBinMessageLoopFlat`, the 6f message-loop
+   shape at zero per-run `$live` delta) and the >64KB orphan-boundary pin
+   (`TestARCBinHugeOrphanBalanced`) close it. The packed-String codec (bignum
+   packing, landed for bible ops) stays a SEPARATE representation; 6c is the
+   heap-object one, now also done.
 4. **6d: WebRTC FFI shim.** WASM imports; the sandbox/no-native interop class.
    Smallest sufficient surface: open channel, send bytes, receive callback.
 5. **6f: the two-tab CRDT browser app.** WASM merge + JS/WebRTC glue + two divs.
