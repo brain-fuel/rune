@@ -161,6 +161,38 @@ three : Nat is 3 end
 	}
 }
 
+// TestEmitExprChecksCollisions verifies that EmitExpr runs the prim-collision guard
+// (codegen.CheckPrimCollisions) before returning. A collision-free expression must
+// succeed; the guard itself is tested thoroughly in codegen/ioprims_test.go.
+func TestEmitExprChecksCollisions(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(idSrc); err != nil {
+		t.Fatal(err)
+	}
+	expr, err := s.ParseSrcExpr("id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.EmitExpr(expr)
+	if err != nil {
+		t.Fatalf("EmitExpr: %v", err)
+	}
+	if p.Main != "$it" {
+		t.Errorf("EmitExpr: want p.Main=%q, got %q", "$it", p.Main)
+	}
+	// The entry definition must appear in the defs list.
+	found := false
+	for _, d := range p.Defs {
+		if d.Name == "$it" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("EmitExpr: $it entry not found in p.Defs")
+	}
+}
+
 // TestBuiltinNatRejectsIllTyped: a binding whose succ is not T -> T fails.
 func TestBuiltinNatRejectsIllTyped(t *testing.T) {
 	s := New()

@@ -1231,6 +1231,11 @@ func (s *Session) EmitExpr(e surface.Exp) (codegen.Program, error) {
 	// neutral value — so `:run do ... end` (and `:run printNat 1`) performs its
 	// effects rather than showing the unforced thunk.
 	p.IOMain = s.isIOType(ty)
+	// Tree-shake and guard against prim collisions, mirroring EmitProgram.
+	p = codegen.Shake(p)
+	if err := codegen.CheckPrimCollisions(p); err != nil {
+		return p, err
+	}
 	return p, nil
 }
 
