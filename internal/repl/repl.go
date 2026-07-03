@@ -68,6 +68,13 @@ func RunWith(in io.Reader, out io.Writer, cfg Config) error {
 		if trimmed == "" {
 			continue
 		}
+		// A comment-only line cannot start a form (`--` runs to end of line and
+		// no expression begins with it); skip it like a blank line so a pasted
+		// listing with comment blocks loads. Comment lines INSIDE a multi-line
+		// form still pass through the continuation loop; the lexer drops them.
+		if strings.HasPrefix(trimmed, "--") {
+			continue
+		}
 		// A non-blank submission claims the next line number (irb-style); a bare
 		// expression result is then named $N for that N (jshell-style), while defs
 		// and commands consume the number without producing a $N.
