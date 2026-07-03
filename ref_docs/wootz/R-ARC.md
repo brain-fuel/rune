@@ -192,7 +192,7 @@ any balanced program must return `$live` to its baseline after main.
   freshly owned let the first fold step release the SHARED cached pointer out from
   under every later reference. Fixed by adding `CForeign` to `consumeOwning`'s
   dup-on-consume-borrowed case.
-- **Plan 6d DONE** (`420cb7d`..the docs commit closing this task, branch
+- **Plan 6d DONE** (`420cb7d`..`50bdd09`, branch
   `feat/wasm-browser-library`): the sandbox/no-native interop class realized as a
   passive WASM LIBRARY artifact, not a WebRTC shim (the design narrowed to a
   browser-consumable export ABI + proven wire codec; WebRTC signaling stays 6f's
