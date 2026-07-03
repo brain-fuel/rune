@@ -1,0 +1,1140 @@
+-- Chapter 564 — the scribe rasterizer FAST PATH and its divergence lock (L4).
+-- The bible-port pattern: the data plane stays total in rune (the ch562/ch563
+-- exact geometry and rasterizer, redeclared verbatim below), and the hot loop
+-- moves behind a host op. `rasterFill` is native float64 font-rs baked into
+-- the backend runtime — the EXACT algorithm of the Go engine's raster.line —
+-- taking snapped 1/256 subpixel coordinates (bias 2^23) and returning the
+-- PACKED alpha mask (w*h bytes, first byte least significant, sentinel on
+-- top). The pure exact rasterizer is the REFERENCE: this chapter packs its
+-- mask the same way and the lock is ONE equality between the two codes.
+-- ch561-ch563 discipline throughout.
+
+data Bool : U is false : Bool | true : Bool end
+data Unit : U is unit : Unit end
+andB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> false | true -> b end end end
+orB  : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> b | true -> true end end end
+notB : Bool -> Bool is fn (a : Bool) is case a of | false -> true | true -> false end end end
+ite  : (A : U) -> Bool -> A -> A -> A is
+  fn (A : U) (c : Bool) (t : A) (e : A) is case c of | false -> e | true -> t end end
+end
+eqB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> notB b | true -> b end end end
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+add : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end end
+builtin natAdd add
+mul : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> 0 | succ k with ih -> add n ih end end end
+builtin natMul mul
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ k -> k end end end
+monus : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end end
+builtin natMonus monus
+isZero : Nat -> Bool is fn (n : Nat) is case n of | zero -> true | succ k -> false end end end
+leW : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is isZero (monus a b) end end
+eqW : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is andB (leW a b) (leW b a) end end
+
+leb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is true end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+divF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is 0 end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> 0
+        | succ k -> case leb b a of | false -> 0 | true -> succ (ih (monus a b) b) end
+        end
+      end
+    end
+  end
+end
+modF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is a end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> a
+        | succ k -> case leb b a of | false -> a | true -> ih (monus a b) b end
+        end
+      end
+    end
+  end
+end
+fdiv : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is divF m m n end end
+fmod : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is modF m m n end end
+builtin natDiv fdiv
+builtin natMod fmod
+
+-- Euclid, fuel-bounded, ONE ih. Every rational is reduced at construction,
+-- so operands stay small and a few dozen steps suffice; fuel exhaustion
+-- returns 1 (no reduction), which is value-correct, never wrong. Fuel is
+-- kept tight because compiled fuel towers run to full depth (eager arms).
+-- The arms are THUNKS: case arms that are plain values evaluate eagerly in
+-- compiled code (so the recursion would burn the whole fuel tower on every
+-- call), but a lambda arm is only applied when selected. With thunked arms
+-- the loop costs the ACTUAL Euclid steps, not the fuel bound.
+gcdGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is 1 end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        let k : Unit -> Nat =
+          case isZero b of
+          | true -> fn (u : Unit) is a end
+          | false -> fn (u : Unit) is ih b (fmod a b) end
+          end
+        in k unit
+      end
+    end
+  end
+end
+-- point-free on purpose: an eta-expanded wrapper would rebuild the 96-level
+-- eliminator tower on every call; this builds it once at load.
+gcdN : Nat -> Nat -> Nat is gcdGo 96 end
+
+data List : U -> U is
+  nil : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+data P2 : U -> U -> U is p2 : (A : U) -> (B : U) -> A -> B -> P2 A B end
+
+-- ------------------------------------------------- signed exact rationals
+-- qn neg num den, den >= 1 kept by the smart constructors below; zero is
+-- always non-negative. No reduction: equality and order are observations by
+-- cross-multiplication (denominators are positive, so no sign flip).
+data Qn : U is qn : Bool -> Nat -> Nat -> Qn end
+
+qZ : Qn is qn false 0 1 end
+qNat : Nat -> Qn is fn (n : Nat) is qn false n 1 end end
+qNeg : Qn -> Qn is
+  fn (a : Qn) is
+    case a of
+    | qn s n d -> case isZero n of | true -> a | false -> qn (notB s) n d end
+    end
+  end
+end
+-- qmk REDUCES: without it denominators double their bit length at every
+-- midpoint (den(pmid) = 2 d1 d2) and the compiled flattener drowns in
+-- million-bit integers. Reduction at construction keeps every value small.
+qmk : Bool -> Nat -> Nat -> Qn is
+  fn (s : Bool) (n : Nat) (d : Nat) is
+    case isZero n of
+    | true -> qn false 0 1
+    | false ->
+        let g : Nat = gcdN n d in
+        qn s (fdiv n g) (fdiv d g)
+    end
+  end
+end
+
+qadd : Qn -> Qn -> Qn is
+  fn (a : Qn) (b : Qn) is
+    case a of
+    | qn s1 n1 d1 ->
+        case b of
+        | qn s2 n2 d2 ->
+            let m1 : Nat = mul n1 d2 in
+            let m2 : Nat = mul n2 d1 in
+            let dd : Nat = mul d1 d2 in
+            case eqB s1 s2 of
+            | true -> qmk s1 (add m1 m2) dd
+            | false ->
+                case leW m2 m1 of
+                | true -> qmk s1 (monus m1 m2) dd
+                | false -> qmk s2 (monus m2 m1) dd
+                end
+            end
+        end
+    end
+  end
+end
+qsub : Qn -> Qn -> Qn is fn (a : Qn) (b : Qn) is qadd a (qNeg b) end end
+qmul : Qn -> Qn -> Qn is
+  fn (a : Qn) (b : Qn) is
+    case a of
+    | qn s1 n1 d1 ->
+        case b of
+        | qn s2 n2 d2 -> qmk (notB (eqB s1 s2)) (mul n1 n2) (mul d1 d2)
+        end
+    end
+  end
+end
+-- qdiv: division by zero yields zero (total; never exercised on zero here).
+qdiv : Qn -> Qn -> Qn is
+  fn (a : Qn) (b : Qn) is
+    case a of
+    | qn s1 n1 d1 ->
+        case b of
+        | qn s2 n2 d2 ->
+            case isZero n2 of
+            | true -> qZ
+            | false -> qmk (notB (eqB s1 s2)) (mul n1 d2) (mul d1 n2)
+            end
+        end
+    end
+  end
+end
+qhalf : Qn -> Qn is
+  fn (a : Qn) is case a of | qn s n d -> qmk s n (mul 2 d) end end
+end
+
+qeq : Qn -> Qn -> Bool is
+  fn (a : Qn) (b : Qn) is
+    case a of
+    | qn s1 n1 d1 ->
+        case b of
+        | qn s2 n2 d2 ->
+            case andB (isZero n1) (isZero n2) of
+            | true -> true
+            | false -> andB (eqB s1 s2) (eqW (mul n1 d2) (mul n2 d1))
+            end
+        end
+    end
+  end
+end
+-- signed <=
+qle : Qn -> Qn -> Bool is
+  fn (a : Qn) (b : Qn) is
+    case a of
+    | qn s1 n1 d1 ->
+        case b of
+        | qn s2 n2 d2 ->
+            case s1 of
+            | false ->
+                case s2 of
+                | false -> leW (mul n1 d2) (mul n2 d1)
+                | true -> andB (isZero n1) (isZero n2)
+                end
+            | true ->
+                case s2 of
+                | false -> true
+                | true -> leW (mul n2 d1) (mul n1 d2)
+                end
+            end
+        end
+    end
+  end
+end
+qmin : Qn -> Qn -> Qn is fn (a : Qn) (b : Qn) is ite Qn (qle a b) a b end end
+qsq : Qn -> Qn is fn (a : Qn) is qmul a a end end
+
+-- rational arithmetic pins
+pinQAdd : Eq Bool (qeq (qadd (qn false 1 3) (qn false 1 6)) (qn false 1 2)) true is refl true end
+pinQSubNeg : Eq Bool (qeq (qsub (qn false 1 4) (qn false 3 4)) (qn true 1 2)) true is refl true end
+pinQMixed : Eq Bool (qeq (qadd (qn true 2 3) (qn false 1 2)) (qn true 1 6)) true is refl true end
+pinQMulSign : Eq Bool (qeq (qmul (qn true 2 5) (qn true 5 2)) (qn false 1 1)) true is refl true end
+pinQDiv : Eq Bool (qeq (qdiv (qn false 7 2) (qn false 7 1)) (qn false 1 2)) true is refl true end
+pinQLe : Eq Bool (qle (qn true 1 100) (qn false 1 1000000)) true is refl true end
+pinQHalf : Eq Bool (qeq (qhalf (qn false 1 2)) (qn false 25 100)) true is refl true end
+pinQZeroSign : Eq Bool (qeq (qsub (qn false 1 3) (qn false 1 3)) qZ) true is refl true end
+
+-- --------------------------------------------------- corner-grid geometry
+data Pt : U is pt : Qn -> Qn -> Pt end
+px : Pt -> Qn is fn (p : Pt) is case p of | pt x y -> x end end end
+py : Pt -> Qn is fn (p : Pt) is case p of | pt x y -> y end end end
+padd : Pt -> Pt -> Pt is
+  fn (a : Pt) (b : Pt) is pt (qadd (px a) (px b)) (qadd (py a) (py b)) end
+end
+psub : Pt -> Pt -> Pt is
+  fn (a : Pt) (b : Pt) is pt (qsub (px a) (px b)) (qsub (py a) (py b)) end
+end
+pscale : Qn -> Pt -> Pt is
+  fn (k : Qn) (a : Pt) is pt (qmul k (px a)) (qmul k (py a)) end
+end
+pmid : Pt -> Pt -> Pt is
+  fn (a : Pt) (b : Pt) is pt (qhalf (qadd (px a) (px b))) (qhalf (qadd (py a) (py b))) end
+end
+peq : Pt -> Pt -> Bool is
+  fn (a : Pt) (b : Pt) is andB (qeq (px a) (px b)) (qeq (py a) (py b)) end
+end
+
+-- Affine (A B C D E F) maps (x, y) to (A x + C y + E, B x + D y + F),
+-- exactly the Go geom.Affine convention.
+data Aff : U is aff : Qn -> Qn -> Qn -> Qn -> Qn -> Qn -> Aff end
+affId : Aff is aff (qNat 1) qZ qZ (qNat 1) qZ qZ end
+affTranslate : Qn -> Qn -> Aff is
+  fn (tx : Qn) (ty : Qn) is aff (qNat 1) qZ qZ (qNat 1) tx ty end
+end
+affScale : Qn -> Qn -> Aff is
+  fn (sx : Qn) (sy : Qn) is aff sx qZ qZ sy qZ qZ end
+end
+affApply : Aff -> Pt -> Pt is
+  fn (m : Aff) (p : Pt) is
+    case m of
+    | aff a b c d e f ->
+        pt (qadd (qadd (qmul a (px p)) (qmul c (py p))) e)
+           (qadd (qadd (qmul b (px p)) (qmul d (py p))) f)
+    end
+  end
+end
+-- affMul m n applies n first, then m (Go: m.Mul(n)).
+affMul : Aff -> Aff -> Aff is
+  fn (m : Aff) (n : Aff) is
+    case m of
+    | aff ma mb mc md me mf ->
+        case n of
+        | aff na nb nc nd ne nf ->
+            aff (qadd (qmul ma na) (qmul mc nb))
+                (qadd (qmul mb na) (qmul md nb))
+                (qadd (qmul ma nc) (qmul mc nd))
+                (qadd (qmul mb nc) (qmul md nd))
+                (qadd (qadd (qmul ma ne) (qmul mc nf)) me)
+                (qadd (qadd (qmul mb ne) (qmul md nf)) mf)
+        end
+    end
+  end
+end
+
+-- affine pins (the Go TestAffine, exact)
+pinAffTrans : Eq Bool (peq (affApply (affTranslate (qNat 10) (qNat 20)) (pt (qNat 1) (qNat 1))) (pt (qNat 11) (qNat 21))) true is refl true end
+pinAffCompose :
+  Eq Bool
+    (peq (affApply (affMul (affTranslate (qNat 10) qZ) (affScale (qNat 2) (qNat 2))) (pt (qNat 1) (qNat 1)))
+         (pt (qNat 12) (qNat 2)))
+    true is
+  refl true
+end
+pinAffId : Eq Bool (peq (affApply affId (pt (qNat 7) (qNat 8))) (pt (qNat 7) (qNat 8))) true is refl true end
+
+-- ------------------------------------------------------- the corner tables
+-- kappa = 4/3 (sqrt 2 - 1) as scribe stores it: EXACTLY 0.5522847498307936.
+kappaQ : Qn is qn false 5522847498307936 10000000000000000 end
+oneMinusKappa : Qn is qsub (qNat 1) kappaQ end
+-- Apple's continuous corner (PaintCode table), exact over 10^8.
+contExtent : Qn is qn false 152866483 100000000 end
+q8 : Nat -> Qn is fn (n : Nat) is qn false n 100000000 end end
+
+-- one corner-table segment in (in, out) coordinates; line uses only the
+-- first point
+data CSeg : U is cseg : Bool -> Pt -> Pt -> Pt -> CSeg end
+
+circularSegs : List CSeg is
+  cons CSeg (cseg false (pt oneMinusKappa qZ) (pt qZ oneMinusKappa) (pt qZ (qNat 1)))
+  (nil CSeg)
+end
+continuousSegs : List CSeg is
+  cons CSeg (cseg false (pt (q8 108849323) qZ) (pt (q8 86840689) qZ) (pt (q8 66993427) (q8 6549600)))
+  (cons CSeg (cseg true (pt (q8 63149399) (q8 7491100)) (pt qZ qZ) (pt qZ qZ))
+  (cons CSeg (cseg false (pt (q8 37282392) (q8 16905899)) (pt (q8 16906013) (q8 37282392)) (pt (q8 7491100) (q8 63149399)))
+  (cons CSeg (cseg false (pt qZ (q8 86840689)) (pt qZ (q8 108849323)) (pt qZ (q8 152866483)))
+  (nil CSeg))))
+end
+
+-- corner style: Bool alias (a fresh 2-nullary data would hash-collide with Bool)
+CStyle : U is Bool end
+styCircular : CStyle is false end
+styContinuous : CStyle is true end
+styExtent : CStyle -> Qn is
+  fn (s : CStyle) is case s of | false -> qNat 1 | true -> contExtent end end
+end
+stySegs : CStyle -> List CSeg is
+  fn (s : CStyle) is case s of | false -> circularSegs | true -> continuousSegs end end
+end
+
+-- --------------------------------------------------------------- the path
+data PVerb : U is
+  pMoveTo : Pt -> PVerb
+| pLineTo : Pt -> PVerb
+| pCubicTo : Pt -> Pt -> Pt -> PVerb
+| pClose : PVerb
+end
+Path : U is List PVerb end
+
+appendV : Path -> Path -> Path is
+  fn (a : Path) (b : Path) is
+    ListElim PVerb (fn (w : List PVerb) is Path end)
+      b
+      (fn (v : PVerb) (rest : List PVerb) (ih : Path) is cons PVerb v ih end)
+      a
+  end
+end
+
+-- emitCorner: k the corner point, u the unit travel direction into the
+-- corner, v the direction leaving it; a table point (a, b) maps to
+-- k - u*(a*r) + v*(b*r). Exactly Go path.emitCorner.
+cornerPt : Pt -> Pt -> Pt -> Qn -> Pt -> Pt is
+  fn (k : Pt) (u : Pt) (v : Pt) (r : Qn) (c : Pt) is
+    padd (psub k (pscale (qmul (px c) r) u)) (pscale (qmul (py c) r) v)
+  end
+end
+emitCorner : List CSeg -> Pt -> Pt -> Pt -> Qn -> Path is
+  fn (segs : List CSeg) (k : Pt) (u : Pt) (v : Pt) (r : Qn) is
+    ListElim CSeg (fn (w : List CSeg) is Path end)
+      (nil PVerb)
+      (fn (s : CSeg) (rest : List CSeg) (ih : Path) is
+        case s of
+        | cseg isLine a b c ->
+            case isLine of
+            | true -> cons PVerb (pLineTo (cornerPt k u v r a)) ih
+            | false -> cons PVerb (pCubicTo (cornerPt k u v r a) (cornerPt k u v r b) (cornerPt k u v r c)) ih
+            end
+        end
+      end)
+      segs
+  end
+end
+
+data Rect : U is mkRect : Pt -> Pt -> Rect end
+rMin : Rect -> Pt is fn (r : Rect) is case r of | mkRect a b -> a end end end
+rMax : Rect -> Pt is fn (r : Rect) is case r of | mkRect a b -> b end end end
+
+rectPath : Rect -> Path is
+  fn (r : Rect) is
+    cons PVerb (pMoveTo (rMin r))
+    (cons PVerb (pLineTo (pt (px (rMax r)) (py (rMin r))))
+    (cons PVerb (pLineTo (rMax r))
+    (cons PVerb (pLineTo (pt (px (rMin r)) (py (rMax r))))
+    (cons PVerb pClose (nil PVerb)))))
+  end
+end
+
+circlePath : Pt -> Qn -> Path is
+  fn (c : Pt) (r : Qn) is
+    let k : Qn = qmul kappaQ r in
+    let cx : Qn = px c in
+    let cy : Qn = py c in
+    cons PVerb (pMoveTo (pt (qadd cx r) cy))
+    (cons PVerb (pCubicTo (pt (qadd cx r) (qadd cy k)) (pt (qadd cx k) (qadd cy r)) (pt cx (qadd cy r)))
+    (cons PVerb (pCubicTo (pt (qsub cx k) (qadd cy r)) (pt (qsub cx r) (qadd cy k)) (pt (qsub cx r) cy))
+    (cons PVerb (pCubicTo (pt (qsub cx r) (qsub cy k)) (pt (qsub cx k) (qsub cy r)) (pt cx (qsub cy r)))
+    (cons PVerb (pCubicTo (pt (qadd cx k) (qsub cy r)) (pt (qadd cx r) (qsub cy k)) (pt (qadd cx r) cy))
+    (cons PVerb pClose (nil PVerb))))))
+  end
+end
+
+roundRect : Rect -> Qn -> CStyle -> Path is
+  fn (r : Rect) (radius : Qn) (style : CStyle) is
+    case qle radius qZ of
+    | true -> rectPath r
+    | false ->
+        let extent : Qn = styExtent style in
+        let segs : List CSeg = stySegs style in
+        let w : Qn = qsub (px (rMax r)) (px (rMin r)) in
+        let h : Qn = qsub (py (rMax r)) (py (rMin r)) in
+        let short : Qn = qmin w h in
+        let rad : Qn = qmin radius (qdiv short (qmul (qNat 2) extent)) in
+        let e : Qn = qmul extent rad in
+        let x0 : Qn = px (rMin r) in
+        let y0 : Qn = py (rMin r) in
+        let x1 : Qn = px (rMax r) in
+        let y1 : Qn = py (rMax r) in
+        let right : Pt = pt (qNat 1) qZ in
+        let down : Pt = pt qZ (qNat 1) in
+        let left : Pt = pt (qNeg (qNat 1)) qZ in
+        let up : Pt = pt qZ (qNeg (qNat 1)) in
+        cons PVerb (pMoveTo (pt (qadd x0 e) y0))
+        (cons PVerb (pLineTo (pt (qsub x1 e) y0))
+        (appendV (emitCorner segs (pt x1 y0) right down rad)
+        (cons PVerb (pLineTo (pt x1 (qsub y1 e)))
+        (appendV (emitCorner segs (pt x1 y1) down left rad)
+        (cons PVerb (pLineTo (pt (qadd x0 e) y1))
+        (appendV (emitCorner segs (pt x0 y1) left up rad)
+        (cons PVerb (pLineTo (pt x0 (qadd y0 e)))
+        (appendV (emitCorner segs (pt x0 y0) up right rad)
+        (cons PVerb pClose (nil PVerb))))))))))
+    end
+  end
+end
+
+-- ------------------------------------------------------------ bounds fold
+verbPts : PVerb -> List Pt is
+  fn (v : PVerb) is
+    case v of
+    | pMoveTo p -> cons Pt p (nil Pt)
+    | pLineTo p -> cons Pt p (nil Pt)
+    | pCubicTo a b c -> cons Pt a (cons Pt b (cons Pt c (nil Pt)))
+    | pClose -> nil Pt
+    end
+  end
+end
+appendPt : List Pt -> List Pt -> List Pt is
+  fn (a : List Pt) (b : List Pt) is
+    ListElim Pt (fn (w : List Pt) is List Pt end)
+      b
+      (fn (x : Pt) (rest : List Pt) (ih : List Pt) is cons Pt x ih end)
+      a
+  end
+end
+allPts : Path -> List Pt is
+  fn (p : Path) is
+    ListElim PVerb (fn (w : List PVerb) is List Pt end)
+      (nil Pt)
+      (fn (v : PVerb) (rest : List PVerb) (ih : List Pt) is appendPt (verbPts v) ih end)
+      p
+  end
+end
+qmax : Qn -> Qn -> Qn is fn (a : Qn) (b : Qn) is ite Qn (qle a b) b a end end
+-- bounds: fold min/max over every control point (the Go Bounds contract)
+boundsOf : Path -> Rect is
+  fn (p : Path) is
+    case allPts p of
+    | nil -> mkRect (pt qZ qZ) (pt qZ qZ)
+    | cons h rest ->
+        ListElim Pt (fn (w : List Pt) is Rect end)
+          (mkRect h h)
+          (fn (x : Pt) (r2 : List Pt) (ih : Rect) is
+            mkRect
+              (pt (qmin (px x) (px (rMin ih))) (qmin (py x) (py (rMin ih))))
+              (pt (qmax (px x) (px (rMax ih))) (qmax (py x) (py (rMax ih))))
+          end)
+          rest
+    end
+  end
+end
+
+-- ------------------------------------------------------------- flattening
+data Cub : U is cub : Pt -> Pt -> Pt -> Pt -> Cub end
+
+-- the Go cubicFlat test, exactly, in squared form (no square roots):
+-- both control points within tol of the chord p0-p3.
+dist2 : Pt -> Pt -> Qn is
+  fn (a : Pt) (b : Pt) is
+    let dx : Qn = qsub (px a) (px b) in
+    let dy : Qn = qsub (py a) (py b) in
+    qadd (qsq dx) (qsq dy)
+  end
+end
+cubFlat : Qn -> Cub -> Bool is
+  fn (tol : Qn) (c : Cub) is
+    case c of
+    | cub p0 c1 c2 p3 ->
+        let d : Pt = psub p3 p0 in
+        let len2 : Qn = qadd (qsq (px d)) (qsq (py d)) in
+        let t2 : Qn = qsq tol in
+        let k : Unit -> Bool =
+          case qeq len2 qZ of
+          | true -> fn (u : Unit) is andB (qle (dist2 c1 p0) t2) (qle (dist2 c2 p0) t2) end
+          | false -> fn (u : Unit) is
+              let v1 : Pt = psub c1 p0 in
+              let v2 : Pt = psub c2 p0 in
+              let x1 : Qn = qsub (qmul (px d) (py v1)) (qmul (py d) (px v1)) in
+              let x2 : Qn = qsub (qmul (px d) (py v2)) (qmul (py d) (px v2)) in
+              let bound : Qn = qmul t2 len2 in
+              andB (qle (qsq x1) bound) (qle (qsq x2) bound)
+            end
+          end
+        in k unit
+    end
+  end
+end
+
+splitL : Cub -> Cub is
+  fn (c : Cub) is
+    case c of
+    | cub p0 c1 c2 p3 ->
+        let ab : Pt = pmid p0 c1 in
+        let bc : Pt = pmid c1 c2 in
+        let abc : Pt = pmid ab bc in
+        let bcd : Pt = pmid bc (pmid c2 p3) in
+        cub p0 ab abc (pmid abc bcd)
+    end
+  end
+end
+splitR : Cub -> Cub is
+  fn (c : Cub) is
+    case c of
+    | cub p0 c1 c2 p3 ->
+        let bc : Pt = pmid c1 c2 in
+        let cd : Pt = pmid c2 p3 in
+        let abc : Pt = pmid (pmid p0 c1) bc in
+        let bcd : Pt = pmid bc cd in
+        cub (pmid abc bcd) bcd cd p3
+    end
+  end
+end
+cubEnd : Cub -> Pt is fn (c : Cub) is case c of | cub a b1 b2 e -> e end end end
+
+-- WORKLIST flattening: one fuel step pops one segment and either emits its
+-- endpoint or pushes its two halves (left on top, so emission stays in
+-- order). ONE syntactic ih; the Go tree recursion would be 2^fuel compiled.
+-- Emitted points accumulate in reverse.
+flatGo : Nat -> List Cub -> Qn -> List Pt -> List Pt is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (work : List Cub) (tol : Qn) (accRev : List Pt) is accRev end
+    | succ f with ih -> fn (work : List Cub) (tol : Qn) (accRev : List Pt) is
+        case work of
+        | nil -> accRev
+        | cons c rest ->
+            let k : Unit -> List Pt =
+              case cubFlat tol c of
+              | true -> fn (u : Unit) is ih rest tol (cons Pt (cubEnd c) accRev) end
+              | false -> fn (u : Unit) is
+                  ih (cons Cub (splitL c) (cons Cub (splitR c) rest)) tol accRev
+                end
+              end
+            in k unit
+        end
+      end
+    end
+  end
+end
+flatFuel : Nat is 1024 end
+-- flattenCubic: the points REVERSED (excluding p0, including p3)
+flattenCubicRev : Qn -> Cub -> List Pt is
+  fn (tol : Qn) (c : Cub) is flatGo flatFuel (cons Cub c (nil Cub)) tol (nil Pt) end
+end
+
+data PLine : U is pline : List Pt -> Bool -> PLine end
+plPts : PLine -> List Pt is fn (p : PLine) is case p of | pline xs c -> xs end end end
+plClosed : PLine -> Bool is fn (p : PLine) is case p of | pline xs c -> c end end end
+
+revPt : List Pt -> List Pt is
+  fn (xs : List Pt) is
+    ListElim Pt (fn (w : List Pt) is List Pt -> List Pt end)
+      (fn (acc : List Pt) is acc end)
+      (fn (x : Pt) (rest : List Pt) (ih : List Pt -> List Pt) is
+        fn (acc : List Pt) is ih (cons Pt x acc) end
+      end)
+      xs
+      (nil Pt)
+  end
+end
+catPtRev : List Pt -> List Pt -> List Pt is
+  fn (newRev : List Pt) (acc : List Pt) is
+    ListElim Pt (fn (w : List Pt) is List Pt -> List Pt end)
+      (fn (a : List Pt) is a end)
+      (fn (x : Pt) (rest : List Pt) (ih : List Pt -> List Pt) is
+        fn (a : List Pt) is cons Pt x (ih a) end
+      end)
+      newRev
+      acc
+  end
+end
+
+-- flatten state: open?, last point, current reversed points, output reversed
+data FSt : U is mkFSt : Bool -> Pt -> List Pt -> List PLine -> FSt end
+flushF : Bool -> FSt -> FSt is
+  fn (closed : Bool) (st : FSt) is
+    case st of
+    | mkFSt open lastP curRev out ->
+        case open of
+        | false -> st
+        | true ->
+            case curRev of
+            | nil -> mkFSt false lastP (nil Pt) out
+            | cons hh tt ->
+                mkFSt false lastP (nil Pt)
+                  (cons PLine (pline (revPt curRev) closed) out)
+            end
+        end
+    end
+  end
+end
+
+flattenStep : Qn -> PVerb -> FSt -> FSt is
+  fn (tol : Qn) (v : PVerb) (st : FSt) is
+    case v of
+    | pMoveTo p ->
+        case flushF false st of
+        | mkFSt o lastP cur out -> mkFSt true p (cons Pt p (nil Pt)) out
+        end
+    | pLineTo p ->
+        case st of
+        | mkFSt o lastP cur out -> mkFSt true p (cons Pt p cur) out
+        end
+    | pCubicTo c1 c2 p3 ->
+        case st of
+        | mkFSt o lastP cur out ->
+            mkFSt true p3 (catPtRev (flattenCubicRev tol (cub lastP c1 c2 p3)) cur) out
+        end
+    | pClose ->
+        case flushF true st of
+        | mkFSt o lastP cur out -> mkFSt false lastP cur out
+        end
+    end
+  end
+end
+
+revPl : List PLine -> List PLine is
+  fn (xs : List PLine) is
+    ListElim PLine (fn (w : List PLine) is List PLine -> List PLine end)
+      (fn (acc : List PLine) is acc end)
+      (fn (x : PLine) (rest : List PLine) (ih : List PLine -> List PLine) is
+        fn (acc : List PLine) is ih (cons PLine x acc) end
+      end)
+      xs
+      (nil PLine)
+  end
+end
+
+flatten : Path -> Qn -> List PLine is
+  fn (p : Path) (tol : Qn) is
+    let fin : FSt =
+      ListElim PVerb (fn (w : List PVerb) is FSt -> FSt end)
+        (fn (st : FSt) is st end)
+        (fn (v : PVerb) (rest : List PVerb) (ih : FSt -> FSt) is
+          fn (st : FSt) is ih (flattenStep tol v st) end
+        end)
+        p
+        (mkFSt false (pt qZ qZ) (nil Pt) (nil PLine))
+    in
+    case flushF false fin of
+    | mkFSt o lastP cur out -> revPl out
+    end
+  end
+end
+
+
+-- ------------------------------------------------------------ vertex snap
+-- qsnap v = round(v * 256) / 256, rounding half AWAY from zero: exactly the
+-- Go rasterizer's math.Round(v*256)/256 on the corner grid.
+qsnap : Qn -> Qn is
+  fn (v : Qn) is
+    case v of
+    | qn s n d ->
+        let n256 : Nat = mul n 256 in
+        let q : Nat = fdiv n256 d in
+        let r : Nat = fmod n256 d in
+        let up : Bool = leW d (mul 2 r) in
+        qmk s (ite Nat up (add q 1) q) 256
+    end
+  end
+end
+pinSnapHalfUp : Eq Bool (qeq (qsnap (qn false 3 512)) (qn false 1 128)) true is refl true end
+pinSnapDown : Eq Bool (qeq (qsnap (qn false 1 200)) (qn false 1 256)) true is refl true end
+pinSnapNeg : Eq Bool (qeq (qsnap (qn true 3 512)) (qn true 1 128)) true is refl true end
+
+-- --------------------------------------------------- accumulation buffer
+-- flat list of (w+1)*h exact cells; functional single-cell add by a fuel
+-- walk. Slow by design: L3 is the reference semantics on small canvases;
+-- the fast path is L4's host op.
+bufNew : Nat -> List Qn is
+  fn (count : Nat) is
+    NatElim (fn (k : Nat) is List Qn end)
+      (nil Qn)
+      (fn (k : Nat) (ih : List Qn) is cons Qn qZ ih end)
+      count
+  end
+end
+bufAdd : Nat -> Qn -> List Qn -> List Qn is
+  fn (idx : Nat) (delta : Qn) (buf : List Qn) is
+    (ListElim Qn (fn (w : List Qn) is Nat -> List Qn end)
+      (fn (i : Nat) is nil Qn end)
+      (fn (x : Qn) (rest : List Qn) (ih : Nat -> List Qn) is
+        fn (i : Nat) is
+          let k : Unit -> List Qn =
+            case isZero i of
+            | true -> fn (u : Unit) is cons Qn (qadd x delta) rest end
+            | false -> fn (u : Unit) is cons Qn x (ih (monus i 1)) end
+            end
+          in k unit
+        end
+      end)
+      buf)
+      idx
+  end
+end
+pinBufAdd :
+  Eq Bool
+    (case bufAdd 1 (qNat 5) (bufNew 3) of
+     | nil -> false
+     | cons a r1 ->
+         case r1 of
+         | nil -> false
+         | cons b r2 -> andB (qeq a qZ) (qeq b (qNat 5))
+         end
+     end)
+    true is
+  refl true
+end
+
+-- floor / ceil on NON-NEGATIVE rationals (everything here is clamped first)
+qfloorN : Qn -> Nat is fn (v : Qn) is case v of | qn s n d -> fdiv n d end end end
+qceilN : Qn -> Nat is
+  fn (v : Qn) is case v of | qn s n d -> fdiv (add n (monus d 1)) d end end
+end
+qIsNeg : Qn -> Bool is
+  fn (v : Qn) is case v of | qn s n d -> andB s (notB (isZero n)) end end
+end
+qone : Qn is qNat 1 end
+
+-- deposit list for one scanline row of one edge (built by the cell split),
+-- then folded into the buffer
+data Dep : U is dep : Nat -> Qn -> Dep end
+
+appendD : List Dep -> List Dep -> List Dep is
+  fn (a : List Dep) (b : List Dep) is
+    ListElim Dep (fn (w : List Dep) is List Dep end)
+      b
+      (fn (x : Dep) (rest : List Dep) (ih : List Dep) is cons Dep x ih end)
+      a
+  end
+end
+-- count consecutive full-coverage inner cells: dep idx0..idx0+n-1, each d*s
+innerDeps : Nat -> Nat -> Qn -> List Dep is
+  fn (n : Nat) (idx0 : Nat) (v : Qn) is
+    (NatElim (fn (k : Nat) is Nat -> List Dep end)
+      (fn (i : Nat) is nil Dep end)
+      (fn (k : Nat) (ih : Nat -> List Dep) is
+        fn (i : Nat) is cons Dep (dep i v) (ih (add i 1)) end
+      end)
+      n)
+      idx0
+  end
+end
+
+-- the per-row cell split: exactly the Go single-cell / multi-cell branches.
+-- x0c/x1c are clamped to [0, w]; stride = w + 1 (guard column).
+rowDeps : Nat -> Nat -> Qn -> Qn -> Qn -> List Dep is
+  fn (w : Nat) (rowBase : Nat) (x0c : Qn) (x1c : Qn) (d : Qn) is
+    let stride : Nat = add w 1 in
+    let x0i : Nat = qfloorN x0c in
+    let x1i : Nat = qceilN x1c in
+    let k : Unit -> List Dep =
+      case leW x1i (add x0i 1) of
+      | true -> fn (u : Unit) is
+          -- single cell (plus spill into the next)
+          let xmf : Qn = qsub (qhalf (qadd x0c x1c)) (qNat x0i) in
+          let d1 : Dep = dep (add rowBase x0i) (qmul d (qsub qone xmf)) in
+          let k2 : Unit -> List Dep =
+            case leW (add (add x0i 1) 1) stride of
+            | true -> fn (u2 : Unit) is
+                cons Dep d1 (cons Dep (dep (add (add rowBase x0i) 1) (qmul d xmf)) (nil Dep))
+              end
+            | false -> fn (u2 : Unit) is cons Dep d1 (nil Dep) end
+            end
+          in k2 unit
+        end
+      | false -> fn (u : Unit) is
+          let s : Qn = qdiv qone (qsub x1c x0c) in
+          let x0fr : Qn = qsub x0c (qNat x0i) in
+          let a0 : Qn = qhalf (qmul s (qsq (qsub qone x0fr))) in
+          let x1fr : Qn = qadd (qsub x1c (qNat x1i)) qone in
+          let am : Qn = qhalf (qmul s (qsq x1fr)) in
+          let d0 : Dep = dep (add rowBase x0i) (qmul d a0) in
+          let dm : List Dep =
+            (let k3 : Unit -> List Dep =
+              case eqW x1i (add x0i 2) of
+              | true -> fn (u3 : Unit) is
+                  cons Dep (dep (add (add rowBase x0i) 1) (qmul d (qsub (qsub qone a0) am))) (nil Dep)
+                end
+              | false -> fn (u3 : Unit) is
+                  let a1 : Qn = qmul s (qsub (qn false 3 2) x0fr) in
+                  let mids : List Dep = innerDeps (monus (monus x1i x0i) 3) (add (add rowBase x0i) 2) (qmul d s) in
+                  let a2 : Qn = qadd a1 (qmul (qNat (monus (monus x1i x0i) 3)) s) in
+                  cons Dep (dep (add (add rowBase x0i) 1) (qmul d (qsub a1 a0)))
+                    (appendD mids
+                      (cons Dep (dep (add rowBase (monus x1i 1)) (qmul d (qsub (qsub qone a2) am))) (nil Dep)))
+                end
+              end
+            in k3 unit)
+          in
+          let tail1 : List Dep =
+            (let k4 : Unit -> List Dep =
+              case leW (add x1i 1) stride of
+              | true -> fn (u4 : Unit) is cons Dep (dep (add rowBase x1i) (qmul d am)) (nil Dep) end
+              | false -> fn (u4 : Unit) is nil Dep end
+              end
+            in k4 unit)
+          in
+          cons Dep d0 (appendD dm tail1)
+        end
+      end
+    in k unit
+  end
+end
+
+
+applyDeps : List Dep -> List Qn -> List Qn is
+  fn (ds : List Dep) (buf : List Qn) is
+    (ListElim Dep (fn (w : List Dep) is List Qn -> List Qn end)
+      (fn (b : List Qn) is b end)
+      (fn (x : Dep) (rest : List Dep) (ih : List Qn -> List Qn) is
+        fn (b : List Qn) is
+          case x of | dep i v -> ih (bufAdd i v b) end
+        end
+      end)
+      ds)
+      buf
+  end
+end
+
+qmax2 : Qn -> Qn -> Qn is fn (a : Qn) (b : Qn) is ite Qn (qle a b) b a end end
+qclamp01w : Nat -> Qn -> Qn is
+  fn (w : Nat) (v : Qn) is qmax2 qZ (qmin v (qNat w)) end
+end
+
+-- the per-edge scanline walk: Go raster.line() in exact arithmetic.
+-- Loops over integer scanlines with ONE ih; the row body is a thunk.
+lineWalk : Nat -> Nat -> Nat -> Nat -> Qn -> Qn -> Qn -> Qn -> Qn -> List Qn -> List Qn is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (w : Nat) (y : Nat) (y1i : Nat) (x : Qn) (dxdy : Qn) (yStart : Qn) (yEnd : Qn) (dir : Qn) (buf : List Qn) is buf end
+    | succ f with ih ->
+        fn (w : Nat) (y : Nat) (y1i : Nat) (x : Qn) (dxdy : Qn) (yStart : Qn) (yEnd : Qn) (dir : Qn) (buf : List Qn) is
+          let k : Unit -> List Qn =
+            case leW y1i y of
+            | true -> fn (u : Unit) is buf end
+            | false -> fn (u : Unit) is
+                let rowTop : Qn = qmax2 (qNat y) yStart in
+                let rowBot : Qn = qmin (qNat (add y 1)) yEnd in
+                let dy : Qn = qsub rowBot rowTop in
+                let xNext : Qn = qadd x (qmul dxdy dy) in
+                let d : Qn = qmul dy dir in
+                let xa : Qn = qclamp01w w (qmin x xNext) in
+                let xb : Qn = qclamp01w w (qmax2 x xNext) in
+                let buf2 : List Qn = applyDeps (rowDeps w (mul y (add w 1)) xa xb d) buf in
+                ih w (add y 1) y1i xNext dxdy yStart yEnd dir buf2
+              end
+            end
+          in k unit
+        end
+    end
+  end
+end
+
+-- one edge into the buffer (skip horizontal; orient upward; clip to [0, h])
+lineQ : Nat -> Nat -> Pt -> Pt -> List Qn -> List Qn is
+  fn (w : Nat) (h : Nat) (a : Pt) (b : Pt) (buf : List Qn) is
+    let k : Unit -> List Qn =
+      case qeq (py a) (py b) of
+      | true -> fn (u : Unit) is buf end
+      | false -> fn (u : Unit) is
+          let flip : Bool = qle (py b) (py a) in
+          let p0 : Pt = ite Pt flip b a in
+          let p1 : Pt = ite Pt flip a b in
+          let dir : Qn = ite Qn flip (qNeg qone) qone in
+          let dxdy : Qn = qdiv (qsub (px p1) (px p0)) (qsub (py p1) (py p0)) in
+          let rawStart : Qn = py p0 in
+          let neg0 : Bool = qIsNeg rawStart in
+          let x0 : Qn = ite Qn neg0 (qadd (px p0) (qmul (qNeg rawStart) dxdy)) (px p0) in
+          let yStart : Qn = ite Qn neg0 qZ rawStart in
+          let yEnd : Qn = qmin (py p1) (qNat h) in
+          let k2 : Unit -> List Qn =
+            case qle yEnd yStart of
+            | true -> fn (u2 : Unit) is buf end
+            | false -> fn (u2 : Unit) is
+                lineWalk (add h 2) w (qfloorN yStart) (qceilN yEnd) x0 dxdy yStart yEnd dir buf
+              end
+            end
+          in k2 unit
+        end
+      end
+    in k unit
+  end
+end
+
+-- a closed polygon: snap every vertex, deposit every edge incl the closer
+snapPt : Pt -> Pt is fn (p : Pt) is pt (qsnap (px p)) (qsnap (py p)) end end
+addPolygon : Nat -> Nat -> List Pt -> List Qn -> List Qn is
+  fn (w : Nat) (h : Nat) (pts : List Pt) (buf : List Qn) is
+    case pts of
+    | nil -> buf
+    | cons first rest ->
+        let f0 : Pt = snapPt first in
+        let final : P2 Pt (List Qn) =
+          (ListElim Pt (fn (ww : List Pt) is P2 Pt (List Qn) -> P2 Pt (List Qn) end)
+            (fn (st : P2 Pt (List Qn)) is st end)
+            (fn (q : Pt) (r2 : List Pt) (ih : P2 Pt (List Qn) -> P2 Pt (List Qn)) is
+              fn (st : P2 Pt (List Qn)) is
+                case st of
+                | p2 prev b ->
+                    let cur : Pt = snapPt q in
+                    ih (p2 Pt (List Qn) cur (lineQ w h prev cur b))
+                end
+              end
+            end)
+            rest)
+            (p2 Pt (List Qn) f0 buf)
+        in
+        case final of
+        | p2 lastP b2 -> lineQ w h lastP f0 b2
+        end
+    end
+  end
+end
+
+-- ------------------------------------------------------------- alpha pass
+-- walk the flat buffer row-major: prefix-sum acc per row, skip the guard
+-- column, alpha = min(255, floor(cov*256)) with cov = min(1, |acc|).
+alphaOf : Qn -> Nat is
+  fn (acc : Qn) is
+    case acc of
+    | qn s n d ->
+        let k : Unit -> Nat =
+          case leW d n of
+          | true -> fn (u : Unit) is 255 end
+          | false -> fn (u : Unit) is
+              let a : Nat = fdiv (mul 256 n) d in
+              ite Nat (leW 255 a) 255 a
+            end
+          end
+        in k unit
+    end
+  end
+end
+
+revN : List Nat -> List Nat is
+  fn (xs : List Nat) is
+    (ListElim Nat (fn (w : List Nat) is List Nat -> List Nat end)
+      (fn (acc : List Nat) is acc end)
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat -> List Nat) is
+        fn (acc : List Nat) is ih (cons Nat x acc) end
+      end)
+      xs)
+      (nil Nat)
+  end
+end
+
+-- state: x position in row, running acc, output alphas (reversed)
+data ASt : U is mkASt : Nat -> Qn -> List Nat -> ASt end
+alphaPass : Nat -> List Qn -> List Nat is
+  fn (w : Nat) (buf : List Qn) is
+    let fin : ASt =
+      (ListElim Qn (fn (ww : List Qn) is ASt -> ASt end)
+        (fn (st : ASt) is st end)
+        (fn (cell : Qn) (rest : List Qn) (ih : ASt -> ASt) is
+          fn (st : ASt) is
+            case st of
+            | mkASt x acc out ->
+                let k : Unit -> ASt =
+                  case eqW x w of
+                  | true -> fn (u : Unit) is mkASt 0 qZ out end
+                  | false -> fn (u : Unit) is
+                      let acc2 : Qn = qadd acc cell in
+                      mkASt (add x 1) acc2 (cons Nat (alphaOf acc2) out)
+                    end
+                  end
+                in ih (k unit)
+            end
+          end
+        end)
+        buf)
+        (mkASt 0 qZ (nil Nat))
+    in
+    case fin of | mkASt x acc out -> revN out end
+  end
+end
+-- rasterize a list of closed polygons on a w x h canvas
+rasterize : Nat -> Nat -> List (List Pt) -> List Nat is
+  fn (w : Nat) (h : Nat) (polys : List (List Pt)) is
+    let buf : List Qn =
+      (ListElim (List Pt) (fn (ww : List (List Pt)) is List Qn -> List Qn end)
+        (fn (b : List Qn) is b end)
+        (fn (poly : List Pt) (rest : List (List Pt)) (ih : List Qn -> List Qn) is
+          fn (b : List Qn) is ih (addPolygon w h poly b) end
+        end)
+        polys)
+        (bufNew (mul (add w 1) h))
+    in
+    alphaPass w buf
+  end
+end
+
+-- ---------------------------------------------- the host-call encoding
+-- A snapped coordinate is k/256 with k an integer; bias 2^23 makes it a Nat.
+subBias : Nat is 8388608 end
+subEnc : Qn -> Nat is
+  fn (v : Qn) is
+    case qsnap v of
+    | qn s n d ->
+        let mag : Nat = mul n (fdiv 256 d) in
+        ite Nat s (monus subBias mag) (add subBias mag)
+    end
+  end
+end
+
+llenP : List Pt -> Nat is
+  fn (xs : List Pt) is
+    ListElim Pt (fn (w : List Pt) is Nat end) 0
+      (fn (x : Pt) (r : List Pt) (ih : Nat) is add ih 1 end) xs
+  end
+end
+-- polygons with fewer than 3 points deposit nothing (the Go AddPolyline
+-- contract); drop them before encoding
+keepBig : List (List Pt) -> List (List Pt) is
+  fn (ps : List (List Pt)) is
+    ListElim (List Pt) (fn (w : List (List Pt)) is List (List Pt) end)
+      (nil (List Pt))
+      (fn (p : List Pt) (rest : List (List Pt)) (ih : List (List Pt)) is
+        ite (List (List Pt)) (leW 3 (llenP p)) (cons (List Pt) p ih) ih
+      end)
+      ps
+  end
+end
+llenPP : List (List Pt) -> Nat is
+  fn (xs : List (List Pt)) is
+    ListElim (List Pt) (fn (w : List (List Pt)) is Nat end) 0
+      (fn (x : List Pt) (r : List (List Pt)) (ih : Nat) is add ih 1 end) xs
+  end
+end
+catN : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      b
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is cons Nat x ih end)
+      a
+  end
+end
+encodePoly : List Pt -> List Nat is
+  fn (p : List Pt) is
+    cons Nat (llenP p)
+      (ListElim Pt (fn (w : List Pt) is List Nat end)
+        (nil Nat)
+        (fn (q : Pt) (rest : List Pt) (ih : List Nat) is
+          cons Nat (subEnc (px q)) (cons Nat (subEnc (py q)) ih)
+        end)
+        p)
+  end
+end
+encodeScene : List (List Pt) -> List Nat is
+  fn (ps : List (List Pt)) is
+    let kept : List (List Pt) = keepBig ps in
+    cons Nat (llenPP kept)
+      (ListElim (List Pt) (fn (w : List (List Pt)) is List Nat end)
+        (nil Nat)
+        (fn (p : List Pt) (rest : List (List Pt)) (ih : List Nat) is
+          catN (encodePoly p) ih
+        end)
+        kept)
+  end
+end
+
+-- pack the pure rasterizer's alpha list exactly as the host packs its mask:
+-- first byte least significant, 0x01 sentinel on top
+packMask : List Nat -> Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end)
+      1
+      (fn (b : Nat) (rest : List Nat) (ih : Nat) is add b (mul 256 ih) end)
+      xs
+  end
+end
+
+pinSubEncHalf : Eq Nat (subEnc (qn false 1 2)) 8388736 is refl 8388736 end
+pinSubEncNeg : Eq Nat (subEnc (qn true 10 1)) 8386048 is refl 8386048 end
+
+-- ------------------------------------------------------ the divergence lock
+foreign rasterFill : Nat -> Nat -> List Nat -> Nat end
+foreign printNat : Nat -> IO Nat end
+
+lockPolys : List (List Pt) is
+  (ListElim PLine (fn (w : List PLine) is List (List Pt) end)
+    (nil (List Pt))
+    (fn (pl : PLine) (rest : List PLine) (ih : List (List Pt)) is
+      cons (List Pt) (plPts pl) ih
+    end)
+    (flatten (roundRect (mkRect (pt (qNat 4) (qNat 4)) (pt (qNat 28) (qNat 28))) (qNat 6) styContinuous) (qn false 1 20)))
+end
+sumN : List Nat -> Nat is
+  fn (xs : List Nat) is
+    ListElim Nat (fn (w : List Nat) is Nat end) 0
+      (fn (x : Nat) (rest : List Nat) (ih : Nat) is add x ih end) xs
+  end
+end
+pureMask : List Nat is rasterize 32 32 lockPolys end
+
+-- the lock: the native fast path must reproduce the exact reference's packed
+-- mask EXACTLY (one bignum equality), and both must carry the pinned sum
+main : IO Nat is
+  bindIO Nat Nat
+    (printNat (ite Nat (eqW (rasterFill 32 32 (encodeScene lockPolys)) (packMask pureMask)) 1 0))
+    (fn (z : Nat) is printNat (sumN pureMask) end)
+end

@@ -595,6 +595,10 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// sum, agreeing with the Go engine (see TestScribeLockL3 for the
 		// full alpha-for-alpha lock).
 		{"ch563_scribe_raster.rune", "answer", "138376"},
+		// ch564: the L4 fast path — the native float64 rasterFill host op
+		// must reproduce the pure exact rasterizer's packed mask EXACTLY
+		// (prints 1), and both carry the lock instance's sum.
+		{"ch564_scribe_accel.rune", "main", "1\n138376\n138376"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {

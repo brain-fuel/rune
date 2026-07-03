@@ -25,16 +25,16 @@ var ioPrims = map[string]bool{
 	"timeNanos":    true,
 	"readLineCode": true,
 	"foldLines":    true, // foldLines (S:U) path step s0 : (S:U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S
-	"foldDir":     true, // foldDir (S:U) dir suffix step s0 : (S:U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S
+	"foldDir":      true, // foldDir (S:U) dir suffix step s0 : (S:U) -> Nat -> Nat -> (S -> Nat -> IO S) -> S -> IO S
 	"splitOn":      true, // splitOn   sep line          : Nat -> Nat -> List Nat   (split packed line on a byte)
 	"byteLen":      true, // byteLen   line              : Nat -> Nat               (byte length of a packed line)
 	"jsonStrField": true, // jsonStrField field doc : Nat -> Nat -> Option Nat  (top-level string field)
-	"sqlQuote": true, // sqlQuote v : Nat -> Nat  (SQL-escape: double ' , wrap in '...')
-	"openWrite":  true, // openWrite  path      : Nat -> IO Handle
-	"writeChunk": true, // writeChunk h chunk   : Handle -> Nat -> IO Handle  (writes chunk + "\n")
-	"closeWrite": true, // closeWrite h         : Handle -> IO Unit
-	"sortFile":   true, // sortFile inPath outPath : Nat -> Nat -> IO Unit  (bytewise line sort)
-	"dbApply": true, // dbApply dbPath sqlPath : Nat -> Nat -> IO Unit  (sqlite3 db ".read sql")
+	"sqlQuote":     true, // sqlQuote v : Nat -> Nat  (SQL-escape: double ' , wrap in '...')
+	"openWrite":    true, // openWrite  path      : Nat -> IO Handle
+	"writeChunk":   true, // writeChunk h chunk   : Handle -> Nat -> IO Handle  (writes chunk + "\n")
+	"closeWrite":   true, // closeWrite h         : Handle -> IO Unit
+	"sortFile":     true, // sortFile inPath outPath : Nat -> Nat -> IO Unit  (bytewise line sort)
+	"dbApply":      true, // dbApply dbPath sqlPath : Nat -> Nat -> IO Unit  (sqlite3 db ".read sql")
 	// D6 net/fs: env + file vocabulary, over the PACKED-String code (a bignum, B4).
 	// Each takes/returns a bare `Nat` code (first byte LSB, 0x01 sentinel) — the
 	// SAME representation `readLineCode` returns and `bytes`/`codeOf` wrap/unwrap on
@@ -52,6 +52,14 @@ var ioPrims = map[string]bool{
 	// D3 machine floats (f64) + the BLAS dot kernel — PURE host bodies (native f64
 	// arithmetic), not IO. A Float is the host's native double; a comparison returns
 	// a Nat (1/0) the Rune side cases into Bool (no host constructor).
+	// scribe L4: the rasterizer fast path. PURE host body (native float64
+	// font-rs, exactly the Go engine's raster.line); input is a flat stream
+	// [nPolys, len_i, subpixel coords...] of SNAPPED 1/256 coordinates,
+	// bias-encoded (sub = v*256 + 2^23, so negatives fit in a Nat); output is
+	// the PACKED alpha mask (w*h bytes, first byte least significant, 0x01
+	// sentinel) so the Rune side can compare it against the pure exact
+	// rasterizer with one equality (the ch564 divergence lock).
+	"rasterFill": true, // rasterFill w h stream : Nat -> Nat -> List Nat -> Nat
 	"fromNat":    true, // fromNat    n             : Nat -> Float
 	"fadd":       true, // fadd/fsub/fmul/fdiv a b   : Float -> Float -> Float
 	"fsub":       true,
@@ -70,7 +78,7 @@ var ioPrims = map[string]bool{
 	// backends OpenBLAS (cblas_ddot), the rest a portable reference floor. Parity is of
 	// the CONTRACT, not the library — the guard checks each impl against an in-language
 	// reference, so a divergent third-party result is BLAMED, never trusted blindly.
-	"npDot":  true, // npDot      xs ys          : FList -> FList -> Float (NumPy on py; OpenBLAS on C/LLVM; reference elsewhere)
+	"npDot":    true, // npDot      xs ys          : FList -> FList -> Float (NumPy on py; OpenBLAS on C/LLVM; reference elsewhere)
 	"npMean":   true, // npMean     xs             : FList -> Float (numpy.mean on py; hand sum/count elsewhere — no BLAS)
 	"npMatSum": true, // npMatSum   m k n A B       : Nat^3 -> FList -> FList -> Float (numpy matmul (A@B).sum() on py; cblas_dgemm on C/LLVM; triple loop elsewhere)
 	"npVar":    true, // npVar      xs             : FList -> Float (numpy.var on py; hand 2-pass mean/sq-dev elsewhere — no BLAS)

@@ -1049,3 +1049,22 @@ func TestREPLScribeRaster(t *testing.T) {
 		t.Errorf("output missing %q\n--- tail ---\n%s", "128 : Nat", got[max(0, len(got)-600):])
 	}
 }
+
+// TestREPLScribeAccel loads the ch564 fast-path chapter into a REPL session;
+// the host op is neutral in the kernel, but the encoding side evaluates:
+// a snapped 1/2 encodes to bias + 128.
+func TestREPLScribeAccel(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "listings", "ch564_scribe_accel.rune"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(src) + "\nsubEnc (qn false 1 2)\n:quit\n"
+	in := strings.NewReader(script)
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "8388736 : Nat") {
+		t.Errorf("output missing %q\n--- tail ---\n%s", "8388736 : Nat", got[max(0, len(got)-600):])
+	}
+}
