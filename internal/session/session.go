@@ -1165,6 +1165,11 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 		p.Main = main
 		p.IOMain = s.isIOType(s.byHash[s.refs[main]].Ty)
 	}
+	// Tree-shake: prune the program to only the definitions reachable from Main.
+	// This runs POST-p.Main assignment and BEFORE CheckPrimCollisions so that the
+	// collision guard sees only reachable foreigns -- an unreachable colliding
+	// foreign in the prelude must not block a program that never uses it.
+	p = codegen.Shake(p)
 	// Guard against two distinct qualified foreigns sharing a prim segment that
 	// maps to a known ioPrim -- that would silently gate the wrong host body.
 	if err := codegen.CheckPrimCollisions(p); err != nil {
