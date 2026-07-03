@@ -1013,3 +1013,21 @@ func TestREPLScribeDL(t *testing.T) {
 		}
 	}
 }
+
+// TestREPLScribeGeom loads the ch562 exact-geometry chapter into a REPL
+// session and flattens a continuous-corner roundrect in-session.
+func TestREPLScribeGeom(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "listings", "ch562_scribe_geom.rune"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(src) + "\nanswerN\n:quit\n"
+	in := strings.NewReader(script)
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "41 : Nat") {
+		t.Errorf("output missing %q\n--- tail ---\n%s", "41 : Nat", got[max(0, len(got)-600):])
+	}
+}

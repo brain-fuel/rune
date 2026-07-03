@@ -587,6 +587,10 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// print-then-parse round trip at runtime (the codec deployed, not just
 		// proven; the refl round-trip laws live in the listing itself).
 		{"ch561_scribe_dl.rune", "answer", "20"},
+		// ch562: scribe's exact-rational geometry — a continuous-corner
+		// roundrect flattens to the same point count (41) the kernel pins by
+		// refl, so the kernel and the backend agree on the exact geometry.
+		{"ch562_scribe_geom.rune", "answer", "41"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {
