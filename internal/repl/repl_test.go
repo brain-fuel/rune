@@ -1068,3 +1068,57 @@ func TestREPLScribeAccel(t *testing.T) {
 		t.Errorf("output missing %q\n--- tail ---\n%s", "8388736 : Nat", got[max(0, len(got)-600):])
 	}
 }
+
+// TestREPLFloatIO is the REPL acceptance test for the float IO primitives
+// (parseFloat/printFloat): a feature is not done until it works in `rune repl`.
+// Host ops are permanently neutral in the normalizer; they run via :run, which
+// emits JS and executes under node. The session declares the ch566-style header,
+// defines main using parseFloat with the packed "3.14" constant (avoids getFloat;
+// stdin feeding through the REPL runner is awkward), and asserts "6.28" appears
+// in the captured output.
+func TestREPLFloatIO(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not in PATH")
+	}
+	// Packed "3.14": bytes LSB-first + 0x01 sentinel.
+	// '3'=51 '.'=46 '1'=49 '4'=52 -> 51 + 46*256 + 49*65536 + 52*16777216 + 1*4294967296 = 5170605619
+	// (Same pattern as ch566's "abc"=23290465 verified comment.)
+	script := []string{
+		"data Nat : U is",
+		"  zero : Nat",
+		"| succ : Nat -> Nat",
+		"end",
+		"builtin nat Nat zero succ",
+		"data Option : U -> U is",
+		"  none : (A : U) -> Option A",
+		"| some : (A : U) -> A -> Option A",
+		"end",
+		"foreign Float : U end",
+		"foreign fromNat : Nat -> Float end",
+		"foreign fmul : Float -> Float -> Float end",
+		"foreign parseFloat : Nat -> Option Float end",
+		"foreign printFloat : Float -> IO Float end",
+		"foreign printNat : Nat -> IO Nat end",
+		"main : IO Nat is",
+		"  case parseFloat 5170605619 of",
+		"  | none -> printNat 999",
+		"  | some x -> bindIO Float Nat (printFloat (fmul x (fromNat 2))) (fn (_y : Float) is printNat 1 end)",
+		"  end",
+		"end",
+		":run main",
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "6.28") {
+		t.Errorf("expected \"6.28\" in :run output (parseFloat \"3.14\" * 2 = 6.28); none-branch should not fire\n--- full output ---\n%s", got)
+	}
+	// The none-branch must not fire: 5170605619 is the packed "3.14" which is valid.
+	if strings.Contains(got, "999") {
+		t.Errorf("none-branch fired (\"999\" in output); parseFloat returned none for the packed \"3.14\" constant\n--- full output ---\n%s", got)
+	}
+}
