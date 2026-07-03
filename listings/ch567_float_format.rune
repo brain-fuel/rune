@@ -1,0 +1,73 @@
+-- Chapter 567: ECMAScript Number::toString format conformance (8-way lock).
+-- No stdin needed. parseFloat is called on 11 valid inputs; the formatted
+-- float is printed via printFloat. Three reject probes follow (none-branch).
+-- Expected 15-line output: 11 valid floats + 3 probe 999s + 1 driver 999
+-- (the runtime prints the return value of main, which is the last probe Nat).
+-- Matches the ECMAScript shortest-round-trip algorithm (JS Number::toString).
+-- The lock verifies byte-identical output on all backends with float IO ops.
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+foreign Float : U end
+foreign fromNat : Nat -> Float end
+foreign parseFloat : Nat -> Option Float end
+foreign printFloat : Float -> IO Float end
+foreign printNat : Nat -> IO Nat end
+
+-- Print the formatted float for a valid packed-string code; print 999 if none.
+-- Returns IO Nat so the bindIO chain stays homogeneous.
+tryPrint : Nat -> IO Nat is
+  fn (code : Nat) is
+    case parseFloat code of
+    | none -> printNat 999
+    | some x -> bindIO Float Nat (printFloat x) (fn (u : Float) is pureIO Nat zero end)
+    end
+  end
+end
+
+-- Reject probe: print 999 if none (always for invalid), 111 if some (never).
+tryProbe : Nat -> IO Nat is
+  fn (code : Nat) is
+    case parseFloat code of
+    | none -> printNat 999
+    | some _ -> printNat 111
+    end
+  end
+end
+
+main : IO Nat is
+  bindIO Nat Nat (tryPrint 304)             -- "0"     -> 0
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 306)             -- "2"     -> 2
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 5170605619)      -- "3.14"  -> 3.14
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 5187186733)      -- "-0.5"  -> -0.5
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 20407601)        -- "1e7"   -> 10000000
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 5103576369)      -- "1e20"  -> 100000000000000000000
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 5120353585)      -- "1e21"  -> 1e+21
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 5203911985)      -- "1e-6"  -> 0.000001
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 5220689201)      -- "1e-7"  -> 1e-7
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 344342111006257) -- "1.5e-9"-> 1.5e-9
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryPrint 20000304)        -- "0.1"   -> 0.1
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryProbe 77358)           -- ".."    -> none -> 999
+  (fn (u : Nat) is
+  bindIO Nat Nat (tryProbe 91441)           -- "1e"    -> none -> 999
+  (fn (u : Nat) is
+  tryProbe 20258869                         -- "5 5"   -> none -> 999
+  end) end) end) end) end) end) end) end) end) end) end) end) end)
+end

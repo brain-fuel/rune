@@ -93,6 +93,9 @@ func (C) Emit(p Program) (TargetSource, error) {
 	// bible ops (byteLen/splitOn/jsonStrField/sqlQuote) when referenced. The codec
 	// is the shared contract for all native string ops (Task 1 of the native tier).
 	emitStreamPrimsC(&b, p)
+	// Float IO ops (parseFloat/getFloat/printFloat) are emitted AFTER emitStreamPrimsC
+	// because parseFloat calls d6_s2h (the packed-string decoder defined above).
+	emitFloatIOPrimsC(&b, p)
 	// Phase 0: bake the real byte-string (Bin) host bodies when referenced.
 	emitBinPrimsC(&b, p)
 	// Phase 1: bake the POSIX socket host bodies when referenced.
@@ -692,10 +695,12 @@ func cstr(s string) string {
 }
 
 // usesNativeStrCodec reports whether the program references any native string codec op
-// (stream prims, D6 file/env ops). Mirrors rust.go's equivalent gate.
+// (stream prims, D6 file/env ops, or parseFloat which decodes a packed-string code).
+// Mirrors rust.go's equivalent gate.
 func usesNativeStrCodec(p Program) bool {
 	return usesStream(p) || usesForeign(p, "printStrCode") || usesForeign(p, "getEnvCode") ||
-		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode")
+		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode") ||
+		usesForeign(p, "parseFloat")
 }
 
 // emitStreamPrimsC bakes the packed-String codec (d6_s2h/d6_h2s) and the 4 pure
@@ -842,6 +847,41 @@ func emitStreamPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value dbApply_c2(Value sql, Value* env) { Value f = mkclo(&dbApply_c3, 2); clo_set(f, 0, env[0]); clo_set(f, 1, sql); return f; }\n")
 		b.WriteString("static Value dbApply_c1(Value db, Value* env) { (void)env; Value f = mkclo(&dbApply_c2, 1); clo_set(f, 0, db); return f; }\n")
 		b.WriteString("static Value dbApply(void) { return mkclo(&dbApply_c1, 0); }\n")
+	}
+}
+
+// emitFloatIOPrimsC bakes parseFloat (Nat -> Option Float), getFloat (IO Float),
+// and printFloat (Float -> IO Float) on the C native backend. Emitted AFTER
+// emitStreamPrimsC because parseFloat calls d6_s2h (the packed-string decoder).
+// The __fmtf helper implements ECMAScript Number::toString (shortest round-trip).
+// d6_validate_float is a DFA for the float literal grammar used by parseFloat.
+func emitFloatIOPrimsC(b *strings.Builder, p Program) {
+	usesFloatIO := usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat")
+	if !usesFloatIO {
+		return
+	}
+	// DFA validator: [+-]? ( \d+ (\.\d*)? | \.\d+ ) ([eE][+-]?\d+)?
+	b.WriteString("static int d6_validate_float(const unsigned char* s, size_t len) { if (len == 0) return 0; size_t i = 0; if (s[i] == '+' || s[i] == '-') i++; int has_digit = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } if (i < len && s[i] == '.') { i++; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } } if (!has_digit) return 0; if (i < len && (s[i] == 'e' || s[i] == 'E')) { i++; if (i < len && (s[i] == '+' || s[i] == '-')) i++; int hd = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { hd = 1; i++; } if (!hd) return 0; } return i == (size_t)len; }\n")
+	// __fmtf: ECMAScript Number::toString shortest-round-trip formatting.
+	// Precision search: p=1..17 significant digits; stop when strtod round-trips.
+	// Dressing cases (k=digit count, n=exponent s.t. value = s[0..k-1] * 10^(n-k)):
+	//   1. k<=n<=21:  digits + trailing zeros
+	//   2. 0<n<k:     digits[0..n-1] + "." + digits[n..k-1]
+	//   3. -5<=n<=0:  "0." + (-n) zeros + digits
+	//   4. else:      d[0][.d[1..]]e+/-(|n-1|)
+	b.WriteString("static void __fmtf(double x, char* out) { if (x != x) { strcpy(out, \"NaN\"); return; } if (x > 1.7976931348623157e308) { strcpy(out, \"Infinity\"); return; } if (x < -1.7976931348623157e308) { strcpy(out, \"-Infinity\"); return; } if (x == 0.0) { strcpy(out, \"0\"); return; } int neg = (x < 0); if (neg) x = -x; char buf[40]; int p; for (p = 1; p <= 17; p++) { snprintf(buf, sizeof buf, \"%.*e\", p - 1, x); if (strtod(buf, NULL) == x) break; } char* ep = strchr(buf, 'e'); int n = atoi(ep + 1) + 1; int k = p; char s[20]; s[0] = buf[0]; int si = 1; if (p > 1) { int ii; for (ii = 2; ii < p + 1; ii++) s[si++] = buf[ii]; } s[si] = '\\0'; char* o = out; if (neg) *o++ = '-'; if (k <= n && n <= 21) { memcpy(o, s, k); o += k; int ii; for (ii = k; ii < n; ii++) *o++ = '0'; } else if (n > 0 && n < k) { memcpy(o, s, n); o += n; *o++ = '.'; memcpy(o, s + n, k - n); o += k - n; } else if (n >= -5 && n <= 0) { *o++ = '0'; *o++ = '.'; int ii; for (ii = 0; ii < -n; ii++) *o++ = '0'; memcpy(o, s, k); o += k; } else { *o++ = s[0]; if (k > 1) { *o++ = '.'; memcpy(o, s + 1, k - 1); o += k - 1; } *o++ = 'e'; int en = n - 1; o += sprintf(o, en >= 0 ? \"+%d\" : \"%d\", en); } *o = '\\0'; }\n")
+	if usesForeign(p, "parseFloat") {
+		b.WriteString("static Value parseFloat_c(Value code, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(code, &len); if (!d6_validate_float(buf, len)) { free(buf); Value none = mkcon(0, \"none\", 1); con_set(none, 0, UNIT); return none; } char* tmp = (char*)malloc(len + 1); memcpy(tmp, buf, len); tmp[len] = 0; double d = strtod(tmp, NULL); free(tmp); free(buf); Value some = mkcon(1, \"some\", 2); con_set(some, 0, UNIT); con_set(some, 1, mkfloat(d)); return some; }\n")
+		b.WriteString("static Value parseFloat(void) { return mkclo(&parseFloat_c, 0); }\n")
+	}
+	if usesForeign(p, "getFloat") {
+		b.WriteString("static Value getFloat_c1(Value u, Value* env) { (void)u; (void)env; double x = 0.0; scanf(\"%lf\", &x); return mkfloat(x); }\n")
+		b.WriteString("static Value getFloat(void) { return mkclo(&getFloat_c1, 0); }\n")
+	}
+	if usesForeign(p, "printFloat") {
+		b.WriteString("static Value printFloat_c2(Value u, Value* env) { (void)u; char buf[64]; __fmtf(float_val(env[0]), buf); printf(\"%s\\n\", buf); return env[0]; }\n")
+		b.WriteString("static Value printFloat_c1(Value f, Value* env) { (void)env; Value c = mkclo(&printFloat_c2, 1); clo_set(c, 0, f); return c; }\n")
+		b.WriteString("static Value printFloat(void) { return mkclo(&printFloat_c1, 0); }\n")
 	}
 }
 
