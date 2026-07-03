@@ -52,3 +52,33 @@ func TestRenderParseErrorNoOffsetPassthrough(t *testing.T) {
 		t.Errorf("empty src should pass message through: %q", got)
 	}
 }
+
+// TestRenderParseErrorAliasOffset verifies that a parse error produced during
+// alias parsing (which carries "at offset N") is rendered with a caret pointing
+// at the problematic column. This mirrors what session.go does when it wraps a
+// RenderParseError call around a LoadSource parse failure on an alias line.
+func TestRenderParseErrorAliasOffset(t *testing.T) {
+	// Simulate a source file containing a malformed alias directive.
+	// The parser would report an error at the offset of the bad token.
+	src := "alias Std.Float as\nalias Std.IO as IO"
+	// Offset 18 is the newline after "as" (the alias name is missing).
+	err := errors.New("expected identifier after 'as', found newline at offset 18")
+	got := RenderParseError(src, err)
+	// The "at offset N" tail must be replaced by the caret.
+	if strings.Contains(got, "offset") {
+		t.Errorf("offset tail should be stripped in favour of caret:\n%s", got)
+	}
+	// The rendered output must include the source line and a caret.
+	if !strings.Contains(got, "alias Std.Float as") {
+		t.Errorf("source line should appear in rendered error:\n%s", got)
+	}
+	if !strings.Contains(got, "^") {
+		t.Errorf("caret must appear in rendered error:\n%s", got)
+	}
+	// The caret must be on the last line of the output.
+	lines := strings.Split(got, "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "^") {
+		t.Errorf("caret should be on the last line:\n%s", got)
+	}
+}
