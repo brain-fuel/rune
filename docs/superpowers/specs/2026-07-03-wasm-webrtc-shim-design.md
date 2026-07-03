@@ -68,6 +68,8 @@ The library module exports, in addition to the existing `memory`:
     rt_mkbin(len) -> bin        rt_bin_set(bin, i, byte)
     rt_bin_len(bin) -> len      rt_bin_at(bin, i) -> byte
     rt_live() -> n              live heap-block count (ARC balance probe, test surface)
+    rt_nat_to_u32(v) -> i32     saturating nat read (the glue readNat helper; added
+                                during implementation, emitted in library mode only)
     def_<name>() -> clo         one per --export'ed definition (memoized accessor)
 
 Ownership contract (documented in the glue header and R-FFI's table): values

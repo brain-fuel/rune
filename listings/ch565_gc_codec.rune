@@ -1,4 +1,4 @@
--- Chapter 565 — THE G-COUNTER WIRE CODEC (proven round-trip + the foreign Bin edge).
+-- Chapter 565: THE G-COUNTER WIRE CODEC (proven round-trip + the foreign Bin edge).
 --
 -- The WASM browser library (6d) ships a G-Counter CRDT whose state is serialised
 -- to a byte string, sent over the wire, and parsed back on the peer. This chapter
@@ -68,11 +68,6 @@ double : Nat -> Nat is
 end
 
 -- The equality toolkit (ch14).
-sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
-  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
-    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
-  end
-end
 
 trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
   fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
@@ -438,7 +433,7 @@ codecRoundTrip : (s : GC) -> Eq GC (decodeGC (encodeGC s)) s is
 end
 
 -- ============================================================================
--- The FOREIGN Bin edge — two UNPROVEN wrappers (ch483's host ops). The kernel
+-- The FOREIGN Bin edge: two UNPROVEN wrappers (ch483's host ops). The kernel
 -- says nothing about these; the runtime gate exercises them.
 -- ============================================================================
 
