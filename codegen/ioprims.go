@@ -42,6 +42,16 @@ func CheckPrimCollisions(p Program) error {
 	var walk func(Ir)
 	walk = func(t Ir) {
 		switch x := t.(type) {
+		case IVar:
+			// leaf -- bound variable, no foreign references
+		case IGlobal:
+			// leaf -- global reference, no nested Ir
+			_ = x
+		case IUnit:
+			// leaf -- unit token, no nested Ir
+		case ILit:
+			// leaf -- native literal, no nested Ir
+			_ = x
 		case IForeign:
 			pn := primName(x.Name)
 			if !ioPrims[pn] {
