@@ -109,7 +109,7 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	// D6 net/fs: the packed-String codec (top-level helpers) + env/file host bodies,
 	// over bare Nat codes (the Rune side wraps `bytes`/`codeOf`). Also emitted for
 	// the pure stream prims (byteLen/splitOn/jsonStrField/sqlQuote).
-	if usesFileEnv(p) || usesStream(p) {
+	if usesFileEnv(p) || usesStream(p) || usesForeign(p, "parseFloat") {
 		b.WriteString("d6unpack(N) when N =< 1 -> [];\nd6unpack(N) -> [N rem 256 | d6unpack(N div 256)].\n")
 		b.WriteString("d6pack(S) -> {N, P} = lists:foldl(fun(C, {Acc, Pl}) -> {Acc + C * Pl, Pl * 256} end, {0, 1}, S), N + P.\n")
 	}
@@ -298,6 +298,30 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	// D4 interop: npMatSum — the triple-loop reference floor; py serves real numpy matmul.
 	if usesForeign(p, "npMatSum") {
 		b.WriteString("ff_npMatSum() -> fun(M) -> fun(K) -> fun(N) -> fun(A) -> fun(B) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, AL = Col(A), BL = Col(B), lists:sum([ lists:nth(I * K + P + 1, AL) * lists:nth(P * N + J + 1, BL) || I <- lists:seq(0, M - 1), J <- lists:seq(0, N - 1), P <- lists:seq(0, K - 1) ]) end end end end end.\n")
+	}
+	// D5 float IO: parseFloat/getFloat/printFloat with canonical ECMAScript Number::toString
+	// dressing. OTP 24 lacks float_to_binary([short]), so we use a precision-search loop
+	// (P=0..17 via {scientific, P}) to find shortest round-trip digits, then re-dress.
+	// d6unpack decodes the packed-String Nat arg for parseFloat (same codec as D6 ops).
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		// Helpers: make_parseable inserts ".0" before 'e' so list_to_float accepts
+		// no-decimal scientific strings (e.g. "1e+07"); shortest_sci finds min P;
+		// fmtf/fmtf2 apply canonical dressing.
+		b.WriteString("ff___make_parseable(S) -> case lists:member($., S) of true -> S; false -> case lists:splitwith(fun(C) -> C =/= $e end, S) of {I, [$e | E]} -> I ++ \".0e\" ++ E; {I, []} -> I ++ \".0\" end end.\n")
+		b.WriteString("ff___shortest_sci(AX) -> ff___shortest_sci(AX, 0).\n")
+		b.WriteString("ff___shortest_sci(AX, P) when P > 17 -> binary_to_list(float_to_binary(AX, [{scientific, 17}]));\n")
+		b.WriteString("ff___shortest_sci(AX, P) -> S = binary_to_list(float_to_binary(AX, [{scientific, P}])), try Parsed = list_to_float(ff___make_parseable(S)), if Parsed =:= AX -> S; true -> ff___shortest_sci(AX, P + 1) end catch _:_ -> ff___shortest_sci(AX, P + 1) end.\n")
+		b.WriteString("ff___fmtf(X) -> if X =/= X -> \"NaN\"; true -> try if X =:= 0.0 -> \"0\"; true -> Sign = if X < 0.0 -> \"-\"; true -> \"\" end, S = ff___shortest_sci(erlang:abs(X)), ff___fmtf2(S, Sign) end catch _:_ -> float_to_list(X) end end.\n")
+		b.WriteString("ff___fmtf2(S, Sign) -> {M, [$e | E]} = lists:splitwith(fun(C) -> C =/= $e end, S), Exp = case E of [$+ | R] -> list_to_integer(R); [$- | R] -> -list_to_integer(R); _ -> list_to_integer(E) end, K = Exp + 1, Digs0 = [C || C <- M, C =/= $.], Digs = lists:reverse(lists:dropwhile(fun(C) -> C =:= $0 end, lists:reverse(Digs0))), D = case Digs of [] -> \"0\"; _ -> Digs end, N = length(D), Out = if N =< K, K =< 21 -> D ++ lists:duplicate(K - N, $0); K > 0, K =< 21, K < N -> lists:sublist(D, K) ++ \".\" ++ lists:nthtail(K, D); K > -6, K =< 0 -> \"0.\" ++ lists:duplicate(-K, $0) ++ D; true -> Base = if N > 1 -> [hd(D)] ++ \".\" ++ tl(D); true -> D end, Ek = K - 1, if Ek >= 0 -> Base ++ \"e+\" ++ integer_to_list(Ek); true -> Base ++ \"e-\" ++ integer_to_list(-Ek) end end, Sign ++ Out.\n")
+	}
+	if usesForeign(p, "parseFloat") {
+		b.WriteString("ff_parseFloat() -> fun(S) -> V = d6unpack(S), Pat = \"^[+-]?((\\\\d+(\\\\.\\\\d*)?)|(\\\\.\\\\d+))([eE][+-]?\\\\d+)?$\", case re:run(V, Pat, [{capture, none}]) of match -> try {c,1,some,[unit,list_to_float(ff___make_parseable(V))]} catch _:_ -> try {c,1,some,[unit,float(list_to_integer(V))]} catch _:_ -> {c,0,none,[unit]} end end; _ -> {c,0,none,[unit]} end end.\n")
+	}
+	if usesForeign(p, "getFloat") {
+		b.WriteString("ff_getFloat() -> fun(_U) -> L0 = io:get_line(\"\"), L1 = string:strip(L0, right, $\\n), L2 = string:strip(L1, right, $\\r), Pat = \"^[+-]?((\\\\d+(\\\\.\\\\d*)?)|(\\\\.\\\\d+))([eE][+-]?\\\\d+)?$\", case re:run(L2, Pat, [{capture, none}]) of match -> try list_to_float(ff___make_parseable(L2)) catch _:_ -> try float(list_to_integer(L2)) catch _:_ -> 0.0 end end; _ -> 0.0 end end.\n")
+	}
+	if usesForeign(p, "printFloat") {
+		b.WriteString("ff_printFloat() -> fun(X) -> fun(_U) -> io:format(\"~s~n\", [ff___fmtf(X)]), X end end.\n")
 	}
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)

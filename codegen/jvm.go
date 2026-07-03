@@ -47,7 +47,7 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printNat") {
 		b.WriteString("  static V printNat() { return fun(n -> fun(u -> { System.out.println(_nat(n)); return n; })); }\n")
 	}
-	if usesForeign(p, "getNat") || usesForeign(p, "readLineCode") {
+	if usesForeign(p, "getNat") || usesForeign(p, "readLineCode") || usesForeign(p, "getFloat") {
 		b.WriteString("  static java.io.BufferedReader __stdin = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));\n")
 	}
 	if usesForeign(p, "getNat") {
@@ -145,6 +145,22 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dot2") {
 		b.WriteString("  static V dot2() { return fun(a0 -> fun(a1 -> fun(b0 -> fun(b1 -> new VFloat(_float(a0)*_float(b0) + _float(a1)*_float(b1)))))); }\n")
 	}
+	// D5 float IO: parseFloat/getFloat/printFloat with canonical ECMAScript Number::toString
+	// dressing. Double.toString gives shortest round-trip digits; __fmtf re-dresses them.
+	// __parfloatPat validates; __s2h decodes the packed-String Nat arg for parseFloat.
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		b.WriteString("  static java.util.regex.Pattern __parfloatPat = java.util.regex.Pattern.compile(\"^[+-]?((\\\\d+(\\\\.\\\\d*)?)|(\\\\.\\\\d+))([eE][+-]?\\\\d+)?$\");\n")
+		b.WriteString("  static String __fmtf(double x) { if (Double.isNaN(x)) return \"NaN\"; if (Double.isInfinite(x)) return x > 0 ? \"Infinity\" : \"-Infinity\"; if (x == 0.0) return \"0\"; String sign = x < 0 ? \"-\" : \"\"; double ax = Math.abs(x); String s = Double.toString(ax); int ei = s.indexOf('E'); String rawDigits; int k; if (ei >= 0) { k = Integer.parseInt(s.substring(ei + 1)) + 1; rawDigits = s.substring(0, ei).replace(\".\", \"\"); } else { int di = s.indexOf('.'); if (di < 0) { k = s.length(); rawDigits = s; } else { String ipt = s.substring(0, di), frac = s.substring(di + 1); if (ipt.equals(\"0\")) { int lz = 0; while (lz < frac.length() && frac.charAt(lz) == '0') lz++; k = -lz; rawDigits = frac.substring(lz); } else { k = ipt.length(); rawDigits = ipt + frac; } } } String d = rawDigits.replaceAll(\"0+$\", \"\"); if (d.isEmpty()) d = \"0\"; int n = d.length(); String out; if (n <= k && k <= 21) { out = d + \"0\".repeat(k - n); } else if (k > 0 && k <= 21) { out = d.substring(0, k) + \".\" + d.substring(k); } else if (k > -6 && k <= 0) { out = \"0.\" + \"0\".repeat(-k) + d; } else { String base = n > 1 ? \"\" + d.charAt(0) + \".\" + d.substring(1) : d; int ek = k - 1; out = base + (ek >= 0 ? \"e+\" + ek : \"e-\" + (-ek)); } return sign + out; }\n")
+	}
+	if usesForeign(p, "parseFloat") {
+		b.WriteString("  static V parseFloat() { return fun(s -> { String v = __s2h(s); if (__parfloatPat.matcher(v).matches()) { return new VCtor(1, \"some\", new V[]{unit(), new VFloat(Double.parseDouble(v))}); } return new VCtor(0, \"none\", new V[]{unit()}); }); }\n")
+	}
+	if usesForeign(p, "getFloat") {
+		b.WriteString("  static V getFloat() { return fun(_u -> { try { String s = __stdin.readLine(); if (s == null) s = \"\"; s = s.replaceAll(\"\\\\r+$\", \"\"); if (__parfloatPat.matcher(s).matches()) { return new VFloat(Double.parseDouble(s)); } } catch (Exception e) {} return new VFloat(0.0); }); }\n")
+	}
+	if usesForeign(p, "printFloat") {
+		b.WriteString("  static V printFloat() { return fun(x -> fun(_u -> { System.out.println(__fmtf(_float(x))); return x; })); }\n")
+	}
 	// D5 / R-OTP: the JVM scheduler shim. Java 25 virtual threads CAN block on a queue,
 	// so the actor blocks on a real receive — no CPS (the JS shim's problem). A Pid is a
 	// VProc (a BlockingQueue mailbox + a CountDownLatch DOWN signal); goroutine-local
@@ -163,7 +179,7 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "printStrCode") {
 		b.WriteString("  static V printStrCode() { return fun(c -> fun(_u -> { System.out.println(__s2h(c)); return c; })); }\n")
 	}
-	if usesLiveKV(p) || usesFileEnv(p) || usesStream(p) {
+	if usesLiveKV(p) || usesFileEnv(p) || usesStream(p) || usesForeign(p, "parseFloat") {
 		// E4: the JVM live-broker data-plane binding. java.net.Socket BLOCKS, so RESP
 		// is synchronous (like Go, unlike the JS async path). A packed String code is a
 		// VNat bignum; __s2h/__h2s are the ASCII byte codec (first byte LSB + 0x01).

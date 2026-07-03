@@ -146,6 +146,67 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "dotList") {
 		b.WriteString("fn dotList() -> Rc<V> { vfun(|xs: Rc<V>| vfun(move |ys: Rc<V>| Rc::new(V::Float(_fldot(xs.clone(), ys.clone()))))) }\n")
 	}
+	// D5 float IO: parseFloat/getFloat/printFloat with canonical ECMAScript Number::toString
+	// dressing. No regex crate — manual validator. Precision-search loop (p=0..=17) finds
+	// shortest round-trip digits from format!("{:.*e}", p, x); _s2h decodes packed String.
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		b.WriteString("fn __is_valid_float_str(s: &str) -> bool {\n")
+		b.WriteString("    let s = s.as_bytes(); let n = s.len(); if n == 0 { return false; }\n")
+		b.WriteString("    let mut i = 0usize;\n")
+		b.WriteString("    if i < n && (s[i] == b'+' || s[i] == b'-') { i += 1; }\n")
+		b.WriteString("    let start = i;\n")
+		b.WriteString("    while i < n && s[i].is_ascii_digit() { i += 1; }\n")
+		b.WriteString("    if i < n && s[i] == b'.' { i += 1; while i < n && s[i].is_ascii_digit() { i += 1; } }\n")
+		b.WriteString("    if i == start { return false; } // must have at least one digit\n")
+		b.WriteString("    if i < n && (s[i] == b'e' || s[i] == b'E') {\n")
+		b.WriteString("        i += 1;\n")
+		b.WriteString("        if i < n && (s[i] == b'+' || s[i] == b'-') { i += 1; }\n")
+		b.WriteString("        let es = i; while i < n && s[i].is_ascii_digit() { i += 1; }\n")
+		b.WriteString("        if i == es { return false; } // exponent must have digits\n")
+		b.WriteString("    }\n")
+		b.WriteString("    i == n\n")
+		b.WriteString("}\n")
+		b.WriteString("fn __fmtf(x: f64) -> String {\n")
+		b.WriteString("    if x.is_nan() { return \"NaN\".to_string(); }\n")
+		b.WriteString("    if x.is_infinite() { return (if x > 0.0 { \"Infinity\" } else { \"-Infinity\" }).to_string(); }\n")
+		b.WriteString("    if x == 0.0 { return \"0\".to_string(); }\n")
+		b.WriteString("    let sign = if x < 0.0 { \"-\" } else { \"\" };\n")
+		b.WriteString("    let ax = x.abs();\n")
+		b.WriteString("    let s = (0usize..=17).find_map(|p| {\n")
+		b.WriteString("        let t = format!(\"{:.*e}\", p, ax);\n")
+		b.WriteString("        if t.parse::<f64>().ok() == Some(ax) { Some(t) } else { None }\n")
+		b.WriteString("    }).unwrap_or_else(|| format!(\"{:e}\", ax));\n")
+		b.WriteString("    let ei = s.find('e').unwrap_or(s.len());\n")
+		b.WriteString("    let mant = &s[..ei];\n")
+		b.WriteString("    let exp: i32 = s[ei+1..].parse().unwrap_or(0);\n")
+		b.WriteString("    let k = exp + 1;\n")
+		b.WriteString("    let raw: String = mant.chars().filter(|&c| c != '.').collect();\n")
+		b.WriteString("    let d: String = raw.trim_end_matches('0').to_string();\n")
+		b.WriteString("    let d = if d.is_empty() { \"0\".to_string() } else { d };\n")
+		b.WriteString("    let n = d.len() as i32;\n")
+		b.WriteString("    let out = if n <= k && k <= 21 {\n")
+		b.WriteString("        format!(\"{}{}\", d, \"0\".repeat((k - n) as usize))\n")
+		b.WriteString("    } else if k > 0 && k <= 21 && k < n {\n")
+		b.WriteString("        format!(\"{}.{}\", &d[..k as usize], &d[k as usize..])\n")
+		b.WriteString("    } else if k > -6 && k <= 0 {\n")
+		b.WriteString("        format!(\"0.{}{}\", \"0\".repeat((-k) as usize), d)\n")
+		b.WriteString("    } else {\n")
+		b.WriteString("        let base = if n > 1 { format!(\"{}.{}\", &d[..1], &d[1..]) } else { d.clone() };\n")
+		b.WriteString("        let ek = k - 1;\n")
+		b.WriteString("        if ek >= 0 { format!(\"{}e+{}\", base, ek) } else { format!(\"{}e-{}\", base, -ek) }\n")
+		b.WriteString("    };\n")
+		b.WriteString("    format!(\"{}{}\", sign, out)\n")
+		b.WriteString("}\n")
+	}
+	if usesForeign(p, "parseFloat") {
+		b.WriteString("fn parseFloat() -> Rc<V> { vfun(|s: Rc<V>| -> Rc<V> { let v = _s2h(&s); let vs = String::from_utf8_lossy(&v).to_string(); if __is_valid_float_str(&vs) { let f: f64 = vs.parse().unwrap_or(0.0); Rc::new(V::Ctor(1, \"some\", vec![unit(), Rc::new(V::Float(f))])) } else { Rc::new(V::Ctor(0, \"none\", vec![unit()])) } }) }\n")
+	}
+	if usesForeign(p, "getFloat") {
+		b.WriteString("fn getFloat() -> Rc<V> { vfun(move |_u: Rc<V>| -> Rc<V> { let mut s = String::new(); std::io::stdin().read_line(&mut s).unwrap_or(0); let s = s.trim_end_matches(|c| c == '\\n' || c == '\\r').to_string(); if __is_valid_float_str(&s) { Rc::new(V::Float(s.parse().unwrap_or(0.0))) } else { Rc::new(V::Float(0.0)) } }) }\n")
+	}
+	if usesForeign(p, "printFloat") {
+		b.WriteString("fn printFloat() -> Rc<V> { vfun(|x: Rc<V>| -> Rc<V> { let s = __fmtf(_float(&x)); let x2 = x.clone(); vfun(move |_u: Rc<V>| -> Rc<V> { println!(\"{}\", s); x2.clone() }) }) }\n")
+	}
 	// D4 interop: npDot is the uniform dot CAPABILITY (NumPy on py, OpenBLAS on C/LLVM);
 	// on rust it is the portable reference floor.
 	if usesForeign(p, "npDot") {
@@ -854,7 +915,8 @@ fn _show(v: &Rc<V>) -> String {
 // packed-string code exactly like the D6 file ops.
 func usesRustStrMarshal(p Program) bool {
 	return usesLiveKV(p) || usesStream(p) || usesForeign(p, "printStrCode") || usesForeign(p, "getEnvCode") ||
-		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode")
+		usesForeign(p, "readFileCode") || usesForeign(p, "writeFileCode") || usesForeign(p, "argAtCode") ||
+		usesForeign(p, "parseFloat")
 }
 
 // rustStrMarshal is the packed-string <-> host-bytes marshalling shared by the live
