@@ -71,6 +71,19 @@ func CheckPrimCollisions(p Program) error {
 			walk(x.P)
 		case ISnd:
 			walk(x.P)
+		case IField:
+			walk(x.Scrut)
+		case ICase:
+			walk(x.Scrut)
+			for _, arm := range x.Arms {
+				walk(arm.Body)
+			}
+		case IBounce:
+			walk(x.Call)
+		default:
+			// A future Ir node type was added without updating this switch.
+			// Panic loudly so the test suite catches the omission immediately.
+			panic("CheckPrimCollisions: unknown Ir node type; update walk in ioprims.go")
 		}
 	}
 	for _, d := range p.Defs {
@@ -330,6 +343,20 @@ func usesPar(p Program) bool {
 			return walk(x.P)
 		case ISnd:
 			return walk(x.P)
+		case IField:
+			return walk(x.Scrut)
+		case ICase:
+			if walk(x.Scrut) {
+				return true
+			}
+			for _, arm := range x.Arms {
+				if walk(arm.Body) {
+					return true
+				}
+			}
+			return false
+		case IBounce:
+			return walk(x.Call)
 		default:
 			return false
 		}
@@ -362,6 +389,20 @@ func usesForeign(p Program, name string) bool {
 			return walk(x.P)
 		case ISnd:
 			return walk(x.P)
+		case IField:
+			return walk(x.Scrut)
+		case ICase:
+			if walk(x.Scrut) {
+				return true
+			}
+			for _, arm := range x.Arms {
+				if walk(arm.Body) {
+					return true
+				}
+			}
+			return false
+		case IBounce:
+			return walk(x.Call)
 		default:
 			return false
 		}

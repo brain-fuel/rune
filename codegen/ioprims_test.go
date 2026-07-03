@@ -113,3 +113,59 @@ func TestPrimCollisionGuard(t *testing.T) {
 		t.Errorf("CheckPrimCollisions should not flag unknown segments: %v", err)
 	}
 }
+
+// TestCheckPrimCollisionsInCaseArm verifies that CheckPrimCollisions walks into
+// ICase arm bodies and detects a prim collision nested inside a case expression.
+// This covers the ICase/IField/IBounce walker paths added to the walk function.
+func TestCheckPrimCollisionsInCaseArm(t *testing.T) {
+	// Build a program where a colliding IForeign appears inside an ICase arm body.
+	// The scrutinee carries one qualified printNat and the arm body carries another
+	// distinct qualified printNat -- a collision that the walker must find.
+	collidingInCase := Program{
+		Defs: []DefSpec{
+			{
+				Name: "f",
+				Body: ICase{
+					Scrut: IForeign{Name: "A.printNat"},
+					Arms: []ICaseArm{
+						{Tag: 0, Body: IForeign{Name: "B.printNat"}},
+					},
+				},
+			},
+		},
+	}
+	if err := CheckPrimCollisions(collidingInCase); err == nil {
+		t.Error("CheckPrimCollisions should detect collision of A.printNat/B.printNat inside ICase")
+	} else if !strings.Contains(err.Error(), "printNat") {
+		t.Errorf("collision error should name the prim segment, got: %v", err)
+	}
+
+	// A single qualified printNat nested in an ICase is fine (no collision).
+	singleInCase := Program{
+		Defs: []DefSpec{
+			{
+				Name: "g",
+				Body: ICase{
+					Scrut: IForeign{Name: "Std.Float.printFloat"},
+					Arms: []ICaseArm{
+						{Tag: 0, Body: IForeign{Name: "Std.IO.printNat"}},
+					},
+				},
+			},
+		},
+	}
+	if err := CheckPrimCollisions(singleInCase); err != nil {
+		t.Errorf("CheckPrimCollisions should not flag distinct prims in ICase: %v", err)
+	}
+
+	// IField and IBounce: a collision inside an IBounce-wrapped call is also caught.
+	collidingInBounce := Program{
+		Defs: []DefSpec{
+			{Name: "h1", Body: IForeign{Name: "A.printNat"}},
+			{Name: "h2", Body: IBounce{Call: IForeign{Name: "B.printNat"}}},
+		},
+	}
+	if err := CheckPrimCollisions(collidingInBounce); err == nil {
+		t.Error("CheckPrimCollisions should detect collision inside IBounce")
+	}
+}
