@@ -71,23 +71,38 @@ func main() {
 			fatal(err)
 		}
 	case "emit", "run":
-		file, main, target, err := parseEmitArgs(os.Args[2:])
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "rune:", err)
+		files, mainName, target, parseErr := parseEmitArgs(os.Args[2:])
+		if parseErr != nil {
+			fmt.Fprintln(os.Stderr, "rune:", parseErr)
 			usage()
 			os.Exit(2)
 		}
-		src, err := os.ReadFile(file)
-		if err != nil {
-			fatal(err)
-		}
-		if os.Args[1] == "emit" {
-			err = runEmit(string(src), main, target, os.Stdout)
+		var runErr error
+		if len(files) == 1 {
+			// Single-file path: byte-identical to the pre-multi-file behaviour.
+			src, readErr := os.ReadFile(files[0])
+			if readErr != nil {
+				fatal(readErr)
+			}
+			if os.Args[1] == "emit" {
+				runErr = runEmit(string(src), mainName, target, os.Stdout)
+			} else {
+				runErr = runTarget(string(src), mainName, target)
+			}
 		} else {
-			err = runTarget(string(src), main, target)
+			// Multi-file path: read all sources and route through LoadSet.
+			sources, readErr := readNamedSources(files)
+			if readErr != nil {
+				fatal(readErr)
+			}
+			if os.Args[1] == "emit" {
+				runErr = runEmitSet(sources, mainName, target, os.Stdout)
+			} else {
+				runErr = runTargetSet(sources, mainName, target)
+			}
 		}
-		if err != nil {
-			fatal(err)
+		if runErr != nil {
+			fatal(runErr)
 		}
 	case "build":
 		if err := runBuildCLI(os.Args[2:], os.Stdout); err != nil {
@@ -275,8 +290,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  rune (fmt|hash) <file>")
 	fmt.Fprintln(os.Stderr, "  rune repl [--no-prelude]")
-	fmt.Fprintln(os.Stderr, "  rune emit <file> [name] [--target js|py|go|rs|erl|jvm]")
-	fmt.Fprintln(os.Stderr, "  rune run  <file> <name> [--target js|py|go|rs|erl|jvm]")
+	fmt.Fprintln(os.Stderr, "  rune emit <path...> [name] [--target js|py|go|rs|erl|jvm]  (dirs expand to their .rune files)")
+	fmt.Fprintln(os.Stderr, "  rune run  <path...> <name> [--target js|py|go|rs|erl|jvm]  (dirs expand to their .rune files)")
 	fmt.Fprintln(os.Stderr, "  rune build <file> [name] [--target T] [--kind app|library] [--module M] [--export Rune[:Host]] [--out dir]")
 	fmt.Fprintln(os.Stderr, "  rune simulate <file> [replicas]   (defines init/merge/value/op0..opN)")
 	fmt.Fprintln(os.Stderr, "  rune deploy <file> [name] --target <backend>   (deploy + RUN a verified protocol)")
@@ -290,9 +305,12 @@ func usage() {
 	fmt.Fprintf(os.Stderr, "  deploy backends: %s\n", strings.Join(infra.Targets(), ", "))
 }
 
-// parseEmitArgs reads the positional <file> [name] and an optional
+// parseEmitArgs reads positional <path...> [name] and an optional
 // `--target NAME` (or `--target=NAME`) flag, in any order, for emit/run.
-func parseEmitArgs(args []string) (file, main, target string, err error) {
+// The last positional is the main name iff at least one earlier positional
+// names an existing file or directory and the last one does not.
+// Directory paths expand non-recursively to their *.rune files, sorted.
+func parseEmitArgs(args []string) (files []string, main, target string, err error) {
 	target = codegen.Default().Target()
 	var pos []string
 	for i := 0; i < len(args); i++ {
@@ -300,7 +318,7 @@ func parseEmitArgs(args []string) (file, main, target string, err error) {
 		switch {
 		case a == "--target", a == "-target":
 			if i+1 >= len(args) {
-				return "", "", "", fmt.Errorf("--target needs a value")
+				return nil, "", "", fmt.Errorf("--target needs a value")
 			}
 			i++
 			target = args[i]
@@ -311,16 +329,71 @@ func parseEmitArgs(args []string) (file, main, target string, err error) {
 		}
 	}
 	if len(pos) == 0 {
-		return "", "", "", fmt.Errorf("emit/run needs a file")
-	}
-	file = pos[0]
-	if len(pos) > 1 {
-		main = pos[1]
+		return nil, "", "", fmt.Errorf("emit/run needs a file")
 	}
 	if _, ok := codegen.ByTarget(target); !ok {
-		return "", "", "", fmt.Errorf("unknown target %q (have %s)", target, strings.Join(codegen.Targets(), ", "))
+		return nil, "", "", fmt.Errorf("unknown target %q (have %s)", target, strings.Join(codegen.Targets(), ", "))
 	}
-	return file, main, target, nil
+	// Determine whether the last positional is a main name or a file/dir path.
+	// It is treated as a name when at least one earlier positional is an existing
+	// file or directory and the last one is not.
+	paths := pos
+	if len(pos) > 1 {
+		lastExists := pathExists(pos[len(pos)-1])
+		anyEarlierExists := false
+		for _, p := range pos[:len(pos)-1] {
+			if pathExists(p) {
+				anyEarlierExists = true
+				break
+			}
+		}
+		if !lastExists && anyEarlierExists {
+			main = pos[len(pos)-1]
+			paths = pos[:len(pos)-1]
+		}
+	}
+	// Expand each path: directories become their *.rune files (sorted, non-recursive).
+	for _, p := range paths {
+		expanded, expErr := expandRunePath(p)
+		if expErr != nil {
+			return nil, "", "", expErr
+		}
+		files = append(files, expanded...)
+	}
+	if len(files) == 0 {
+		return nil, "", "", fmt.Errorf("no .rune source files found in the given paths")
+	}
+	return files, main, target, nil
+}
+
+// pathExists reports whether p names an existing file or directory.
+func pathExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+// expandRunePath returns the .rune files for path p: a directory expands to its
+// *.rune entries sorted by name (non-recursive); a plain file returns itself.
+func expandRunePath(p string) ([]string, error) {
+	info, err := os.Stat(p)
+	if err != nil {
+		return nil, fmt.Errorf("%s: no such file or directory", p)
+	}
+	if !info.IsDir() {
+		return []string{p}, nil
+	}
+	entries, err := os.ReadDir(p)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".rune") {
+			out = append(out, filepath.Join(p, e.Name()))
+		}
+	}
+	// os.ReadDir returns entries sorted by name, so out is already sorted.
+	return out, nil
 }
 
 func fatal(err error) {
@@ -367,6 +440,95 @@ func programFor(src, main string) (codegen.Program, error) {
 		return codegen.Program{}, err
 	}
 	return p, nil
+}
+
+// readNamedSources reads each file path and returns it as a NamedSource.
+func readNamedSources(files []string) ([]session.NamedSource, error) {
+	sources := make([]session.NamedSource, 0, len(files))
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			return nil, err
+		}
+		sources = append(sources, session.NamedSource{Name: f, Src: string(data)})
+	}
+	return sources, nil
+}
+
+// programForSet topo-sorts and loads a set of named sources via session.LoadSet,
+// then emits the erased program for the named main (may be "").
+func programForSet(sources []session.NamedSource, main string) (codegen.Program, error) {
+	s := session.New()
+	if err := session.LoadSet(s, sources); err != nil {
+		return codegen.Program{}, err
+	}
+	return s.EmitProgram(main)
+}
+
+// runEmitSet emits the erased shadow for a set of source files via LoadSet.
+func runEmitSet(sources []session.NamedSource, main, target string, w io.Writer) error {
+	bk, ok := codegen.ByTarget(target)
+	if !ok {
+		return fmt.Errorf("unknown target %q", target)
+	}
+	p, err := programForSet(sources, main)
+	if err != nil {
+		return err
+	}
+	out, err := bk.Emit(p)
+	if err != nil {
+		return err
+	}
+	_, err = io.WriteString(w, string(out))
+	return err
+}
+
+// runTargetSet emits and executes a set of source files via LoadSet.
+func runTargetSet(sources []session.NamedSource, main, target string) error {
+	if main == "" {
+		return fmt.Errorf("rune run needs a definition to evaluate: rune run FILE NAME")
+	}
+	bk, ok := codegen.ByTarget(target)
+	if !ok {
+		return fmt.Errorf("unknown target %q", target)
+	}
+	p, err := programForSet(sources, main)
+	if err != nil {
+		return err
+	}
+	out, err := bk.Emit(p)
+	if err != nil {
+		return err
+	}
+	r, ok := targetRunner[bk.Target()]
+	if !ok {
+		return fmt.Errorf("no runner for target %q (use `rune emit` to inspect the output)", bk.Target())
+	}
+	if _, err := exec.LookPath(r.bin); err != nil {
+		return fmt.Errorf("the %s backend needs %s in PATH to run (use `rune emit` to inspect the output)", bk.Target(), r.bin)
+	}
+	dir, err := os.MkdirTemp("", "rune-run-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	srcFile := dir + "/main." + r.ext
+	if err := os.WriteFile(srcFile, []byte(out), 0o644); err != nil {
+		return err
+	}
+	runFile := srcFile
+	if r.compile != nil {
+		binFile := dir + "/main.bin"
+		c := r.compile(srcFile, binFile)
+		c.Stderr = os.Stderr
+		if err := c.Run(); err != nil {
+			return fmt.Errorf("compiling the %s shadow failed: %w", bk.Target(), err)
+		}
+		runFile = binFile
+	}
+	cmd := r.run(runFile)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
 }
 
 // targetRunner names, per backend Target(), the temp-file extension and the
