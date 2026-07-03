@@ -255,3 +255,32 @@ func TestWasmBrowserLibraryHostNameExport(t *testing.T) {
 		t.Fatalf("smoke-host value via HostName override: got %q want 2 (full output %q)", lines[0], out)
 	}
 }
+
+// ============================================================================
+// Task 1 (6f, the two-tab demo): the demo program builds and its artifacts load.
+// examples/twotab/counter.rune is the runnable twin of ch565_gc_codec.rune (the
+// proofs stay in ch565); build.mjs runs `rune build --kind library --target wasm`
+// then wabt-assembles the emitted WAT, and smoke.mjs loads the result through the
+// generated glue exactly as a browser would. Both scripts are node+wabt gated via
+// requireBrowserLib, like every other browser-library gate in this file.
+// ============================================================================
+
+// TestTwoTabBuild: the demo builds and its artifacts load (node + wabt gated).
+func TestTwoTabBuild(t *testing.T) {
+	requireBrowserLib(t)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(wd, "..", "examples", "twotab")
+	run := func(script string) {
+		cmd := exec.Command("node", script)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", script, err, out)
+		}
+	}
+	run("build.mjs")
+	run("smoke.mjs")
+}

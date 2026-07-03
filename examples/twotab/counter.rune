@@ -1,0 +1,304 @@
+-- The two-tab demo program. Runnable twin of ch565 (the proofs live there);
+-- rebuild with build.mjs.
+--
+-- This file carries ONLY the runnable defs a G-Counter CRDT + its wire codec
+-- need to deploy as a WASM library: no theorem, no equality toolkit, no
+-- round-trip proof. listings/ch565_gc_codec.rune is the proven twin -- its
+-- header explains the base-2 length-prefixed frame choice and the honest
+-- foreign-Bin-edge caveat (the kernel theorem covers only the in-language
+-- NList codec; gcToBin/gcFromBin are unproven wrappers exercised by runtime
+-- gates, never by the kernel). Do not edit the proofs here; edit ch565 and
+-- copy the runnable shapes back down if they change.
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+-- Addition, recursion on the left: add zero n = n and add (succ zero) n =
+-- succ n DEFINITIONALLY.
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+-- double n = n + n, by its own recursion so double (succ k) = succ (succ
+-- (double k)).
+double : Nat -> Nat is
+  fn (n : Nat) is
+    case n of
+    | zero -> zero
+    | succ k with ih -> succ (succ ih)
+    end
+  end
+end
+
+-- ============================================================================
+-- ch14's positional binary, redeclared verbatim. Pos: 1 | 2p | 2p+1 (least
+-- significant decision outermost, the leading 1 = pH innermost). BN adjoins
+-- zero.
+-- ============================================================================
+
+data Pos : U is
+  pH : Pos
+| pO : Pos -> Pos
+| pI : Pos -> Pos
+end
+
+psucc : Pos -> Pos is
+  fn (p : Pos) is
+    case p of
+    | pH -> pO pH
+    | pO a -> pI a
+    | pI a with ih -> pO ih
+    end
+  end
+end
+
+data BN : U is
+  bn0 : BN
+| bnP : Pos -> BN
+end
+
+bnsucc : BN -> BN is
+  fn (b : BN) is
+    case b of
+    | bn0 -> bnP pH
+    | bnP p -> bnP (psucc p)
+    end
+  end
+end
+
+toNatP : Pos -> Nat is
+  fn (p : Pos) is
+    case p of
+    | pH -> succ zero
+    | pO a with ih -> double ih
+    | pI a with ih -> succ (double ih)
+    end
+  end
+end
+
+toNat : BN -> Nat is
+  fn (b : BN) is
+    case b of
+    | bn0 -> zero
+    | bnP p -> toNatP p
+    end
+  end
+end
+
+fromNat : Nat -> BN is
+  fn (n : Nat) is
+    case n of
+    | zero -> bn0
+    | succ k with ih -> bnsucc ih
+    end
+  end
+end
+
+-- ============================================================================
+-- The wire: an in-language byte list, and the paired result of a frame parse.
+-- ============================================================================
+
+data NList : U is
+  nnil  : NList
+| ncons : Nat -> NList -> NList
+end
+
+data PNL : U is
+  pnl : Nat -> NList -> PNL
+end
+
+pnlFst : PNL -> Nat is
+  fn (x : PNL) is case x of | pnl v r -> v end end
+end
+
+pnlSnd : PNL -> NList is
+  fn (x : PNL) is case x of | pnl v r -> r end end
+end
+
+len : NList -> Nat is
+  fn (l : NList) is
+    case l of
+    | nnil -> zero
+    | ncons b bs with ih -> succ ih
+    end
+  end
+end
+
+append : NList -> NList -> NList is
+  fn (xs : NList) is
+    case xs of
+    | nnil -> fn (ys : NList) is ys end
+    | ncons b bs with ih -> fn (ys : NList) is ncons b (ih ys) end
+    end
+  end
+end
+
+-- ============================================================================
+-- Nat <-> bit list, structural on the Pos spine (no fuel, no bound).
+-- posToBits emits the little-endian bits ending in the leading 1 (pH).
+-- ============================================================================
+
+posToBits : Pos -> NList is
+  fn (p : Pos) is
+    case p of
+    | pH -> ncons (succ zero) nnil
+    | pO a with ih -> ncons zero ih
+    | pI a with ih -> ncons (succ zero) ih
+    end
+  end
+end
+
+bnBits : BN -> NList is
+  fn (b : BN) is
+    case b of
+    | bn0 -> nnil
+    | bnP p -> posToBits p
+    end
+  end
+end
+
+-- ============================================================================
+-- The framed codec. encodeNat prepends the bit count; decode reads the count
+-- and Horner-folds that many bits, returning (value, leftover).
+-- ============================================================================
+
+frameNL : NList -> NList is
+  fn (bs : NList) is ncons (len bs) bs end
+end
+
+encodeNat : Nat -> NList is
+  fn (n : Nat) is frameNL (bnBits (fromNat n)) end
+end
+
+-- Consume exactly `count` bits (LSB first) via a Horner fold, returning the
+-- value paired with the leftover list.
+takeNat : Nat -> NList -> PNL is
+  fn (c : Nat) is
+    case c of
+    | zero -> fn (l : NList) is pnl zero l end
+    | succ k with ih -> fn (l : NList) is
+        case l of
+        | nnil -> pnl zero nnil
+        | ncons b bs -> case (ih bs) of | pnl v r -> pnl (add b (double v)) r end
+        end
+      end
+    end
+  end
+end
+
+decodeNatFrame : NList -> PNL is
+  fn (l : NList) is
+    case l of
+    | nnil -> pnl zero nnil
+    | ncons c tl -> takeNat c tl
+    end
+  end
+end
+
+-- ============================================================================
+-- The G-Counter and its codec. encodeGC concatenates the two slots' frames;
+-- decodeGC parses the first frame, then the second from the leftover.
+-- ============================================================================
+
+data GC : U is
+  gc : Nat -> Nat -> GC
+end
+
+initGC : GC is gc zero zero end
+
+bump : GC -> GC is
+  fn (s : GC) is case s of | gc a b -> gc (succ a) b end end
+end
+
+value : GC -> Nat is
+  fn (s : GC) is case s of | gc a b -> add a b end end
+end
+
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is n end
+    | succ k with ih -> fn (n : Nat) is
+        case n of
+        | zero -> succ k
+        | succ j -> succ (ih j)
+        end
+      end
+    end
+  end
+end
+
+merge : GC -> GC -> GC is
+  fn (s : GC) (t : GC) is
+    case s of
+    | gc a b -> case t of | gc c d -> gc (max a c) (max b d) end
+    end
+  end
+end
+
+encodeGC : GC -> NList is
+  fn (s : GC) is
+    case s of | gc a b -> append (encodeNat a) (encodeNat b) end
+  end
+end
+
+decodeGC : NList -> GC is
+  fn (l : NList) is
+    gc (pnlFst (decodeNatFrame l))
+       (pnlFst (decodeNatFrame (pnlSnd (decodeNatFrame l))))
+  end
+end
+
+-- ============================================================================
+-- The FOREIGN Bin edge: two UNPROVEN wrappers (ch483's host ops). The kernel
+-- says nothing about these; the demo's build/smoke scripts exercise them.
+-- ============================================================================
+
+foreign Bin      : U end
+foreign binEmpty : Bin end
+foreign binCons  : Nat -> Bin -> Bin end
+foreign binLen   : Bin -> Nat end
+foreign binAt    : Bin -> Nat -> Nat end
+
+-- binCons PREPENDS, so folding the byte list right-to-left keeps element
+-- order: the first NList byte lands at Bin index 0.
+nlToBin : NList -> Bin is
+  fn (l : NList) is
+    case l of
+    | nnil -> binEmpty
+    | ncons b bs with ih -> binCons b ih
+    end
+  end
+end
+
+gcToBin : GC -> Bin is
+  fn (s : GC) is nlToBin (encodeGC s) end
+end
+
+-- Walk binAt 0 .. len-1 into an NList (fuel = the byte length).
+binGo : Nat -> Nat -> Bin -> NList is
+  fn (f : Nat) is
+    case f of
+    | zero -> fn (i : Nat) (b : Bin) is nnil end
+    | succ k with ih -> fn (i : Nat) (b : Bin) is
+        ncons (binAt b i) (ih (succ i) b)
+      end
+    end
+  end
+end
+
+binToNL : Bin -> NList is
+  fn (b : Bin) is binGo (binLen b) zero b end
+end
+
+gcFromBin : Bin -> GC is
+  fn (b : Bin) is decodeGC (binToNL b) end
+end
