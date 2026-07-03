@@ -81,6 +81,18 @@ else warn "no tofu/terraform — the fmt-check sweep SKIPS without one (asdf ins
 echo "-- rust backend --"
 have rustc && ok "rustc $(rustc --version 2>/dev/null | awk '{print $2}')" || warn "rustc not found (rustup: https://rustup.rs) — only needed for the Rust source backend"
 
+# Both harness/node_modules npm packages below (wabt, puppeteer) are installed
+# with `npm install --no-save`, and harness/ has no committed package.json (npm
+# packages are not vendored into the repo -- see requireBrowserLib). EMPIRICAL
+# FINDING: with no package.json to consult, npm's install-time auto-prune treats
+# ONLY the package(s) named on the current `npm install` command line as
+# non-extraneous and DELETES any other already-installed package from
+# node_modules as a side effect -- confirmed by hand (`npm install --no-save
+# wabt@1.0.39` after puppeteer was already installed silently removed all 25
+# puppeteer packages, and vice versa). So each section below names BOTH pins on
+# its install line, not just its own, to keep the other section's package alive
+# regardless of which one actually triggered the install or what ran first.
+
 # 7. Browser-library gate (6d): node assembles WAT via the wabt npm package.
 echo "-- wasm browser library --"
 if have node; then
@@ -91,8 +103,25 @@ if have node; then
   # new pin.
   if [ -d "$(dirname "$0")/../harness/node_modules/wabt" ]; then ok "wabt npm present"
   elif [ "$CHECK_ONLY" = 1 ]; then miss "wabt npm (run: bin/setup.sh, installs into harness/node_modules)"
-  else (cd "$(dirname "$0")/../harness" && npm install --no-save wabt@1.0.39 >/dev/null 2>&1) && ok "wabt npm installed (harness/node_modules)" || warn "npm install wabt failed - TestWasmBrowserLibrary will SKIP"
+  else (cd "$(dirname "$0")/../harness" && npm install --no-save wabt@1.0.39 puppeteer@25.3.0 >/dev/null 2>&1) && ok "wabt npm installed (harness/node_modules)" || warn "npm install wabt failed - TestWasmBrowserLibrary will SKIP"
   fi
 else warn "node not found - the browser-library gate SKIPS"; fi
+
+# 8. Puppeteer (6f): the real two-tab convergence gate drives two headless-chrome
+#    pages over a real WebRTC data channel. Mirrors section 7's wabt idiom exactly.
+echo "-- puppeteer (6f two-tab browser gate) --"
+if have node; then
+  # The presence check below only asks "is harness/node_modules/puppeteer a
+  # directory"; it does not compare against the pinned version, so bumping the
+  # puppeteer@ pin on the install line does NOT trigger a refresh for a machine
+  # that already has an older install present. Delete harness/node_modules/puppeteer
+  # to force a reinstall at the new pin.
+  if [ -d "$(dirname "$0")/../harness/node_modules/puppeteer" ]; then ok "puppeteer npm present"
+  elif [ "$CHECK_ONLY" = 1 ]; then miss "puppeteer npm (run: bin/setup.sh, installs into harness/node_modules)"
+  else
+    warn "installing puppeteer npm - downloads a headless chrome (~400MB, observed; varies by platform)"
+    (cd "$(dirname "$0")/../harness" && npm install --no-save wabt@1.0.39 puppeteer@25.3.0 >/dev/null 2>&1 && node node_modules/puppeteer/install.mjs >/dev/null 2>&1) && ok "puppeteer npm installed (harness/node_modules)" || warn "npm install puppeteer failed - TestTwoTabDemo will SKIP"
+  fi
+else warn "node not found - the puppeteer gate SKIPS"; fi
 
 echo "== done =="

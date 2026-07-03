@@ -1,6 +1,8 @@
 package harness
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -338,5 +340,50 @@ func TestTwoTabSyncUnit(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sync unit: %v\n%s", err, out)
+	}
+}
+
+// ============================================================================
+// Task 3 (6f, the two-tab demo): the puppeteer gate -- the real browser pin.
+// examples/twotab/e2e.mjs drives TWO pages of one headless-chrome browser
+// against the demo statically served over httptest, asserting both pages'
+// #status DOMs report "connected" (a real RTCDataChannel paired, signaled over a
+// real BroadcastChannel) and both #count DOMs converge to 3 after two bumps in
+// one tab and one in the other. Self-contained: this test shells build.mjs
+// itself first (not TestTwoTabBuild), so it does not depend on test run order.
+// Skips (does not fail) when node, wabt, or the puppeteer npm package (bin/
+// setup.sh section 8) are absent.
+// ============================================================================
+
+// TestTwoTabDemo: the real two-tab claim, gated by requireBrowserLib (node +
+// wabt) plus a puppeteer presence check.
+func TestTwoTabDemo(t *testing.T) {
+	requireBrowserLib(t)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(wd, "node_modules", "puppeteer")); err != nil {
+		t.Skip("harness/node_modules/puppeteer not installed - run bin/setup.sh (section 8)")
+	}
+	dir := filepath.Join(wd, "..", "examples", "twotab")
+
+	build := exec.Command("node", "build.mjs")
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build.mjs: %v\n%s", err, out)
+	}
+
+	srv := httptest.NewServer(http.FileServer(http.Dir(dir)))
+	defer srv.Close()
+
+	e2e := exec.Command("node", "e2e.mjs", srv.URL+"/index.html")
+	e2e.Dir = dir
+	out, err := e2e.CombinedOutput()
+	if err != nil {
+		t.Fatalf("e2e.mjs: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "e2e ok") {
+		t.Fatalf("e2e.mjs did not report ok: %s", out)
 	}
 }
