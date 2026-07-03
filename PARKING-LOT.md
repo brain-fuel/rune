@@ -576,3 +576,24 @@ for a demo.
   Std.Float.fromNat etc.; a future cleanup would shorten these to Float.fromNat
   without breaking existing listings; parked until a user-facing DX complaint
   arises.
+
+- **`rune run` builtin-accel cross-registration via the always-on prelude.**
+  Structurally identical datatypes hash equal in de Bruijn core, so a user file
+  that declares its own `data Nat is zero | succ end` (WITHOUT `builtin nat`)
+  plus an eliminator-shaped `add` identical to the prelude's `addW` gets the
+  prelude's `builtin natAdd` acceleration cross-registered onto it under the
+  always-on prelude, changing emitted arithmetic (BEAM emits native `+` on
+  constructor records). `rune build`/`rune deploy` avoid it via demand-driven
+  prelude loading (`sourcesNeedPrelude`); the `rune run`/`rune emit` path can
+  still reach it. Parked: no current run-path consumer hits it (files that do
+  succ-arithmetic declare `builtin nat`, which auto-disables the prelude), and
+  the delivery-path risk (build/deploy) is closed. A future fix gates NatOp
+  registration on the declaring session source rather than the hash.
+
+- **`sourcesNeedPrelude` substring conservatism + run-vs-build asymmetry.**
+  `import StdX` (any module name starting with `Std`) loads the prelude for
+  build/deploy unnecessarily (harmless, mirrors the `builtin nat` substring
+  rule). Qualified `Std.Float.fmul` WITHOUT an `import Std.Float` directive
+  works under `rune run` (always-on) but not `rune build` (demand-driven); the
+  documented pattern (`import Std.Float`) works everywhere. Parked with this
+  note as the record.
