@@ -593,6 +593,28 @@ const wasmRuntime = `
   ;; ARC live-block count (alloc bumps, free drops): the leak/double-free probe.
   (func $rt_live (result i32) (global.get $live))
 
+  ;; rt_nat_to_u32: read a builtin-Nat (a K_BIG base-1e9 bignum) as a host u32, so a
+  ;; library-mode caller (the browser glue) can pull a small counter value out of a
+  ;; result without walking the bignum's limbs itself. value = limb0 + limb1*1e9
+  ;; (base-1e9 little-endian limbs); SATURATES at 2^32-1 (returned as the i32 bit
+  ;; pattern -1, i.e. 0xFFFFFFFF -- read it back on the JS side with '>>> 0') whenever
+  ;; the value has more than 2 limbs, or the 2-limb value itself exceeds 2^32-1. A
+  ;; 0-limb value (Nat's zero) reads back as 0 (both $l0/$l1 stay at their i64 zero
+  ;; default).
+  (func $rt_nat_to_u32 (param $v i32) (result i32)
+    (local $n i32) (local $l0 i64) (local $l1 i64) (local $val i64)
+    (local.set $n (call $big_nlimbs (local.get $v)))
+    (if (i32.gt_s (local.get $n) (i32.const 2))
+      (then (return (i32.const -1))))
+    (if (i32.gt_s (local.get $n) (i32.const 0))
+      (then (local.set $l0 (i64.extend_i32_u (call $big_limb (local.get $v) (i32.const 0))))))
+    (if (i32.gt_s (local.get $n) (i32.const 1))
+      (then (local.set $l1 (i64.extend_i32_u (call $big_limb (local.get $v) (i32.const 1))))))
+    (local.set $val (i64.add (local.get $l0) (i64.mul (local.get $l1) (i64.const 1000000000))))
+    (if (i64.gt_u (local.get $val) (i64.const 4294967295))
+      (then (return (i32.const -1))))
+    (i32.wrap_i64 (local.get $val)))
+
   ;; $rt_bucket_addr: return the $freelist bucket address for a rounded payload size, or 0
   ;; if the size is out of range. Sub-256-byte sizes (index < 64) hit the original exact-size
   ;; buckets. Sizes in [256, 65536] that are already an exact power of two hit one of 9 big
