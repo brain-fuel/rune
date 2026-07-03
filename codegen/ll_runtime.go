@@ -575,3 +575,45 @@ int main(int argc, char** argv) {
   return 0;
 }
 `
+
+// llRuntimeMainFloat is llRuntimeMain with setlocale(LC_NUMERIC, "C") pinned
+// at the top of main. Emitted instead of llRuntimeMain when the program uses
+// float IO prims (parseFloat/getFloat/printFloat); locale.h is already
+// #included by emitFloatIOPrimsLL which appears earlier in the same runtime.c.
+const llRuntimeMainFloat = `
+extern void rune_main(void);
+int main(void) {
+  setlocale(LC_NUMERIC, "C");
+  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;
+  UNIT = mkunit();
+  rt_add_root(&UNIT);
+  rune_main();
+#ifdef RUNE_GC_STATS
+  fprintf(stderr, "rune-ll: gc collections=%ld\n", gc_n_collections);
+#else
+  (void)gc_n_collections;
+#endif
+  return 0;
+}
+`
+
+// llRuntimeMainFloatArgv is the argc/argv+float variant (both setlocale and
+// argc/argv capture), for programs that use float IO prims AND argCountCode/
+// argAtCode.
+const llRuntimeMainFloatArgv = `
+extern void rune_main(void);
+int main(int argc, char** argv) {
+  rune_argc = argc; rune_argv = argv;
+  setlocale(LC_NUMERIC, "C");
+  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;
+  UNIT = mkunit();
+  rt_add_root(&UNIT);
+  rune_main();
+#ifdef RUNE_GC_STATS
+  fprintf(stderr, "rune-ll: gc collections=%ld\n", gc_n_collections);
+#else
+  (void)gc_n_collections;
+#endif
+  return 0;
+}
+`

@@ -181,6 +181,12 @@ func (C) Emit(p Program) (TargetSource, error) {
 	} else {
 		b.WriteString("int main(void) {\n")
 	}
+	// Pin LC_NUMERIC to "C" so the float formatter (snprintf %.*e / strtod) is
+	// locale-independent even when the user's LANG sets a decimal comma. Emitted
+	// only when the program uses float IO prims; non-float programs are unchanged.
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		b.WriteString("  setlocale(LC_NUMERIC, \"C\");\n")
+	}
 	// Capture the C stack bottom for the conservative GC root scan: every live
 	// Value used by the evaluation lives in a frame above this point, so the
 	// collector scans from the current SP up to here.
@@ -860,6 +866,8 @@ func emitFloatIOPrimsC(b *strings.Builder, p Program) {
 	if !usesFloatIO {
 		return
 	}
+	// locale.h required for setlocale(LC_NUMERIC, "C") called from main.
+	b.WriteString("#include <locale.h>\n")
 	// DFA validator: [+-]? ( \d+ (\.\d*)? | \.\d+ ) ([eE][+-]?\d+)?
 	b.WriteString("static int d6_validate_float(const unsigned char* s, size_t len) { if (len == 0) return 0; size_t i = 0; if (s[i] == '+' || s[i] == '-') i++; int has_digit = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } if (i < len && s[i] == '.') { i++; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } } if (!has_digit) return 0; if (i < len && (s[i] == 'e' || s[i] == 'E')) { i++; if (i < len && (s[i] == '+' || s[i] == '-')) i++; int hd = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { hd = 1; i++; } if (!hd) return 0; } return i == (size_t)len; }\n")
 	// __fmtf: ECMAScript Number::toString shortest-round-trip formatting.
@@ -875,7 +883,10 @@ func emitFloatIOPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static Value parseFloat(void) { return mkclo(&parseFloat_c, 0); }\n")
 	}
 	if usesForeign(p, "getFloat") {
-		b.WriteString("static Value getFloat_c1(Value u, Value* env) { (void)u; (void)env; double x = 0.0; scanf(\"%lf\", &x); return mkfloat(x); }\n")
+		// Contract: read one '\n'-terminated line (max 255 chars; longer lines are
+		// garbage -> 0.0), strip trailing '\n' then all trailing '\r', validate the
+		// whole remainder against the float DFA, strtod only on pass. EOF -> 0.0.
+		b.WriteString("static Value getFloat_c1(Value u, Value* env) { (void)u; (void)env; char buf[256]; if (!fgets(buf, sizeof buf, stdin)) return mkfloat(0.0); size_t n = strlen(buf); if (n > 0 && buf[n-1] == '\\n') { n--; buf[n] = '\\0'; } while (n > 0 && buf[n-1] == '\\r') { n--; buf[n] = '\\0'; } if (!d6_validate_float((const unsigned char*)buf, n)) return mkfloat(0.0); return mkfloat(strtod(buf, NULL)); }\n")
 		b.WriteString("static Value getFloat(void) { return mkclo(&getFloat_c1, 0); }\n")
 	}
 	if usesForeign(p, "printFloat") {

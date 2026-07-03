@@ -229,9 +229,19 @@ func (LL) EmitRuntimeFor(p Program) string {
 	emitTLSPrimsLL(&b, p)
 	// When argCountCode/argAtCode are used, main must accept argc/argv and populate
 	// the rune_argc/rune_argv globals that were declared in emitStreamPrimsLL above.
-	if usesForeign(p, "argCountCode") || usesForeign(p, "argAtCode") {
+	// When float IO prims are used, main pins LC_NUMERIC="C" so the emitted
+	// __fmtf/strtod formatter is locale-independent; locale.h was #included above
+	// by emitFloatIOPrimsLL.
+	floatIO := usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat")
+	argv := usesForeign(p, "argCountCode") || usesForeign(p, "argAtCode")
+	switch {
+	case argv && floatIO:
+		b.WriteString(llRuntimeMainFloatArgv)
+	case argv:
 		b.WriteString(llRuntimeMainArgv)
-	} else {
+	case floatIO:
+		b.WriteString(llRuntimeMainFloat)
+	default:
 		b.WriteString(llRuntimeMain)
 	}
 	return b.String()
@@ -500,6 +510,8 @@ func emitFloatIOPrimsLL(b *strings.Builder, p Program) {
 	if !usesFloatIO {
 		return
 	}
+	// locale.h required for setlocale(LC_NUMERIC, "C") called from the float main.
+	b.WriteString("#include <locale.h>\n")
 	b.WriteString("static int d6_validate_float(const unsigned char* s, size_t len) { if (len == 0) return 0; size_t i = 0; if (s[i] == '+' || s[i] == '-') i++; int has_digit = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } if (i < len && s[i] == '.') { i++; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } } if (!has_digit) return 0; if (i < len && (s[i] == 'e' || s[i] == 'E')) { i++; if (i < len && (s[i] == '+' || s[i] == '-')) i++; int hd = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { hd = 1; i++; } if (!hd) return 0; } return i == (size_t)len; }\n")
 	b.WriteString("static void __fmtf(double x, char* out) { if (x != x) { strcpy(out, \"NaN\"); return; } if (x > 1.7976931348623157e308) { strcpy(out, \"Infinity\"); return; } if (x < -1.7976931348623157e308) { strcpy(out, \"-Infinity\"); return; } if (x == 0.0) { strcpy(out, \"0\"); return; } int neg = (x < 0); if (neg) x = -x; char buf[40]; int p; for (p = 1; p <= 17; p++) { snprintf(buf, sizeof buf, \"%.*e\", p - 1, x); if (strtod(buf, NULL) == x) break; } char* ep = strchr(buf, 'e'); int n = atoi(ep + 1) + 1; int k = p; char s[20]; s[0] = buf[0]; int si = 1; if (p > 1) { int ii; for (ii = 2; ii < p + 1; ii++) s[si++] = buf[ii]; } s[si] = '\\0'; char* o = out; if (neg) *o++ = '-'; if (k <= n && n <= 21) { memcpy(o, s, k); o += k; int ii; for (ii = k; ii < n; ii++) *o++ = '0'; } else if (n > 0 && n < k) { memcpy(o, s, n); o += n; *o++ = '.'; memcpy(o, s + n, k - n); o += k - n; } else if (n >= -5 && n <= 0) { *o++ = '0'; *o++ = '.'; int ii; for (ii = 0; ii < -n; ii++) *o++ = '0'; memcpy(o, s, k); o += k; } else { *o++ = s[0]; if (k > 1) { *o++ = '.'; memcpy(o, s + 1, k - 1); o += k - 1; } *o++ = 'e'; int en = n - 1; o += sprintf(o, en >= 0 ? \"+%d\" : \"%d\", en); } *o = '\\0'; }\n")
 	if usesForeign(p, "parseFloat") {
@@ -507,7 +519,10 @@ func emitFloatIOPrimsLL(b *strings.Builder, p Program) {
 		b.WriteString("Value parseFloat(void) { return rt_mkclo(&parseFloat_c, 0); }\n")
 	}
 	if usesForeign(p, "getFloat") {
-		b.WriteString("static Value getFloat_c1(Value u, Value* env) { (void)u; (void)env; double x = 0.0; scanf(\"%lf\", &x); return mkfloat(x); }\n")
+		// Contract: read one '\n'-terminated line (max 255 chars; longer lines are
+		// garbage -> 0.0), strip trailing '\n' then all trailing '\r', validate the
+		// whole remainder against the float DFA, strtod only on pass. EOF -> 0.0.
+		b.WriteString("static Value getFloat_c1(Value u, Value* env) { (void)u; (void)env; char buf[256]; if (!fgets(buf, sizeof buf, stdin)) return mkfloat(0.0); size_t n = strlen(buf); if (n > 0 && buf[n-1] == '\\n') { n--; buf[n] = '\\0'; } while (n > 0 && buf[n-1] == '\\r') { n--; buf[n] = '\\0'; } if (!d6_validate_float((const unsigned char*)buf, n)) return mkfloat(0.0); return mkfloat(strtod(buf, NULL)); }\n")
 		b.WriteString("Value getFloat(void) { return rt_mkclo(&getFloat_c1, 0); }\n")
 	}
 	if usesForeign(p, "printFloat") {

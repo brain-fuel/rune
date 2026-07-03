@@ -282,6 +282,65 @@ func TestIOFloatStdinCRLFWasm(t *testing.T) {
 	}
 }
 
+// TestIOFloatStdinGarbage is the cross-backend garbage-line contract lock:
+// feeding "3.14 junk\n" (a line that has valid float prefix followed by garbage)
+// must produce "0\n999\n999\n999" on every backend (getFloat -> 0.0; doubled 0.0
+// prints as "0"; the two parseFloat probes each print 999; driver shows 999).
+func TestIOFloatStdinGarbage(t *testing.T) {
+	const want = "0\n999\n999\n999"
+	for _, bk := range floatIOBackends() {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runIOListing(t, bk, "ch566_float_io.rune", "main", "3.14 junk\n"); got != want {
+				t.Errorf("[%s] garbage stdin gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+}
+
+func TestIOFloatStdinGarbageJVM(t *testing.T) {
+	const want = "0\n999\n999\n999"
+	if got := runIOListingJVM(t, "ch566_float_io.rune", "3.14 junk\n"); got != want {
+		t.Errorf("[jvm] garbage stdin gave %q, want %q", got, want)
+	}
+}
+
+func TestIOFloatStdinGarbageC(t *testing.T) {
+	const want = "0\n999\n999\n999"
+	got, ok := runNativeListingStdin(t, "c", "ch566_float_io.rune", "main", "3.14 junk\n")
+	if !ok {
+		t.Skip("cc not in PATH")
+	}
+	if got != want {
+		t.Errorf("[c] garbage stdin gave %q, want %q", got, want)
+	}
+}
+
+func TestIOFloatStdinGarbageLL(t *testing.T) {
+	const want = "0\n999\n999\n999"
+	got, ok := runNativeListingStdin(t, "ll", "ch566_float_io.rune", "main", "3.14 junk\n")
+	if !ok {
+		t.Skip("clang not in PATH")
+	}
+	if got != want {
+		t.Errorf("[ll] garbage stdin gave %q, want %q", got, want)
+	}
+}
+
+func TestIOFloatStdinGarbageWasm(t *testing.T) {
+	const want = "0\n999\n999\n999"
+	got, ok := runWasmListingFloatStdin(t, "ch566_float_io.rune", "main", "3.14 junk\n")
+	if !ok {
+		t.Skip("wasmtime not available")
+	}
+	if got != want {
+		t.Errorf("[wasm] garbage stdin gave %q, want %q", got, want)
+	}
+}
+
 // TestIOFloatStdinC is the C native backend gate for ch566_float_io.rune (stdin).
 func TestIOFloatStdinC(t *testing.T) {
 	const want = "6.28\n999\n999\n999"
