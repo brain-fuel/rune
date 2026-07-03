@@ -347,6 +347,31 @@ source/module split:
    "js:Math.sqrt" for the browser coexist (Idris's multi-backend descriptors,
    Gleam's BEAM/JS dual targeting).
 
+**Class 3's first shipped realization (Plan 6d, WASM browser library).** The
+sandbox/no-native class is no longer only a design slot: `codegen.Wasm.EmitLibrary`
+(`codegen/wasm_library.go`) builds a passive, WASI-free library-mode WAT module (an
+export ABI -- `init`/`rt_apply`/`rt_retain`/`rt_release`/the `rt_bin_*` family/
+`def_<name>` accessors, no `_start`) plus a generated ES module `glue.js` that any
+WASI-free JS host (a browser, `node --experimental-wasm-*` free of any filesystem
+grant) loads directly via `WebAssembly.instantiate`. This is the per-backend target
+table's "js:..." row realized concretely for THIS backend, not a C-symbol shim but a
+whole calling convention: JS drives the module purely through the exported ARC
+primitives (`glue.call`/`glue.retain`/`glue.release`/`glue.mkBin`/`glue.readBin`),
+never touching a raw C ABI. `docs/superpowers/specs/2026-07-03-wasm-webrtc-shim-
+design.md` is the design record; `harness/browserlib/driver.mjs` + `wasm_library_test.go`
+are the gate (a real WAT assembled by the `wabt` npm package and loaded exactly as a
+browser would, `TestWasmBrowserLibraryConverge` proving two independent instances
+converge over the wire). One finding worth generalizing: `glue.js`'s `call()` helper
+chains `rt_apply` across a curried multi-argument export one argument at a time: the
+FIRST value applied (the retained top-level accessor) needs no explicit release (it
+mirrors the in-module immortal `CGlobal` reference, which never gets one either), but
+every INTERMEDIATE partial-application closure produced by a subsequent apply is an
+ordinary, non-immortal heap value and needs an explicit `rt_release` once consumed --
+exactly mirroring how in-module compiled code (e.g. a Horner-fold body chaining two
+applies) already does this explicitly. A generic external caller crossing this
+boundary must reproduce that same discipline; `wasmLibraryGlue`'s generated `call()`
+now does.
+
 `codegen.Backend.Foreign()` (`R-IR.md:280`) returns, per op, the `ForeignSig`
 grown with the contract and `CRepr` data; an op a backend cannot realize is a
 clean error (R-IR's conformance discipline). The M4 conformance corpus checks

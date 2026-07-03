@@ -17,6 +17,10 @@
 -- `binAt`), exercised end-to-end by the runtime gate (TestGCCodecRuns), never by
 -- the kernel. Do not read the theorem as covering the foreign edge; it does not.
 --
+-- The per-frame length prefix is a bit count < 256 for any slot < 2^255; digits
+-- are structurally 0/1, so the Bin edge is byte-safe for every physically
+-- reachable counter.
+--
 -- BASE CHOICE: base-2 (positional binary), length-prefixed frame. WHY, on the
 -- survey evidence:
 --   * There is NO existing reusable `natOf (digitsOf n) = n` inverse lemma in the

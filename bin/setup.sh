@@ -84,6 +84,11 @@ have rustc && ok "rustc $(rustc --version 2>/dev/null | awk '{print $2}')" || wa
 # 7. Browser-library gate (6d): node assembles WAT via the wabt npm package.
 echo "-- wasm browser library --"
 if have node; then
+  # The presence check below only asks "is harness/node_modules/wabt a directory";
+  # it does not compare against the pinned version, so bumping the wabt@ pin on the
+  # install line does NOT trigger a refresh for a machine that already has an older
+  # install present. Delete harness/node_modules/wabt to force a reinstall at the
+  # new pin.
   if [ -d "$(dirname "$0")/../harness/node_modules/wabt" ]; then ok "wabt npm present"
   elif [ "$CHECK_ONLY" = 1 ]; then miss "wabt npm (run: bin/setup.sh, installs into harness/node_modules)"
   else (cd "$(dirname "$0")/../harness" && npm install --no-save wabt@1.0.39 >/dev/null 2>&1) && ok "wabt npm installed (harness/node_modules)" || warn "npm install wabt failed - TestWasmBrowserLibrary will SKIP"

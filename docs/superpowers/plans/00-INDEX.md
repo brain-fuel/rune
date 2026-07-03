@@ -140,7 +140,23 @@ Listed in dependency order. Each is its own spec-to-plan-to-implementation cycle
 > - 6b: the Perceus ownership INSERTION pass - `2026-06-27-perceus-ownership-wasm.md` (DONE, merged to main 372dc87, NOT tagged - internal infra, no behavior change). EXPLICIT PORTABLE NODES (CIr->CIr CDup/CDrop, opt-in WASM-only; same annotated CIr drives 6e). 12 commits; output-invariant whole corpus + 8 backends byte-identical; leak-free proven per ownership case (vars/let/app/closures/constructors/case/field/pairs). PATH B model (borrowed dup-on-consume, owned args dropped when dead), store=move. Final whole-branch review caught a base-fragment UAF (let h=g in h) all 9 per-task reviews missed - WAT-verified-fixed + regression-guarded. HONEST BOUNDARY: 0 real listings reach steady-flat (inline pattern-matching pervasive) -> deferred to 6b-2.
 > - 6b-2: close the leak residuals (real programs steady-flat) - `2026-06-27-perceus-6b2-leak-residuals.md` (DONE, v3.337.0; Task-1 commit 4f7e68e et seq; all four residuals closed, PerceusBalanceable re-opened, TestPerceusRealisticFlat + corpus steady gate green). BONUS beyond plan scope: WASM partial support (CBounce lowering + ARC trampoline, spec 376eb8b) landed v3.341.0 (5335be3), so the "partials unsupported" exclusion is gone too; accel programs re-opened v3.342.0 range (37925db). Original scope note: INVESTIGATION RESHAPED SCOPE: the 5 "residuals" are really 4 LEAKS + 1 reclassification. CBounce is NOT a leak - WASM has no emitIn CBounce case, so partials are UNSUPPORTED (a separate future "WASM partial support" plan), kept excluded. The 4 leaks COMPOUND (a real `optElim ...(some 7)` program leaks via several at once), so one plan, measured by per-task leak-DELTA with a real-program-flat payoff. 5 tasks across 3 layers: (1) emitNatFold owns its loop temps + RETAINS the counter for the step [pass/emitter]; (2) REMOVE the curry-through carve-out -> dead motive drops [pass, coupled to+enabled by Task 1]; (3) saturated-constructor DIRECT emit, no intermediate K_CLO [emitter, like accelDispatch]; (4) rt_big_parse releases per-digit temps [runtime - UNFREEZES wasm_runtime.go, additive ownership, ARC tests stay green]; (5) re-open PerceusBalanceable + realistic program at true flat + corpus coverage>0 [payoff]. store=move preserved (no retain-on-store/PATH A).
 > - 6c: strings/bytes as refcounted heap objects (Bin over ARC) - `2026-07-02-wasm-bin-arc.md` (DONE, branch `feat/wasm-bin-arc`, commits `f4f49d3`..`e00b270`). 4 tasks: power-of-two big buckets [256B,64KB] in the free list (`f4f49d3`, `b63a09f`); `K_BIN = 8` packed-byte ARC leaf kind (`0452208`); full `Bin` op parity (`LitBytes`, `binEmpty`/`binCons`/`binLen`/`binAt`/`printBin`, `$show`) joining the ch483 cross-backend gate (`571cdd4`); the steady-flat payoff (`TestPerceusBinMessageLoopFlat`: the 6f message-loop shape at zero per-run `$live` delta) + the >64KB orphan boundary pin (`TestARCBinHugeOrphanBalanced`), which also fixed two pre-existing gaps: `WasmSteadyModule` never baked foreign-op WAT bodies (no prior steady receiver used one), and `consumeOwning` (`codegen/perceus.go`) did not treat a bare-VALUE `CForeign` (`binEmpty`) as a borrowed dup-on-consume leaf the way it already treated `CGlobal`, a genuine use-after-free on the shared cached `binEmpty` pointer, not a leak.
-> - 6d: WebRTC FFI shim (WASM imports, sandbox/no-native interop class).
+> - 6d: WASM browser-library shim (DONE, branch `feat/wasm-browser-library`,
+>   `420cb7d`..the docs commit closing this task) - `2026-07-03-wasm-browser-
+>   library.md`. The design narrowed from a WebRTC FFI shim to a passive,
+>   browser-consumable WASM LIBRARY artifact: a proven G-Counter wire codec
+>   (`ch565_gc_codec.rune`, `codecRoundTrip` over an in-language byte list, plus
+>   the thin unproven `Bin` foreign edge), `codegen.Wasm.EmitLibrary` (library-
+>   mode WAT export ABI + generated `glue.js`, app-mode emission untouched), the
+>   node+wabt harness substrate + single-instance smoke gate, and the TWO-
+>   INSTANCE convergence gate (`TestWasmBrowserLibraryConverge`: two independent
+>   `glue.load` instances gossip a G-Counter as plain bytes and converge under
+>   both orders, live-delta 0). Found and fixed one real bug along the way: the
+>   generated `glue.js` `call()` helper was missing an explicit `rt_release` on
+>   each intermediate partial-application closure when chaining `rt_apply`
+>   across a curried multi-argument export (invisible until this task became
+>   the first consumer to drive a 2-argument export across the external ABI).
+>   6f's remaining surface: WebRTC signaling + DOM + two tabs consuming
+>   `glue.js` verbatim.
 > - 6e: port the ARC discipline to C + LLVM (replace mark-sweep).
 > - 6f: the two-tab CRDT browser app (WASM merge + JS/WebRTC glue + two divs).
 > - 6g: the GTM script / book chapter (proven-minimal-IAM + Ledger moments).

@@ -44,8 +44,16 @@ checklist of everything between HEAD and a shippable beta.
    (`TestARCBinHugeOrphanBalanced`) close it. The packed-String codec (bignum
    packing, landed for bible ops) stays a SEPARATE representation; 6c is the
    heap-object one, now also done.
-4. **6d: WebRTC FFI shim.** WASM imports; the sandbox/no-native interop class.
-   Smallest sufficient surface: open channel, send bytes, receive callback.
+4. ~~6d: WebRTC FFI shim~~ DONE (branch `feat/wasm-browser-library`, `420cb7d`..the
+   docs commit closing this task). The design narrowed to a passive, browser-
+   consumable WASM LIBRARY artifact rather than a WebRTC-specific shim: a proven
+   G-Counter wire codec (`ch565_gc_codec.rune`), `codegen.Wasm.EmitLibrary`
+   (library-mode WAT export ABI + generated `glue.js`, app-mode emission
+   untouched), the node+wabt harness substrate, and a two-instance convergence
+   gate (`TestWasmBrowserLibraryConverge`) proving two independent module
+   instances gossip a G-Counter's state as plain bytes and converge under both
+   gossip orders, live-delta 0. 6f's remaining surface: WebRTC signaling + DOM +
+   two tabs consuming `glue.js` verbatim.
 5. **6f: the two-tab CRDT browser app.** WASM merge + JS/WebRTC glue + two divs.
    Reuses a proven CvRDT (G-Counter or MV-Register) and the convergence proof.
 6. **Five-outputs integration.** One demo source producing, from the same content

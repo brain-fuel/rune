@@ -257,6 +257,17 @@ export function readNat(handle, ptr) {
 // value the memoized thunk returns; retaining gives this call its own reference),
 // then chain rt_apply over each argument. Returns the final owned value -- release it
 // when done.
+//
+// A curried definition of arity >= 2 (e.g. a two-argument export) applies one
+// argument at a time; every intermediate step (all but the last) returns a FRESH
+// partial-application closure, distinct from the immortal memoized accessor and
+// from the final result. In-module compiled code releases that same kind of
+// intermediate explicitly once it has been consumed as the next apply's closure
+// argument (mirroring, e.g., a curried definition's own generated body chaining
+// two applies together); this loop does the same for every step after the first
+// -- the retained accessor consumed by the FIRST apply needs no such release (it
+// mirrors the immortal top-level accessor reference, which is never released),
+// but each intermediate produced by every apply from the second onward does.
 export function call(handle, name, ...args) {
   const exportName = EXPORT_MAP[name];
   if (!exportName) {
@@ -264,8 +275,12 @@ export function call(handle, name, ...args) {
   }
   let v = handle.exports[exportName]();
   handle.exports.rt_retain(v);
-  for (const a of args) {
-    v = handle.exports.rt_apply(v, a);
+  for (let i = 0; i < args.length; i++) {
+    const next = handle.exports.rt_apply(v, args[i]);
+    if (i > 0) {
+      handle.exports.rt_release(v);
+    }
+    v = next;
   }
   return v;
 }

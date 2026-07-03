@@ -189,18 +189,52 @@ func runBrowserLib(t *testing.T, listing string, exports []string, scenario stri
 	return runBrowserLibExports(t, listing, exp, "browserlib", scenario)
 }
 
+// browserExports is the export list every browser-library gate in this file builds
+// the ch565_gc_codec.rune artifact against: the full named-operation surface (Task 3's
+// smoke chain plus the merge/codec ops Task 4's converge scenarios need), so every gate
+// shares one artifact shape (named once, per the plan's Task 4 self-review).
+var browserExports = []string{
+	"initGC", "bump", "value", "merge", "encodeGC", "decodeGC", "gcToBin", "gcFromBin",
+}
+
 // TestWasmBrowserLibrarySmoke is the single-instance smoke gate (Task 3): a real WAT
 // module, assembled by wabt and loaded through the generated glue exactly as a browser
 // would, drives initGC -> bump -> bump -> value through the export ABI and prints the
 // result. Skips (does not fail) when node or the wabt npm package is absent.
 func TestWasmBrowserLibrarySmoke(t *testing.T) {
-	out := runBrowserLib(t, "ch565_gc_codec.rune",
-		[]string{"initGC", "bump", "value", "merge", "encodeGC", "decodeGC", "gcToBin", "gcFromBin"},
-		"smoke")
+	out := runBrowserLib(t, "ch565_gc_codec.rune", browserExports, "smoke")
 	// line 1: the counter value; line 2: rt_live after the calls.
 	lines := strings.Split(out, "\n")
 	if lines[0] != "2" {
 		t.Fatalf("smoke value: got %q want 2 (full output %q)", lines[0], out)
+	}
+}
+
+// TestWasmBrowserLibraryConverge is the two-instance convergence gate (Task 4): TWO
+// INDEPENDENT glue.load instances (as isolated as two browser tabs) each do their own
+// local writes, cross their serialized state as plain bytes (gcToBin -> readBin/mkBin
+// -> gcFromBin), merge into their own state, and both must observe the SAME converged
+// counter value -- the ch72 mergeComm proof (merge is commutative, so replicas converge
+// regardless of gossip order), observed here at the browser export ABI rather than in
+// the kernel. converge-reversed swaps which instance processes the remote message
+// first; both orders must converge identically. Each scenario also prints a live-delta
+// (rt_live() against a baseline captured after a throwaway warm-up round, mirroring the
+// steady-harness run-2 discipline for the one-time def_<name> accessor-cache cost) that
+// must be exactly zero: every pointer the driver retained or allocated for the scenario
+// itself was released.
+func TestWasmBrowserLibraryConverge(t *testing.T) {
+	for _, sc := range []string{"converge", "converge-reversed"} {
+		out := runBrowserLib(t, "ch565_gc_codec.rune", browserExports, sc)
+		lines := strings.Split(out, "\n")
+		if len(lines) < 4 {
+			t.Fatalf("%s: expected 4 output lines (value A, value B, delta A, delta B), got %v (full output %q)", sc, lines, out)
+		}
+		if lines[0] != "3" || lines[1] != "3" {
+			t.Fatalf("%s: both instances must converge to 3, got %v", sc, lines[:2])
+		}
+		if lines[2] != "0" || lines[3] != "0" {
+			t.Fatalf("%s: live-delta must be 0 after releasing every held pointer, got %v", sc, lines[2:4])
+		}
 	}
 }
 

@@ -192,7 +192,29 @@ any balanced program must return `$live` to its baseline after main.
   freshly owned let the first fold step release the SHARED cached pointer out from
   under every later reference. Fixed by adding `CForeign` to `consumeOwning`'s
   dup-on-consume-borrowed case.
-- Plan 6d: the WebRTC FFI shim (the sandbox/no-native interop class) as WASM imports.
+- **Plan 6d DONE** (`420cb7d`..the docs commit closing this task, branch
+  `feat/wasm-browser-library`): the sandbox/no-native interop class realized as a
+  passive WASM LIBRARY artifact, not a WebRTC shim (the design narrowed to a
+  browser-consumable export ABI + proven wire codec; WebRTC signaling stays 6f's
+  job). Four tasks: (1) `ch565_gc_codec.rune`, a proven G-Counter byte codec
+  (`codecRoundTrip` over an in-language `NList`, plus the thin unproven `Bin`
+  foreign edge); (2) `codegen.Wasm.EmitLibrary` (`codegen/wasm_library.go`) --
+  library-mode WAT (export ABI, no `_start`) + generated `glue.js`, sharing the
+  app-mode module core so app-mode emission stays byte-identical; (3) the
+  node+wabt harness substrate (`harness/browserlib/driver.mjs`, `bin/setup.sh`
+  section 7) + the single-instance smoke gate; (4) the TWO-INSTANCE convergence
+  gate (`TestWasmBrowserLibraryConverge`) -- two independent `glue.load`
+  instances gossip a G-Counter's state as plain bytes (`gcToBin`/`gcFromBin`)
+  and converge to the same value in both gossip orders, the ch72 `mergeComm`
+  proof observed at the browser ABI, with a live-delta balance assertion (0
+  after every held pointer is released). Task 4 also found and fixed a real
+  ARC gap in the Task 2 glue: `glue.js`'s `call()` helper chains `rt_apply`
+  across a curried multi-argument export one argument at a time, and every
+  INTERMEDIATE partial-application closure (all but the first value applied)
+  needs an explicit `rt_release` once consumed -- mirroring how in-module
+  compiled code already does this for a chained apply -- which `call()` was
+  missing (invisible until Task 4 became the first consumer to drive a
+  2-argument export, `merge`, across the external ABI).
 - Plan 6e: port the ARC discipline to C and LLVM runtimes (replace mark-sweep GC).
 - Plan 6f: the two-tab CRDT browser app (WASM merge + JS/WebRTC glue + two divs).
 - Plan 6g: the go-to-market script / book chapter (the proven-minimal-IAM + Ledger
