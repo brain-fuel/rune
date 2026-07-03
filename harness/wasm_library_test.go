@@ -284,3 +284,59 @@ func TestTwoTabBuild(t *testing.T) {
 	run("build.mjs")
 	run("smoke.mjs")
 }
+
+// TestTwoTabOwnership: the empirical pin for app.js's ownership discipline (Task 2)
+// against the REAL glue -- examples/twotab/ownership_check.mjs replays the exact
+// call pattern app.js uses (init, repeated bumps, render/encode reads, a merge with
+// a decoded copy of the state's own bytes) and asserts both the counter values and
+// that rt_live() shows zero marginal growth on an identical second run (this
+// package's own steady-harness convention; see runBrowserLibExports's warm-up-round
+// note). node + wabt gated like TestTwoTabBuild.
+func TestTwoTabOwnership(t *testing.T) {
+	requireBrowserLib(t)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(wd, "..", "examples", "twotab")
+	run := func(script string) {
+		cmd := exec.Command("node", script)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", script, err, out)
+		}
+	}
+	run("build.mjs")
+	run("ownership_check.mjs")
+}
+
+// ============================================================================
+// Task 2 (6f, the two-tab demo): the sync protocol module (examples/twotab/sync.js)
+// -- channel-injectable WebRTC pairing over a BroadcastChannel-shaped signal object
+// and an RTCPeerConnection-shaped factory, so it is unit-testable under plain node
+// with fakes, no browser. examples/twotab/sync_test.mjs drives four scenarios
+// (pairing/offerer-election, initial sync on channel open, sendState after a local
+// bump, and undeduplicated duplicate delivery) against fake signal + fake
+// cross-wired data channels; the merge-idempotence theorem that makes duplicate/
+// reordered delivery harmless is the app's (ch72), not this protocol layer's, so the
+// test only asserts delivery here.
+// ============================================================================
+
+// TestTwoTabSyncUnit: the sync.js protocol unit gate (node + fakes, no browser, no
+// wasm artifacts required). Skips (does not fail) when node is absent.
+func TestTwoTabSyncUnit(t *testing.T) {
+	if _, err := exec.LookPath("node"); err != nil {
+		t.Skip("node not in PATH")
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("node", "sync_test.mjs")
+	cmd.Dir = filepath.Join(wd, "..", "examples", "twotab")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sync unit: %v\n%s", err, out)
+	}
+}

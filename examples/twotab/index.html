@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Two-Tab CRDT Counter</title>
+<style>
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    margin-top: 4rem;
+    font-family: system-ui, sans-serif;
+    color: #1a1a1a;
+  }
+  #count {
+    font-size: 6rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  #bump {
+    font-size: 1.5rem;
+    padding: 0.5rem 2rem;
+    cursor: pointer;
+  }
+  #status {
+    color: #555;
+  }
+  footer {
+    max-width: 34rem;
+    text-align: center;
+    color: #555;
+    font-size: 0.9rem;
+    margin-top: 2rem;
+    padding: 0 1rem;
+  }
+</style>
+</head>
+<body>
+  <div id="count">0</div>
+  <button id="bump">Bump</button>
+  <div id="status">starting</div>
+  <footer>
+    Machine-checked: the counter state, the merge (convergence proven:
+    commutative, idempotent, associative), and the wire codec (round-trip
+    theorem). Trusted glue: WebRTC transport, signaling, and this page's
+    JavaScript.
+  </footer>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
