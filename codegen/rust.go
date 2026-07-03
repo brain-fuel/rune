@@ -150,14 +150,20 @@ func (Rust) Emit(p Program) (TargetSource, error) {
 	// dressing. No regex crate — manual validator. Precision-search loop (p=0..=17) finds
 	// shortest round-trip digits from format!("{:.*e}", p, x); _s2h decodes packed String.
 	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		// Validator matches the binding regex ^[+-]?((\d+(\.\d*)?)|(\.\d+))([eE][+-]?\d+)?$
+		// exactly: accept iff sawDigitBeforeDot || (sawDot && sawDigitAfterDot).
+		// A lone dot (or sign + dot) lacks both, so it is correctly rejected.
 		b.WriteString("fn __is_valid_float_str(s: &str) -> bool {\n")
 		b.WriteString("    let s = s.as_bytes(); let n = s.len(); if n == 0 { return false; }\n")
 		b.WriteString("    let mut i = 0usize;\n")
 		b.WriteString("    if i < n && (s[i] == b'+' || s[i] == b'-') { i += 1; }\n")
-		b.WriteString("    let start = i;\n")
-		b.WriteString("    while i < n && s[i].is_ascii_digit() { i += 1; }\n")
-		b.WriteString("    if i < n && s[i] == b'.' { i += 1; while i < n && s[i].is_ascii_digit() { i += 1; } }\n")
-		b.WriteString("    if i == start { return false; } // must have at least one digit\n")
+		b.WriteString("    let d0 = i; while i < n && s[i].is_ascii_digit() { i += 1; }\n")
+		b.WriteString("    let saw_before = i > d0;\n")
+		b.WriteString("    let saw_dot = i < n && s[i] == b'.';\n")
+		b.WriteString("    if saw_dot { i += 1; }\n")
+		b.WriteString("    let d1 = i; if saw_dot { while i < n && s[i].is_ascii_digit() { i += 1; } }\n")
+		b.WriteString("    let saw_after = saw_dot && i > d1;\n")
+		b.WriteString("    if !saw_before && !saw_after { return false; }\n")
 		b.WriteString("    if i < n && (s[i] == b'e' || s[i] == b'E') {\n")
 		b.WriteString("        i += 1;\n")
 		b.WriteString("        if i < n && (s[i] == b'+' || s[i] == b'-') { i += 1; }\n")

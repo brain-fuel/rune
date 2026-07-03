@@ -19,7 +19,7 @@ func floatIOBackends() []ioBackend {
 }
 
 func TestIOFloatStdinConformance(t *testing.T) {
-	const want = "6.28\n999\n999"
+	const want = "6.28\n999\n999\n999"
 	for _, bk := range floatIOBackends() {
 		bk := bk
 		t.Run(bk.name, func(t *testing.T) {
@@ -34,7 +34,7 @@ func TestIOFloatStdinConformance(t *testing.T) {
 }
 
 func TestIOFloatStdinCRLF(t *testing.T) {
-	const want = "6.28\n999\n999"
+	const want = "6.28\n999\n999\n999"
 	for _, bk := range floatIOBackends() {
 		bk := bk
 		t.Run(bk.name, func(t *testing.T) {
@@ -55,7 +55,7 @@ func runIOListingJVM(t *testing.T, listing, stdin string) string {
 	t.Helper()
 	javac25, java25, ok := findJava25()
 	if !ok {
-		t.Skip("no JDK 25 (asdf temurin-25) — the JVM backend targets Java 25")
+		t.Skip("no JDK 25 (asdf temurin-25); the JVM backend targets Java 25")
 	}
 	s := loadListing(t, listing)
 	p, err := s.EmitProgram("main")
@@ -84,14 +84,14 @@ func runIOListingJVM(t *testing.T, listing, stdin string) string {
 }
 
 func TestIOFloatStdinJVM(t *testing.T) {
-	const want = "6.28\n999\n999"
+	const want = "6.28\n999\n999\n999"
 	if got := runIOListingJVM(t, "ch566_float_io.rune", "3.14\n"); got != want {
 		t.Errorf("[jvm] float stdin run gave %q, want %q", got, want)
 	}
 }
 
 func TestIOFloatStdinCRLFJVM(t *testing.T) {
-	const want = "6.28\n999\n999"
+	const want = "6.28\n999\n999\n999"
 	if got := runIOListingJVM(t, "ch566_float_io.rune", "3.14\r\n"); got != want {
 		t.Errorf("[jvm] float stdin CRLF run gave %q, want %q", got, want)
 	}

@@ -311,6 +311,9 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 		b.WriteString("ff___shortest_sci(AX) -> ff___shortest_sci(AX, 0).\n")
 		b.WriteString("ff___shortest_sci(AX, P) when P > 17 -> binary_to_list(float_to_binary(AX, [{scientific, 17}]));\n")
 		b.WriteString("ff___shortest_sci(AX, P) -> S = binary_to_list(float_to_binary(AX, [{scientific, P}])), try Parsed = list_to_float(ff___make_parseable(S)), if Parsed =:= AX -> S; true -> ff___shortest_sci(AX, P + 1) end catch _:_ -> ff___shortest_sci(AX, P + 1) end.\n")
+		// Erlang floats cannot hold IEEE inf/NaN (arithmetic raises badarith instead),
+		// so no Infinity/NaN branches are emitted. The NaN guard (X =/= X) is ordered
+		// first as a defensive catch; it is unreachable in practice on the BEAM.
 		b.WriteString("ff___fmtf(X) -> if X =/= X -> \"NaN\"; true -> try if X =:= 0.0 -> \"0\"; true -> Sign = if X < 0.0 -> \"-\"; true -> \"\" end, S = ff___shortest_sci(erlang:abs(X)), ff___fmtf2(S, Sign) end catch _:_ -> float_to_list(X) end end.\n")
 		b.WriteString("ff___fmtf2(S, Sign) -> {M, [$e | E]} = lists:splitwith(fun(C) -> C =/= $e end, S), Exp = case E of [$+ | R] -> list_to_integer(R); [$- | R] -> -list_to_integer(R); _ -> list_to_integer(E) end, K = Exp + 1, Digs0 = [C || C <- M, C =/= $.], Digs = lists:reverse(lists:dropwhile(fun(C) -> C =:= $0 end, lists:reverse(Digs0))), D = case Digs of [] -> \"0\"; _ -> Digs end, N = length(D), Out = if N =< K, K =< 21 -> D ++ lists:duplicate(K - N, $0); K > 0, K =< 21, K < N -> lists:sublist(D, K) ++ \".\" ++ lists:nthtail(K, D); K > -6, K =< 0 -> \"0.\" ++ lists:duplicate(-K, $0) ++ D; true -> Base = if N > 1 -> [hd(D)] ++ \".\" ++ tl(D); true -> D end, Ek = K - 1, if Ek >= 0 -> Base ++ \"e+\" ++ integer_to_list(Ek); true -> Base ++ \"e-\" ++ integer_to_list(-Ek) end end, Sign ++ Out.\n")
 	}
