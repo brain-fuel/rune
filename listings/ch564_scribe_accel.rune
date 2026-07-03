@@ -71,10 +71,12 @@ fmod : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is modF m m n end end
 builtin natDiv fdiv
 builtin natMod fmod
 
--- Euclid, fuel-bounded, ONE ih. Every rational is reduced at construction,
--- so operands stay small and a few dozen steps suffice; fuel exhaustion
--- returns 1 (no reduction), which is value-correct, never wrong. Fuel is
--- kept tight because compiled fuel towers run to full depth (eager arms).
+-- Euclid, fuel-bounded, ONE ih, arms THUNKED: the loop costs its ACTUAL
+-- steps compiled, so the fuel bound is generous for free. It must be: a
+-- silent fuel exhaustion returns 1 (value-correct, unreduced) and the
+-- unreduced values COMPOUND downstream into a denominator explosion - the
+-- kappa table's 10^16-scale constants need ~150 Euclid steps once squared
+-- through the flatness test, and fuel 96 was exactly that cliff.
 -- The arms are THUNKS: case arms that are plain values evaluate eagerly in
 -- compiled code (so the recursion would burn the whole fuel tower on every
 -- call), but a lambda arm is only applied when selected. With thunked arms
@@ -96,7 +98,7 @@ gcdGo : Nat -> Nat -> Nat -> Nat is
 end
 -- point-free on purpose: an eta-expanded wrapper would rebuild the 96-level
 -- eliminator tower on every call; this builds it once at load.
-gcdN : Nat -> Nat -> Nat is gcdGo 96 end
+gcdN : Nat -> Nat -> Nat is gcdGo 4096 end
 
 data List : U -> U is
   nil : (A : U) -> List A
@@ -507,16 +509,32 @@ cubFlat : Qn -> Cub -> Bool is
         let d : Pt = psub p3 p0 in
         let len2 : Qn = qadd (qsq (px d)) (qsq (py d)) in
         let t2 : Qn = qsq tol in
+        -- ABSOLUTE acceptance for tiny segments: once a segment sits inside
+        -- the tolerance ball the relative test below can reject it forever
+        -- (cross^2 <= tol^2 * len2 fails as len2 -> 0), and with gridded
+        -- midpoints subdivision reaches a FIXED POINT: a livelock the fuel
+        -- then eats. A converging segment never comes near this scale, so
+        -- previously-locked outputs are untouched.
+        let tiny : Bool =
+          andB (qle len2 t2) (andB (qle (dist2 c1 p0) t2) (qle (dist2 c2 p0) t2))
+        in
         let k : Unit -> Bool =
-          case qeq len2 qZ of
-          | true -> fn (u : Unit) is andB (qle (dist2 c1 p0) t2) (qle (dist2 c2 p0) t2) end
+          case tiny of
+          | true -> fn (u : Unit) is true end
           | false -> fn (u : Unit) is
-              let v1 : Pt = psub c1 p0 in
-              let v2 : Pt = psub c2 p0 in
-              let x1 : Qn = qsub (qmul (px d) (py v1)) (qmul (py d) (px v1)) in
-              let x2 : Qn = qsub (qmul (px d) (py v2)) (qmul (py d) (px v2)) in
-              let bound : Qn = qmul t2 len2 in
-              andB (qle (qsq x1) bound) (qle (qsq x2) bound)
+              let k2 : Unit -> Bool =
+                case qeq len2 qZ of
+                | true -> fn (u2 : Unit) is andB (qle (dist2 c1 p0) t2) (qle (dist2 c2 p0) t2) end
+                | false -> fn (u2 : Unit) is
+                    let v1 : Pt = psub c1 p0 in
+                    let v2 : Pt = psub c2 p0 in
+                    let x1 : Qn = qsub (qmul (px d) (py v1)) (qmul (py d) (px v1)) in
+                    let x2 : Qn = qsub (qmul (px d) (py v2)) (qmul (py d) (px v2)) in
+                    let bound : Qn = qmul t2 len2 in
+                    andB (qle (qsq x1) bound) (qle (qsq x2) bound)
+                  end
+                end
+              in k2 unit
             end
           end
         in k unit
@@ -524,15 +542,38 @@ cubFlat : Qn -> Cub -> Bool is
   end
 end
 
+-- Subdivision midpoints are QUANTIZED to the 1/2^20 grid. Without this,
+-- denominators COMPOUND exponentially through the splits (midpoint dens
+-- multiply, and the kappa table's 10^16-scale denominators are coprime to
+-- everything, so gcd reduction is powerless) and the flattener drowns in
+-- thousand-bit integers. The 1e-6 quantization error is three orders of
+-- magnitude inside the flatness tolerance, endpoints stay exact, and the
+-- final vertices are snapped to 1/256 anyway; the cross-language mask locks
+-- re-verify the agreement empirically.
+gridDen : Nat is 1048576 end
+qgrid : Qn -> Qn is
+  fn (v : Qn) is
+    case v of
+    | qn s n d ->
+        let ng : Nat = mul n gridDen in
+        let q : Nat = fdiv ng d in
+        let r : Nat = fmod ng d in
+        qmk s (ite Nat (leW d (mul 2 r)) (add q 1) q) gridDen
+    end
+  end
+end
+pgrid : Pt -> Pt is fn (p : Pt) is pt (qgrid (px p)) (qgrid (py p)) end end
+pmidG : Pt -> Pt -> Pt is fn (a : Pt) (b : Pt) is pgrid (pmid a b) end end
+
 splitL : Cub -> Cub is
   fn (c : Cub) is
     case c of
     | cub p0 c1 c2 p3 ->
-        let ab : Pt = pmid p0 c1 in
-        let bc : Pt = pmid c1 c2 in
-        let abc : Pt = pmid ab bc in
-        let bcd : Pt = pmid bc (pmid c2 p3) in
-        cub p0 ab abc (pmid abc bcd)
+        let ab : Pt = pmidG p0 c1 in
+        let bc : Pt = pmidG c1 c2 in
+        let abc : Pt = pmidG ab bc in
+        let bcd : Pt = pmidG bc (pmidG c2 p3) in
+        cub p0 ab abc (pmidG abc bcd)
     end
   end
 end
@@ -540,11 +581,11 @@ splitR : Cub -> Cub is
   fn (c : Cub) is
     case c of
     | cub p0 c1 c2 p3 ->
-        let bc : Pt = pmid c1 c2 in
-        let cd : Pt = pmid c2 p3 in
-        let abc : Pt = pmid (pmid p0 c1) bc in
-        let bcd : Pt = pmid bc cd in
-        cub (pmid abc bcd) bcd cd p3
+        let bc : Pt = pmidG c1 c2 in
+        let cd : Pt = pmidG c2 p3 in
+        let abc : Pt = pmidG (pmidG p0 c1) bc in
+        let bcd : Pt = pmidG bc cd in
+        cub (pmidG abc bcd) bcd cd p3
     end
   end
 end

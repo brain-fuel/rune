@@ -165,7 +165,7 @@ func TestREPLMutualData(t *testing.T) {
 	got := out.String()
 	wants := []string{
 		"declared Tree node TreeElim Forest fnil fcons ForestElim", // the whole group
-		"succ (succ zero)",                                         // forestLen of a 2-tree forest
+		"succ (succ zero)", // forestLen of a 2-tree forest
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
@@ -1120,5 +1120,23 @@ func TestREPLFloatIO(t *testing.T) {
 	// The none-branch must not fire: 5170605619 is the packed "3.14" which is valid.
 	if strings.Contains(got, "999") {
 		t.Errorf("none-branch fired (\"999\" in output); parseFloat returned none for the packed \"3.14\" constant\n--- full output ---\n%s", got)
+	}
+}
+
+// TestREPLScribeCorpus loads the ch565 corpus chapter into a REPL session and
+// interprets scene2's even-odd ring in-session (mask count = 3 paint ops).
+func TestREPLScribeCorpus(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "listings", "ch565_scribe_corpus.rune"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(src) + "\nllenPl2 (interpret scene2)\n:quit\n"
+	in := strings.NewReader(script)
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "3 : Nat") {
+		t.Errorf("output missing %q\n--- tail ---\n%s", "3 : Nat", got[max(0, len(got)-600):])
 	}
 }

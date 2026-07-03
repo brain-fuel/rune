@@ -599,6 +599,9 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// must reproduce the pure exact rasterizer's packed mask EXACTLY
 		// (prints 1), and both carry the lock instance's sum.
 		{"ch564_scribe_accel.rune", "main", "1\n138376\n138376"},
+		// ch565: the corpus lock's aggregate — both scenes' per-op masks sum
+		// to the Go fixtures' total (TestScribeLockL5 locks every alpha).
+		{"ch565_scribe_corpus.rune", "answer", "494176"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {

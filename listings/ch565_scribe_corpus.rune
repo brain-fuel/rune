@@ -1,14 +1,14 @@
--- Chapter 563 — the scribe pure rasterizer over exact rationals (L3).
--- The Go engine's font-rs signed-area rasterizer, ported term for term into
--- exact arithmetic: vertices snap to the 1/256 grid (round half away from
--- zero, exactly math.Round(v*256)/256), each edge deposits per-cell signed
--- area DELTAS as exact rationals, a per-row prefix sum recovers coverage,
--- and alpha = min(255, floor(coverage * 256)). In Go, "a pixel half-covered
--- by a grid-line edge has alpha exactly 128" is a carefully engineered test;
--- here it is an arithmetic fact, pinned by refl. The geometry base (Qn, Pt,
--- corner tables, builders, worklist flattener) is ch562, redeclared verbatim
--- per corpus convention. All ch561/ch562 discipline applies: one ih per fuel
--- level, thunked branch arms, point-free fuel towers, gcd-reduced rationals.
+-- Chapter 565 — the scribe corpus lock (L5, the port's last rung).
+-- The full drawing pipeline, locked scene by scene against the Go engine: a
+-- display-list INTERPRETER (CTM, state stack, current path, fill semantics —
+-- the dl.Render walk minus compositing) drives the ch562 exact geometry and
+-- the ch563 exact rasterizer (extended here with the EVEN-ODD rule), and
+-- every paint op's raw mask must agree alpha for alpha with the fixtures the
+-- Go engine renders from the same scenes (scribe testdata/corpus/*.scr via
+-- dl.Masks). The ps text of each scene was locked to its program shape by
+-- the ch561 parser; here the programs drive geometry. Masks are the
+-- semantic surface: PNG bytes and compositing are presentation.
+-- ch561-ch564 discipline throughout.
 
 data Bool : U is false : Bool | true : Bool end
 data Unit : U is unit : Unit end
@@ -1070,7 +1070,80 @@ rasterize : Nat -> Nat -> List (List Pt) -> List Nat is
   end
 end
 
--- ------------------------------------------------------- the theorem pins
+-- ------------------------------------------------- even-odd coverage rule
+-- FillRule: Bool alias (nonzero = false, even-odd = true); a fresh 2-nullary
+-- data would hash-collide with Bool.
+FillRule : U is Bool end
+ruleNonZero : FillRule is false end
+ruleEvenOdd : FillRule is true end
+
+-- even-odd: coverage is the triangle wave of |acc| mod 2
+alphaOfEO : Qn -> Nat is
+  fn (acc : Qn) is
+    case acc of
+    | qn s n d ->
+        let m : Nat = fmod n (mul 2 d) in
+        let k : Unit -> Nat =
+          case leW m d of
+          | true -> fn (u : Unit) is
+              let a : Nat = fdiv (mul 256 m) d in
+              ite Nat (leW 255 a) 255 a
+            end
+          | false -> fn (u : Unit) is
+              let a : Nat = fdiv (mul 256 (monus (mul 2 d) m)) d in
+              ite Nat (leW 255 a) 255 a
+            end
+          end
+        in k unit
+    end
+  end
+end
+alphaOfR : FillRule -> Qn -> Nat is
+  fn (rule : FillRule) (acc : Qn) is
+    case rule of | false -> alphaOf acc | true -> alphaOfEO acc end
+  end
+end
+alphaPassR : FillRule -> Nat -> List Qn -> List Nat is
+  fn (rule : FillRule) (w : Nat) (buf : List Qn) is
+    let fin : ASt =
+      (ListElim Qn (fn (ww : List Qn) is ASt -> ASt end)
+        (fn (st : ASt) is st end)
+        (fn (cell : Qn) (rest : List Qn) (ih : ASt -> ASt) is
+          fn (st : ASt) is
+            case st of
+            | mkASt x acc out ->
+                let k : Unit -> ASt =
+                  case eqW x w of
+                  | true -> fn (u : Unit) is mkASt 0 qZ out end
+                  | false -> fn (u : Unit) is
+                      let acc2 : Qn = qadd acc cell in
+                      mkASt (add x 1) acc2 (cons Nat (alphaOfR rule acc2) out)
+                    end
+                  end
+                in ih (k unit)
+            end
+          end
+        end)
+        buf)
+        (mkASt 0 qZ (nil Nat))
+    in
+    case fin of | mkASt x acc out -> revN out end
+  end
+end
+rasterizeR : FillRule -> Nat -> Nat -> List (List Pt) -> List Nat is
+  fn (rule : FillRule) (w : Nat) (h : Nat) (polys : List (List Pt)) is
+    let buf : List Qn =
+      (ListElim (List Pt) (fn (ww : List (List Pt)) is List Qn -> List Qn end)
+        (fn (b : List Qn) is b end)
+        (fn (poly : List Pt) (rest : List (List Pt)) (ih : List Qn -> List Qn) is
+          fn (b : List Qn) is ih (addPolygon w h poly b) end
+        end)
+        polys)
+        (bufNew (mul (add w 1) h))
+    in
+    alphaPassR rule w buf
+  end
+end
 nthN : List Nat -> Nat -> Nat is
   fn (xs : List Nat) (i : Nat) is
     (ListElim Nat (fn (w : List Nat) is Nat -> Nat end)
@@ -1098,85 +1171,320 @@ rectPoly : Qn -> Qn -> Qn -> Qn -> List Pt is
     (nil Pt))))
   end
 end
-one1 : List (List Pt) -> List (List Pt) is fn (x : List (List Pt)) is x end end
-
--- full pixels: rect (1,1)-(3,3) on 4x4: inside 255, outside 0
-mask44 : List Nat is
-  rasterize 4 4 (cons (List Pt) (rectPoly (qNat 1) (qNat 1) (qNat 2) (qNat 2)) (nil (List Pt)))
+-- even-odd pin: two nested same-direction squares leave a ring
+pinEO :
+  Eq Nat
+    (nthN
+      (rasterizeR ruleEvenOdd 4 4
+        (cons (List Pt) (rectPoly qZ qZ (qNat 4) (qNat 4))
+        (cons (List Pt) (rectPoly (qNat 1) (qNat 1) (qNat 2) (qNat 2))
+        (nil (List Pt)))))
+      5)
+    0 is
+  refl 0
 end
-pinFullInside : Eq Nat (nthN mask44 5) 255 is refl 255 end
-pinFullInside2 : Eq Nat (nthN mask44 10) 255 is refl 255 end
-pinFullOutside : Eq Nat (nthN mask44 0) 0 is refl 0 end
-pinFullOutside2 : Eq Nat (nthN mask44 3) 0 is refl 0 end
-
--- THE THEOREM: a pixel half-covered by an edge on the corner grid has alpha
--- EXACTLY 128 (Go asserts this as a test; here it is arithmetic)
-maskHalf : List Nat is
-  rasterize 4 3 (cons (List Pt) (rectPoly qZ qZ (qNat 4) (qn false 5 2)) (nil (List Pt)))
+pinEOEdge :
+  Eq Nat
+    (nthN
+      (rasterizeR ruleEvenOdd 4 4
+        (cons (List Pt) (rectPoly qZ qZ (qNat 4) (qNat 4))
+        (cons (List Pt) (rectPoly (qNat 1) (qNat 1) (qNat 2) (qNat 2))
+        (nil (List Pt)))))
+      0)
+    255 is
+  refl 255
 end
-pinHalfRow : Eq Nat (nthN maskHalf 9) 128 is refl 128 end
-pinFullRow : Eq Nat (nthN maskHalf 5) 255 is refl 255 end
 
--- vertical half pixels: rect x in [1/2, 3/2] on 2x1
-maskVHalf : List Nat is
-  rasterize 2 1 (cons (List Pt) (rectPoly (qn false 1 2) qZ (qNat 1) (qNat 1)) (nil (List Pt)))
-end
-pinVHalfL : Eq Nat (nthN maskVHalf 0) 128 is refl 128 end
-pinVHalfR : Eq Nat (nthN maskVHalf 1) 128 is refl 128 end
+-- --------------------------------------- the display list (ch561, trimmed)
+data Num : U is num : Bool -> Nat -> Nat -> Nat -> Num end
+data Color : U is rgba : Nat -> Nat -> Nat -> Nat -> Color end
+JoinT : U is Bool end
+data CapT : U is capButt : CapT | capRound : CapT | capSquare : CapT end
 
--- diagonal: triangle (0,0),(1,0),(0,1) half-covers its pixel
-maskTri : List Nat is
-  rasterize 1 1
-    (cons (List Pt)
-      (cons Pt (pt qZ qZ) (cons Pt (pt (qNat 1) qZ) (cons Pt (pt qZ (qNat 1)) (nil Pt))))
-      (nil (List Pt)))
+data Op : U is
+  opMoveTo : Num -> Num -> Op
+| opLineTo : Num -> Num -> Op
+| opCurveTo : Num -> Num -> Num -> Num -> Num -> Num -> Op
+| opClosePath : Op
+| opNewPath : Op
+| opRect : Num -> Num -> Num -> Num -> Op
+| opCircle : Num -> Num -> Num -> Op
+| opRoundRect : Num -> Num -> Num -> Num -> Num -> CStyle -> Op
+| opSetColor : Color -> Op
+| opSetLineWidth : Num -> Op
+| opSetCap : CapT -> Op
+| opSetJoin : JoinT -> Op
+| opSave : Op
+| opRestore : Op
+| opTranslate : Num -> Num -> Op
+| opScale : Num -> Num -> Op
+| opFill : Op
+| opFillEO : Op
+| opStroke : Op
+| opClear : Color -> Op
 end
-pinTri : Eq Nat (nthN maskTri 0) 128 is refl 128 end
 
--- quarter coverage
-maskQ : List Nat is
-  rasterize 1 1 (cons (List Pt) (rectPoly qZ qZ (qn false 1 2) (qn false 1 2)) (nil (List Pt)))
+pow10 : Nat -> Nat is
+  fn (k : Nat) is
+    NatElim (fn (w : Nat) is Nat end) 1
+      (fn (j : Nat) (ih : Nat) is mul 10 ih end) k
+  end
 end
-pinQuarter : Eq Nat (nthN maskQ 0) 64 is refl 64 end
+-- a ps decimal denotes the exact rational (units*10^fl + fr) / 10^fl
+numQ : Num -> Qn is
+  fn (q : Num) is
+    case q of
+    | num neg units fl fr ->
+        let d : Nat = pow10 fl in
+        qmk neg (add (mul units d) fr) d
+    end
+  end
+end
+nI : Nat -> Num is fn (u : Nat) is num false u 0 0 end end
 
--- clipping: a huge rect covers the whole 2x2 canvas, winding intact
-maskClip : List Nat is
-  rasterize 2 2 (cons (List Pt) (rectPoly (qNeg (qNat 10)) (qNeg (qNat 10)) (qNat 20) (qNat 20)) (nil (List Pt)))
+-- ----------------------------------------------------- the interpreter
+transformPath : Aff -> Path -> Path is
+  fn (m : Aff) (p : Path) is
+    ListElim PVerb (fn (w : List PVerb) is Path end)
+      (nil PVerb)
+      (fn (v : PVerb) (rest : List PVerb) (ih : Path) is
+        cons PVerb
+          (case v of
+           | pMoveTo a -> pMoveTo (affApply m a)
+           | pLineTo a -> pLineTo (affApply m a)
+           | pCubicTo a b c -> pCubicTo (affApply m a) (affApply m b) (affApply m c)
+           | pClose -> pClose
+           end)
+          ih
+      end)
+      p
+  end
 end
-pinClip0 : Eq Nat (nthN maskClip 0) 255 is refl 255 end
-pinClip3 : Eq Nat (nthN maskClip 3) 255 is refl 255 end
 
--- ------------------------------------------- the Go-vs-rune lock instance
--- canvas 32x32, RoundRect(4,4,24,24) radius 6 continuous, tol 1/20 (the Go
--- FlattenTol), nonzero. The Go engine renders the same instance into a
--- committed fixture; alpha-for-alpha agreement is the L5 seed.
-lockPolys : List (List Pt) is
-  (ListElim PLine (fn (w : List PLine) is List (List Pt) end)
-    (nil (List Pt))
-    (fn (pl : PLine) (rest : List PLine) (ih : List (List Pt)) is
-      cons (List Pt) (plPts pl) ih
-    end)
-    (flatten (roundRect (mkRect (pt (qNat 4) (qNat 4)) (pt (qNat 28) (qNat 28))) (qNat 6) styContinuous) (qn false 1 20)))
+-- interpreter state: CTM, saved CTMs, current path (reversed verbs), masks
+-- so far (reversed)
+data ISt : U is mkISt : Aff -> List Aff -> List PVerb -> List (List Nat) -> ISt end
+
+pushV : PVerb -> ISt -> ISt is
+  fn (v : PVerb) (st : ISt) is
+    case st of
+    | mkISt m saved cur masks -> mkISt m saved (cons PVerb v cur) masks
+    end
+  end
 end
-lockMask : List Nat is rasterize 32 32 lockPolys end
+revV : List PVerb -> List PVerb is
+  fn (xs : List PVerb) is
+    (ListElim PVerb (fn (w : List PVerb) is List PVerb -> List PVerb end)
+      (fn (acc : List PVerb) is acc end)
+      (fn (x : PVerb) (rest : List PVerb) (ih : List PVerb -> List PVerb) is
+        fn (acc : List PVerb) is ih (cons PVerb x acc) end
+      end)
+      xs)
+      (nil PVerb)
+  end
+end
+appendRevShape : Aff -> Path -> List PVerb -> List PVerb is
+  fn (m : Aff) (shape : Path) (cur : List PVerb) is
+    ListElim PVerb (fn (w : List PVerb) is List PVerb -> List PVerb end)
+      (fn (acc : List PVerb) is acc end)
+      (fn (v : PVerb) (rest : List PVerb) (ih : List PVerb -> List PVerb) is
+        fn (acc : List PVerb) is
+          ih (cons PVerb
+            (case v of
+             | pMoveTo a -> pMoveTo (affApply m a)
+             | pLineTo a -> pLineTo (affApply m a)
+             | pCubicTo a b c -> pCubicTo (affApply m a) (affApply m b) (affApply m c)
+             | pClose -> pClose
+             end)
+            acc)
+        end
+      end)
+      shape
+      cur
+  end
+end
+
+canvasW : Nat is 32 end
+lockTol : Qn is qn false 1 20 end
+polysOf : List PVerb -> List (List Pt) is
+  fn (curRev : List PVerb) is
+    (ListElim PLine (fn (w : List PLine) is List (List Pt) end)
+      (nil (List Pt))
+      (fn (pl : PLine) (rest : List PLine) (ih : List (List Pt)) is
+        cons (List Pt) (plPts pl) ih
+      end)
+      (flatten (revV curRev) lockTol))
+  end
+end
+paintOp : FillRule -> ISt -> ISt is
+  fn (rule : FillRule) (st : ISt) is
+    case st of
+    | mkISt m saved cur masks ->
+        mkISt m saved (nil PVerb)
+          (cons (List Nat) (rasterizeR rule canvasW canvasW (polysOf cur)) masks)
+    end
+  end
+end
+
+-- Every arm is a THUNK: with value arms the eager dispatch would run
+-- paintOp (a full rasterize, under BOTH rules) and every shape build on
+-- every single op step (the ch562 lesson, at interpreter scale).
+stepOp : Op -> ISt -> ISt is
+  fn (o : Op) (st : ISt) is
+    case st of
+    | mkISt m saved cur masks ->
+        let k : Unit -> ISt =
+          case o of
+          | opMoveTo x y -> fn (u : Unit) is pushV (pMoveTo (affApply m (pt (numQ x) (numQ y)))) st end
+          | opLineTo x y -> fn (u : Unit) is pushV (pLineTo (affApply m (pt (numQ x) (numQ y)))) st end
+          | opCurveTo a b c d e f -> fn (u : Unit) is
+              pushV (pCubicTo (affApply m (pt (numQ a) (numQ b)))
+                              (affApply m (pt (numQ c) (numQ d)))
+                              (affApply m (pt (numQ e) (numQ f)))) st
+            end
+          | opClosePath -> fn (u : Unit) is pushV pClose st end
+          | opNewPath -> fn (u : Unit) is mkISt m saved (nil PVerb) masks end
+          | opRect x y w h -> fn (u : Unit) is
+              mkISt m saved
+                (appendRevShape m (rectPath (mkRect (pt (numQ x) (numQ y)) (pt (qadd (numQ x) (numQ w)) (qadd (numQ y) (numQ h))))) cur)
+                masks
+            end
+          | opCircle x y r -> fn (u : Unit) is
+              mkISt m saved (appendRevShape m (circlePath (pt (numQ x) (numQ y)) (numQ r)) cur) masks
+            end
+          | opRoundRect x y w h r sty -> fn (u : Unit) is
+              mkISt m saved
+                (appendRevShape m (roundRect (mkRect (pt (numQ x) (numQ y)) (pt (qadd (numQ x) (numQ w)) (qadd (numQ y) (numQ h)))) (numQ r) sty) cur)
+                masks
+            end
+          | opSetColor c -> fn (u : Unit) is st end
+          | opSetLineWidth w -> fn (u : Unit) is st end
+          | opSetCap c -> fn (u : Unit) is st end
+          | opSetJoin j -> fn (u : Unit) is st end
+          | opSave -> fn (u : Unit) is mkISt m (cons Aff m saved) cur masks end
+          | opRestore -> fn (u : Unit) is
+              (case saved of
+               | nil -> st
+               | cons top rest -> mkISt top rest cur masks
+               end)
+            end
+          | opTranslate x y -> fn (u : Unit) is mkISt (affMul m (affTranslate (numQ x) (numQ y))) saved cur masks end
+          | opScale x y -> fn (u : Unit) is mkISt (affMul m (affScale (numQ x) (numQ y))) saved cur masks end
+          | opFill -> fn (u : Unit) is paintOp ruleNonZero st end
+          | opFillEO -> fn (u : Unit) is paintOp ruleEvenOdd st end
+          | opStroke -> fn (u : Unit) is mkISt m saved (nil PVerb) masks end
+          | opClear c -> fn (u : Unit) is st end
+          end
+        in k unit
+    end
+  end
+end
+
+revM : List (List Nat) -> List (List Nat) is
+  fn (xs : List (List Nat)) is
+    (ListElim (List Nat) (fn (w : List (List Nat)) is List (List Nat) -> List (List Nat) end)
+      (fn (acc : List (List Nat)) is acc end)
+      (fn (x : List Nat) (rest : List (List Nat)) (ih : List (List Nat) -> List (List Nat)) is
+        fn (acc : List (List Nat)) is ih (cons (List Nat) x acc) end
+      end)
+      xs)
+      (nil (List Nat))
+  end
+end
+-- interpret a program: the per-paint-op masks, in order (dl.Masks)
+interpret : List Op -> List (List Nat) is
+  fn (prog : List Op) is
+    case
+      (ListElim Op (fn (w : List Op) is ISt -> ISt end)
+        (fn (st : ISt) is st end)
+        (fn (o : Op) (rest : List Op) (ih : ISt -> ISt) is
+          fn (st : ISt) is ih (stepOp o st) end
+        end)
+        prog)
+        (mkISt affId (nil Aff) (nil PVerb) (nil (List Nat)))
+    of
+    | mkISt m saved cur masks -> revM masks
+    end
+  end
+end
+
+-- ---------------------------------------------------------- the corpus
+-- testdata/corpus/scene1.scr: shapes and state, fills only. The ps parse of
+-- scenes was locked by ch561; here the programs drive the geometry.
+anyCol : Color is rgba 16 18 26 255 end
+scene1 : List Op is
+  cons Op (opClear anyCol)
+  (cons Op (opSetColor anyCol)
+  (cons Op (opRoundRect (nI 2) (nI 2) (nI 28) (nI 28) (nI 6) styContinuous)
+  (cons Op opFill
+  (cons Op (opSetColor anyCol)
+  (cons Op (opCircle (nI 16) (nI 16) (nI 8))
+  (cons Op opFill
+  (cons Op (opRoundRect (nI 4) (nI 14) (nI 24) (nI 4) (nI 1) styCircular)
+  (cons Op opFill
+  (nil Op)))))))))
+end
+-- testdata/corpus/scene2.scr: transforms and even-odd
+scene2 : List Op is
+  cons Op opSave
+  (cons Op (opTranslate (nI 4) (nI 4))
+  (cons Op (opScale (nI 2) (nI 2))
+  (cons Op (opRect (nI 1) (nI 1) (nI 10) (nI 10))
+  (cons Op opFillEO
+  (cons Op opRestore
+  (cons Op (opCircle (nI 16) (nI 16) (nI 10))
+  (cons Op (opCircle (nI 16) (nI 16) (nI 5))
+  (cons Op opFillEO
+  (cons Op (opRect (nI 8) (nI 8) (nI 16) (nI 16))
+  (cons Op opFill
+  (nil Op)))))))))))
+end
+
+catNN : List Nat -> List Nat -> List Nat is
+  fn (a : List Nat) (b : List Nat) is
+    ListElim Nat (fn (w : List Nat) is List Nat end)
+      b
+      (fn (x : Nat) (rest : List Nat) (ih : List Nat) is cons Nat x ih end)
+      a
+  end
+end
+flatMasks : List (List Nat) -> List Nat is
+  fn (ms : List (List Nat)) is
+    ListElim (List Nat) (fn (w : List (List Nat)) is List Nat end)
+      (nil Nat)
+      (fn (m : List Nat) (rest : List (List Nat)) (ih : List Nat) is catNN m ih end)
+      ms
+  end
+end
 sumN : List Nat -> Nat is
   fn (xs : List Nat) is
     ListElim Nat (fn (w : List Nat) is Nat end) 0
       (fn (x : Nat) (rest : List Nat) (ih : Nat) is add x ih end) xs
   end
 end
-answer : Nat is sumN lockMask end
 
--- kernel pin: the same sum the Go engine computes for this instance
-pinLockSum : Eq Nat answer 138376 is refl 138376 end
+corpusAlphas : List Nat is
+  catNN (flatMasks (interpret scene1)) (flatMasks (interpret scene2))
+end
 
 foreign printNat : Nat -> IO Nat end
--- print every alpha, one per line: the byte-for-byte lock observable
+-- the lock observable: every alpha of every per-paint-op mask, both scenes
 main : IO Nat is
   (ListElim Nat (fn (w : List Nat) is IO Nat end)
     (pureIO Nat 0)
     (fn (x : Nat) (rest : List Nat) (ih : IO Nat) is
       bindIO Nat Nat (printNat x) (fn (z : Nat) is ih end)
     end)
-    lockMask)
+    corpusAlphas)
+end
+
+-- kernel pin: the corpus total the Go fixtures carry
+pinCorpusSum : Eq Nat (sumN corpusAlphas) 494176 is refl 494176 end
+answer : Nat is sumN corpusAlphas end
+
+llenPl2 : List (List Nat) -> Nat is
+  fn (xs : List (List Nat)) is
+    ListElim (List Nat) (fn (w : List (List Nat)) is Nat end) 0
+      (fn (x : List Nat) (r : List (List Nat)) (ih : Nat) is add ih 1 end) xs
+  end
 end
