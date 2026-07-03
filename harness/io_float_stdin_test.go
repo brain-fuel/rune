@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// Task 1: js only. Later tasks append backends to floatIOBackends.
+// Task 1 added js; Task 2 adds py and go.
 func floatIOBackends() []ioBackend {
-	return []ioBackend{ioCLIBackends[0]} // js
+	return ioCLIBackends[:3] // js, py, go
 }
 
 func TestIOFloatStdinConformance(t *testing.T) {

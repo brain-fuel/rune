@@ -51,8 +51,16 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		// par's frontier runtime reads WAVELET_SEED from the environment.
 		addImp("os")
 	}
-	if usesForeign(p, "fsqrt") || usesForeign(p, "npNorm") || usesForeign(p, "fpow") {
+	if usesForeign(p, "fsqrt") || usesForeign(p, "npNorm") || usesForeign(p, "fpow") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") || usesForeign(p, "parseFloat") {
 		addImp("math")
+	}
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		// regexp for accept-regex (hoisted, no per-call compile); strconv for formatting.
+		addImp("regexp", "strconv")
+	}
+	if usesForeign(p, "getFloat") {
+		// getFloat reads the first line from stdin — needs bufio + os.
+		addImp("bufio", "os")
 	}
 	if usesOTP(p) {
 		// D5 / R-OTP: the non-BEAM Go scheduler shim needs goroutine-local mailbox
@@ -189,7 +197,7 @@ func (Go) Emit(p Program) (TargetSource, error) {
 		b.WriteString("func readLineCode() any { return func(_u any) any { var s string; fmt.Scan(&s); n := big.NewInt(1); for i := len(s) - 1; i >= 0; i-- { n.Mul(n, big.NewInt(256)); n.Add(n, big.NewInt(int64(s[i]))) }; return n } }\n")
 	}
 	// D6 net/fs: the packed-String codec + env/file host bodies, over bare Nat codes.
-	if usesFileEnv(p) || usesLiveKV(p) || usesStream(p) {
+	if usesFileEnv(p) || usesLiveKV(p) || usesStream(p) || usesForeign(p, "parseFloat") {
 		b.WriteString("func __s2h(v any) string { b := new(big.Int).Set(v.(*big.Int)); one := big.NewInt(1); m := big.NewInt(256); var sb []byte; for b.Cmp(one) > 0 { r := new(big.Int); b.DivMod(b, m, r); sb = append(sb, byte(r.Int64())) }; return string(sb) }\n")
 		b.WriteString("func __h2s(v string) any { n := big.NewInt(1); m := big.NewInt(256); for i := len(v) - 1; i >= 0; i-- { n.Mul(n, m); n.Add(n, big.NewInt(int64(v[i]))) }; return n }\n")
 	}
@@ -339,6 +347,52 @@ func (Go) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "fpow") {
 		b.WriteString("func fpow() any { return func(b any) any { return func(e any) any { return math.Pow(b.(float64), e.(float64)) } } }\n")
+	}
+	// Float IO: parseFloat/getFloat/printFloat — ECMAScript Number::toString on go.
+	// __parfloatRe is hoisted (no per-call regexp.MustCompile) as a package-level var.
+	// __fmtf implements the canonical format via strconv 'e' shortest form + re-dress.
+	// __s2h is needed by parseFloat; its codec guard (usesFileEnv || usesStream) is
+	// extended below to cover the parseFloat case.
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		b.WriteString("var __parfloatRe = regexp.MustCompile(`^[+-]?((\\d+(\\.\\d*)?)|(\\.\\d+))([eE][+-]?\\d+)?$`)\n")
+		b.WriteString("func __fmtf(x float64) string {\n" +
+			"\tif math.IsNaN(x) { return \"NaN\" }\n" +
+			"\tif math.IsInf(x, 1) { return \"Infinity\" }\n" +
+			"\tif math.IsInf(x, -1) { return \"-Infinity\" }\n" +
+			"\tif x == 0 { return \"0\" }\n" +
+			"\tsign := \"\"; if x < 0 { sign = \"-\"; x = -x }\n" +
+			"\ts := strconv.FormatFloat(x, 'e', -1, 64)\n" +
+			"\teIdx := strings.IndexByte(s, 'e')\n" +
+			"\tmant := s[:eIdx]; expStr := s[eIdx+1:]\n" +
+			"\texp, _ := strconv.Atoi(expStr)\n" +
+			"\tk := exp + 1\n" +
+			"\td := strings.ReplaceAll(mant, \".\", \"\")\n" +
+			"\tn := len(d)\n" +
+			"\tvar out string\n" +
+			"\tswitch {\n" +
+			"\tcase n <= k && k <= 21:\n\t\tout = d + strings.Repeat(\"0\", k-n)\n" +
+			"\tcase 0 < k && k <= 21:\n\t\tout = d[:k] + \".\" + d[k:]\n" +
+			"\tcase -6 < k && k <= 0:\n\t\tout = \"0.\" + strings.Repeat(\"0\", -k) + d\n" +
+			"\tdefault:\n" +
+			"\t\tif n > 1 { out = string(d[0]) + \".\" + d[1:] } else { out = string(d[0]) }\n" +
+			"\t\tif k-1 >= 0 { out += \"e+\" + strconv.Itoa(k-1) } else { out += \"e-\" + strconv.Itoa(-(k-1)) }\n" +
+			"\t}\n" +
+			"\treturn sign + out\n" +
+			"}\n")
+	}
+	if usesForeign(p, "parseFloat") {
+		// parseFloat takes a packed-Nat string code; __s2h decodes it.
+		b.WriteString("func parseFloat() any { return func(s any) any { v := __s2h(s); if __parfloatRe.MatchString(v) { f, _ := strconv.ParseFloat(v, 64); return map[string]any{\"tag\": 1, \"name\": \"some\", \"args\": []any{nil, f}} }; return map[string]any{\"tag\": 0, \"name\": \"none\", \"args\": []any{nil}} } }\n")
+	}
+	if usesForeign(p, "getFloat") {
+		// getFloat reads the first line of stdin, validates the whole line against
+		// the accept-regex; garbage yields 0.0. Uses bufio to read the full line.
+		b.WriteString("var __stdinRdr = bufio.NewReader(os.Stdin)\n")
+		b.WriteString("func getFloat() any { return func(_u any) any { line, _ := __stdinRdr.ReadString('\\n'); line = strings.TrimRight(line, \"\\r\\n\"); if __parfloatRe.MatchString(line) { f, _ := strconv.ParseFloat(line, 64); return f }; return 0.0 } }\n")
+	}
+	if usesForeign(p, "printFloat") {
+		// printFloat prints the canonical ECMAScript rendering + newline; returns x.
+		b.WriteString("func printFloat() any { return func(x any) any { return func(_u any) any { fmt.Println(__fmtf(x.(float64))); return x } } }\n")
 	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("func dot2() any { return func(a0 any) any { return func(a1 any) any { return func(b0 any) any { return func(b1 any) any { return a0.(float64)*b0.(float64) + a1.(float64)*b1.(float64) } } } } }\n")

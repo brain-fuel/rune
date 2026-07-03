@@ -100,7 +100,7 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	// D6 net/fs: the packed-String codec + env/file host bodies, over bare Nat codes.
 	// Also emitted for stream prims (byteLen/splitOn/jsonStrField/sqlQuote) which use
 	// the same codec to decode/encode the packed-string representation.
-	if usesFileEnv(p) || usesStream(p) {
+	if usesFileEnv(p) || usesStream(p) || usesForeign(p, "parseFloat") {
 		b.WriteString("def __s2h(n):\n    s = ''\n    while n > 1:\n        s += chr(n % 256)\n        n //= 256\n    return s\n")
 		b.WriteString("def __h2s(v):\n    n = 1\n    for ch in reversed(v):\n        n = n * 256 + ord(ch)\n    return n\n")
 	}
@@ -242,6 +242,53 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "fpow") {
 		b.WriteString("def fpow():\n    import math\n    return lambda b: lambda e: math.pow(b, e)\n")
+	}
+	// Float IO: parseFloat/getFloat/printFloat — ECMAScript Number::toString on py.
+	// __fmtf implements the canonical format; __parsef_re validates before host parse.
+	// __s2h is also needed by parseFloat; the codec guard below covers it.
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		b.WriteString("import re as __re\n__parsef_re = __re.compile(r'^[+-]?((\\d+(\\.\\d*)?)|(\\.\\d+))([eE][+-]?\\d+)?$')\n")
+		b.WriteString("def __fmtf(x):\n" +
+			"    import math\n" +
+			"    if math.isnan(x): return 'NaN'\n" +
+			"    if math.isinf(x): return 'Infinity' if x > 0 else '-Infinity'\n" +
+			"    if x == 0: return '0'\n" +
+			"    s = repr(abs(x))\n" +
+			"    if 'e' in s or 'E' in s:\n" +
+			"        m, _, e = s.lower().partition('e')\n" +
+			"        k = int(e) + 1\n" +
+			"    else:\n" +
+			"        m = s; k = 0\n" +
+			"        if '.' in m:\n" +
+			"            i, _, f = m.partition('.')\n" +
+			"            if i == '0':\n" +
+			"                f2 = f.lstrip('0'); k = -(len(f) - len(f2)); m = f2\n" +
+			"            else:\n" +
+			"                k = len(i); m = i + f\n" +
+			"        else:\n" +
+			"            k = len(m)\n" +
+			"    d = m.replace('.', '').rstrip('0') or '0'\n" +
+			"    n = len(d)\n" +
+			"    sign = '-' if x < 0 else ''\n" +
+			"    if n <= k <= 21: out = d + '0' * (k - n)\n" +
+			"    elif 0 < k <= 21: out = d[:k] + '.' + d[k:]\n" +
+			"    elif -6 < k <= 0: out = '0.' + '0' * (-k) + d\n" +
+			"    else:\n" +
+			"        out = d[0] + ('.' + d[1:] if n > 1 else '') + 'e' + ('+' if k - 1 >= 0 else '-') + str(abs(k - 1))\n" +
+			"    return sign + out\n")
+	}
+	if usesForeign(p, "parseFloat") {
+		// parseFloat takes a packed-Nat string code; __s2h decodes it.
+		b.WriteString("def parseFloat():\n    def _f(s):\n        v = __s2h(s)\n        return {\"tag\":1,\"name\":\"some\",\"args\":[None, float(v)]} if __parsef_re.match(v) else {\"tag\":0,\"name\":\"none\",\"args\":[None]}\n    return _f\n")
+	}
+	if usesForeign(p, "getFloat") {
+		// getFloat reads the first line of stdin (mirroring getNat's readline shape),
+		// validates the whole line against the accept-regex; garbage yields 0.0.
+		b.WriteString("def getFloat():\n    import sys\n    def _t(_u):\n        s = sys.stdin.readline().rstrip('\\n')\n        return float(s) if __parsef_re.match(s) else 0.0\n    return _t\n")
+	}
+	if usesForeign(p, "printFloat") {
+		// printFloat prints the canonical ECMAScript rendering + newline; returns x.
+		b.WriteString("def printFloat():\n    return lambda x: lambda _u: (print(__fmtf(x)), x)[1]\n")
 	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("def dot2():\n    return lambda a0: lambda a1: lambda b0: lambda b1: a0 * b0 + a1 * b1\n")
