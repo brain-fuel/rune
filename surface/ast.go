@@ -297,6 +297,31 @@ type DataGroup struct {
 	Members []DataDef // len >= 2
 }
 
+// Import is a top-level import declaration (contextual keyword):
+//
+//	import Std.Float
+//
+// Module is the dotted module path as a single string. Pos is the byte offset
+// of the "import" keyword in the source text.
+type Import struct {
+	Module string
+	Pos    int
+}
+
+// Alias is a top-level alias declaration (contextual keyword):
+//
+//	alias Math.Geometry
+//	alias Math.Geometry as G
+//
+// Module is the dotted module path. As is the local short name: the last
+// dotted segment of Module when the "as" clause is absent, or the explicit
+// name when present. Pos is the byte offset of the "alias" keyword.
+type Alias struct {
+	Module string
+	As     string
+	Pos    int
+}
+
 // Item is one top-level program item: a Def, a DataDef, or a builtin binding.
 type Item interface {
 	isItem()
@@ -309,6 +334,8 @@ func (DataGroup) isItem()     {}
 func (BuiltinNat) isItem()    {}
 func (BuiltinNatOp) isItem()  {}
 func (BuiltinNumInj) isItem() {}
+func (Import) isItem()        {}
+func (Alias) isItem()         {}
 
 func (ESubst) isExp() {}
 func (ECase) isExp()  {}

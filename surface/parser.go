@@ -139,6 +139,30 @@ func ParseProgram(src string) ([]Item, error) {
 			items = append(items, d)
 			continue
 		}
+		// `import` is a CONTEXTUAL keyword: a declaration only in the form
+		// `import ModName` where the next token is an identifier. When the next
+		// token is `:` the text `import` is an ordinary definition name (a def
+		// named import) and falls through to parseItem.
+		if p.peek().kind == tIdent && p.peek().text == "import" && p.peekAt(1).kind == tIdent {
+			imp, err := p.parseImport()
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, imp)
+			continue
+		}
+		// `alias` is a CONTEXTUAL keyword: a declaration only in the form
+		// `alias ModName` where the next token is an identifier. When the next
+		// token is `:` the text `alias` is an ordinary definition name and falls
+		// through to parseItem.
+		if p.peek().kind == tIdent && p.peek().text == "alias" && p.peekAt(1).kind == tIdent {
+			al, err := p.parseAlias()
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, al)
+			continue
+		}
 		it, err := p.parseItem()
 		if err != nil {
 			return nil, err
@@ -346,6 +370,63 @@ func (p *parser) parsePostulate() (Def, error) {
 		return Def{}, err
 	}
 	return Def{Name: id.text, Pos: namePos, Ty: ty, IsForeign: true, IsPostulate: true, Why: reason.text}, nil
+}
+
+// parseImport parses `import ModName` (contextual keyword form). The module
+// path arrives as a single identifier token (the lexer absorbs dot segments).
+// Malformed form: `import` at end of file yields ErrIncomplete.
+func (p *parser) parseImport() (Import, error) {
+	kw := p.next() // consume the contextual `import`
+	mod := p.peek()
+	if mod.kind == tEOF {
+		return Import{}, fmt.Errorf("%w: expected a module name after 'import'", ErrIncomplete)
+	}
+	if mod.kind != tIdent {
+		return Import{}, fmt.Errorf("expected a module name after 'import', found %s at offset %d", mod.kind, mod.pos)
+	}
+	p.next()
+	return Import{Module: mod.text, Pos: kw.pos}, nil
+}
+
+// lastSegment returns the text after the last '.' in s, or s itself when
+// there is no dot. Used to derive the default local name for an alias.
+func lastSegment(s string) string {
+	if i := strings.LastIndex(s, "."); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// parseAlias parses `alias ModName` or `alias ModName as LocalName`
+// (contextual keyword form). `as` is also contextual: only meaningful
+// immediately after the module identifier, never reserved. Malformed forms:
+// `alias` at end of file, or `alias M as` with nothing after `as`, both yield
+// informative errors.
+func (p *parser) parseAlias() (Alias, error) {
+	kw := p.next() // consume the contextual `alias`
+	mod := p.peek()
+	if mod.kind == tEOF {
+		return Alias{}, fmt.Errorf("%w: expected a module name after 'alias'", ErrIncomplete)
+	}
+	if mod.kind != tIdent {
+		return Alias{}, fmt.Errorf("expected a module name after 'alias', found %s at offset %d", mod.kind, mod.pos)
+	}
+	p.next()
+	// Check for optional contextual `as LocalName`.
+	localName := lastSegment(mod.text)
+	if p.peek().kind == tIdent && p.peek().text == "as" {
+		p.next() // consume contextual `as`
+		asId := p.peek()
+		if asId.kind == tEOF {
+			return Alias{}, fmt.Errorf("%w: expected a local name after 'as'", ErrIncomplete)
+		}
+		if asId.kind != tIdent {
+			return Alias{}, fmt.Errorf("expected a local name after 'as', found %s at offset %d", asId.kind, asId.pos)
+		}
+		p.next()
+		localName = asId.text
+	}
+	return Alias{Module: mod.text, As: localName, Pos: kw.pos}, nil
 }
 
 // parseModule parses `module Name is <Def>* end` (C6): a namespace block. Each

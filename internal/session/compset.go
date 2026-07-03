@@ -123,6 +123,8 @@ func definedNames(items []surface.Item) map[string]bool {
 			}
 		case surface.BuiltinNat, surface.BuiltinNatOp, surface.BuiltinNumInj:
 			// session-state declarations: no new store entries
+		case surface.Import, surface.Alias:
+			// import/alias define nothing at the file-topo level for this task
 		}
 	}
 	return defs
@@ -188,6 +190,8 @@ func referencedNames(items []surface.Item) map[string]bool {
 			// no expressions to walk.
 			// Assumption: builtin declarations are co-located with the definitions
 			// they name; a cross-file builtin would require reference extraction here.
+		case surface.Import, surface.Alias:
+			// import/alias reference nothing at the file-topo level for this task
 		}
 	}
 	return refs
