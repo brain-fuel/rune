@@ -282,7 +282,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	// __fmtf: canonical ECMAScript Number::toString with -0 mapped to "0".
 	// __parsef: strict regex accept (no nan/inf/spaces/hex); null on reject.
 	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
-		b.WriteString("const __fmtf = x => Object.is(x, -0) ? \"0\" : String(x);\n")
+		// globalThis.String: a Rune `String : U` def emits `const String = ...`
+		// which would shadow the JS built-in constructor used here.
+		b.WriteString("const __fmtf = x => Object.is(x, -0) ? \"0\" : globalThis.String(x);\n")
 		b.WriteString("const __parsef = s => /^[+-]?((\\d+(\\.\\d*)?)|(\\.\\d+))([eE][+-]?\\d+)?$/.test(s) ? Number(s) : null;\n")
 	}
 	if usesForeign(p, "parseFloat") {
@@ -941,6 +943,6 @@ const showRuntime = `function $show(v) {
     }
     return s;
   }
-  return String(v);
+  return globalThis.String(v);
 }
 `

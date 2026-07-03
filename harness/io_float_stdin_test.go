@@ -8,7 +8,157 @@ import (
 	"testing"
 
 	"goforge.dev/rune/v3/codegen"
+	"goforge.dev/rune/v3/internal/prelude"
+	"goforge.dev/rune/v3/internal/session"
 )
+
+// loadExampleWithPrelude loads examples/<name> into a session that already has
+// the shared prelude (Std.Float, Option, numeric tower, etc.) installed.
+func loadExampleWithPrelude(t *testing.T, name string) *session.Session {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join("..", "examples", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := session.New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude for %s: %v", name, err)
+	}
+	if _, err := s.LoadSource(string(src)); err != nil {
+		t.Fatalf("examples/%s did not load: %v", name, err)
+	}
+	return s
+}
+
+// runExampleWithPrelude emits mainName from examples/<example> (with prelude) on
+// bk, feeds stdin, and returns trimmed stdout. Mirrors runIOListing but sources
+// from examples/ and pre-loads the prelude.
+func runExampleWithPrelude(t *testing.T, bk ioBackend, example, mainName, stdin string) string {
+	t.Helper()
+	s := loadExampleWithPrelude(t, example)
+	p, err := s.EmitProgram(mainName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := bk.emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "main."+bk.ext)
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runFile := f
+	if bk.compile != nil {
+		bin := filepath.Join(dir, "main.bin")
+		if out, err := bk.compile(f, bin).CombinedOutput(); err != nil {
+			t.Fatalf("[%s] compile failed: %v\n%s\n--- src ---\n%s", bk.name, err, out, src)
+		}
+		runFile = bin
+	}
+	cmd := bk.run(runFile)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("[%s] run failed: %v\n%s", bk.name, err, stderr)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestIOFloatDoubleDemo is the 9-backend acceptance gate for examples/double.rune:
+// reads a float from stdin, doubles it, prints and returns it.
+// Feed "3.14" → expect "6.28\n6.28" (printFloat side-effect + the shown IO result).
+// Source backends: js, py, go, erl (CLI); rs (compile step); jvm (separate, needs JDK 25).
+// WASM (ninth backend) runs under wasmtime. Native C/LLVM have no stdin runner and are
+// excluded here; they are covered by native-backend float IO tests in this file.
+func TestIOFloatDoubleDemo(t *testing.T) {
+	const (
+		input = "3.14\n"
+		want  = "6.28\n6.28"
+	)
+	// Source backends: js, py, go, erl, rs.
+	for _, bk := range floatIOBackends() {
+		bk := bk
+		t.Run(bk.name, func(t *testing.T) {
+			if _, err := exec.LookPath(bk.bin); err != nil {
+				t.Skipf("%s not in PATH", bk.bin)
+			}
+			if got := runExampleWithPrelude(t, bk, "double.rune", "main", input); got != want {
+				t.Errorf("[%s] double demo gave %q, want %q", bk.name, got, want)
+			}
+		})
+	}
+	// JVM backend (needs javac --release 25).
+	t.Run("jvm", func(t *testing.T) {
+		javac25, java25, ok := findJava25()
+		if !ok {
+			t.Skip("no JDK 25 (asdf temurin-25)")
+		}
+		s := loadExampleWithPrelude(t, "double.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, err := codegen.JVM{}.Emit(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		f := filepath.Join(dir, "main.java")
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := exec.Command(javac25, "--release", "25", "-d", dir, f).CombinedOutput(); err != nil {
+			t.Fatalf("javac: %v\n%s", err, out)
+		}
+		cmd := exec.Command(java25, "-cp", dir, "main")
+		cmd.Stdin = strings.NewReader(input)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("java run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[jvm] double demo gave %q, want %q", got, want)
+		}
+	})
+	// WASM (ninth) backend.
+	t.Run("wasm", func(t *testing.T) {
+		wt := wasmtimePathHarness()
+		if wt == "" {
+			t.Skip("wasmtime not available")
+		}
+		s := loadExampleWithPrelude(t, "double.rune")
+		p, err := s.EmitProgram("main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		src, err := codegen.Wasm{}.Emit(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		f := filepath.Join(dir, "module.wat")
+		if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(wt, "run", f)
+		cmd.Stdin = strings.NewReader(input)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("wasmtime run: %v", err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("[wasm] double demo gave %q, want %q", got, want)
+		}
+	})
+}
 
 // floatIOBackends returns the 5 source backends covered by float IO host ops:
 // the four CLI backends (js, py, go, erl) plus Rust (compile step).

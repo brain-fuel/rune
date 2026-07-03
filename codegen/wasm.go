@@ -62,7 +62,7 @@ func emitModuleCore(p Program) (*wasmEmitter, *strings.Builder) {
 
 	var b strings.Builder
 	b.WriteString("  (type $codety (func (param i32 i32) (result i32)))\n")
-	b.WriteString(wasmRuntime)
+	emitWasmRuntime(&b, usesFloatWasm(p))
 	b.WriteString("\n")
 	// String-constant data segments (constructor names) + the fixed runtime messages,
 	// laid out in the reserved low region [64, 4096). Each cstr is NUL-terminated.

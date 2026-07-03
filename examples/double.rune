@@ -1,0 +1,12 @@
+-- examples/double.rune: a 7-line demo of the Std.Float module.
+-- Reads a float from stdin, doubles it with fmul, and prints the result.
+-- Depends on the standard prelude (Std.Float module + IO monad).
+-- Run: rune run examples/double.rune main --target js <<< "3.14"
+-- Output: 6.28
+
+import Std.Float
+
+main : IO Float is
+  bindIO Float Float getFloat
+    (fn (x : Float) is printFloat (fmul x (fromNat 2)) end)
+end

@@ -1,5 +1,7 @@
 package codegen
 
+import "strings"
+
 // wasm_runtime.go - the NINTH backend's WAT runtime: a self-contained WebAssembly
 // runtime emitted INLINE in the module (unlike the C/LLVM backends, whose runtime is
 // a linked C blob - wasmtime runs a single `.wat` with no host linkage, so the whole
@@ -784,6 +786,36 @@ const wasmRuntime = `
 // const is unexported so the runtime cannot be modified from outside codegen; this
 // accessor gives the external test package read-only access.
 func WasmRuntime() string { return wasmRuntime }
+
+// emitWasmRuntime writes the WAT runtime into b. When withFloat is true it
+// inserts a K_FLOAT=9 arm into $show so that float return values are rendered
+// via the $flt_fmt formatter (defined by emitFloatRuntimeWasm). The arm is
+// injected by string replacement of the "$show default" sentinel, which is
+// unique in the runtime. When withFloat is false the const is written verbatim.
+func emitWasmRuntime(b *strings.Builder, withFloat bool) {
+	if !withFloat {
+		b.WriteString(wasmRuntime)
+		return
+	}
+	// Insert K_FLOAT=9 before the "$show" function's default "()" fall-through.
+	// $flt_fmt / $rt_float_val / $D6FLT are defined by emitFloatRuntimeWasm, which
+	// is emitted later in the same module; WAT resolves function/global refs by name
+	// across the whole module, so forward references are valid.
+	const sentinel = "      ;; default: \"()\"\n"
+	const floatArm = "      ;; K_FLOAT = 9: format the f64 via $flt_fmt (defined in the float\n" +
+		"      ;; runtime that follows) and copy the bytes into the show buffer.\n" +
+		"      (if (i32.eq (call $w (local.get $v) (i32.const 0)) (i32.const 9))\n" +
+		"        (then\n" +
+		"          (local.set $o (i32.add (global.get $D6FLT) (i32.const 60000)))\n" +
+		"          (local.set $nf (call $flt_fmt (call $rt_float_val (local.get $v)) (local.get $o)))\n" +
+		"          (local.set $i (i32.const 0))\n" +
+		"          (block $b (loop $l (br_if $b (i32.ge_s (local.get $i) (local.get $nf)))\n" +
+		"            (call $emit_byte (i32.load8_u (i32.add (local.get $o) (local.get $i))))\n" +
+		"            (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $l)))\n" +
+		"          (return)))\n" +
+		sentinel
+	b.WriteString(strings.Replace(wasmRuntime, sentinel, floatArm, 1))
+}
 
 // wasmBibleCodec is the packed-String CODEC for the bible/D6 host-op family: the
 // base-256, leading-1-sentinel encoding shared byte-for-byte with the C (codegen/c.go)

@@ -326,6 +326,10 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	if usesForeign(p, "printFloat") {
 		b.WriteString("ff_printFloat() -> fun(X) -> fun(_U) -> io:format(\"~s~n\", [ff___fmtf(X)]), X end end.\n")
 	}
+	// show/show_t: include the float case when ff___fmtf is in scope, so that
+	// raw Erlang floats (e.g. the return value of printFloat : Float -> IO Float)
+	// are shown identically to JS/Python/Go.
+	emitBeamShow(&b, usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat"))
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}
@@ -551,22 +555,21 @@ func beamMangle(n string) string {
 	return b.String()
 }
 
-// beamRuntime is the shared helpers: application, the nat eliminator/destructor,
-// and the structural show (erased unit fields are skipped, matching JS/Go).
-const beamRuntime = `ap(F, X) -> F(X).
+// beamRuntimePre is the core helpers before show: application + nat eliminator.
+// show is emitted dynamically (see emitBeamShow) so it can include the float
+// case when ff___fmtf is in scope.
+const beamRuntimePre = `ap(F, X) -> F(X).
 nat_elim(C0, _C1, 0) -> C0;
 nat_elim(C0, C1, N) when N > 0 -> ap(ap(C1, N - 1), nat_elim(C0, C1, N - 1)).
 nat_d(C0, _C1, 0) -> C0;
 nat_d(_C0, C1, N) when N > 0 -> ap(ap(C1, N - 1), unit).
-show(V) ->
-  if
-    V =:= unit -> "()";
-    is_integer(V) -> integer_to_list(V);
-    is_binary(V) -> binary_to_list(V);
-    is_function(V) -> "<function>";
-    true -> show_t(V)
-  end.
-show_t({ptr, _}) -> "<ptr>";
+`
+
+// beamRuntime is kept as an alias for backward compatibility internally.
+const beamRuntime = beamRuntimePre
+
+// beamShowRuntime is the structural show (no float case — appended separately).
+const beamShowTail = `show_t({ptr, _}) -> "<ptr>";
 show_t({pair, A, B}) -> "(" ++ show(A) ++ ", " ++ show(B) ++ ")";
 show_t({c, _Tag, Name, Args}) ->
   lists:foldl(fun(A, S) ->
@@ -581,6 +584,24 @@ show_t({c, _Tag, Name, Args}) ->
     end
   end, Name, Args).
 `
+
+// emitBeamShow emits the show/show_t runtime. When withFloat is true it includes
+// is_float(V) -> ff___fmtf(V) so raw Erlang floats (e.g. the return value of
+// printFloat : Float -> IO Float) display identically to other backends.
+func emitBeamShow(b interface{ WriteString(string) (int, error) }, withFloat bool) {
+	b.WriteString("show(V) ->\n  if\n")
+	b.WriteString("    V =:= unit -> \"()\";\n")
+	b.WriteString("    is_integer(V) -> integer_to_list(V);\n")
+	b.WriteString("    is_binary(V) -> binary_to_list(V);\n")
+	b.WriteString("    is_function(V) -> \"<function>\";\n")
+	if withFloat {
+		// ff___fmtf implements ECMAScript Number::toString (shortest round-trip),
+		// matching JS/Python/Go show output for floats.
+		b.WriteString("    is_float(V) -> ff___fmtf(V);\n")
+	}
+	b.WriteString("    true -> show_t(V)\n  end.\n")
+	b.WriteString(beamShowTail)
+}
 
 // beamQuotRuntime is the erased quotient builtin group (v2): the carrier with the
 // proofs as units.

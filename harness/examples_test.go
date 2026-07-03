@@ -6,13 +6,16 @@ import (
 	"strings"
 	"testing"
 
+	"goforge.dev/rune/v3/internal/prelude"
 	"goforge.dev/rune/v3/internal/session"
 )
 
 // TestExamplesLoad guards every committed examples/*.rune: each elaborates and
-// type-checks in a fresh session (the examples are self-contained — CRDT specs and
-// data-plane demos that `rune simulate`/`rune run` consume without the REPL prelude).
-// A rotted example fails here.
+// type-checks in a fresh session. Examples that use `import` declarations (e.g.
+// double.rune importing Std.Float) get the shared prelude loaded first, matching
+// the CLI's always-on prelude behaviour. Self-contained CRDT examples that define
+// their own numeric tower are loaded bare (they may shadow prelude names such as
+// `succ`/`zero` and would conflict if the prelude were loaded first).
 func TestExamplesLoad(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Join("..", "examples"))
 	if err != nil {
@@ -30,6 +33,13 @@ func TestExamplesLoad(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := session.New()
+			// Examples that use `import` declarations need the prelude; bare
+			// examples (e.g. CRDT specs that define their own Nat tower) do not.
+			if strings.Contains(string(src), "import ") {
+				if _, err := s.LoadSource(prelude.Source()); err != nil {
+					t.Fatalf("examples/%s: loading prelude: %v", e.Name(), err)
+				}
+			}
 			if _, err := s.LoadSource(string(src)); err != nil {
 				t.Errorf("examples/%s did not load: %v", e.Name(), err)
 			}
