@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"goforge.dev/rune/v3/codegen"
+	"goforge.dev/rune/v3/internal/session"
 )
 
 type buildArgs struct {
@@ -137,7 +138,21 @@ func runBuildCLI(args []string, out io.Writer) error {
 }
 
 func runBuild(src string, cfg buildArgs, out io.Writer) error {
-	p, err := programFor(src, cfg.main)
+	// Route through programForSet (the same path emit/run use) so the standard
+	// prelude is loaded when the source requests it. Prelude loading is
+	// demand-driven: load only when the source has an explicit "import Std" or
+	// "alias Std" directive AND does not declare its own numeric tower via
+	// "builtin nat". This avoids hash collisions with user sources that define
+	// their own Nat-like data types (same structure hashes to same core term).
+	// The file name is used only for error messages; fall back to a placeholder
+	// when called from tests without a path.
+	name := cfg.file
+	if name == "" {
+		name = "(build)"
+	}
+	sources := []session.NamedSource{{Name: name, Src: src}}
+	usePrelude := sourcesNeedPrelude(sources) && !sourcesHaveBuiltinNat(sources)
+	p, err := programForSet(sources, cfg.main, usePrelude)
 	if err != nil {
 		return err
 	}

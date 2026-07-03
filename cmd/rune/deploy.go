@@ -281,10 +281,13 @@ func isCodeTarget(t string) bool {
 }
 
 // runWorkloadDeploy deploys + RUNS a verified protocol's actor system on a real
-// backend: `rune deploy FILE [NAME] --target beam`. This is the Lambert gate — a
+// backend: `rune deploy FILE [NAME] --target beam`. This is the Lambert gate; a
 // proven CvRDT does not just emit config, it runs (e.g. live gossiping BEAM actors
-// via the serveG projection). It reuses the emit-and-execute path (runTarget); BEAM
-// (erl) is the default distributed target.
+// via the serveG projection). BEAM (erl) is the default distributed target.
+// Prelude loading is demand-driven: the standard prelude is loaded only when the
+// source file has an explicit "import Std" or "alias Std" directive AND does not
+// declare its own numeric tower via "builtin nat". This avoids hash collisions
+// when user sources define their own Nat-like data types.
 func runWorkloadDeploy(positional []string, target string, out io.Writer) error {
 	if len(positional) == 0 {
 		return fmt.Errorf("rune deploy FILE [NAME] --target <backend>: needs a source file")
@@ -297,12 +300,13 @@ func runWorkloadDeploy(positional []string, target string, out io.Writer) error 
 	if target == "" {
 		target = "erl" // BEAM, the distributed default
 	}
-	src, err := os.ReadFile(file)
+	sources, err := readNamedSources([]string{file})
 	if err != nil {
 		return err
 	}
+	usePrelude := sourcesNeedPrelude(sources) && !sourcesHaveBuiltinNat(sources)
 	fmt.Fprintf(out, "deploying %s (%s) on target %q…\n", file, mainName, target)
-	return runTarget(string(src), mainName, target)
+	return runTargetSet(sources, mainName, target, usePrelude)
 }
 
 // resourceFor builds an agnostic Resource from the CLI flags.

@@ -175,3 +175,35 @@ func TestRunBuildLibraryReportsSharedUnsupportedError(t *testing.T) {
 		t.Fatalf("error = %v, want ErrLibraryUnsupported", err)
 	}
 }
+
+// TestRunBuildUsesPrelude verifies that runBuild (and the underlying programForSet
+// path) loads the standard prelude so a source with `import Std.Float` succeeds.
+// This regression-tests the fix for build bypassing the prelude (the old
+// programFor path returned "import Std.Float: no definitions found for module").
+func TestRunBuildUsesPrelude(t *testing.T) {
+	// A minimal double.rune-style source: imports Std.Float and uses fmul/fromNat.
+	src := `import Std.Float
+
+main : IO Float is
+  bindIO Float Float getFloat
+    (fn (x : Float) is printFloat (fmul x (fromNat 2)) end)
+end
+`
+	var out bytes.Buffer
+	err := runBuild(src, buildArgs{
+		target: "js",
+		kind:   codegen.BuildApp,
+		main:   "main",
+	}, &out)
+	if err != nil {
+		t.Fatalf("runBuild with Std.Float import: %v", err)
+	}
+	got := out.String()
+	// printFloat and getFloat come from the Std.Float prelude module;
+	// their presence proves the prelude was loaded successfully.
+	for _, want := range []string{"# main.js", "printFloat", "getFloat"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected generated JS to contain %q", want)
+		}
+	}
+}

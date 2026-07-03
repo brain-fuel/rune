@@ -281,8 +281,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage:")
 	fmt.Fprintln(os.Stderr, "  rune (fmt|hash) <file>")
 	fmt.Fprintln(os.Stderr, "  rune repl [--no-prelude]")
-	fmt.Fprintln(os.Stderr, "  rune emit <path...> [name] [--target js|py|go|rs|erl|jvm]  (dirs expand to their .rune files)")
-	fmt.Fprintln(os.Stderr, "  rune run  <path...> <name> [--target js|py|go|rs|erl|jvm]  (dirs expand to their .rune files)")
+	fmt.Fprintln(os.Stderr, "  rune emit <path...> [name] [--target js|py|go|rs|erl|jvm] [--no-prelude]  (dirs expand to their .rune files)")
+	fmt.Fprintln(os.Stderr, "  rune run  <path...> <name> [--target js|py|go|rs|erl|jvm] [--no-prelude]  (dirs expand to their .rune files)")
 	fmt.Fprintln(os.Stderr, "  rune build <file> [name] [--target T] [--kind app|library] [--module M] [--export Rune[:Host]] [--out dir]")
 	fmt.Fprintln(os.Stderr, "  rune simulate <file> [replicas]   (defines init/merge/value/op0..opN)")
 	fmt.Fprintln(os.Stderr, "  rune deploy <file> [name] --target <backend>   (deploy + RUN a verified protocol)")
@@ -445,6 +445,20 @@ func readNamedSources(files []string) ([]session.NamedSource, error) {
 func sourcesHaveBuiltinNat(sources []session.NamedSource) bool {
 	for _, ns := range sources {
 		if strings.Contains(ns.Src, "builtin nat") {
+			return true
+		}
+	}
+	return false
+}
+
+// sourcesNeedPrelude returns true when any source text contains an explicit
+// "import Std" or "alias Std" directive, indicating that the source requires
+// names from the standard prelude (e.g. Std.Float, Std.IO). Used by rune build
+// and rune deploy to load the prelude on-demand: only when actually needed,
+// avoiding hash collisions when user sources define their own Nat-like types.
+func sourcesNeedPrelude(sources []session.NamedSource) bool {
+	for _, ns := range sources {
+		if strings.Contains(ns.Src, "import Std") || strings.Contains(ns.Src, "alias Std") {
 			return true
 		}
 	}
