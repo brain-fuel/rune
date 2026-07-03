@@ -545,3 +545,10 @@ slip past both gates. FIX if initial-sync ever regresses: add a puppeteer scenar
 page's `#count` immediately after "connected" (before either page's bump button is clicked), so the
 real `onopen` send is exercised end-to-end. Park (Standing Rule 1, no manifested bug -- e2e's post-bump
 assertions pass and sync_test's scenario B covers the protocol shape).
+Two adjacent gaps from the whole-branch review, same disposition: (1) the RUN.md kill-reopen re-sync
+claim is pinned only by the fakes (`sync_test.mjs` scenario F fires `onclose` manually); a real
+browser tab-kill's disconnect timing is untested -- fold a reopen step into the same future puppeteer
+scenario. (2) equal-session-id deadlock (`examples/twotab/sync.js:14`: two tabs drawing the same
+`Math.random().toString(36).slice(2)` id drop each other's hello as self-echo and neither wins the
+offerer election); probability ~1e-17 per pair, inherent to single-random-id negotiation, cosmetic
+for a demo.
