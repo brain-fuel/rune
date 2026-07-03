@@ -35,7 +35,7 @@ checklist of everything between HEAD and a shippable beta.
    residuals closed, PerceusBalanceable re-opened, realistic programs steady-flat;
    WASM partial support landed too, v3.341.0). Was listed here off the stale index.
 3. ~~6c: strings/bytes as refcounted heap objects~~ DONE (branch `feat/wasm-bin-arc`,
-   `f4f49d3`..`571cdd4` + the Task 4 payoff commit). `K_BIN = 8` packed-byte ARC leaf
+   `f4f49d3`..`e00b270`). `K_BIN = 8` packed-byte ARC leaf
    kind + power-of-two big buckets [256B,64KB] in the free list (so a `Bin` payload
    over 256B is still pooled) + full op parity (`binEmpty`/`binCons`/`binLen`/
    `binAt`/`printBin`, the `b"..."` literal, `$show`) joining the ch483 cross-backend

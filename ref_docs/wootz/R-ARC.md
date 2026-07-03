@@ -167,7 +167,7 @@ any balanced program must return `$live` to its baseline after main.
 
 ## Downstream (the demo path)
 
-- **Plan 6c DONE** (`f4f49d3`..`571cdd4` + the Task 4 payoff commit, branch
+- **Plan 6c DONE** (`f4f49d3`..`e00b270`, branch
   `feat/wasm-bin-arc`): bytes as a refcounted heap object in WASM. `K_BIN = 8`, a
   packed-byte leaf container (`[kind][byte-len][raw bytes, 4-rounded]`), plus the
   power-of-two big buckets above (Task 1) so a `Bin` payload over 256B still gets
