@@ -81,4 +81,13 @@ else warn "no tofu/terraform — the fmt-check sweep SKIPS without one (asdf ins
 echo "-- rust backend --"
 have rustc && ok "rustc $(rustc --version 2>/dev/null | awk '{print $2}')" || warn "rustc not found (rustup: https://rustup.rs) — only needed for the Rust source backend"
 
+# 7. Browser-library gate (6d): node assembles WAT via the wabt npm package.
+echo "-- wasm browser library --"
+if have node; then
+  if [ -d "$(dirname "$0")/../harness/node_modules/wabt" ]; then ok "wabt npm present"
+  elif [ "$CHECK_ONLY" = 1 ]; then miss "wabt npm (run: bin/setup.sh, installs into harness/node_modules)"
+  else (cd "$(dirname "$0")/../harness" && npm install --no-save wabt@1.0.39 >/dev/null 2>&1) && ok "wabt npm installed (harness/node_modules)" || warn "npm install wabt failed - TestWasmBrowserLibrary will SKIP"
+  fi
+else warn "node not found - the browser-library gate SKIPS"; fi
+
 echo "== done =="

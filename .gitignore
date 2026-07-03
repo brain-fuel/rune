@@ -47,3 +47,6 @@ third_party/bearssl/build/
 .superpowers/
 .assayxport/
 assayxport.json
+
+# npm dependencies for the browser-library gate (bin/setup.sh section 7)
+/harness/node_modules/
