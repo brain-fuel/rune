@@ -583,6 +583,10 @@ func TestListingsEmitAndExecute(t *testing.T) {
 		// ch194: fuel-bounded Euclidean division by repeated subtraction. 7 ÷ 3 yields
 		// quotient 2; the divmod result (a Σ pair) deploys/runs on a backend.
 		{"ch194_divmod.rune", "quotient", "succ (succ zero)"},
+		// ch561: the scribe display list — demo.scr's 20 ops survive a full
+		// print-then-parse round trip at runtime (the codec deployed, not just
+		// proven; the refl round-trip laws live in the listing itself).
+		{"ch561_scribe_dl.rune", "answer", "20"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.listing, func(t *testing.T) {

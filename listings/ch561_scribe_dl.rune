@@ -1,0 +1,1190 @@
+-- Chapter 561 — the scribe display list (L1 of the scribe Rune port).
+-- scribe (goforge.dev/scribe) is the 2D drawing engine built on the QuickDraw
+-- corner-grid model; its portable IR is a display list of 20 drawing ops, and
+-- its text codec is `ps`, a PostScript-homage postfix language. This chapter
+-- ports the IR and codec: the Op datatype, a total pure printer, a total pure
+-- parser with line:col diagnostics, and refl round-trip proofs
+-- (parse (print P) = ok P). Everything is PURE rune (no foreign ops in the
+-- codec) so the proofs normalize; numbers are exact decimals (sign, units,
+-- fracLen, fracDigits) — the corner tables are decimal literals, so the whole
+-- geometry stays exact downstream. Fuel-bounded structural recursion only.
+
+-- ---------------------------------------------------------------- preamble
+data Bool : U is false : Bool | true : Bool end
+andB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> false | true -> b end end end
+orB  : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | false -> b | true -> true end end end
+notB : Bool -> Bool is fn (a : Bool) is case a of | false -> true | true -> false end end end
+ite  : (A : U) -> Bool -> A -> A -> A is
+  fn (A : U) (c : Bool) (t : A) (e : A) is case c of | false -> e | true -> t end end
+end
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+add : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> n | succ k with ih -> succ ih end end end
+builtin natAdd add
+mul : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case m of | zero -> 0 | succ k with ih -> add n ih end end end
+builtin natMul mul
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ k -> k end end end
+monus : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is case n of | zero -> m | succ k with ih -> pred ih end end end
+builtin natMonus monus
+
+leb : Nat -> Nat -> Bool is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is true end
+    | succ k with ih -> fn (n : Nat) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+
+-- flooring division / remainder (ch213 pattern): fuel = the dividend; the
+-- builtin natDiv/natMod accel makes them O(1) on literals and native in
+-- codegen, so the loops never actually run.
+divF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is 0 end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> 0
+        | succ k -> case leb b a of | false -> 0 | true -> succ (ih (monus a b) b) end
+        end
+      end
+    end
+  end
+end
+modF : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Nat) (b : Nat) is a end
+    | succ f with ih -> fn (a : Nat) (b : Nat) is
+        case b of
+        | zero -> a
+        | succ k -> case leb b a of | false -> a | true -> ih (monus a b) b end
+        end
+      end
+    end
+  end
+end
+fdiv : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is divF m m n end end
+fmod : Nat -> Nat -> Nat is fn (m : Nat) (n : Nat) is modF m m n end end
+builtin natDiv fdiv
+builtin natMod fmod
+
+-- accel-safe comparisons: monus is O(1) native, so these never unroll on the
+-- packed bignums (leb would).
+isZero : Nat -> Bool is fn (n : Nat) is case n of | zero -> true | succ k -> false end end end
+leW : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is isZero (monus a b) end end
+eqW : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is andB (leW a b) (leW b a) end end
+gtZ : Nat -> Bool is fn (n : Nat) is notB (isZero n) end end
+
+-- packed binary strings (B4): a String is one bignum of UTF-8 bytes, first
+-- byte least-significant, 0x01 sentinel on top; uncons is O(1) via the accel.
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+emptyS : Bytes is bytes 1 end
+strNull : Bytes -> Bool is fn (s : Bytes) is leW (codeOf s) 1 end end
+strHead : Bytes -> Nat is fn (s : Bytes) is fmod (codeOf s) 256 end end
+strTail : Bytes -> Bytes is fn (s : Bytes) is bytes (fdiv (codeOf s) 256) end end
+strCons : Nat -> Bytes -> Bytes is fn (c : Nat) (s : Bytes) is bytes (add c (mul 256 (codeOf s))) end end
+
+-- strCatF: concatenation by re-consing a (fuel >= byte length of a); every
+-- left operand in this chapter is one printed op line, so lineFuel bounds it.
+strCatF : Nat -> Bytes -> Bytes -> Bytes is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Bytes) (b : Bytes) is b end
+    | succ f with ih -> fn (a : Bytes) (b : Bytes) is
+        case strNull a of
+        | false -> strCons (strHead a) (ih (strTail a) b)
+        | true -> b
+        end
+      end
+    end
+  end
+end
+lineFuel : Nat is 512 end
+cat : Bytes -> Bytes -> Bytes is fn (a : Bytes) (b : Bytes) is strCatF lineFuel a b end end
+
+data List : U -> U is
+  nil : (A : U) -> List A
+| cons : (A : U) -> A -> List A -> List A
+end
+data Result : U -> U -> U is
+  ok : (A : U) -> (E : U) -> A -> Result A E
+| err : (A : U) -> (E : U) -> E -> Result A E
+end
+data P2 : U -> U -> U is p2 : (A : U) -> (B : U) -> A -> B -> P2 A B end
+
+-- ------------------------------------------------------------------ the IR
+-- Exact decimal: neg, units, fracLen, fracDigits. Denotes
+-- (units*10^fracLen + fracDigits) / 10^fracLen, negated when neg. Canonical:
+-- fracDigits has no trailing zero (when fracLen > 0) and zero is never neg.
+data Num : U is num : Bool -> Nat -> Nat -> Nat -> Num end
+data Color : U is rgba : Nat -> Nat -> Nat -> Nat -> Color end
+-- A 2-nullary-constructor datatype is structurally identical to Bool, and the
+-- store is content-addressed, so a fresh `data CStyle is circular | continuous`
+-- would HASH-COLLIDE with Bool (the ch217 Blame lesson). Corner style and join
+-- are therefore Bool aliases with named constants; cap has 3 constructors and
+-- a unique shape, so it is a real datatype.
+CStyle : U is Bool end
+styCircular : CStyle is false end
+styContinuous : CStyle is true end
+JoinT : U is Bool end
+joinBevel : JoinT is false end
+joinRound : JoinT is true end
+data CapT : U is capButt : CapT | capRound : CapT | capSquare : CapT end
+
+data Op : U is
+  opMoveTo : Num -> Num -> Op
+| opLineTo : Num -> Num -> Op
+| opCurveTo : Num -> Num -> Num -> Num -> Num -> Num -> Op
+| opClosePath : Op
+| opNewPath : Op
+| opRect : Num -> Num -> Num -> Num -> Op
+| opCircle : Num -> Num -> Num -> Op
+| opRoundRect : Num -> Num -> Num -> Num -> Num -> CStyle -> Op
+| opSetColor : Color -> Op
+| opSetLineWidth : Num -> Op
+| opSetCap : CapT -> Op
+| opSetJoin : JoinT -> Op
+| opSave : Op
+| opRestore : Op
+| opTranslate : Num -> Num -> Op
+| opScale : Num -> Num -> Op
+| opFill : Op
+| opFillEO : Op
+| opStroke : Op
+| opClear : Color -> Op
+end
+
+-- -------------------------------------------------------------- the printer
+-- natToStrGo prepends n's decimal digits (least-significant digit innermost,
+-- so the digits land most-significant-first); fuel 32 covers any Nat this
+-- codec meets.
+natToStrGo : Nat -> Nat -> Bytes -> Bytes is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (n : Nat) (acc : Bytes) is acc end
+    | succ f with ih -> fn (n : Nat) (acc : Bytes) is
+        case isZero n of
+        | false -> ih (fdiv n 10) (strCons (add 48 (fmod n 10)) acc)
+        | true -> acc
+        end
+      end
+    end
+  end
+end
+natToStr : Nat -> Bytes is
+  fn (n : Nat) is
+    case isZero n of
+    | false -> natToStrGo 32 n emptyS
+    | true -> strCons 48 emptyS
+    end
+  end
+end
+
+-- fracToStrGo prepends exactly `width` digits of f, left-padded with zeros.
+fracToStrGo : Nat -> Nat -> Bytes -> Bytes is
+  fn (width : Nat) is
+    case width of
+    | zero -> fn (f : Nat) (acc : Bytes) is acc end
+    | succ w with ih -> fn (f : Nat) (acc : Bytes) is
+        ih (fdiv f 10) (strCons (add 48 (fmod f 10)) acc)
+      end
+    end
+  end
+end
+
+numToStr : Num -> Bytes is
+  fn (q : Num) is
+    case q of
+    | num neg units fracLen fracDigits ->
+        let body : Bytes =
+          case isZero fracLen of
+          | false -> cat (natToStr units) (strCons 46 (fracToStrGo fracLen fracDigits emptyS))
+          | true -> natToStr units
+          end
+        in
+        case neg of | false -> body | true -> strCons 45 body end
+    end
+  end
+end
+
+hexDigit : Nat -> Nat is fn (n : Nat) is ite Nat (leW n 9) (add 48 n) (add 87 n) end end
+byteHex : Nat -> Bytes -> Bytes is
+  fn (b : Nat) (acc : Bytes) is
+    strCons (hexDigit (fdiv b 16)) (strCons (hexDigit (fmod b 16)) acc)
+  end
+end
+colorToStr : Color -> Bytes is
+  fn (c : Color) is
+    case c of
+    | rgba r g b a ->
+        strCons 35 (byteHex r (byteHex g (byteHex b
+          (ite Bytes (eqW a 255) emptyS (byteHex a emptyS)))))
+    end
+  end
+end
+
+sp : Bytes -> Bytes -> Bytes is fn (a : Bytes) (b : Bytes) is cat a (strCons 32 b) end end
+
+styleWord : CStyle -> Bytes is
+  fn (s : CStyle) is case s of | false -> "circular" | true -> "continuous" end end
+end
+capWord : CapT -> Bytes is
+  fn (c : CapT) is case c of | capButt -> "butt" | capRound -> "round" | capSquare -> "square" end end
+end
+joinWord : JoinT -> Bytes is
+  fn (j : JoinT) is case j of | false -> "bevel" | true -> "round" end end
+end
+
+opLine : Op -> Bytes is
+  fn (o : Op) is
+    case o of
+    | opMoveTo x y -> sp (numToStr x) (sp (numToStr y) "moveto")
+    | opLineTo x y -> sp (numToStr x) (sp (numToStr y) "lineto")
+    | opCurveTo a b c d e f ->
+        sp (numToStr a) (sp (numToStr b) (sp (numToStr c) (sp (numToStr d)
+          (sp (numToStr e) (sp (numToStr f) "curveto")))))
+    | opClosePath -> "closepath"
+    | opNewPath -> "newpath"
+    | opRect x y w h ->
+        sp (numToStr x) (sp (numToStr y) (sp (numToStr w) (sp (numToStr h) "rect")))
+    | opCircle x y r ->
+        sp (numToStr x) (sp (numToStr y) (sp (numToStr r) "circle"))
+    | opRoundRect x y w h r sty ->
+        sp (numToStr x) (sp (numToStr y) (sp (numToStr w) (sp (numToStr h)
+          (sp (numToStr r) (sp (styleWord sty) "roundrect")))))
+    | opSetColor c -> sp (colorToStr c) "setcolor"
+    | opSetLineWidth w -> sp (numToStr w) "setlinewidth"
+    | opSetCap c -> sp (capWord c) "setcap"
+    | opSetJoin j -> sp (joinWord j) "setjoin"
+    | opSave -> "gsave"
+    | opRestore -> "grestore"
+    | opTranslate x y -> sp (numToStr x) (sp (numToStr y) "translate")
+    | opScale x y -> sp (numToStr x) (sp (numToStr y) "scale")
+    | opFill -> "fill"
+    | opFillEO -> "eofill"
+    | opStroke -> "stroke"
+    | opClear c -> sp (colorToStr c) "clear"
+    end
+  end
+end
+
+-- printOps: one op per line, trailing newline (the Go ps.Print contract).
+printOps : List Op -> Bytes is
+  fn (ops : List Op) is
+    ListElim Op (fn (w : List Op) is Bytes end)
+      emptyS
+      (fn (o : Op) (rest : List Op) (ih : Bytes) is cat (opLine o) (strCons 10 ih) end)
+      ops
+  end
+end
+
+-- printer pins: the codec's leaf contracts, each a refl proof (they compute).
+pinNumFrac : Eq Bytes (numToStr (num false 114 1 7)) "114.7" is refl "114.7" end
+pinNumNeg : Eq Bytes (numToStr (num true 30 0 0)) "-30" is refl "-30" end
+pinNumZero : Eq Bytes (numToStr (num false 0 0 0)) "0" is refl "0" end
+pinNumPad : Eq Bytes (numToStr (num false 1 2 5)) "1.05" is refl "1.05" end
+pinColor : Eq Bytes (colorToStr (rgba 255 106 0 255)) "#ff6a00" is refl "#ff6a00" end
+pinColorA : Eq Bytes (colorToStr (rgba 255 0 0 128)) "#ff000080" is refl "#ff000080" end
+pinMoveTo : Eq Bytes (opLine (opMoveTo (num false 1 0 0) (num false 2 0 0))) "1 2 moveto" is
+  refl "1 2 moveto"
+end
+pinRoundRect :
+  Eq Bytes
+    (opLine (opRoundRect (num false 0 0 0) (num false 0 0 0) (num false 512 0 0)
+      (num false 512 0 0) (num false 114 1 7) styContinuous))
+    "0 0 512 512 114.7 continuous roundrect" is
+  refl "0 0 512 512 114.7 continuous roundrect"
+end
+
+-- ------------------------------------------------------------- the tokenizer
+-- A token is (line, col, word): position 1-based, word = the packed bytes of
+-- the lexeme. Whitespace splits; `%` comments run to end of line.
+data Tok : U is mkTok : Nat -> Nat -> Nat -> Tok end
+
+-- Tokenizer state: line col wordAcc wordMul wordLine wordCol inComment toksRev.
+-- The word accumulates as acc + c*mul (first byte least significant); a word
+-- is open iff mul > 1; finalizing adds the sentinel: word = acc + mul.
+data TSt : U is
+  mkTSt : Nat -> Nat -> Nat -> Nat -> Nat -> Nat -> Bool -> List Tok -> TSt
+end
+
+tstInit : TSt is mkTSt 1 1 0 1 1 1 false (nil Tok) end
+
+flushT : TSt -> TSt is
+  fn (st : TSt) is
+    case st of
+    | mkTSt line col acc mw wl wc com toks ->
+        case leW mw 1 of
+        | false -> mkTSt line col 0 1 1 1 com (cons Tok (mkTok wl wc (add acc mw)) toks)
+        | true -> st
+        end
+    end
+  end
+end
+
+-- one byte step (c is the head byte; positions advance here)
+tokStep : Nat -> TSt -> TSt is
+  fn (c : Nat) (st : TSt) is
+    case st of
+    | mkTSt line col acc mw wl wc com toks ->
+        case com of
+        | true ->
+            case eqW c 10 of
+            | false -> mkTSt line col acc mw wl wc true toks
+            | true -> mkTSt (add line 1) 1 acc mw wl wc false toks
+            end
+        | false ->
+            case eqW c 10 of
+            | true ->
+                case flushT st of
+                | mkTSt l2 c2 a2 m2 wl2 wc2 co2 t2 -> mkTSt (add l2 1) 1 a2 m2 wl2 wc2 co2 t2
+                end
+            | false ->
+                case orB (eqW c 32) (orB (eqW c 9) (eqW c 13)) of
+                | true ->
+                    case flushT st of
+                    | mkTSt l2 c2 a2 m2 wl2 wc2 co2 t2 -> mkTSt l2 (add c2 1) a2 m2 wl2 wc2 co2 t2
+                    end
+                | false ->
+                    case eqW c 37 of
+                    | true ->
+                        case flushT st of
+                        | mkTSt l2 c2 a2 m2 wl2 wc2 co2 t2 -> mkTSt l2 (add c2 1) a2 m2 wl2 wc2 true t2
+                        end
+                    | false ->
+                        case leW mw 1 of
+                        | true -> mkTSt line (add col 1) (add acc (mul c mw)) (mul mw 256) line col com toks
+                        | false -> mkTSt line (add col 1) (add acc (mul c mw)) (mul mw 256) wl wc com toks
+                        end
+                    end
+                end
+            end
+        end
+    end
+  end
+end
+
+tokGo : Nat -> Bytes -> TSt -> List Tok is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (s : Bytes) (st : TSt) is
+        case flushT st of | mkTSt l c a m wl wc co toks -> toks end
+      end
+    | succ f with ih -> fn (s : Bytes) (st : TSt) is
+        case strNull s of
+        | false -> ih (strTail s) (tokStep (strHead s) st)
+        | true -> case flushT st of | mkTSt l c a m wl wc co toks -> toks end
+        end
+      end
+    end
+  end
+end
+
+revToks : List Tok -> List Tok is
+  fn (ts : List Tok) is
+    ListElim Tok (fn (w : List Tok) is List Tok -> List Tok end)
+      (fn (acc : List Tok) is acc end)
+      (fn (t : Tok) (rest : List Tok) (ih : List Tok -> List Tok) is
+        fn (acc : List Tok) is ih (cons Tok t acc) end
+      end)
+      ts
+      (nil Tok)
+  end
+end
+
+tokFuel : Nat is 4096 end
+tokenize : Bytes -> List Tok is
+  fn (s : Bytes) is revToks (tokGo tokFuel s tstInit) end
+end
+
+llenT : List Tok -> Nat is
+  fn (ts : List Tok) is
+    ListElim Tok (fn (w : List Tok) is Nat end)
+      0
+      (fn (t : Tok) (rest : List Tok) (ih : Nat) is add ih 1 end)
+      ts
+  end
+end
+
+-- tokenizer pins
+pinTokCount : Eq Nat (llenT (tokenize "1 2 moveto")) 3 is refl 3 end
+pinTokComment : Eq Nat (llenT (tokenize "% all comment\n7 % tail\n")) 1 is refl 1 end
+pinTokCRLF : Eq Nat (llenT (tokenize "a\r\nb")) 2 is refl 2 end
+pinTokPos :
+  Eq Bool
+    (case tokenize "% c\n1 2 moveto" of
+     | nil -> false
+     | cons t rest ->
+         case t of
+         | mkTok l c w -> andB (eqW l 2) (andB (eqW c 1) (eqW w (codeOf "1")))
+         end
+     end)
+    true is
+  refl true
+end
+pinTokWordPos :
+  Eq Bool
+    (case tokenize "1 2 movetoo" of
+     | nil -> false
+     | cons a r1 ->
+         case r1 of
+         | nil -> false
+         | cons b r2 ->
+             case r2 of
+             | nil -> false
+             | cons t r3 ->
+                 case t of
+                 | mkTok l c w -> andB (eqW l 1) (andB (eqW c 5) (eqW w (codeOf "movetoo")))
+                 end
+             end
+         end
+     end)
+    true is
+  refl true
+end
+
+-- ---------------------------------------------------------------- the parser
+-- Values on the operand stack carry their source position for diagnostics
+-- (the leftover error points at the value, like the Go parser).
+data Val : U is
+  vNum : Nat -> Nat -> Num -> Val
+| vCol : Nat -> Nat -> Color -> Val
+| vName : Nat -> Nat -> Nat -> Val
+end
+
+-- A diagnostic: line, col, error code, offending word. Codes: 1 unknown word,
+-- 2 missing argument, 3 wrong argument type, 4 bad color, 5 bad number,
+-- 6 grestore without gsave, 7 leftover value, 8 bad corner style, 9 bad cap,
+-- 10 bad join.
+data PErr : U is mkPErr : Nat -> Nat -> Nat -> Bytes -> PErr end
+
+-- Parser state: operand stack, gsave depth, ops accumulated in reverse.
+data PSt : U is mkPSt : List Val -> Nat -> List Op -> PSt end
+
+bindR : (A : U) -> (B : U) -> Result A PErr -> (A -> Result B PErr) -> Result B PErr is
+  fn (A : U) (B : U) (r : Result A PErr) (k : A -> Result B PErr) is
+    ResultElim A PErr (fn (w : Result A PErr) is Result B PErr end)
+      (fn (a : A) is k a end)
+      (fn (e : PErr) is err B PErr e end)
+      r
+  end
+end
+
+isDigitB : Nat -> Bool is fn (c : Nat) is andB (leW 48 c) (leW c 57) end end
+
+-- Exactly ONE syntactic `ih` per fuel level: case arms evaluate eagerly in
+-- compiled code, so two recursive sites would cost 2^fuel (the strict-case-arm
+-- rule). Precompute the continue predicate, recurse once.
+stripZeros : Nat -> Nat -> Nat -> P2 Nat Nat is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (fl : Nat) (fr : Nat) is p2 Nat Nat fl fr end
+    | succ f with ih -> fn (fl : Nat) (fr : Nat) is
+        case andB (gtZ fl) (isZero (fmod fr 10)) of
+        | true -> ih (monus fl 1) (fdiv fr 10)
+        | false -> p2 Nat Nat fl fr
+        end
+      end
+    end
+  end
+end
+
+normNum : Bool -> Nat -> Nat -> Nat -> Num is
+  fn (neg : Bool) (units : Nat) (fl : Nat) (fr : Nat) is
+    case stripZeros 32 fl fr of
+    | p2 fl2 fr2 ->
+        let isZ : Bool = andB (isZero units) (isZero fl2) in
+        num (andB neg (notB isZ)) units fl2 fr2
+    end
+  end
+end
+
+
+-- number scan over the token's bytes (sign already peeled by the caller)
+numGo : Nat -> Bytes -> Bool -> Bool -> Nat -> Bool -> Nat -> Nat -> PErr -> Result Num PErr is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (s : Bytes) (neg : Bool) (sd : Bool) (units : Nat) (dot : Bool) (fl : Nat) (fr : Nat) (e : PErr) is
+        err Num PErr e
+      end
+    | succ f with ih -> fn (s : Bytes) (neg : Bool) (sd : Bool) (units : Nat) (dot : Bool) (fl : Nat) (fr : Nat) (e : PErr) is
+        case strNull s of
+        | true ->
+            case andB sd (notB (andB dot (isZero fl))) of
+            | true -> ok Num PErr (normNum neg units fl fr)
+            | false -> err Num PErr e
+            end
+        | false ->
+            let c : Nat = strHead s in
+            let isD : Bool = isDigitB c in
+            let isDot : Bool = andB (eqW c 46) (notB dot) in
+            case orB isD isDot of
+            | false -> err Num PErr e
+            | true ->
+                let d : Nat = monus c 48 in
+                let intD : Bool = andB isD (notB dot) in
+                let frcD : Bool = andB isD dot in
+                ih (strTail s) neg (orB sd isD)
+                  (ite Nat intD (add (mul units 10) d) units)
+                  (orB dot isDot)
+                  (ite Nat frcD (add fl 1) fl)
+                  (ite Nat frcD (add (mul fr 10) d) fr)
+                  e
+            end
+        end
+      end
+    end
+  end
+end
+
+parseNum : Nat -> Nat -> Nat -> Result Num PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) is
+    let e : PErr = mkPErr line col 5 (bytes word) in
+    let s : Bytes = bytes word in
+    case eqW (strHead s) 45 of
+    | true -> numGo 32 (strTail s) true false 0 false 0 0 e
+    | false -> numGo 32 s false false 0 false 0 0 e
+    end
+  end
+end
+
+hexVal : Nat -> Nat is
+  fn (c : Nat) is
+    case andB (leW 48 c) (leW c 57) of
+    | true -> monus c 48
+    | false ->
+        case andB (leW 97 c) (leW c 102) of
+        | true -> monus c 87
+        | false ->
+            case andB (leW 65 c) (leW c 70) of
+            | true -> monus c 55
+            | false -> 255
+            end
+        end
+    end
+  end
+end
+
+hexPair : Bytes -> PErr -> Result (P2 Nat Bytes) PErr is
+  fn (s : Bytes) (e : PErr) is
+    case strNull s of
+    | true -> err (P2 Nat Bytes) PErr e
+    | false ->
+        let h : Nat = hexVal (strHead s) in
+        let s2 : Bytes = strTail s in
+        case strNull s2 of
+        | true -> err (P2 Nat Bytes) PErr e
+        | false ->
+            let l : Nat = hexVal (strHead s2) in
+            case orB (eqW h 255) (eqW l 255) of
+            | true -> err (P2 Nat Bytes) PErr e
+            | false -> ok (P2 Nat Bytes) PErr (p2 Nat Bytes (add (mul 16 h) l) (strTail s2))
+            end
+        end
+    end
+  end
+end
+
+parseColor : Nat -> Nat -> Nat -> Result Color PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) is
+    let e : PErr = mkPErr line col 4 (bytes word) in
+    let s : Bytes = strTail (bytes word) in
+    bindR (P2 Nat Bytes) Color (hexPair s e) (fn (pr : P2 Nat Bytes) is
+      case pr of
+      | p2 r s1 ->
+          bindR (P2 Nat Bytes) Color (hexPair s1 e) (fn (pg : P2 Nat Bytes) is
+            case pg of
+            | p2 g s2 ->
+                bindR (P2 Nat Bytes) Color (hexPair s2 e) (fn (pb : P2 Nat Bytes) is
+                  case pb of
+                  | p2 b s3 ->
+                      case strNull s3 of
+                      | true -> ok Color PErr (rgba r g b 255)
+                      | false ->
+                          bindR (P2 Nat Bytes) Color (hexPair s3 e) (fn (pa : P2 Nat Bytes) is
+                            case pa of
+                            | p2 a s4 ->
+                                case strNull s4 of
+                                | true -> ok Color PErr (rgba r g b a)
+                                | false -> err Color PErr e
+                                end
+                            end
+                          end)
+                      end
+                  end
+                end)
+            end
+          end)
+      end
+    end)
+  end
+end
+
+-- popped name argument: its position, its word, the remaining stack
+data NameArg : U is nameArg : Nat -> Nat -> Nat -> List Val -> NameArg end
+
+popNum : Nat -> Nat -> Nat -> List Val -> Result (P2 Num (List Val)) PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) (stack : List Val) is
+    case stack of
+    | nil -> err (P2 Num (List Val)) PErr (mkPErr line col 2 (bytes word))
+    | cons v rest ->
+        case v of
+        | vNum vl vc n -> ok (P2 Num (List Val)) PErr (p2 Num (List Val) n rest)
+        | vCol vl vc c -> err (P2 Num (List Val)) PErr (mkPErr line col 3 (bytes word))
+        | vName vl vc w -> err (P2 Num (List Val)) PErr (mkPErr line col 3 (bytes word))
+        end
+    end
+  end
+end
+popCol : Nat -> Nat -> Nat -> List Val -> Result (P2 Color (List Val)) PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) (stack : List Val) is
+    case stack of
+    | nil -> err (P2 Color (List Val)) PErr (mkPErr line col 2 (bytes word))
+    | cons v rest ->
+        case v of
+        | vNum vl vc n -> err (P2 Color (List Val)) PErr (mkPErr line col 3 (bytes word))
+        | vCol vl vc c -> ok (P2 Color (List Val)) PErr (p2 Color (List Val) c rest)
+        | vName vl vc w -> err (P2 Color (List Val)) PErr (mkPErr line col 3 (bytes word))
+        end
+    end
+  end
+end
+popName : Nat -> Nat -> Nat -> List Val -> Result NameArg PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) (stack : List Val) is
+    case stack of
+    | nil -> err NameArg PErr (mkPErr line col 2 (bytes word))
+    | cons v rest ->
+        case v of
+        | vNum vl vc n -> err NameArg PErr (mkPErr line col 3 (bytes word))
+        | vCol vl vc c -> err NameArg PErr (mkPErr line col 3 (bytes word))
+        | vName vl vc w -> ok NameArg PErr (nameArg vl vc w rest)
+        end
+    end
+  end
+end
+
+emitOp : Op -> List Val -> Nat -> List Op -> Result PSt PErr is
+  fn (o : Op) (stack : List Val) (gs : Nat) (ops : List Op) is
+    ok PSt PErr (mkPSt stack gs (cons Op o ops))
+  end
+end
+
+apN1 : (Num -> Op) -> Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (f : Num -> Op) (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR (P2 Num (List Val)) PSt (popNum line col word stack) (fn (pa : P2 Num (List Val)) is
+          case pa of | p2 a r1 -> emitOp (f a) r1 gs ops end
+        end)
+    end
+  end
+end
+apN2 : (Num -> Num -> Op) -> Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (f : Num -> Num -> Op) (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR (P2 Num (List Val)) PSt (popNum line col word stack) (fn (pb : P2 Num (List Val)) is
+          case pb of
+          | p2 b r1 ->
+              bindR (P2 Num (List Val)) PSt (popNum line col word r1) (fn (pa : P2 Num (List Val)) is
+                case pa of | p2 a r2 -> emitOp (f a b) r2 gs ops end
+              end)
+          end
+        end)
+    end
+  end
+end
+apN3 : (Num -> Num -> Num -> Op) -> Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (f : Num -> Num -> Num -> Op) (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR (P2 Num (List Val)) PSt (popNum line col word stack) (fn (pc : P2 Num (List Val)) is
+          case pc of
+          | p2 c r1 ->
+              bindR (P2 Num (List Val)) PSt (popNum line col word r1) (fn (pb : P2 Num (List Val)) is
+                case pb of
+                | p2 b r2 ->
+                    bindR (P2 Num (List Val)) PSt (popNum line col word r2) (fn (pa : P2 Num (List Val)) is
+                      case pa of | p2 a r3 -> emitOp (f a b c) r3 gs ops end
+                    end)
+                end
+              end)
+          end
+        end)
+    end
+  end
+end
+apN4 : (Num -> Num -> Num -> Num -> Op) -> Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (f : Num -> Num -> Num -> Num -> Op) (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR (P2 Num (List Val)) PSt (popNum line col word stack) (fn (pd : P2 Num (List Val)) is
+          case pd of
+          | p2 d r1 ->
+              bindR PSt PSt (apN3 (fn (a : Num) (b : Num) (c : Num) is f a b c d end) line col word (mkPSt r1 gs ops))
+                (fn (st2 : PSt) is ok PSt PErr st2 end)
+          end
+        end)
+    end
+  end
+end
+apN6 : (Num -> Num -> Num -> Num -> Num -> Num -> Op) -> Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (f : Num -> Num -> Num -> Num -> Num -> Num -> Op) (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR (P2 Num (List Val)) PSt (popNum line col word stack) (fn (pf : P2 Num (List Val)) is
+          case pf of
+          | p2 f6 r1 ->
+              bindR (P2 Num (List Val)) PSt (popNum line col word r1) (fn (pe : P2 Num (List Val)) is
+                case pe of
+                | p2 e5 r2 ->
+                    bindR PSt PSt
+                      (apN4 (fn (a : Num) (b : Num) (c : Num) (d : Num) is f a b c d e5 f6 end) line col word (mkPSt r2 gs ops))
+                      (fn (st2 : PSt) is ok PSt PErr st2 end)
+                end
+              end)
+          end
+        end)
+    end
+  end
+end
+apCol : (Color -> Op) -> Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (f : Color -> Op) (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR (P2 Color (List Val)) PSt (popCol line col word stack) (fn (pa : P2 Color (List Val)) is
+          case pa of | p2 c r1 -> emitOp (f c) r1 gs ops end
+        end)
+    end
+  end
+end
+
+
+-- Word equality must be BYTEWISE: eqW against a big packed literal would make
+-- the evaluator unroll the literal succ-by-succ (monus's accel needs both
+-- sides literal), which overflows the checker. Each byte is < 256, so the
+-- per-byte comparison is bounded.
+eqSF : Nat -> Bytes -> Bytes -> Bool is
+  fn (fuel : Nat) is
+    case fuel of
+    | zero -> fn (a : Bytes) (b : Bytes) is false end
+    | succ f with ih -> fn (a : Bytes) (b : Bytes) is
+        case strNull a of
+        | true -> strNull b
+        | false ->
+            case strNull b of
+            | true -> false
+            | false ->
+                case eqW (strHead a) (strHead b) of
+                | true -> ih (strTail a) (strTail b)
+                | false -> false
+                end
+            end
+        end
+      end
+    end
+  end
+end
+eqS : Nat -> Bytes -> Bool is fn (w : Nat) (s : Bytes) is eqSF 16 (bytes w) s end end
+
+-- roundrect: pops the style name, then five numbers (x y w h r).
+styleOf : Nat -> Nat -> Nat -> Result CStyle PErr is
+  fn (nl : Nat) (nc : Nat) (nw : Nat) is
+    case eqS nw "circular" of
+    | true -> ok CStyle PErr styCircular
+    | false ->
+        case eqS nw "continuous" of
+        | true -> ok CStyle PErr styContinuous
+        | false -> err CStyle PErr (mkPErr nl nc 8 (bytes nw))
+        end
+    end
+  end
+end
+
+apRoundRect : Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR NameArg PSt (popName line col word stack) (fn (na : NameArg) is
+          case na of
+          | nameArg nl nc nw rest0 ->
+              bindR CStyle PSt (styleOf nl nc nw) (fn (sty : CStyle) is
+                bindR (P2 Num (List Val)) PSt (popNum line col word rest0) (fn (pr : P2 Num (List Val)) is
+                  case pr of
+                  | p2 r5 rest1 ->
+                      bindR (P2 Num (List Val)) PSt (popNum line col word rest1) (fn (ph : P2 Num (List Val)) is
+                        case ph of
+                        | p2 h4 rest2 ->
+                            bindR (P2 Num (List Val)) PSt (popNum line col word rest2) (fn (pw : P2 Num (List Val)) is
+                              case pw of
+                              | p2 w3 rest3 ->
+                                  bindR (P2 Num (List Val)) PSt (popNum line col word rest3) (fn (py : P2 Num (List Val)) is
+                                    case py of
+                                    | p2 y2 rest4 ->
+                                        bindR (P2 Num (List Val)) PSt (popNum line col word rest4) (fn (px : P2 Num (List Val)) is
+                                          case px of
+                                          | p2 x1 rest5 -> emitOp (opRoundRect x1 y2 w3 h4 r5 sty) rest5 gs ops
+                                          end
+                                        end)
+                                    end
+                                  end)
+                              end
+                            end)
+                        end
+                      end)
+                  end
+                end)
+              end)
+          end
+        end)
+    end
+  end
+end
+
+apSetCap : Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR NameArg PSt (popName line col word stack) (fn (na : NameArg) is
+          case na of
+          | nameArg nl nc nw rest ->
+              case eqS nw "butt" of
+              | true -> emitOp (opSetCap capButt) rest gs ops
+              | false ->
+                  case eqS nw "round" of
+                  | true -> emitOp (opSetCap capRound) rest gs ops
+                  | false ->
+                      case eqS nw "square" of
+                      | true -> emitOp (opSetCap capSquare) rest gs ops
+                      | false -> err PSt PErr (mkPErr nl nc 9 (bytes nw))
+                      end
+                  end
+              end
+          end
+        end)
+    end
+  end
+end
+
+apSetJoin : Nat -> Nat -> Nat -> PSt -> Result PSt PErr is
+  fn (line : Nat) (col : Nat) (word : Nat) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops ->
+        bindR NameArg PSt (popName line col word stack) (fn (na : NameArg) is
+          case na of
+          | nameArg nl nc nw rest ->
+              case eqS nw "bevel" of
+              | true -> emitOp (opSetJoin joinBevel) rest gs ops
+              | false ->
+                  case eqS nw "round" of
+                  | true -> emitOp (opSetJoin joinRound) rest gs ops
+                  | false -> err PSt PErr (mkPErr nl nc 10 (bytes nw))
+                  end
+              end
+          end
+        end)
+    end
+  end
+end
+
+isValueName : Nat -> Bool is
+  fn (w : Nat) is
+    orB (eqS w "butt") (orB (eqS w "round") (orB (eqS w "square")
+      (orB (eqS w "bevel") (orB (eqS w "circular") (eqS w "continuous")))))
+  end
+end
+
+pushVal : Val -> PSt -> Result PSt PErr is
+  fn (v : Val) (st : PSt) is
+    case st of
+    | mkPSt stack gs ops -> ok PSt PErr (mkPSt (cons Val v stack) gs ops)
+    end
+  end
+end
+
+-- one token against the machine state
+stepTok : Tok -> PSt -> Result PSt PErr is
+  fn (t : Tok) (st : PSt) is
+    case t of
+    | mkTok line col word ->
+        let c0 : Nat = fmod word 256 in
+        case orB (isDigitB c0) (orB (eqW c0 45) (eqW c0 46)) of
+        | true ->
+            bindR Num PSt (parseNum line col word) (fn (n : Num) is
+              pushVal (vNum line col n) st
+            end)
+        | false ->
+            case eqW c0 35 of
+            | true ->
+                bindR Color PSt (parseColor line col word) (fn (c : Color) is
+                  pushVal (vCol line col c) st
+                end)
+            | false ->
+                case isValueName word of
+                | true -> pushVal (vName line col word) st
+                | false ->
+                    case eqS word "moveto" of
+                    | true -> apN2 opMoveTo line col word st
+                    | false ->
+                    case eqS word "lineto" of
+                    | true -> apN2 opLineTo line col word st
+                    | false ->
+                    case eqS word "curveto" of
+                    | true -> apN6 opCurveTo line col word st
+                    | false ->
+                    case eqS word "closepath" of
+                    | true -> case st of | mkPSt sk gs ops -> emitOp opClosePath sk gs ops end
+                    | false ->
+                    case eqS word "newpath" of
+                    | true -> case st of | mkPSt sk gs ops -> emitOp opNewPath sk gs ops end
+                    | false ->
+                    case eqS word "rect" of
+                    | true -> apN4 opRect line col word st
+                    | false ->
+                    case eqS word "circle" of
+                    | true -> apN3 opCircle line col word st
+                    | false ->
+                    case eqS word "roundrect" of
+                    | true -> apRoundRect line col word st
+                    | false ->
+                    case eqS word "setcolor" of
+                    | true -> apCol opSetColor line col word st
+                    | false ->
+                    case eqS word "setlinewidth" of
+                    | true -> apN1 opSetLineWidth line col word st
+                    | false ->
+                    case eqS word "setcap" of
+                    | true -> apSetCap line col word st
+                    | false ->
+                    case eqS word "setjoin" of
+                    | true -> apSetJoin line col word st
+                    | false ->
+                    case eqS word "gsave" of
+                    | true -> case st of | mkPSt sk gs ops -> ok PSt PErr (mkPSt sk (add gs 1) (cons Op opSave ops)) end
+                    | false ->
+                    case eqS word "grestore" of
+                    | true ->
+                        case st of
+                        | mkPSt sk gs ops ->
+                            case isZero gs of
+                            | true -> err PSt PErr (mkPErr line col 6 (bytes word))
+                            | false -> ok PSt PErr (mkPSt sk (monus gs 1) (cons Op opRestore ops))
+                            end
+                        end
+                    | false ->
+                    case eqS word "translate" of
+                    | true -> apN2 opTranslate line col word st
+                    | false ->
+                    case eqS word "scale" of
+                    | true -> apN2 opScale line col word st
+                    | false ->
+                    case eqS word "fill" of
+                    | true -> case st of | mkPSt sk gs ops -> emitOp opFill sk gs ops end
+                    | false ->
+                    case eqS word "eofill" of
+                    | true -> case st of | mkPSt sk gs ops -> emitOp opFillEO sk gs ops end
+                    | false ->
+                    case eqS word "stroke" of
+                    | true -> case st of | mkPSt sk gs ops -> emitOp opStroke sk gs ops end
+                    | false ->
+                    case eqS word "clear" of
+                    | true -> apCol opClear line col word st
+                    | false -> err PSt PErr (mkPErr line col 1 (bytes word))
+                    end end end end end end end end end end end end end end end end end end end end
+                end
+            end
+        end
+    end
+  end
+end
+
+foldToks : List Tok -> Result PSt PErr -> Result PSt PErr is
+  fn (ts : List Tok) is
+    ListElim Tok (fn (w : List Tok) is Result PSt PErr -> Result PSt PErr end)
+      (fn (st : Result PSt PErr) is st end)
+      (fn (t : Tok) (rest : List Tok) (ih : Result PSt PErr -> Result PSt PErr) is
+        fn (st : Result PSt PErr) is
+          ih (bindR PSt PSt st (fn (s0 : PSt) is stepTok t s0 end))
+        end
+      end)
+      ts
+  end
+end
+
+revOps : List Op -> List Op is
+  fn (os : List Op) is
+    ListElim Op (fn (w : List Op) is List Op -> List Op end)
+      (fn (acc : List Op) is acc end)
+      (fn (o : Op) (rest : List Op) (ih : List Op -> List Op) is
+        fn (acc : List Op) is ih (cons Op o acc) end
+      end)
+      os
+      (nil Op)
+  end
+end
+
+-- parse: tokenize, fold, then require an empty operand stack (a leftover is
+-- reported at the topmost leftover value, like the Go parser).
+parse : Bytes -> Result (List Op) PErr is
+  fn (src : Bytes) is
+    bindR PSt (List Op)
+      (foldToks (tokenize src) (ok PSt PErr (mkPSt (nil Val) 0 (nil Op))))
+      (fn (st : PSt) is
+        case st of
+        | mkPSt stack gs ops ->
+            case stack of
+            | nil -> ok (List Op) PErr (revOps ops)
+            | cons v rest ->
+                case v of
+                | vNum vl vc n -> err (List Op) PErr (mkPErr vl vc 7 emptyS)
+                | vCol vl vc c -> err (List Op) PErr (mkPErr vl vc 7 emptyS)
+                | vName vl vc w -> err (List Op) PErr (mkPErr vl vc 7 (bytes w))
+                end
+            end
+        end
+      end)
+  end
+end
+
+-- ------------------------------------------------------ diagnostics pinned
+errIs : Result (List Op) PErr -> Nat -> Nat -> Nat -> Bool is
+  fn (r : Result (List Op) PErr) (l : Nat) (c : Nat) (k : Nat) is
+    case r of
+    | ok os -> false
+    | err e ->
+        case e of
+        | mkPErr el ec ek ew -> andB (eqW el l) (andB (eqW ec c) (eqW ek k))
+        end
+    end
+  end
+end
+
+-- positions and codes match the Go ps parser's diagnostics exactly
+pinErrUnknown : Eq Bool (errIs (parse "1 2 movetoo") 1 5 1) true is refl true end
+pinErrArity : Eq Bool (errIs (parse "1 moveto") 1 3 2) true is refl true end
+pinErrType : Eq Bool (errIs (parse "1 setcolor") 1 3 3) true is refl true end
+pinErrLater : Eq Bool (errIs (parse "% comment\n1 2 moveto\nbogus") 3 1 1) true is refl true end
+pinErrLeftover : Eq Bool (errIs (parse "1 2 3 moveto") 1 1 7) true is refl true end
+pinErrGrestore : Eq Bool (errIs (parse "gsave grestore grestore") 1 16 6) true is refl true end
+pinErrBadColor : Eq Bool (errIs (parse "#12345 setcolor") 1 1 4) true is refl true end
+pinErrBadJoin : Eq Bool (errIs (parse "square setjoin") 1 1 10) true is refl true end
+pinErrBadStyle : Eq Bool (errIs (parse "1 1 8 8 2 butt roundrect") 1 11 8) true is refl true end
+pinErrBadCap : Eq Bool (errIs (parse "bevel setcap") 1 1 9) true is refl true end
+
+-- --------------------------------------------------------- round trips
+n0 : Num is num false 0 0 0 end
+nI : Nat -> Num is fn (u : Nat) is num false u 0 0 end end
+nNeg : Nat -> Num is fn (u : Nat) is num true u 0 0 end end
+
+-- every constructor, both corner styles, all caps and joins, a negative, a
+-- fraction, and an alpha color
+allOps : List Op is
+  cons Op (opClear (rgba 16 18 26 255))
+  (cons Op (opSetColor (rgba 255 106 0 128))
+  (cons Op opSave
+  (cons Op (opTranslate (nI 2) (nI 3))
+  (cons Op (opScale (num false 1 1 5) (num false 1 1 5))
+  (cons Op (opSetLineWidth (num false 2 2 25))
+  (cons Op (opSetCap capSquare)
+  (cons Op (opSetJoin joinRound)
+  (cons Op (opMoveTo (nI 1) (nNeg 2))
+  (cons Op (opLineTo (nI 3) (nI 4))
+  (cons Op (opCurveTo (nI 5) (nI 6) (nI 7) (nI 8) (nI 9) (nI 10))
+  (cons Op opClosePath
+  (cons Op opStroke
+  (cons Op opRestore
+  (cons Op opNewPath
+  (cons Op (opRect (nI 1) (nI 1) (nI 4) (nI 4))
+  (cons Op opFillEO
+  (cons Op (opCircle (nI 5) (nI 5) (nI 2))
+  (cons Op opFill
+  (cons Op (opRoundRect n0 n0 (nI 8) (nI 8) (nI 2) styContinuous)
+  (cons Op (opSetCap capButt)
+  (cons Op (opSetCap capRound)
+  (cons Op (opSetJoin joinBevel)
+  (cons Op (opRoundRect n0 n0 (nI 8) (nI 8) (nI 2) styCircular)
+  (cons Op opFill
+  (nil Op)))))))))))))))))))))))))
+end
+
+-- THE round-trip law on the all-ops program: parse (print P) = ok P, by refl.
+rtAll :
+  Eq (Result (List Op) PErr) (parse (printOps allOps)) (ok (List Op) PErr allOps) is
+  refl (ok (List Op) PErr allOps)
+end
+
+-- scribe's demo.scr, transcribed byte for byte (comments, blank-free lines)
+demoSrc : Bytes is
+  "% scribe demo: badge with stroked orbit\n#10121a clear\n#ff6a00 setcolor\n8 8 112 112 26 continuous roundrect\nfill\n#10121a setcolor\n64 64 34 circle\nfill\n#f5f0e8 setcolor\n6 setlinewidth\nround setcap\nround setjoin\ngsave\n64 64 translate\n30 -30 moveto\n-30 -30 -30 30 30 30 curveto\nstroke\ngrestore\n#3aa0ff setcolor\n44 60 40 8 4 circular roundrect\nfill\n"
+end
+
+demoProg : List Op is
+  cons Op (opClear (rgba 16 18 26 255))
+  (cons Op (opSetColor (rgba 255 106 0 255))
+  (cons Op (opRoundRect (nI 8) (nI 8) (nI 112) (nI 112) (nI 26) styContinuous)
+  (cons Op opFill
+  (cons Op (opSetColor (rgba 16 18 26 255))
+  (cons Op (opCircle (nI 64) (nI 64) (nI 34))
+  (cons Op opFill
+  (cons Op (opSetColor (rgba 245 240 232 255))
+  (cons Op (opSetLineWidth (nI 6))
+  (cons Op (opSetCap capRound)
+  (cons Op (opSetJoin joinRound)
+  (cons Op opSave
+  (cons Op (opTranslate (nI 64) (nI 64))
+  (cons Op (opMoveTo (nI 30) (nNeg 30))
+  (cons Op (opCurveTo (nNeg 30) (nNeg 30) (nNeg 30) (nI 30) (nI 30) (nI 30))
+  (cons Op opStroke
+  (cons Op opRestore
+  (cons Op (opSetColor (rgba 58 160 255 255))
+  (cons Op (opRoundRect (nI 44) (nI 60) (nI 40) (nI 8) (nI 4) styCircular)
+  (cons Op opFill
+  (nil Op))))))))))))))))))))
+end
+
+-- demo.scr parses to exactly the transcribed program...
+demoParses : Eq (Result (List Op) PErr) (parse demoSrc) (ok (List Op) PErr demoProg) is
+  refl (ok (List Op) PErr demoProg)
+end
+-- ...and the parse-print round trip is a fixed point on it.
+rtDemo :
+  Eq (Result (List Op) PErr) (parse (printOps demoProg)) (ok (List Op) PErr demoProg) is
+  refl (ok (List Op) PErr demoProg)
+end
+
+-- ------------------------------------------------------------ the runnable
+llenOps : List Op -> Nat is
+  fn (os : List Op) is
+    ListElim Op (fn (w : List Op) is Nat end)
+      0
+      (fn (o : Op) (rest : List Op) (ih : Nat) is add ih 1 end)
+      os
+  end
+end
+
+foreign printNat : Nat -> IO Nat end
+
+-- The deployed observable: run demo.scr through print-then-parse and report
+-- the op count (20). Exercises the whole codec on every backend.
+main : IO Nat is
+  printNat
+    (case parse (printOps demoProg) of
+     | ok os -> llenOps os
+     | err e -> 0
+     end)
+end
+
+-- pure observable for the emit gate (printNat would double-print: the IO
+-- body logs and the harness shows the returned value)
+answer : Nat is
+  case parse (printOps demoProg) of
+  | ok os -> llenOps os
+  | err e -> 0
+  end
+end

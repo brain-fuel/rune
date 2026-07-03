@@ -983,3 +983,33 @@ func TestREPLInterpolation(t *testing.T) {
 		}
 	}
 }
+
+// TestREPLScribeDL loads the ch561 scribe display-list codec into a REPL
+// session (the whole listing, fed line by line — a feature isn't done until it
+// works in `rune repl`) and evaluates a parse in-session: the ps program
+// "1 2 moveto fill" parses to two ops, and a diagnostic carries its position.
+func TestREPLScribeDL(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "listings", "ch561_scribe_dl.rune"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(src) + "\n" +
+		"llenOps (case parse \"1 2 moveto fill\" of | ok os -> os | err e -> nil Op end)\n" +
+		"errIs (parse \"1 2 movetoo\") 1 5 1\n" +
+		":quit\n"
+	in := strings.NewReader(script)
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith returned error: %v", err)
+	}
+	got := out.String()
+	wants := []string{
+		"2 : Nat",     // two ops parsed in-session (compressed numeral display)
+		"true : Bool", // the diagnostic position check
+	}
+	for _, w := range wants {
+		if !strings.Contains(got, w) {
+			t.Errorf("output missing %q\n--- tail of output ---\n%s", w, got[max(0, len(got)-800):])
+		}
+	}
+}
