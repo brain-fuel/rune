@@ -465,6 +465,26 @@ const wasmRuntime = `
       (local.set $i (i32.sub (local.get $i) (i32.const 1)))
       (br $l))))
 
+  ;; emit_hex_nibble: one lowercase hex digit (0-15) -- '0'-'9' | 'a'-'f'.
+  (func $emit_hex_nibble (param $n i32)
+    (if (i32.lt_u (local.get $n) (i32.const 10))
+      (then (call $emit_byte (i32.add (local.get $n) (i32.const 48))))    ;; '0'
+      (else (call $emit_byte (i32.add (local.get $n) (i32.const 87))))))  ;; 'a'-10
+  ;; emit_bin_byte: the canonical Bin $show byte rule (ir.go LitBytes / ch483) -- printable
+  ;; ASCII (0x20..0x7e) other than '"' (0x22) and '\' (0x5c) literal, every other byte
+  ;; (control, NUL, and every byte >= 0x7f) as backslash-x-NN with two lowercase hex
+  ;; digits. Mirrors js.go's __binShow and c.go's printBin_c2/K_BYTES show case.
+  (func $emit_bin_byte (param $c i32)
+    (if (i32.and
+          (i32.and (i32.ge_u (local.get $c) (i32.const 32)) (i32.lt_u (local.get $c) (i32.const 127)))
+          (i32.and (i32.ne (local.get $c) (i32.const 34)) (i32.ne (local.get $c) (i32.const 92))))
+      (then (call $emit_byte (local.get $c)))
+      (else
+        (call $emit_byte (i32.const 92))   ;; '\'
+        (call $emit_byte (i32.const 120))  ;; 'x'
+        (call $emit_hex_nibble (i32.shr_u (local.get $c) (i32.const 4)))
+        (call $emit_hex_nibble (i32.and (local.get $c) (i32.const 15))))))
+
   ;; show_paren: parenthesize a constructor with >=1 non-unit field.
   (func $show_paren (param $v i32)
     (local $o i32) (local $i i32) (local $nf i32) (local $shown i32)
@@ -496,6 +516,18 @@ const wasmRuntime = `
       ;; K_BIG = 6
       (if (i32.eq (call $w (local.get $v) (i32.const 0)) (i32.const 6))
         (then (call $emit_big (local.get $v)) (return)))
+      ;; K_BIN = 8: a double-quoted string, byte-level (no UTF-8 decoding) -- the
+      ;; canonical Bin rendering (ir.go LitBytes), byte-identical to every other backend.
+      (if (i32.eq (call $w (local.get $v) (i32.const 0)) (i32.const 8))
+        (then
+          (call $emit_byte (i32.const 34))   ;; '"'
+          (local.set $nf (call $rt_bin_len (local.get $v)))
+          (local.set $i (i32.const 0))
+          (block $b (loop $l (br_if $b (i32.ge_s (local.get $i) (local.get $nf)))
+            (call $emit_bin_byte (call $rt_bin_at (local.get $v) (local.get $i)))
+            (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $l)))
+          (call $emit_byte (i32.const 34))   ;; '"'
+          (return)))
       ;; K_CLO = 0
       (if (i32.eq (call $w (local.get $v) (i32.const 0)) (i32.const 0))
         (then (call $emit_cstr (global.get $fn_msg)) (return)))

@@ -24,11 +24,12 @@ import (
 // SUPPORTED FRAGMENT (byte-identical to the C/LLVM backends on this subset): builtin-
 // nat arithmetic (zero/succ/NatElim + accel add/mul/monus), constructors + eliminators
 // (CCase/CField over ListElim/NatElim/any datatype), curried closures + application,
-// dependent pairs (CPair/CFst/CSnd), the erased token (CUnit), native int/nat literals
-// (CLit{LitInt,LitNat}). UNSUPPORTED in v1 (the emitter returns a clear error, never
-// broken WAT): LitStr/LitBytes/LitPtr, IForeign/CForeign (no host vocabulary in the
-// WASI sandbox yet), and IO main. GC: none — a bump allocator only (v1); a program
-// that out-allocates the 16 MiB initial memory traps. See the deliverable notes.
+// dependent pairs (CPair/CFst/CSnd), the erased token (CUnit), native int/nat/bytes
+// literals (CLit{LitInt,LitNat,LitBytes}), and the whitelisted `foreign` IO/value
+// vocabulary (wasmSupportedForeign). UNSUPPORTED (the emitter returns a clear error,
+// never broken WAT): LitStr/LitPtr, and any foreign not on the whitelist. GC: none:
+// a bump allocator only (v1); a program that out-allocates the 16 MiB initial memory
+// traps. See the deliverable notes.
 type Wasm struct{}
 
 func (Wasm) Target() string { return "wasm" }
@@ -136,6 +137,12 @@ var wasmSupportedForeign = map[string]bool{
 	"argAtCode":     true,
 	"argCountCode":  true,
 	"exitWith":      true,
+	// Task 3 (6c): the Phase-0 Bin vocabulary (binPrims, ioprims.go) over K_BIN.
+	"binEmpty": true,
+	"binCons":  true,
+	"binLen":   true,
+	"binAt":    true,
+	"printBin": true,
 }
 
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
@@ -157,7 +164,7 @@ func wasmCheckSupported(p Program) error {
 			// whitelisted: a WAT body is baked by emitForeignPrimsWasm -- no error.
 		case ILit:
 			switch x.Kind {
-			case LitInt, LitNat:
+			case LitInt, LitNat, LitBytes:
 				// supported
 			case LitStr:
 				err = fmt.Errorf("codegen(wasm): string literals are not supported in v1")
@@ -812,14 +819,21 @@ func (f *wasmFunc) emitBounce(b *strings.Builder, call CIr, locals []string) str
 	return "(local.get " + o + ")"
 }
 
-// emitLit lowers a native literal. v1 supports LitInt (immediate-tagged i32) and LitNat
-// (a parsed bignum); other kinds are rejected by wasmCheckSupported.
+// emitLit lowers a native literal. v1 supports LitInt (immediate-tagged i32), LitNat
+// (a parsed bignum), and LitBytes (a constant Bin, allocated + filled byte-by-byte at
+// the use site via $rt_mkbin/$rt_bin_set, Task 3); other kinds are rejected by
+// wasmCheckSupported.
 func (f *wasmFunc) emitLit(b *strings.Builder, x CLit) string {
 	r := f.fresh()
 	switch x.Kind {
 	case LitNat:
 		off := f.em.intern(x.Nat)
 		fmt.Fprintf(b, "    (local.set %s (call $rt_big_parse (i32.const %d)))\n", r, off)
+	case LitBytes:
+		fmt.Fprintf(b, "    (local.set %s (call $rt_mkbin (i32.const %d)))\n", r, len(x.Str))
+		for i := 0; i < len(x.Str); i++ {
+			fmt.Fprintf(b, "    (call $rt_bin_set (local.get %s) (i32.const %d) (i32.const %d))\n", r, i, x.Str[i])
+		}
 	default: // LitInt
 		fmt.Fprintf(b, "    (local.set %s (call $rt_mkint (i32.const %d)))\n", r, x.Int)
 	}
@@ -1148,6 +1162,14 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 	}
 	if usesForeign(p, "exitWith") {
 		em.emitExitWithWasm(b)
+	}
+	// Task 3 (6c): the Phase-0 Bin vocabulary over K_BIN (usesBin, ioprims.go).
+	if usesBin(p) {
+		em.emitBinEmptyWasm(b)
+		em.emitBinConsWasm(b)
+		em.emitBinLenWasm(b)
+		em.emitBinAtWasm(b)
+		em.emitPrintBinWasm(b)
 	}
 }
 
@@ -2109,6 +2131,147 @@ func (em *wasmEmitter) emitExitWithWasm(b *strings.Builder) {
 	em.emitCachedThunk(b, "exitWith", func(f *wasmFunc, bb *strings.Builder) string {
 		r := f.fresh()
 		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitBinEmptyWasm bakes `binEmpty : Bin` -- the empty byte string. Not a function (no
+// arg to curry), so it is a plain memoized VALUE thunk over $rt_mkbin(0), exactly the
+// nullary-constructor template (emitCtor's arity==0 case): the cached global IS the
+// canonical value every reference returns.
+func (em *wasmEmitter) emitBinEmptyWasm(b *strings.Builder) {
+	em.emitCachedThunk(b, "binEmpty", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkbin (i32.const 0)))\n", r)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitBinConsWasm bakes `binCons : Nat -> Bin -> Bin` -- prepend the LOW byte of the nat
+// (n mod 256, via the 1e9-mod-256 fact: nlimbs==0 -> 0, else limb0 & 255) onto a Bin,
+// PURE 2-arg curried chain: accessor -> c1(n->env) -> c2(b->result). c2 borrows both n
+// (env, read-only) and b (arg): it copies b's bytes into a FRESH, larger Bin rather than
+// mutating or aliasing b, so b is never retained into the result and is released once
+// consumed (n is left alone -- owned by the c1-built closure, released when THAT closure
+// is torn down by its caller, matching splitOn's env discipline).
+func (em *wasmEmitter) emitBinConsWasm(b *strings.Builder) {
+	c1 := em.codeRef("binCons_c1")
+	c2 := em.codeRef("binCons_c2")
+	// c2: env={n}, arg=b (owned). o = fresh Bin of len(b)+1; o[0] = low byte of n;
+	// o[1..] = b's bytes. Release b (its bytes are copied, not aliased); return o (fresh
+	// owned, no retain needed).
+	b.WriteString("  (func $binCons_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $n i32) (local $nl i32) (local $byte i32)\n")
+	b.WriteString("    (local $len i32) (local $o i32) (local $i i32)\n")
+	b.WriteString("    (local.set $n (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (local.set $nl (call $big_nlimbs (local.get $n)))\n")
+	b.WriteString("    (if (i32.gt_s (local.get $nl) (i32.const 0))\n")
+	b.WriteString("      (then (local.set $byte (i32.and (call $big_limb (local.get $n) (i32.const 0)) (i32.const 255))))\n")
+	b.WriteString("      (else (local.set $byte (i32.const 0))))\n")
+	b.WriteString("    (local.set $len (call $rt_bin_len (local.get $arg)))\n")
+	b.WriteString("    (local.set $o (call $rt_mkbin (i32.add (local.get $len) (i32.const 1))))\n")
+	b.WriteString("    (call $rt_bin_set (local.get $o) (i32.const 0) (local.get $byte))\n")
+	b.WriteString("    (local.set $i (i32.const 0))\n")
+	b.WriteString("    (block $done (loop $lp\n")
+	b.WriteString("      (br_if $done (i32.ge_s (local.get $i) (local.get $len)))\n")
+	b.WriteString("      (call $rt_bin_set (local.get $o) (i32.add (local.get $i) (i32.const 1))\n")
+	b.WriteString("        (call $rt_bin_at (local.get $arg) (local.get $i)))\n")
+	b.WriteString("      (local.set $i (i32.add (local.get $i) (i32.const 1)))\n")
+	b.WriteString("      (br $lp)))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $o))\n")
+	// c1: arg=n (owned). Build c2 {n(move)}.
+	fmt.Fprintf(b, "  (func $binCons_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "binCons", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitBinLenWasm bakes `binLen : Bin -> Nat` -- PURE 1-arg (accessor -> c1(b) -> Nat),
+// exactly byteLen's template: the owned $arg is consumed (read, then released) since the
+// result is a fresh bignum unrelated to b's identity.
+func (em *wasmEmitter) emitBinLenWasm(b *strings.Builder) {
+	c1 := em.codeRef("binLen_c1")
+	b.WriteString("  (func $binLen_c1 (param $arg i32) (param $env i32) (result i32) (local $r i32)\n")
+	b.WriteString("    (local.set $r (call $rt_big_from_long (call $rt_bin_len (local.get $arg))))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	em.emitCachedThunk(b, "binLen", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitBinAtWasm bakes `binAt : Bin -> Nat -> Nat` -- the byte at an index, 0 if out of
+// range. PURE 2-arg curried: accessor -> c1(b->env) -> c2(i->result). The index nat is
+// guarded by nlimbs the same way binCons guards its low byte: nlimbs==0 -> index 0 (in
+// range iff the Bin is non-empty); nlimbs==1 -> index = limb0 (bounds-checked against
+// rt_bin_len); nlimbs>1 -> the value is >= 1e9, unconditionally out of range (no real Bin
+// is that long) -- $inRange stays 0 so the oob arm fires. b (env, borrowed) is never
+// released here (owned by the c1-built closure); the owned index nat ($arg) is consumed
+// (released) since the result is a fresh Nat unrelated to its identity.
+func (em *wasmEmitter) emitBinAtWasm(b *strings.Builder) {
+	c1 := em.codeRef("binAt_c1")
+	c2 := em.codeRef("binAt_c2")
+	b.WriteString("  (func $binAt_c2 (param $arg i32) (param $env i32) (result i32)\n")
+	b.WriteString("    (local $bn i32) (local $nl i32) (local $k i32) (local $inRange i32)\n")
+	b.WriteString("    (local $len i32) (local $r i32)\n")
+	b.WriteString("    (local.set $bn (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (local.set $nl (call $big_nlimbs (local.get $arg)))\n")
+	b.WriteString("    (local.set $inRange (i32.const 0))\n")
+	b.WriteString("    (if (i32.eqz (local.get $nl))\n")
+	b.WriteString("      (then (local.set $k (i32.const 0)) (local.set $inRange (i32.const 1)))\n")
+	b.WriteString("      (else (if (i32.eq (local.get $nl) (i32.const 1))\n")
+	b.WriteString("        (then\n")
+	b.WriteString("          (local.set $k (call $big_limb (local.get $arg) (i32.const 0)))\n")
+	b.WriteString("          (local.set $inRange (i32.const 1))))))\n")
+	b.WriteString("    (local.set $len (call $rt_bin_len (local.get $bn)))\n")
+	b.WriteString("    (if (i32.and (local.get $inRange) (i32.lt_s (local.get $k) (local.get $len)))\n")
+	b.WriteString("      (then (local.set $r (call $rt_big_from_long (call $rt_bin_at (local.get $bn) (local.get $k)))))\n")
+	b.WriteString("      (else (local.set $r (call $rt_big_from_long (i32.const 0)))))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	// c1: arg=b (owned). Build c2 {b(move)}.
+	fmt.Fprintf(b, "  (func $binAt_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "binAt", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitPrintBinWasm bakes `printBin : Bin -> IO Unit` (NOT `IO Bin` -- ch483's foreign
+// signature is `Bin -> IO Unit`, mirroring the JS/C bodies which return $unit/mkunit()
+// too). 3-step curried IO-closure chain: c1(b->env) -> w(world->effect). The world step
+// borrows b from env (read-only: $rt_show_line renders it via the K_BIN `$show` arm, no
+// mutation), then returns the immortal $rt_unit -- no retain-and-return of b is needed
+// (unlike printNat, which hands its Nat argument back). b is left untouched: it is owned
+// by the c1-built closure and is released when that closure is torn down by its caller
+// (bindIO's io_bind4 releases the fresh action after running it), exactly as splitOn's
+// env-captured sep is never manually released in the body.
+func (em *wasmEmitter) emitPrintBinWasm(b *strings.Builder) {
+	vIdx := em.codeRef("printBin_v")
+	wIdx := em.codeRef("printBin_w")
+	b.WriteString("  (func $printBin_w (param $arg i32) (param $env i32) (result i32) (local $bn i32)\n")
+	b.WriteString("    (local.set $bn (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("    (call $rt_show_line (local.get $bn))\n")
+	b.WriteString("    (call $rt_unit))\n")
+	fmt.Fprintf(b, "  (func $printBin_v (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", wIdx)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "printBin", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, vIdx)
 		return "(local.get " + r + ")"
 	})
 }

@@ -161,3 +161,24 @@ func TestBytesNative(t *testing.T) { runBytesNative(t, "ch483_bytes.rune", binWa
 // gained a VBytes(int[]) record): ch483 prints the same bytes / length / index / unit
 // the source + native backends do. Needs Java 25 (sealed records, virtual threads).
 func TestBytesJVM(t *testing.T) { runBytesJVM(t, "ch483_bytes.rune", binWant) }
+
+// TestBytesWasm gates the Bin vocabulary on the WASM backend (6c / Task 3): ch483 under
+// wasmtime must print byte-identically to the 8-way reference (binWant). ch483 exercises
+// printBin (the K_BIN `$show` arm's only path here; a raw Bin never reaches `$show` via
+// main's return value since main's result is Unit) plus binLen/binAt over a Bin built by
+// a binCons chain (the surface `b"..."` literal desugars to binCons/binEmpty, not to a
+// LitBytes IR node -- see wasm.go's emitLit for the LitBytes path, landed defensively
+// with no current consumer).
+func TestBytesWasm(t *testing.T) {
+	wt := wasmtimePathHarness()
+	if wt == "" {
+		t.Skip("wasmtime not found")
+	}
+	got, ok := runWasmListing(t, "ch483_bytes.rune", "main", "")
+	if !ok {
+		t.Skip("wasmtime absent")
+	}
+	if got != strings.TrimSpace(binWant) {
+		t.Fatalf("wasm bin divergence:\n got %q\nwant %q", got, binWant)
+	}
+}
