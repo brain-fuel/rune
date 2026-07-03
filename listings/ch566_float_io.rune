@@ -1,0 +1,39 @@
+-- Chapter 566: float IO at the boundary (parseFloat/getFloat/printFloat).
+-- Feed "3.14" on stdin: prints 6.28 then 999 (the none-branch probe) then
+-- the shown IO result. Canonical float formatting is the ECMAScript
+-- Number::toString algorithm on every backend (the divergence lock).
+
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+
+data Option : U -> U is
+  none : (A : U) -> Option A
+| some : (A : U) -> A -> Option A
+end
+
+foreign Float : U end
+foreign fromNat : Nat -> Float end
+foreign fmul : Float -> Float -> Float end
+foreign parseFloat : Nat -> Option Float end
+foreign getFloat : IO Float end
+foreign printFloat : Float -> IO Float end
+foreign printNat : Nat -> IO Nat end
+
+-- "abc" packed: bytes least-significant first with the 0x01 sentinel on top.
+-- 'a'=97 'b'=98 'c'=99 -> 0x01636261 = 23290465
+-- `none` takes 0 runtime args (the type A is erased, fixed by scrutinee type).
+-- `some` takes 1 runtime arg (the Float value x).
+probe : IO Nat is
+  case parseFloat 23290465 of
+  | none -> printNat 999
+  | some x -> printNat 111
+  end
+end
+
+main : IO Nat is
+  bindIO Float Nat getFloat
+    (fn (x : Float) is
+      bindIO Float Nat (printFloat (fmul x (fromNat 2)))
+        (fn (_y : Float) is probe end)
+    end)
+end

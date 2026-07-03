@@ -70,6 +70,10 @@ var ioPrims = map[string]bool{
 	"fleqN":      true, // fleqN      a b           : Float -> Float -> Nat (1 if a<=b else 0)
 	"fsqrt":      true, // fsqrt      x             : Float -> Float (IEEE-754 square root; host sqrt — C/LLVM link -lm)
 	"fpow":       true, // fpow       b e           : Float -> Float -> Float (host pow b^e — C/LLVM link -lm)
+	// Float IO: the standard IO vocabulary for machine floats.
+	"parseFloat": true, // parseFloat s : Nat -> Option Float (packed string -> float; none on reject)
+	"getFloat":   true, // getFloat      : IO Float (read stdin line, parse; garbage -> 0.0)
+	"printFloat": true, // printFloat x  : Float -> IO Float (canonical ECMAScript Number::toString + \n; returns x)
 	"dot2":       true, // dot2       a0 a1 b0 b1    : Float^4 -> Float (a0*b0 + a1*b1)
 	"dotList":    true, // dotList    xs ys          : FList -> FList -> Float (cblas_ddot over a marshalled double[]; C/LLVM)
 	"gemmSum":    true, // gemmSum    m k n A B       : Nat^3 -> FList -> FList -> Float (cblas_dgemm A·B, sum of entries; C/LLVM)

@@ -127,7 +127,7 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	}
 	// D6 net/fs: the packed-String codec (decode code->string, encode string->code)
 	// + env/file host bodies, over bare Nat codes (the Rune side wraps `bytes`).
-	if usesFileEnv(p) || usesLiveKV(p) || usesStream(p) {
+	if usesFileEnv(p) || usesLiveKV(p) || usesStream(p) || usesForeign(p, "parseFloat") {
 		// globalThis.String (NOT bare `String`): a Rune `String : U` def emits a
 		// top-level `const String` that would shadow the JS builtin.
 		b.WriteString("const __s2h = n => { let s = ''; while (n > 1n) { s += globalThis.String.fromCharCode(Number(n % 256n)); n = n / 256n; } return s; };\n")
@@ -277,6 +277,27 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "fpow") {
 		b.WriteString("const fpow = () => b => e => Math.pow(b, e);\n")
+	}
+	// Float IO: parseFloat/getFloat/printFloat — the standard IO vocabulary for f64.
+	// __fmtf: canonical ECMAScript Number::toString with -0 mapped to "0".
+	// __parsef: strict regex accept (no nan/inf/spaces/hex); null on reject.
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+		b.WriteString("const __fmtf = x => Object.is(x, -0) ? \"0\" : String(x);\n")
+		b.WriteString("const __parsef = s => /^[+-]?((\\d+(\\.\\d*)?)|(\\.\\d+))([eE][+-]?\\d+)?$/.test(s) ? Number(s) : null;\n")
+	}
+	if usesForeign(p, "parseFloat") {
+		// parseFloat takes a packed-Nat string code; __s2h decodes it, __parsef tests it.
+		b.WriteString("const parseFloat = () => s => { const v = __parsef(__s2h(s)); return v === null ? {tag:0,name:\"none\",args:[null]} : {tag:1,name:\"some\",args:[null,v]}; };\n")
+	}
+	if usesForeign(p, "getFloat") {
+		if usesOTP(p) || usesLiveKV(p) || usesNet(p) || usesTLS(p) {
+			b.WriteString("const getFloat = () => async () => { const fs = await import('node:fs'); const v = __parsef(fs.readFileSync(0, 'utf8').trim().split(/\\s+/)[0]); return v === null ? 0.0 : v; };\n")
+		} else {
+			b.WriteString("const getFloat = () => () => { const v = __parsef(require('fs').readFileSync(0, 'utf8').trim().split(/\\s+/)[0]); return v === null ? 0.0 : v; };\n")
+		}
+	}
+	if usesForeign(p, "printFloat") {
+		b.WriteString("const printFloat = () => x => () => { console.log(__fmtf(x)); return x; };\n")
 	}
 	if usesForeign(p, "dot2") {
 		b.WriteString("const dot2 = () => a0 => a1 => b0 => b1 => a0 * b0 + a1 * b1;\n")
