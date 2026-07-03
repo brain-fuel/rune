@@ -2,7 +2,6 @@ package surface
 
 import (
 	"math/big"
-	"strings"
 	"testing"
 )
 
@@ -123,10 +122,12 @@ func TestMapExpNamesRenamesCaseCtors(t *testing.T) {
 	if got.Clauses[0].Ctor != "M.c" {
 		t.Errorf("Ctor not rewritten: %v", got.Clauses[0].Ctor)
 	}
-	if got.Clauses[0].Body.(EVar).Name != "M.x" {
-		t.Errorf("Clause body not rewritten: %v", got.Clauses[0].Body)
+	// "x" is a clause Binder: it scopes over the clause body, so the body
+	// occurrence must NOT be rewritten.
+	if got.Clauses[0].Body.(EVar).Name != "x" {
+		t.Errorf("Clause body binder occurrence was rewritten: %v", got.Clauses[0].Body)
 	}
-	if !strings.EqualFold(got.Clauses[0].Binders[0], "x") {
+	if got.Clauses[0].Binders[0] != "x" {
 		t.Errorf("Binders must not be rewritten, got %v", got.Clauses[0].Binders)
 	}
 }
@@ -160,5 +161,69 @@ func TestMapExpNamesLeafsDontPanic(t *testing.T) {
 	}
 	for _, leaf := range leaves {
 		_ = MapExpNames(leaf, id) // must not panic
+	}
+}
+
+// TestMapExpNamesPreservesELamBinder verifies that an ELam's Param scopes over
+// the Body: a free-variable occurrence with the same name as the binder must NOT
+// be passed through ren.  The Dom (annotation) is NOT in the binder scope and
+// must still be renamed.
+func TestMapExpNamesPreservesELamBinder(t *testing.T) {
+	ren := func(n string) string {
+		if n == "three" {
+			return "M.three"
+		}
+		return n
+	}
+	// fn (three : Nat) is three end
+	//   Dom = EVar{"Nat"}  -- in annotation position, free
+	//   Body = EVar{"three"} -- in binder scope, bound
+	e := ELam{
+		Param: "three",
+		Dom:   EVar{Name: "Nat"},
+		Body:  EVar{Name: "three"},
+	}
+	got := MapExpNames(e, ren).(ELam)
+	if got.Dom.(EVar).Name != "Nat" {
+		t.Errorf("Dom: got %q, want %q", got.Dom.(EVar).Name, "Nat")
+	}
+	// Body "three" is bound by the lambda -- must NOT be renamed.
+	if body := got.Body.(EVar).Name; body != "three" {
+		t.Errorf("ELam body binder occurrence: got %q, want %q (binder should shadow)", body, "three")
+	}
+	if got.Param != "three" {
+		t.Errorf("Param: got %q, want %q", got.Param, "three")
+	}
+}
+
+// TestMapExpNamesPreservesEPiBinder verifies that an EPi's Param scopes over the
+// Cod: a free-variable occurrence with the same name as the binder in the Cod
+// must NOT be renamed.  The Dom is not in the binder scope and must still be renamed
+// when it contains a free reference.
+func TestMapExpNamesPreservesEPiBinder(t *testing.T) {
+	ren := func(n string) string {
+		if n == "three" {
+			return "M.three"
+		}
+		return n
+	}
+	// (three : Nat) -> Vec three
+	//   Dom = EVar{"Nat"}                         -- free, not renamed (Nat is not "three")
+	//   Cod = EApp{EVar{"Vec"}, EVar{"three"}}    -- "three" is the Pi binder, bound here
+	e := EPi{
+		Param: "three",
+		Dom:   EVar{Name: "Nat"},
+		Cod:   EApp{Fn: EVar{Name: "Vec"}, Arg: EVar{Name: "three"}},
+	}
+	got := MapExpNames(e, ren).(EPi)
+	if got.Dom.(EVar).Name != "Nat" {
+		t.Errorf("Dom: got %q, want %q", got.Dom.(EVar).Name, "Nat")
+	}
+	// "three" in Cod is bound by the Pi binder -- must NOT be renamed.
+	if arg := got.Cod.(EApp).Arg.(EVar).Name; arg != "three" {
+		t.Errorf("EPi Cod binder occurrence: got %q, want %q (binder should shadow)", arg, "three")
+	}
+	if got.Param != "three" {
+		t.Errorf("Param: got %q, want %q", got.Param, "three")
 	}
 }

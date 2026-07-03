@@ -3,6 +3,8 @@ package session
 import (
 	"strings"
 	"testing"
+
+	"goforge.dev/rune/v3/surface"
 )
 
 const geo = `
@@ -87,5 +89,85 @@ two : Nat is succ one end
 	}
 	if _, ok := s.Lookup("two"); !ok {
 		t.Fatal("two was not loaded into the session")
+	}
+}
+
+const geoNat = `
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+module M is
+  three : Nat is succ (succ (succ zero)) end
+end
+`
+
+// TestImportLambdaBinderNotRewritten verifies that a lambda parameter whose name
+// matches an imported module member is NOT rewritten inside the lambda body.
+// Regression for the binder-capture bug: MapExpNames previously rewrote every
+// EVar occurrence of "three" to "M.three", even when "three" was the lambda's
+// own bound parameter.
+func TestImportLambdaBinderNotRewritten(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(geoNat); err != nil {
+		t.Fatal(err)
+	}
+	// "three" inside fn body must refer to the lambda parameter, not M.three.
+	const src = `
+import M
+id : Nat -> Nat is fn (three : Nat) is three end end
+`
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+	// id zero must be zero (identity), not M.three (= succ (succ (succ zero))).
+	e, err := s.ParseSrcExpr("id zero")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm, _, err := s.ElabExpr(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nf := s.NormalizeExpr(tm)
+	got := surface.PrettyWith(nf, s.RefNames())
+	if got != "zero" {
+		t.Errorf("id zero = %q, want %q (import lambda binder capture?)", got, "zero")
+	}
+}
+
+// TestImportCaseBinderNotRewritten verifies that clause binders in a case
+// expression are not rewritten when an imported module member has the same name.
+func TestImportCaseBinderNotRewritten(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(geoNat); err != nil {
+		t.Fatal(err)
+	}
+	// The "three" binder in "| succ three -> three" must refer to the
+	// predecessor, not to M.three.
+	const src = `
+import M
+pred : Nat -> Nat is
+  fn (n : Nat) is
+    case n of
+      | zero -> zero
+      | succ three -> three
+    end
+  end
+end
+`
+	if _, err := s.LoadSource(src); err != nil {
+		t.Fatalf("load failed: %v", err)
+	}
+	// pred (succ zero) must be zero (predecessor), not M.three (= 3).
+	e, err := s.ParseSrcExpr("pred (succ zero)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tm, _, err := s.ElabExpr(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nf := s.NormalizeExpr(tm)
+	got := surface.PrettyWith(nf, s.RefNames())
+	if got != "zero" {
+		t.Errorf("pred (succ zero) = %q, want %q (import case binder capture?)", got, "zero")
 	}
 }
