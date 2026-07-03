@@ -291,9 +291,9 @@ func (JS) Emit(p Program) (TargetSource, error) {
 	}
 	if usesForeign(p, "getFloat") {
 		if usesOTP(p) || usesLiveKV(p) || usesNet(p) || usesTLS(p) {
-			b.WriteString("const getFloat = () => async () => { const fs = await import('node:fs'); const v = __parsef(fs.readFileSync(0, 'utf8').split('\\n')[0]); return v === null ? 0.0 : v; };\n")
+			b.WriteString("const getFloat = () => async () => { const fs = await import('node:fs'); const v = __parsef(fs.readFileSync(0, 'utf8').split('\\n')[0].replace(/\\r+$/, '')); return v === null ? 0.0 : v; };\n")
 		} else {
-			b.WriteString("const getFloat = () => () => { const v = __parsef(require('fs').readFileSync(0, 'utf8').split('\\n')[0]); return v === null ? 0.0 : v; };\n")
+			b.WriteString("const getFloat = () => () => { const v = __parsef(require('fs').readFileSync(0, 'utf8').split('\\n')[0].replace(/\\r+$/, '')); return v === null ? 0.0 : v; };\n")
 		}
 	}
 	if usesForeign(p, "printFloat") {

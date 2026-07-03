@@ -284,7 +284,7 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "getFloat") {
 		// getFloat reads the first line of stdin (mirroring getNat's readline shape),
 		// validates the whole line against the accept-regex; garbage yields 0.0.
-		b.WriteString("def getFloat():\n    import sys\n    def _t(_u):\n        s = sys.stdin.readline().rstrip('\\n')\n        return float(s) if __parsef_re.match(s) else 0.0\n    return _t\n")
+		b.WriteString("def getFloat():\n    import sys\n    def _t(_u):\n        s = sys.stdin.readline().rstrip('\\n').rstrip('\\r')\n        return float(s) if __parsef_re.match(s) else 0.0\n    return _t\n")
 	}
 	if usesForeign(p, "printFloat") {
 		// printFloat prints the canonical ECMAScript rendering + newline; returns x.
