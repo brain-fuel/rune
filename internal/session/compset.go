@@ -11,7 +11,8 @@ import (
 type NamedSource struct{ Name, Src string }
 
 // LoadSet parses every source, topologically sorts the files by
-// defined-name -> referenced-name edges, and loads them in order.
+// defined-name -> referenced-name edges (and by module-prefix edges for
+// import/alias items), and loads them in order.
 // Module blocks already qualify their defs at parse time, so "defined
 // names" fall out of the parsed items directly.
 //
@@ -22,6 +23,7 @@ func LoadSet(s *Session, sources []NamedSource) error {
 		items []surface.Item
 		defs  map[string]bool
 		refs  map[string]bool
+		mods  map[string]bool // module paths from import/alias items
 	}
 	ps := make([]*parsed, 0, len(sources))
 	owner := map[string]int{} // defined name -> file index
@@ -35,6 +37,7 @@ func LoadSet(s *Session, sources []NamedSource) error {
 			items: items,
 			defs:  definedNames(items),
 			refs:  referencedNames(items),
+			mods:  moduleRefs(items),
 		}
 		for d := range p.defs {
 			owner[d] = i
@@ -42,17 +45,33 @@ func LoadSet(s *Session, sources []NamedSource) error {
 		ps = append(ps, p)
 	}
 
-	// Build the dependency graph. File i depends on file j when i references
-	// a name that j defines (and j != i; self-references do not create edges).
+	// Build the dependency graph. File i depends on file j when:
+	//   (a) i directly references a name that j defines, OR
+	//   (b) i declares `import M` or `alias M …` and j defines at least one
+	//       name with the prefix "M." (module-qualified defs).
+	// In both cases self-edges (j == i) and duplicates are skipped.
 	adj := make([][]int, len(ps))   // adj[j] = files that depend on j
 	indeg := make([]int, len(ps))
 	for i, p := range ps {
 		seen := map[int]bool{}
+		// (a) Direct name references.
 		for r := range p.refs {
 			if j, ok := owner[r]; ok && j != i && !seen[j] {
 				seen[j] = true
 				adj[j] = append(adj[j], i)
 				indeg[i]++
+			}
+		}
+		// (b) Module import/alias references: `import M` (or `alias M …`) makes
+		// this file depend on any file that defines at least one name prefixed "M.".
+		for mod := range p.mods {
+			prefix := mod + "."
+			for defName, j := range owner {
+				if strings.HasPrefix(defName, prefix) && j != i && !seen[j] {
+					seen[j] = true
+					adj[j] = append(adj[j], i)
+					indeg[i]++
+				}
 			}
 		}
 	}
@@ -97,6 +116,8 @@ func LoadSet(s *Session, sources []NamedSource) error {
 
 // definedNames returns the set of top-level names that a parsed file declares
 // (former names, constructor names, eliminator names, and def names).
+// Import and Alias items do not define names themselves; the module-prefix
+// dependency edges they create are handled separately via moduleRefs.
 func definedNames(items []surface.Item) map[string]bool {
 	defs := map[string]bool{}
 	for _, it := range items {
@@ -124,7 +145,7 @@ func definedNames(items []surface.Item) map[string]bool {
 		case surface.BuiltinNat, surface.BuiltinNatOp, surface.BuiltinNumInj:
 			// session-state declarations: no new store entries
 		case surface.Import, surface.Alias:
-			// import/alias define nothing at the file-topo level for this task
+			// module refs are extracted by moduleRefs; no new defined names here
 		}
 	}
 	return defs
@@ -191,8 +212,25 @@ func referencedNames(items []surface.Item) map[string]bool {
 			// Assumption: builtin declarations are co-located with the definitions
 			// they name; a cross-file builtin would require reference extraction here.
 		case surface.Import, surface.Alias:
-			// import/alias reference nothing at the file-topo level for this task
+			// module dependencies are captured by moduleRefs; no expression refs here
 		}
 	}
 	return refs
+}
+
+// moduleRefs returns the set of module paths declared by import or alias items.
+// These paths produce cross-file topo edges in LoadSet: a file that declares
+// `import M` (or `alias M …`) depends on every file that defines at least one
+// name with the prefix "M.".
+func moduleRefs(items []surface.Item) map[string]bool {
+	mods := map[string]bool{}
+	for _, it := range items {
+		switch d := it.(type) {
+		case surface.Import:
+			mods[d.Module] = true
+		case surface.Alias:
+			mods[d.Module] = true
+		}
+	}
+	return mods
 }
