@@ -32,6 +32,13 @@ func TestExamplesLoad(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Infra MANIFESTS share the .rune extension but are the manifest
+			// language (`<kind> <name> [key=val...]`, `#` comments), not rune
+			// source. They are gated by cmd/rune's manifest/deploy/calm tests
+			// (TestExampleManifest, TestDeployDemoHCL, TestFiveOutputs*).
+			if strings.HasPrefix(strings.TrimSpace(string(src)), "#") {
+				t.Skipf("examples/%s is an infra manifest, not rune source", e.Name())
+			}
 			s := session.New()
 			// Examples that use `import` declarations need the prelude; bare
 			// examples (e.g. CRDT specs that define their own Nat tower) do not.
