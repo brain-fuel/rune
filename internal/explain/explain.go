@@ -37,6 +37,10 @@ type Options struct {
 	// called user definitions n levels deep. Prims, foreign axioms, and
 	// builtin-accelerated definitions stay one-line at every depth.
 	Depth int
+	// Core renders the elaborated core walk instead of the surface tree: the
+	// nothing-hidden view. Implicits visible (braces), sugar expanded,
+	// underscore binders shown, numerals as literals, no English templates.
+	Core bool
 }
 
 // Explain renders the named definition from the session as a Step tree.
@@ -50,6 +54,13 @@ func Explain(s *session.Session, name string, opts Options) (Step, error) {
 		Text: "Entrypoint: " + short(name),
 		Code: short(name) + " : " + printCore(d.Ty, nil, s.RefNames()),
 	}
+	if opts.Core {
+		if d.Body == nil {
+			return Step{}, fmt.Errorf("explain: %q has no body to walk (a foreign axiom or postulate)", name)
+		}
+		root.Kids = coreSteps(s, d.Body, nil)
+		return root, nil
+	}
 	sd, ok := s.SurfaceDef(name)
 	if !ok {
 		return Step{}, fmt.Errorf("explain: %q has no surface body to explain (a foreign axiom, builtin, or constructor)", name)
@@ -61,6 +72,13 @@ func Explain(s *session.Session, name string, opts Options) (Step, error) {
 
 // ExplainExp renders a bare surface expression (the REPL $N path).
 func ExplainExp(s *session.Session, e surface.Exp, opts Options) (Step, error) {
+	if opts.Core {
+		tm, _, err := s.ElabExpr(e)
+		if err != nil {
+			return Step{}, err
+		}
+		return Step{Text: "Expression", Kids: coreSteps(s, tm, nil)}, nil
+	}
 	c := &ctx{s: s, defs: defMap(s), depth: opts.Depth}
 	return Step{Text: "Expression", Code: printExp(e), Kids: c.steps(e, "")}, nil
 }
