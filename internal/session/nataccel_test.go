@@ -420,6 +420,57 @@ func TestNatAccelNotExportedForHashEqualShadow(t *testing.T) {
 	}
 }
 
+// TestNatAccelExportKeepsDeclaringName locks the positive half of the
+// provenance gate: when the declaring def IS the current binding (the normal
+// prelude case), its codegen acceleration export survives.
+func TestNatAccelExportKeepsDeclaringName(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(accelProviderSrc); err != nil {
+		t.Fatalf("load provider source: %v", err)
+	}
+	p, err := s.EmitProgram("")
+	if err != nil {
+		t.Fatalf("EmitProgram: %v", err)
+	}
+	if p.Nat == nil {
+		t.Fatalf("expected a NatSpec: the provider source declared a builtin nat binding")
+	}
+	if op := p.Nat.Ops["addW"]; op != core.NatOpAdd {
+		t.Fatalf("declaring def addW must keep its codegen acceleration, got %v", op)
+	}
+}
+
+// TestNatAccelShadowedDeclNameLosesExport locks the second way the gate fires:
+// rebinding the DECLARING NAME to a different def gives the registered hash a
+// suffixed emit name (name$hash), which no longer equals the declaring name,
+// so the export is dropped (conservative correctness; the old binding's calls
+// fall back to the eliminator loop).
+func TestNatAccelShadowedDeclNameLosesExport(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(accelProviderSrc); err != nil {
+		t.Fatalf("load provider source: %v", err)
+	}
+	if _, err := s.LoadSource(`
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    n
+  end
+end
+`); err != nil {
+		t.Fatalf("rebind addW: %v", err)
+	}
+	p, err := s.EmitProgram("")
+	if err != nil {
+		t.Fatalf("EmitProgram: %v", err)
+	}
+	if p.Nat == nil {
+		t.Fatalf("expected a NatSpec: the provider source declared a builtin nat binding")
+	}
+	if len(p.Nat.Ops) != 0 {
+		t.Fatalf("rebinding addW must drop the codegen export for the old hash (suffixed emit name differs from the declaring name), got %v", p.Nat.Ops)
+	}
+}
+
 // TestNatAccelShadowEmitsEliminatorCall pins the emitted-source shape on BEAM:
 // the shadow program's main must call d_add() (the eliminator loop), never
 // native arithmetic on constructor records (the badarith of the parked bug).
