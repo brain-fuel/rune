@@ -577,18 +577,23 @@ for a demo.
   without breaking existing listings; parked until a user-facing DX complaint
   arises.
 
-- **`rune run` builtin-accel cross-registration via the always-on prelude.**
-  Structurally identical datatypes hash equal in de Bruijn core, so a user file
-  that declares its own `data Nat is zero | succ end` (WITHOUT `builtin nat`)
-  plus an eliminator-shaped `add` identical to the prelude's `addW` gets the
+- **`rune run` builtin-accel cross-registration via the always-on prelude
+  (FIXED: declaring-name provenance gate).** Structurally identical datatypes
+  and defs hash equal in de Bruijn core, so a user file declaring its own
+  `data Nat is zero | succ end` (WITHOUT `builtin nat`) plus an
+  eliminator-shaped `add` identical to the prelude's `addW` used to get the
   prelude's `builtin natAdd` acceleration cross-registered onto it under the
-  always-on prelude, changing emitted arithmetic (BEAM emits native `+` on
-  constructor records). `rune build`/`rune deploy` avoid it via demand-driven
-  prelude loading (`sourcesNeedPrelude`); the `rune run`/`rune emit` path can
-  still reach it. Parked: no current run-path consumer hits it (files that do
-  succ-arithmetic declare `builtin nat`, which auto-disables the prelude), and
-  the delivery-path risk (build/deploy) is closed. A future fix gates NatOp
-  registration on the declaring session source rather than the hash.
+  always-on prelude: codegen emitted native arithmetic on the user's
+  constructor-record data group (BEAM badarith, JS `[object Object]` concat,
+  Go interface-conversion panic). Fixed in internal/session: `AddBuiltinNatOp`
+  records the declaring def name (`natAccelDecl`) and `emitDefs` exports a
+  `NatSpec.Ops` entry only when the hash's emitted name equals it, so
+  hash-equal shadows conservatively fall back to the eliminator loop
+  (nataccel_test.go locks both halves). The kernel/normalizer accel stays
+  hash-keyed, sound by the registration-time differential gate. History: the
+  delivery path (`rune build`/`rune deploy`) had already been closed by
+  demand-driven prelude loading (`sourcesNeedPrelude`); that mechanism stays,
+  and the provenance gate closes the remaining `rune run`/`rune emit` reach.
 
 - **`sourcesNeedPrelude` substring conservatism + run-vs-build asymmetry.**
   `import StdX` (any module name starting with `Std`) loads the prelude for
