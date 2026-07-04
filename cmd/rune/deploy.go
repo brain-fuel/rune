@@ -138,7 +138,7 @@ func runDeploy(args []string, out io.Writer) error {
 	}
 
 	// MANIFEST MODE: emit ONE artifact for a whole app's resource graph (shared
-	// provider scaffolding emitted once). `rune deploy --manifest app.wav --backend aws`.
+	// provider scaffolding emitted once). `rune deploy --manifest app.rune --backend aws`.
 	if manifest != "" {
 		rs, err := parseManifest(manifest)
 		if err != nil {

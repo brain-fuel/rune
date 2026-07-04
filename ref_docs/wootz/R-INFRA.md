@@ -211,7 +211,7 @@ round-trips through a genuine IAM implementation. The kv (ElastiCache) and compu
 slices of the demo need a real account (LocalStack community does not implement
 them); IAM is the no-account-applicable part. Azure has no terraform emulator (see
 the Azure no-account IAM note); the billed one-cloud apply is documented in
-examples/wavelet_deploy.wav.
+examples/wavelet_demo.rune.
 
 ## Azure least-privilege IAM: the no-account ceiling
 
@@ -228,5 +228,5 @@ emulator apply is cleanly refused. For Azure's DATA shapes (kv, object, queue) t
 no-account path is FOSS-via-Podman (Valkey, Garage, RabbitMQ/NATS); IAM is a cloud
 control-plane concept with no FOSS equivalent, so for the IAM specifically the
 no-account ceiling is validate, and real provisioning needs a billed account (the
-billed apply is documented in examples/wavelet_deploy.wav). AWS, by contrast, is
+billed apply is documented in examples/wavelet_demo.rune). AWS, by contrast, is
 applied-and-observed no-account because LocalStack implements IAM (see the AWS note).

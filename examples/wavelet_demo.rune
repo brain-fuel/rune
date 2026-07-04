@@ -1,5 +1,8 @@
-# examples/wavelet_deploy.wav - the two-tab CRDT app's deployable infrastructure.
+# examples/wavelet_demo.rune - the two-tab collaborative CRDT app (Wavelet beta demo):
+# ONE manifest for BOTH the architecture model (rune calm) and the deployable
+# infrastructure (rune deploy). Four nodes:
 #
+# web: the browser client (the two-tab page).
 # relay: the signaling/relay service (a container workload).
 # store: the persistence layer (a managed kv store; Valkey self-hosted).
 # relay_role: the relay's workload identity, scoped to LEAST PRIVILEGE - exactly the
@@ -8,19 +11,21 @@
 #   listings/ch538_control_catalog.rune (needed = kv get/set). An over-broad policy
 #   would carry extra actions and be visible in the diff.
 #
-# Deploy the HCL for any cloud (region pinned via the provider's region variable):
-#   rune deploy --manifest examples/wavelet_deploy.wav --backend aws   > demo.tf
-#   rune deploy --manifest examples/wavelet_deploy.wav --backend azure > demo.tf
-#   rune deploy --manifest examples/wavelet_deploy.wav --backend gcp   > demo.tf
-compute relay
-kv      store
-iam     relay_role grants=kv:Get,kv:Set
+# The control catalog (control.Catalog) attaches the blessed controls by name:
+# in-region + convergence + the live-region tail on the store, least-privilege-IAM
+# on the relay, encrypted-in-transit on the web->relay link.
+#
+#   rune calm emit                       > demo.calm.json
+#   rune calm validate demo.calm.json
+#   rune deploy --manifest examples/wavelet_demo.rune --backend aws   > demo.tf
+#   rune deploy --manifest examples/wavelet_demo.rune --backend azure > demo.tf
+#   rune deploy --manifest examples/wavelet_demo.rune --backend gcp   > demo.tf
 #
 # ONE CLOUD LIVE (billed, cloud-gated):
 #   # no-account dry run on LocalStack (AWS), tears itself down:
-#   rune deploy --manifest examples/wavelet_deploy.wav --backend aws --apply --localstack --destroy
+#   rune deploy --manifest examples/wavelet_demo.rune --backend aws --apply --localstack --destroy
 #   # against a real billed account (drop --localstack; uses ambient AWS creds):
-#   AWS_PROFILE=your-profile rune deploy --manifest examples/wavelet_deploy.wav --backend aws --apply --destroy
+#   AWS_PROFILE=your-profile rune deploy --manifest examples/wavelet_demo.rune --backend aws --apply --destroy
 # The other two clouds emit fmt-clean HCL (rune deploy ... --backend azure|gcp).
 #
 # NO-ACCOUNT IAM (applied + observed): the scoped relay_role policy is apply-tested
@@ -31,3 +36,7 @@ iam     relay_role grants=kv:Get,kv:Set
 # be applied no-account. It IS terraform-validated no-account (provider-valid), and
 # Azure's data shapes use FOSS-via-Podman; real IAM needs a billed account
 # (cmd/rune/azure_iam_noaccount_test.go).
+paas    web
+compute relay
+kv      store
+iam     relay_role grants=kv:Get,kv:Set

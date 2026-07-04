@@ -31,11 +31,11 @@ YAML/HCL tool can make.
 ## 3. DEPLOY — one agnostic manifest, an equivalent deployment on every cloud
 
 ```sh
-rune deploy --manifest examples/app.wav --backend aws    > app.tf   # OpenTofu/Terraform
-rune deploy --manifest examples/app.wav --backend gcp    > app.tf   # … same logical set
+rune deploy --manifest examples/app.rune --backend aws    > app.tf   # OpenTofu/Terraform
+rune deploy --manifest examples/app.rune --backend gcp    > app.tf   # … same logical set
 ```
 
-`app.wav` is a 9-resource web app (compute/queue/kv/db/secret/iam/object/lb/cdn). The
+`app.rune` is a 9-resource web app (compute/queue/kv/db/secret/iam/object/lb/cdn). The
 22-row matrix lowers each kind to AWS/Azure/GCP HCL; the equal-config → equivalent-
 deployment equivalence is the gate. 13 abstractions also have a self-hosted FOSS backend
 (`--backend valkey|redpanda|…`) that runs under Podman/Docker with no cloud account.

@@ -11,7 +11,7 @@ import (
 	"goforge.dev/rune/v3/infra"
 )
 
-const demoDeployManifest = "../../examples/wavelet_deploy.wav"
+const demoDeployManifest = "../../examples/wavelet_demo.rune"
 
 // validateClean runs `terraform validate` on one cloud's main.tf. It needs provider
 // init; if init fails (offline / no network), it SKIPS rather than failing, so the

@@ -40,14 +40,14 @@ impeccable; the op is the bug).
 
 ## Wavelet infrastructure (the `rune deploy` verb, E4)
 
-`app.wav` is a whole application's resource graph (a public-facing web app:
+`app.rune` is a whole application's resource graph (a public-facing web app:
 compute + queue + kv + database + secret + iam + object + lb + cdn). One agnostic
 manifest lowers to an equivalent deployment on every cloud:
 
 ```
-rune deploy --manifest examples/app.wav --backend aws    > app.tf
-rune deploy --manifest examples/app.wav --backend azure  > app.tf
-rune deploy --manifest examples/app.wav --backend gcp    > app.tf
+rune deploy --manifest examples/app.rune --backend aws    > app.tf
+rune deploy --manifest examples/app.rune --backend azure  > app.tf
+rune deploy --manifest examples/app.rune --backend gcp    > app.tf
 ```
 
 A single resource lowers with `rune deploy --resource <kind> --name <n> --backend <b>`.

@@ -10,7 +10,7 @@ import (
 
 func TestManifestGrants(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "m.wav")
+	path := filepath.Join(dir, "m.rune")
 	if err := os.WriteFile(path, []byte("iam relay_role grants=kv:Get,kv:Set\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestManifestGrants(t *testing.T) {
 func TestManifestGrantsOnlyIAM(t *testing.T) {
 	// grants on a non-iam resource is a clear error
 	dir := t.TempDir()
-	path := filepath.Join(dir, "m.wav")
+	path := filepath.Join(dir, "m.rune")
 	if err := os.WriteFile(path, []byte("kv store grants=kv:Get\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

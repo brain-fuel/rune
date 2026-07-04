@@ -909,7 +909,7 @@ first and forces only on mismatch, so the fast path logs nothing.
       cross-backend; the `protocol … end` block (CONTEXTUAL keyword — checked CvRDT
       grouping that REJECTS a missing convergence proof); `infra.Kinds()` single-sourcing
       the kind list + CLI-completeness gates (every kind × every cloud, single + manifest
-      modes); examples/app.wav a 9-resource web app; and `rune deploy` in two modes — infra
+      modes); examples/app.rune a 9-resource web app; and `rune deploy` in two modes — infra
       (`--resource …`/`--manifest`) and workload (`FILE --target beam` RUNS a verified
       protocol's actors live on BEAM to convergence, the Lambert gate). REMAINING: runtime
       data-plane foreign-op binding + live Podman round-trip; the dependency-heavy matrix

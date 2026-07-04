@@ -39,7 +39,7 @@ accounts buy is not capability, it is validation against the genuine cloud APIs 
 - Stand up isolated AWS, Azure, and GCP organizations with hard budget caps and
   auto-teardown (every test run applies and destroys; nothing standing overnight without
   intent).
-- Take `examples/app.wav` (the 9-resource web app) to a live `apply` on AWS first. Confirm
+- Take `examples/app.rune` (the 9-resource web app) to a live `apply` on AWS first. Confirm
   the app serves traffic. Capture the run as the next demo artifact (a real URL on three
   clouds is the upgrade to the 90-second video).
 - Promote the existing `--apply` path from LocalStack/FOSS to real accounts: drop the
@@ -48,7 +48,7 @@ accounts buy is not capability, it is validation against the genuine cloud APIs 
 
 ### Phase B: all three clouds, equivalence observed (weeks 4 to 12)
 - Bring Azure and GCP to the same applied bar. Assert the equivalence gate against live
-  deployments: the same `app.wav` produces an equivalent running system on each.
+  deployments: the same `app.rune` produces an equivalent running system on each.
 - A nightly CI job that applies the matrix to ephemeral cloud resources and destroys them,
   so "it deploys to real clouds" is a continuously verified claim, not a one-time demo.
 

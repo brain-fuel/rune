@@ -117,7 +117,7 @@ paas, warehouse, inference, archive, serverless, devops) each lower to AWS /
 Azure / GCP as OpenTofu/Terraform HCL (canonical, `terraform fmt -check`-clean) and, for
 every row with a sane self-hosted form, to a FOSS backend that runs locally under Podman
 (RabbitMQ/NATS, Valkey, Garage, Postgres, Vault, Redpanda, Loki, Prometheus, k3s, and
-more; 15+ in all). `rune deploy --manifest app.wav --backend
+more; 15+ in all). `rune deploy --manifest app.rune --backend
 aws` emits a whole app's graph as one `main.tf`, each provider's shared scaffolding
 de-duplicated; the same manifest lowers to the same *logical* resource set on every
 cloud (the equivalence gate). The three data-plane abstractions (queue/kv/object) also
@@ -213,7 +213,7 @@ rune simulate FILE [n]  # run a distributed protocol under a fault policy (see a
 
 rune deploy FILE [NAME] --target beam        # deploy + RUN a verified protocol live
 rune deploy --resource <kind> --name N --backend <b>   # one resource -> HCL / Compose
-rune deploy --manifest app.wav --backend aws # a whole app's graph -> one main.tf
+rune deploy --manifest app.rune --backend aws # a whole app's graph -> one main.tf
 #   kinds:    queue kv object compute database secret nosql dns disk kms file
 #             stream iam k8s network firewall logs registry paas
 #   backends: aws azure gcp | rabbitmq nats valkey garage podman postgres ...

@@ -24,7 +24,7 @@ iam worker-role
 // resources, and that Azure's shared scaffolding (resource group, Key Vault) is emitted
 // exactly once for the whole graph.
 func TestManifestDeploy(t *testing.T) {
-	f, err := os.CreateTemp("", "app-*.wav")
+	f, err := os.CreateTemp("", "app-*.rune")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,19 +53,19 @@ func TestManifestDeploy(t *testing.T) {
 	}
 }
 
-// TestExampleManifest gates the committed examples/app.wav: it parses and lowers to
+// TestExampleManifest gates the committed examples/app.rune: it parses and lowers to
 // each cloud, with the shared scaffolding de-duplicated.
 func TestExampleManifest(t *testing.T) {
-	rs, err := parseManifest("../../examples/app.wav")
+	rs, err := parseManifest("../../examples/app.rune")
 	if err != nil {
-		t.Fatalf("examples/app.wav did not parse: %v", err)
+		t.Fatalf("examples/app.rune did not parse: %v", err)
 	}
 	if len(rs) != 9 {
-		t.Errorf("expected 9 resources in app.wav, got %d", len(rs))
+		t.Errorf("expected 9 resources in app.rune, got %d", len(rs))
 	}
 	for _, c := range cloudCloudTargets {
 		var out bytes.Buffer
-		if err := runDeploy([]string{"--manifest", "../../examples/app.wav", "--backend", c}, &out); err != nil {
+		if err := runDeploy([]string{"--manifest", "../../examples/app.rune", "--backend", c}, &out); err != nil {
 			t.Errorf("[%s] example manifest deploy: %v", c, err)
 		}
 		if !strings.Contains(out.String(), "resource \"") {
@@ -103,7 +103,7 @@ func TestManifestErrors(t *testing.T) {
 		{"compute w replicas=x", "positive integer"},
 	}
 	for _, c := range cases {
-		f, _ := os.CreateTemp("", "bad-*.wav")
+		f, _ := os.CreateTemp("", "bad-*.rune")
 		f.WriteString(c.body + "\n")
 		f.Close()
 		_, err := parseManifest(f.Name())
@@ -142,14 +142,14 @@ func TestAllCLIKindsLowerOnEveryCloud(t *testing.T) {
 }
 
 // TestManifestEveryKind exercises the --manifest path across ALL agnostic kinds (not
-// just app.wav's subset): a manifest with one line per infra.Kind() parses into a
+// just app.rune's subset): a manifest with one line per infra.Kind() parses into a
 // resource graph that lowers to a single artifact on every cloud, sharing scaffolding.
 func TestManifestEveryKind(t *testing.T) {
 	var b strings.Builder
 	for i, k := range infra.Kinds() {
 		fmt.Fprintf(&b, "%s res%d\n", k, i)
 	}
-	f, err := os.CreateTemp("", "allkinds-*.wav")
+	f, err := os.CreateTemp("", "allkinds-*.rune")
 	if err != nil {
 		t.Fatal(err)
 	}

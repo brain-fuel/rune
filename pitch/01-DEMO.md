@@ -25,9 +25,9 @@ rune simulate examples/gcounter.rune 2
 #   a catch no YAML or HCL tool can make, because they never model behavior.
 
 # 3. DEPLOY: one agnostic manifest, an equivalent deployment on every cloud.
-rune deploy --manifest examples/app.wav --backend aws  > app.aws.tf
-rune deploy --manifest examples/app.wav --backend gcp  > app.gcp.tf
-#   app.wav is a 9-resource web app (compute/queue/kv/db/secret/iam/object/lb/cdn).
+rune deploy --manifest examples/app.rune --backend aws  > app.aws.tf
+rune deploy --manifest examples/app.rune --backend gcp  > app.gcp.tf
+#   app.rune is a 9-resource web app (compute/queue/kv/db/secret/iam/object/lb/cdn).
 #   The 22-row matrix lowers each kind to AWS/Azure/GCP HCL; "equal config => equivalent
 #   deployment" is the gate, mirroring backend conformance.
 

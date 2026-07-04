@@ -1,4 +1,4 @@
-# examples/serving.wav
+# examples/serving.rune
 # a model-serving app, end to end: an API in front of an inference endpoint, with a cache,
 # a cold archive for request logs, a serverless function for async post-processing, and a CI
 # pipeline. The genuine consumer for the wavelet inference/archive/serverless/devops rows —

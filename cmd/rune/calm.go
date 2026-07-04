@@ -26,7 +26,7 @@ func runCalm(args []string, out io.Writer) error {
 	sub := args[0]
 	rest := args[1:]
 
-	manifest := "examples/wavelet_demo.wav"
+	manifest := "examples/wavelet_demo.rune"
 	listing := "listings/ch538_control_catalog.rune"
 	var file string
 	for i := 0; i < len(rest); i++ {

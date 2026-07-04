@@ -390,7 +390,7 @@ unchanged). Sibling of the parked int64 fast-lane / native bignum / raw-sockets 
 
 ## Would-be consumers for the parked frontier nodes (2026-06-23)
 Every parked node is parked for "no consumer." The 2026-06-23 sweep built the three GENUINE
-consumers (fit.rune ch473 → D4 ML-interop; serving.wav → E4 inference/archive rows; ch474
+consumers (fit.rune ch473 → D4 ML-interop; serving.rune → E4 inference/archive rows; ch474
 perpetual service → live non-settling shape) and RECORDED the would-be consumer for the rest —
 building those would be MANUFACTURING need (a Standing Rule 1 violation), so they stay parked:
 - **rung-4 zero-copy `Array dt sh` CRepr** ← needs a LARGE-array workload where the O(n) FList
@@ -417,7 +417,7 @@ consumer, no longer parked):
 - **`elemTy:DType->U` → BUILT (ch476) + the eliminator motive bumped to U1 (large elim LIFTED,
   elaborate/data.go):** consumer = mixed i64/f64/bool_ cells. The "no large elimination into U"
   limit is RETIRED. NO LONGER PARKED.
-- **E4 serverless/devops → BUILT (Fn/Woodpecker):** consumer = serving.wav; matrix complete (27).
+- **E4 serverless/devops → BUILT (Fn/Woodpecker):** consumer = serving.rune; matrix complete (27).
 - **non-settling adequacy → BUILT for the perpetual-mirror class (ch477):** consumer = ch474.
 - **dim-2 HIT interior → was ALREADY CLOSED (ch98 + ch478 consumer):** the parking was stale.
 Still genuinely parked (capability provided otherwise / research): R-UFH (single UF suffices),

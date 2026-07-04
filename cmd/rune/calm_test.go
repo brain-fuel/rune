@@ -9,7 +9,7 @@ import (
 	"goforge.dev/rune/v3/calm"
 )
 
-const demoManifest = "../../examples/wavelet_demo.wav"
+const demoManifest = "../../examples/wavelet_demo.rune"
 const demoListing = "../../listings/ch538_control_catalog.rune"
 
 func TestRunCalmEmitThenValidate(t *testing.T) {
@@ -30,8 +30,8 @@ func TestRunCalmEmitThenValidate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse emitted: %v", err)
 	}
-	if len(doc.Nodes) != 3 {
-		t.Fatalf("want 3 nodes in the emitted demo doc, got %d", len(doc.Nodes))
+	if len(doc.Nodes) != 4 {
+		t.Fatalf("want 4 nodes in the emitted demo doc, got %d", len(doc.Nodes))
 	}
 }
 
