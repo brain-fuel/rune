@@ -45,11 +45,15 @@ type Options struct {
 
 // Explain renders the named definition from the session as a Step tree.
 func Explain(s *session.Session, name string, opts Options) (Step, error) {
-	defs := defMap(s)
-	d, ok := defs[name]
+	// Resolve the target per-name (session.DefOf), not through the hash-keyed
+	// defMap: two definitions with an identical elaborated core share one hash,
+	// and the name-keyed listing would keep only the latest, making the other
+	// name report as missing. defMap is still built for call-site lookups.
+	d, ok := s.DefOf(name)
 	if !ok {
 		return Step{}, fmt.Errorf("explain: no definition named %q", name)
 	}
+	defs := defMap(s)
 	root := Step{
 		Text: "Entrypoint: " + short(name),
 		Code: short(name) + " : " + printCore(d.Ty, nil, s.RefNames()),
@@ -99,6 +103,18 @@ type ctx struct {
 	depth int
 }
 
+// userBodied reports whether name resolves to a retained user definition with
+// a real body (a bodied plain or partial def). True prims are foreign axioms
+// or prelude builtins, which SurfaceDef does not retain, so this is false for
+// them. The prim English templates apply ONLY when this is false: a user
+// definition whose short name collides with a prim (e.g. a user `fmul` that
+// does not multiply) must render through its own body, never borrow the prim's
+// sentence. The explainer must not lie.
+func (c *ctx) userBodied(name string) bool {
+	d, ok := c.s.SurfaceDef(name)
+	return ok && !d.IsForeign && d.Body != nil
+}
+
 // steps renders expression e as a flat list of sibling steps. binder is the
 // name the surrounding bindIO chain or let gives e's result; "" means
 // unnamed, and names starting with "_" are treated as unnamed.
@@ -113,7 +129,7 @@ func (c *ctx) steps(e surface.Exp, binder string) []Step {
 		if n == "bindIO" && len(expl) == 4 {
 			return c.bindSteps(e, expl, binder)
 		}
-		if t, ok := primTemplates[n]; ok && len(expl) >= t.args {
+		if t, ok := primTemplates[n]; ok && len(expl) >= t.args && !c.userBodied(v.Name) {
 			return c.primSteps(t, e, expl, binder)
 		}
 		if _, ok := c.defs[v.Name]; ok {

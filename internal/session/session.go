@@ -1167,6 +1167,30 @@ func (s *Session) Lookup(name string) (core.Hash, bool) {
 	return h, ok
 }
 
+// DefOf returns the core definition currently bound to name, resolved through
+// the per-name reference table. Two definitions that share an identical
+// elaborated core (hash-equal) both stay reachable by their own name here; the
+// name-keyed Defs() listing keeps only the latest name per hash, so a caller
+// that must exist-check or read the type/body of a specific name uses this
+// seam instead. Session-side metadata is carried the same way Defs() carries
+// it.
+func (s *Session) DefOf(name string) (Def, bool) {
+	h, ok := s.refs[name]
+	if !ok {
+		return Def{}, false
+	}
+	d, ok := s.byHash[h]
+	if !ok {
+		return Def{}, false
+	}
+	m := s.meta[d.Name]
+	d.Postulate = m.postulate
+	d.Why = m.why
+	d.UsesGuard = m.usesGuard
+	d.Pos = m.pos
+	return d, true
+}
+
 // SurfaceDef returns the retained, import-qualified surface definition of
 // name. Only definitions with a body are retained; foreign axioms, builtin
 // group members, and data constructors return ok=false.

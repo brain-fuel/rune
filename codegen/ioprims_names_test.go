@@ -26,7 +26,7 @@ func TestIOPrimNames(t *testing.T) {
 		}
 	}
 	fams := [][]string{
-		dataPlanePrims, binPrims, netPrims, fsPrims,
+		fileEnvPrims, streamPrims, dataPlanePrims, binPrims, netPrims, fsPrims,
 		{"procRun", "sha256", "tlsGet"},
 	}
 	for _, fam := range fams {

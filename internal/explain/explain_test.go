@@ -1,6 +1,7 @@
 package explain
 
 import (
+	"strings"
 	"testing"
 
 	"goforge.dev/rune/v3/internal/session"
@@ -143,5 +144,44 @@ func TestExplainErrors(t *testing.T) {
 	}
 	if _, err := Explain(s, "F", Options{}); err == nil {
 		t.Error("Explain(F): want error (foreign axiom has no surface body)")
+	}
+}
+
+// TestUserDefShadowsPrimName: a USER definition whose short name collides with
+// a prim (here `fmul`, the float-multiply prim) must render through its own
+// body, never borrow the prim's English. This user fmul returns its first
+// argument unchanged, so an explanation that said "Multiply" would be a lie.
+func TestUserDefShadowsPrimName(t *testing.T) {
+	src := `data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+fmul : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is a end end
+caller : Nat is fmul zero zero end
+`
+	s := load(t, src)
+	got := explainText(t, s, "caller", Options{})
+	if strings.Contains(got, "Multiply") {
+		t.Errorf("user fmul must not borrow the prim's English:\ngot:\n%s", got)
+	}
+	if !strings.Contains(got, "Apply `fmul`") {
+		t.Errorf("user fmul should render as a call to its own body:\ngot:\n%s", got)
+	}
+}
+
+// TestExplainIdenticalDefsBothNamed: two definitions with an identical
+// elaborated core (hash-equal) are BOTH explainable by their own name. The
+// hash-keyed listing keeps only the latest name per hash, so target resolution
+// must go through the per-name seam.
+func TestExplainIdenticalDefsBothNamed(t *testing.T) {
+	src := `data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+a : Nat is zero end
+b : Nat is zero end
+`
+	s := load(t, src)
+	if _, err := Explain(s, "a", Options{}); err != nil {
+		t.Errorf("Explain(a): want explainable, got %v", err)
+	}
+	if _, err := Explain(s, "b", Options{}); err != nil {
+		t.Errorf("Explain(b): want explainable, got %v", err)
 	}
 }
