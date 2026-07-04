@@ -5,6 +5,7 @@
 //	rune repl [--no-prelude]        elaborate/normalize/print loop (internal/repl)
 //	rune emit <file> [name]         emit target source for a definition (--target)
 //	rune run <file> <name>          emit and execute on a backend (--target)
+//	rune explain <file> [name]      render a definition as English steps (--depth n|core)
 //	rune build <file> [name]        ship host artifacts (--kind app|library)
 //	rune simulate <file> ...        drive a protocol under fault schedules (internal/sim)
 //	rune deploy ...                 infra emit / workload run / --apply lifecycle
@@ -94,6 +95,10 @@ func main() {
 		}
 		if runErr != nil {
 			fatal(runErr)
+		}
+	case "explain":
+		if err := runExplainCLI(os.Args[2:], os.Stdout); err != nil {
+			fatal(err)
 		}
 	case "build":
 		if err := runBuildCLI(os.Args[2:], os.Stdout); err != nil {
@@ -283,6 +288,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  rune repl [--no-prelude]")
 	fmt.Fprintln(os.Stderr, "  rune emit <path...> [name] [--target js|py|go|rs|erl|jvm] [--no-prelude]  (dirs expand to their .rune files)")
 	fmt.Fprintln(os.Stderr, "  rune run  <path...> <name> [--target js|py|go|rs|erl|jvm] [--no-prelude]  (dirs expand to their .rune files)")
+	fmt.Fprintln(os.Stderr, "  rune explain <path...> [name] [--depth n|core] [--no-prelude]   (English step view; name defaults to main)")
 	fmt.Fprintln(os.Stderr, "  rune build <file> [name] [--target T] [--kind app|library] [--module M] [--export Rune[:Host]] [--out dir]")
 	fmt.Fprintln(os.Stderr, "  rune simulate <file> [replicas]   (defines init/merge/value/op0..opN)")
 	fmt.Fprintln(os.Stderr, "  rune deploy <file> [name] --target <backend>   (deploy + RUN a verified protocol)")

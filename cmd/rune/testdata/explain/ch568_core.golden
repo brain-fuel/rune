@@ -1,0 +1,2 @@
+[Entrypoint: main]
+[Compute (printNat 42)]

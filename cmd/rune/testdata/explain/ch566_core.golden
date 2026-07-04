@@ -1,0 +1,5 @@
+[Entrypoint: main]
+[Do (getFloat) as `x` : Float]
+[Do (printFloat (fmul x (fromNat 2))) as `_y` : Float]
+[Do (probe) as `_r` : Nat]
+[Do (probe2)]

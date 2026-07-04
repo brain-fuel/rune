@@ -1,0 +1,6 @@
+[Entrypoint: main]
+[Get Float `x` from Command Line]
+[Apply Function (fmul x (fromNat 2))]
+[Print Result to Command Line]
+[Apply `probe` (gives IO Nat)]
+[Apply `probe2` (gives IO Nat)]

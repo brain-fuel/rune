@@ -1,0 +1,3 @@
+[Entrypoint: main]
+[Do (getFloat) as `x` : Float]
+[Do (printFloat (fmul x (fromNat 2)))]
