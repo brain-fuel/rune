@@ -86,7 +86,7 @@ raw socket — the wavelet kv/queue abstraction reads and writes a REAL Valkey, 
 with no third-party dependency. (Gated by `TestLiveKVRoundTrip`, which runs all three
 backends against one broker.)
 
-## The five outputs — one source set, one gate
+## The five outputs - one source set, one gate
 
 Beta success criterion 2, checkable: from {`examples/twotab/counter.rune`,
 `examples/wavelet_demo.rune`, `listings/ch538_control_catalog.rune`} the same
