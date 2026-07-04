@@ -6,6 +6,7 @@ package main
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"goforge.dev/rune/v3/internal/session"
@@ -49,5 +50,25 @@ func TestFiveOutputsHashBinding(t *testing.T) {
 		if ha != hc {
 			t.Errorf("%q hash mismatch: app %s vs catalog %s - the proven control is not about the deployed merge", name, ha, hc)
 		}
+	}
+}
+
+// TestFiveOutputsSim folds the EXACT source the app deploys under the
+// partition-and-heal schedule and the CvRDT law linter (output 2 of 5).
+func TestFiveOutputsSim(t *testing.T) {
+	src, err := os.ReadFile(fiveOutputsApp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	if err := runSimulate(string(src), 2, &out); err != nil {
+		t.Fatalf("simulate: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "verdict: CONVERGED") {
+		t.Fatalf("app protocol did not converge under the fault schedule:\n%s", got)
+	}
+	if !strings.Contains(got, "join laws hold") {
+		t.Fatalf("CvRDT law linter did not certify the join:\n%s", got)
 	}
 }

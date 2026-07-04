@@ -302,3 +302,14 @@ end
 gcFromBin : Bin -> GC is
   fn (b : Bin) is decodeGC (binToNL b) end
 end
+
+-- ============================================================================
+-- The simulate convention (rune simulate examples/twotab/counter.rune 2):
+-- thin aliases so the fault simulator folds THIS deployed source directly.
+-- ============================================================================
+
+init : GC is initGC end
+
+op0 : GC -> GC is bump end
+
+op1 : GC -> GC is bump end
