@@ -12,6 +12,12 @@
 -- so `refl` type-checks only when the claim holds. An over-broad IAM policy makes
 -- the IAM fold reduce to `false`, so its `refl` fails to elaborate (a compile
 -- error, not a runtime check) - see harness/control_catalog_test.go.
+--
+-- The convergence control is proven over the two-tab app's OWN G-Counter, not a
+-- stand-in max-register: `GC`/`merge` below are copied VERBATIM from
+-- examples/twotab/counter.rune (the source the browser tabs deploy), so content
+-- addressing hash-binds the proof to the exact deployed merge
+-- (cmd/rune/five_outputs_test.go's TestFiveOutputsHashBinding pins it).
 
 data Unit : U is unit : Unit end
 data Bool : U is false : Bool | true : Bool end
@@ -136,73 +142,129 @@ granted : CodeList is ccons 10 (ccons 11 cnil) end
 -- makes eqCodes reduce to `false`, so this refl would fail to elaborate (Task 6).
 leastPrivProof : Eq Bool (eqCodes granted needed) true is refl end
 
--- ===== convergence: the verified max-register CvRDT (reused from ch453) =====
-cong : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
-  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
-    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
-  end
-end
-symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
-  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
-    subst A x y p (fn (z : A) is Eq A z x end) refl
+-- ===== convergence: the two-tab demo's G-Counter (the SHAPES ARE THE APP'S) =====
+-- add/max/GC/value/merge below are copied VERBATIM from examples/twotab/counter.rune
+-- (the source the browser tabs deploy). Content addressing binds them: identical
+-- structure = identical hash, so the convergesProof the ledger/CALM doc carries is
+-- about the EXACT merge the app runs (TestFiveOutputsHashBinding pins it). Edit the
+-- shapes there, copy back here; the proofs below are the gcounter.rune/ch72 family.
+
+-- Addition, recursion on the left: add zero n = n and add (succ zero) n =
+-- succ n DEFINITIONALLY.
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
   end
 end
 
-natMax : Nat -> Nat -> Nat is
-  fn (a : Nat) (b : Nat) is
-    NatElim (fn (x : Nat) is Nat -> Nat end)
-      (fn (m : Nat) is m end)
-      (fn (k : Nat) (maxK : Nat -> Nat) is
-         fn (m : Nat) is
-           NatElim (fn (y : Nat) is Nat end) (succ k) (fn (j : Nat) (ih2 : Nat) is succ (maxK j) end) m
-         end end)
-      a b
+data GC : U is
+  gc : Nat -> Nat -> GC
+end
+
+value : GC -> Nat is
+  fn (s : GC) is case s of | gc a b -> add a b end end
+end
+
+max : Nat -> Nat -> Nat is
+  fn (m : Nat) is
+    case m of
+    | zero -> fn (n : Nat) is n end
+    | succ k with ih -> fn (n : Nat) is
+        case n of
+        | zero -> succ k
+        | succ j -> succ (ih j)
+        end
+      end
+    end
   end
 end
-maxZeroR : (a : Nat) -> Eq Nat (natMax a zero) a is
-  fn (a : Nat) is
-    NatElim (fn (x : Nat) is Eq Nat (natMax x zero) x end) refl (fn (k : Nat) (ih : Eq Nat (natMax k zero) k) is refl end) a
+
+merge : GC -> GC -> GC is
+  fn (s : GC) (t : GC) is
+    case s of
+    | gc a b -> case t of | gc c d -> gc (max a c) (max b d) end
+    end
   end
 end
-maxComm : (a : Nat) -> (b : Nat) -> Eq Nat (natMax a b) (natMax b a) is
-  fn (a : Nat) is
-    NatElim (fn (x : Nat) is (b : Nat) -> Eq Nat (natMax x b) (natMax b x) end)
-      (fn (b : Nat) is symEq Nat (natMax b zero) b (maxZeroR b) end)
-      (fn (k : Nat) (ih : (b : Nat) -> Eq Nat (natMax k b) (natMax b k)) is
-         fn (b : Nat) is
-           NatElim (fn (y : Nat) is Eq Nat (natMax (succ k) y) (natMax y (succ k)) end)
-             refl
-             (fn (j : Nat) (ihj : Eq Nat (natMax (succ k) j) (natMax j (succ k))) is
-                cong Nat Nat succ (natMax k j) (natMax j k) (ih j) end)
-             b
+
+-- symmetry and a succ-congruence over the ambient Eq, by `subst` (Leibniz transport).
+symNat : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat b a is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat z a end) (refl a)
+  end
+end
+
+congSucc : (a : Nat) -> (b : Nat) -> Eq Nat a b -> Eq Nat (succ a) (succ b) is
+  fn (a : Nat) (b : Nat) (e : Eq Nat a b) is
+    subst Nat a b e (fn (z : Nat) is Eq Nat (succ a) (succ z) end) (refl (succ a))
+  end
+end
+
+-- max m 0 = m, by `refl` on each constructor (both equations are definitional: max 0 0 ~> 0 and
+-- max (succ k) 0 ~> succ k), assembled by induction so it holds for every m.
+maxZeroR : (m : Nat) -> Eq Nat (max m zero) m is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x zero) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k zero) k) is refl (succ k) end)
+      m
+  end
+end
+
+-- MAX IS COMMUTATIVE, the heart of CRDT convergence (the join is order-independent). Double
+-- induction: m = 0 uses `max n 0 = n` (maxZeroR, flipped by symNat); the succ/succ step is
+-- succ-congruence on the IH.
+maxComm : (m : Nat) -> (n : Nat) -> Eq Nat (max m n) (max n m) is
+  fn (m : Nat) is
+    NatElim (fn (x : Nat) is (n : Nat) -> Eq Nat (max x n) (max n x) end)
+      (fn (n : Nat) is symNat (max n zero) n (maxZeroR n) end)
+      (fn (k : Nat) (ih : (n : Nat) -> Eq Nat (max k n) (max n k)) is
+         fn (n : Nat) is
+           NatElim (fn (x : Nat) is Eq Nat (max (succ k) x) (max x (succ k)) end)
+             (refl (succ k))
+             (fn (j : Nat) (ihj : Eq Nat (max (succ k) j) (max j (succ k))) is
+                congSucc (max k j) (max j k) (ih j) end)
+             n
          end
        end)
+      m
+  end
+end
+
+-- MAX IS IDEMPOTENT, `max a a = a`. By induction: base `max 0 0 ~> 0`; step `max (succ k)
+-- (succ k) ~> succ (max k k)`, succ-congruence on the IH. (Join idempotence: merging a replica
+-- with itself is a no-op.)
+maxIdem : (a : Nat) -> Eq Nat (max a a) a is
+  fn (a : Nat) is
+    NatElim (fn (x : Nat) is Eq Nat (max x x) x end)
+      (refl zero)
+      (fn (k : Nat) (ih : Eq Nat (max k k) k) is congSucc (max k k) k ih end)
       a
   end
 end
-maxIdem : (a : Nat) -> Eq Nat (natMax a a) a is
+
+-- MAX IS ASSOCIATIVE, `max (max a b) c = max a (max b c)`. Triple induction; every boundary
+-- (any argument 0) is `refl` by the definitional max equations, and the succ/succ/succ case is
+-- succ-congruence on the outer IH at the predecessors. (Join associativity: gossip grouping is
+-- irrelevant.)
+maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat)
+   -> Eq Nat (max (max a b) c) (max a (max b c)) is
   fn (a : Nat) is
-    NatElim (fn (x : Nat) is Eq Nat (natMax x x) x end)
-      refl
-      (fn (k : Nat) (ih : Eq Nat (natMax k k) k) is cong Nat Nat succ (natMax k k) k ih end)
-      a
-  end
-end
-maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) ->
-           Eq Nat (natMax (natMax a b) c) (natMax a (natMax b c)) is
-  fn (a : Nat) is
-    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (natMax (natMax x b) c) (natMax x (natMax b c)) end)
-      (fn (b : Nat) (c : Nat) is refl end)
-      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (natMax (natMax k b) c) (natMax k (natMax b c))) is
+    NatElim (fn (x : Nat) is (b : Nat) -> (c : Nat) -> Eq Nat (max (max x b) c) (max x (max b c)) end)
+      (fn (b : Nat) (c : Nat) is refl (max b c) end)
+      (fn (k : Nat) (ih : (b : Nat) -> (c : Nat) -> Eq Nat (max (max k b) c) (max k (max b c))) is
          fn (b : Nat) is
-           NatElim (fn (y : Nat) is (c : Nat) -> Eq Nat (natMax (natMax (succ k) y) c) (natMax (succ k) (natMax y c)) end)
-             (fn (c : Nat) is refl end)
-             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (natMax (natMax (succ k) j) c) (natMax (succ k) (natMax j c))) is
+           NatElim (fn (x : Nat) is (c : Nat) -> Eq Nat (max (max (succ k) x) c) (max (succ k) (max x c)) end)
+             (fn (c : Nat) is refl (max (succ k) c) end)
+             (fn (j : Nat) (ihb : (c : Nat) -> Eq Nat (max (max (succ k) j) c) (max (succ k) (max j c))) is
                 fn (c : Nat) is
-                  NatElim (fn (z : Nat) is Eq Nat (natMax (natMax (succ k) (succ j)) z) (natMax (succ k) (natMax (succ j) z)) end)
-                    refl
-                    (fn (i : Nat) (ihc : Eq Nat (natMax (natMax (succ k) (succ j)) i) (natMax (succ k) (natMax (succ j) i))) is
-                       cong Nat Nat succ (natMax (natMax k j) i) (natMax k (natMax j i)) (ih j i) end)
+                  NatElim (fn (x : Nat) is Eq Nat (max (max (succ k) (succ j)) x) (max (succ k) (max (succ j) x)) end)
+                    (refl (succ (max k j)))
+                    (fn (i : Nat) (ihc : Eq Nat (max (max (succ k) (succ j)) i) (max (succ k) (max (succ j) i))) is
+                       congSucc (max (max k j) i) (max k (max j i)) (ih j i) end)
                     c
                 end
               end)
@@ -213,49 +275,66 @@ maxAssoc : (a : Nat) -> (b : Nat) -> (c : Nat) ->
   end
 end
 
-data Reg : U is reg : Nat -> Reg end
-val : Reg -> Nat is fn (r : Reg) is RegElim (fn (w : Reg) is Nat end) (fn (n : Nat) is n end) r end end
-merge : Reg -> Reg -> Reg is fn (x : Reg) (y : Reg) is reg (natMax (val x) (val y)) end end
+-- GC-congruence in both slots, by two `subst`s.
+congGC : (a : Nat) -> (b : Nat) -> (c : Nat) -> (d : Nat)
+   -> Eq Nat a c -> Eq Nat b d -> Eq GC (gc a b) (gc c d) is
+  fn (a : Nat) (b : Nat) (c : Nat) (d : Nat) (e1 : Eq Nat a c) (e2 : Eq Nat b d) is
+    subst Nat a c e1 (fn (x : Nat) is Eq GC (gc a b) (gc x d) end)
+      (subst Nat b d e2 (fn (y : Nat) is Eq GC (gc a b) (gc a y) end)
+         (refl (gc a b)))
+  end
+end
 
-mergeComm : (x : Reg) -> (y : Reg) -> Eq Reg (merge x y) (merge y x) is
-  fn (x : Reg) is
-    RegElim (fn (wx : Reg) is (y : Reg) -> Eq Reg (merge wx y) (merge y wx) end)
-      (fn (a : Nat) is
-         fn (y : Reg) is
-           RegElim (fn (wy : Reg) is Eq Reg (merge (reg a) wy) (merge wy (reg a)) end)
-             (fn (b : Nat) is cong Nat Reg reg (natMax a b) (natMax b a) (maxComm a b) end)
-             y
-         end end)
-      x
+-- CONVERGENCE: merge is COMMUTATIVE, gossiping in either order reaches the same state, so all
+-- replicas converge (eventual consistency). By `maxComm` on each slot + GC-congruence.
+mergeComm : (g : GC) -> (h : GC) -> Eq GC (merge g h) (merge h g) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> Eq GC (merge x h) (merge h x) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is Eq GC (merge (gc a b) y) (merge y (gc a b)) end)
+             (fn (c : Nat) (d : Nat) is
+                congGC (max a c) (max b d) (max c a) (max d b)
+                  (maxComm a c) (maxComm b d) end)
+             h
+         end
+       end)
+      g
   end
 end
-mergeIdem : (x : Reg) -> Eq Reg (merge x x) x is
-  fn (x : Reg) is
-    RegElim (fn (wx : Reg) is Eq Reg (merge wx wx) wx end)
-      (fn (a : Nat) is cong Nat Reg reg (natMax a a) a (maxIdem a) end)
-      x
+
+-- MERGE IS IDEMPOTENT, `merge g g = g` (re-merging a replica with itself is a no-op). By
+-- `maxIdem` on each slot + GC-congruence.
+mergeIdem : (g : GC) -> Eq GC (merge g g) g is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is Eq GC (merge x x) x end)
+      (fn (a : Nat) (b : Nat) is congGC (max a a) (max b b) a b (maxIdem a) (maxIdem b) end)
+      g
   end
 end
-mergeAssoc : (x : Reg) -> (y : Reg) -> (z : Reg) ->
-             Eq Reg (merge (merge x y) z) (merge x (merge y z)) is
-  fn (x : Reg) is
-    RegElim (fn (wx : Reg) is (y : Reg) -> (z : Reg) ->
-        Eq Reg (merge (merge wx y) z) (merge wx (merge y z)) end)
-      (fn (a : Nat) is
-         fn (y : Reg) is
-           RegElim (fn (wy : Reg) is (z : Reg) ->
-               Eq Reg (merge (merge (reg a) wy) z) (merge (reg a) (merge wy z)) end)
-             (fn (b : Nat) is
-                fn (z : Reg) is
-                  RegElim (fn (wz : Reg) is
-                      Eq Reg (merge (merge (reg a) (reg b)) wz) (merge (reg a) (merge (reg b) wz)) end)
-                    (fn (c : Nat) is
-                       cong Nat Reg reg (natMax (natMax a b) c) (natMax a (natMax b c)) (maxAssoc a b c) end)
-                    z
-                end end)
-             y
-         end end)
-      x
+
+-- MERGE IS ASSOCIATIVE, `merge (merge g h) k = merge g (merge h k)` (gossip grouping is
+-- irrelevant). By `maxAssoc` on each slot + GC-congruence.
+mergeAssoc : (g : GC) -> (h : GC) -> (k : GC)
+   -> Eq GC (merge (merge g h) k) (merge g (merge h k)) is
+  fn (g : GC) is
+    GCElim (fn (x : GC) is (h : GC) -> (k : GC) -> Eq GC (merge (merge x h) k) (merge x (merge h k)) end)
+      (fn (a : Nat) (b : Nat) is
+         fn (h : GC) is
+           GCElim (fn (y : GC) is (k : GC) -> Eq GC (merge (merge (gc a b) y) k) (merge (gc a b) (merge y k)) end)
+             (fn (c : Nat) (d : Nat) is
+                fn (k : GC) is
+                  GCElim (fn (z : GC) is Eq GC (merge (merge (gc a b) (gc c d)) z) (merge (gc a b) (merge (gc c d) z)) end)
+                    (fn (e : Nat) (ff : Nat) is
+                       congGC (max (max a c) e) (max (max b d) ff) (max a (max c e)) (max b (max d ff))
+                         (maxAssoc a c e) (maxAssoc b d ff) end)
+                    k
+                end
+              end)
+             h
+         end
+       end)
+      g
   end
 end
 
@@ -272,17 +351,17 @@ data Conv : (R : U) -> (m : R -> R -> R) -> U is
       -> Conv R m
 end
 
-convergesProof : Conv Reg merge is conv Reg merge mergeComm mergeIdem mergeAssoc end
+convergesProof : Conv GC merge is conv GC merge mergeComm mergeIdem mergeAssoc end
 
 -- ===== a runnable witness (the Lambert spirit gate: it deploys + runs) =====
--- Two replicas hold 3 and 7; either merge order converges to 7 = max(3, 7).
+-- Replica A counted 2, replica B counted 1; either merge order observes 3.
 foreign printNat : Nat -> IO Nat end
-r3 : Reg is reg 3 end
-r7 : Reg is reg 7 end
+replicaA : GC is gc (succ (succ zero)) zero end
+replicaB : GC is gc zero (succ zero) end
 
 main : IO Unit is
-  bindIO Nat Unit (printNat (val (merge r3 r7))) (fn (u1 : Nat) is
-    bindIO Nat Unit (printNat (val (merge r7 r3))) (fn (u2 : Nat) is
+  bindIO Nat Unit (printNat (value (merge replicaA replicaB))) (fn (u1 : Nat) is
+    bindIO Nat Unit (printNat (value (merge replicaB replicaA))) (fn (u2 : Nat) is
       pureIO Unit unit
     end)
   end)

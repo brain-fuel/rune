@@ -15,9 +15,10 @@ func TestControlCatalogElaborates(t *testing.T) {
 	normalizesTo(t, s, `allInRegion usEast demoServices`, "true")
 	normalizesTo(t, s, `allEncrypted demoEdges`, "true")
 	normalizesTo(t, s, `eqCodes granted needed`, "true")
-	// either merge order converges to max(3, 7) = 7
-	normalizesTo(t, s, `val (merge r3 r7)`, "7")
-	normalizesTo(t, s, `val (merge r7 r3)`, "7")
+	// either merge order converges: replica A counted 2, replica B counted 1
+	const three = "succ (succ (succ zero))"
+	normalizesTo(t, s, `value (merge replicaA replicaB)`, three)
+	normalizesTo(t, s, `value (merge replicaB replicaA)`, three)
 }
 
 // findEntry returns the ledger entry for a control name.
