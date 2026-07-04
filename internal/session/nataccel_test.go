@@ -471,6 +471,106 @@ end
 	}
 }
 
+// accelDataShadowSrc mimics a user file that shadows ONLY the data group: its
+// Nat is structurally identical to Whole (hash equal), but it calls the
+// UNSHADOWED prelude op addW directly. The shared group hash then emits under
+// the LATEST declared name (NatElim), which mismatches the binding's
+// WholeElim, so the group compiles to constructor records, not native
+// integers. The provenance gate alone does NOT cover this: addW's emitted
+// name still equals its declaring name, so without the drift gate its Ops
+// export survives and call sites emit native arithmetic on records.
+const accelDataShadowSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+main : Nat is
+  addW (succ (succ zero)) (succ zero)
+end
+`
+
+// TestNatAccelDataShadowDriftSuppressesOps is the drift-gate RED test: when a
+// hash-equal data-only shadow makes the builtin-nat group emit under a
+// different name (record form), the codegen Ops export must be suppressed even
+// for the UNSHADOWED declaring op, and the emitted main must call the
+// eliminator-loop def, never native arithmetic on constructor records.
+func TestNatAccelDataShadowDriftSuppressesOps(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(accelProviderSrc); err != nil {
+		t.Fatalf("load provider source: %v", err)
+	}
+	if _, err := s.LoadSource(accelDataShadowSrc); err != nil {
+		t.Fatalf("load user source: %v", err)
+	}
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatalf("EmitProgram: %v", err)
+	}
+	if p.Nat == nil {
+		t.Fatalf("expected a NatSpec: the provider source declared a builtin nat binding")
+	}
+	if len(p.Nat.Ops) != 0 {
+		t.Fatalf("data-group drift must suppress the whole Ops export (the group emits constructor records), got %v", p.Nat.Ops)
+	}
+	be, ok := codegen.ByTarget("erl")
+	if !ok {
+		t.Fatalf("no erl backend registered")
+	}
+	src, err := be.Emit(p)
+	if err != nil {
+		t.Fatalf("Emit erl: %v", err)
+	}
+	var mainLine string
+	for _, line := range strings.Split(string(src), "\n") {
+		if strings.HasPrefix(line, "d_main()") {
+			mainLine = line
+			break
+		}
+	}
+	if mainLine == "" {
+		t.Fatalf("emitted BEAM source has no d_main() definition")
+	}
+	if strings.Contains(mainLine, "+") {
+		t.Fatalf("drifted-group program emitted native arithmetic on constructor records (BEAM badarith): %s", mainLine)
+	}
+	if !strings.Contains(mainLine, "d_addW()") {
+		t.Fatalf("drifted-group main should emit an ordinary call to d_addW(): %s", mainLine)
+	}
+}
+
+// TestNatAccelDataShadowDriftRejectsNumerals pins the numeral half of the
+// drift gate: numeral literals compile to the backend's NATIVE integer
+// (codegen LitNat) unconditionally, so a program that mixes a numeral with a
+// drifted (record-form) builtin-nat group would put a native integer where
+// constructor records live. Silent wrong code is never acceptable: emitting
+// such a program must fail with a clear diagnostic instead.
+func TestNatAccelDataShadowDriftRejectsNumerals(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(accelProviderSrc); err != nil {
+		t.Fatalf("load provider source: %v", err)
+	}
+	if _, err := s.LoadSource(`
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+main : Nat is
+  addW 2 (succ zero)
+end
+`); err != nil {
+		t.Fatalf("load user source: %v", err)
+	}
+	_, err := s.EmitProgram("main")
+	if err == nil {
+		t.Fatal("emitting a numeral against a drifted (record-form) builtin-nat group must be refused, not silently emitted as a native integer among constructor records")
+	}
+	if !strings.Contains(err.Error(), "numeral") {
+		t.Fatalf("drift-gate numeral refusal should say what went wrong (mention the numeral), got: %v", err)
+	}
+}
+
 // TestNatAccelShadowEmitsEliminatorCall pins the emitted-source shape on BEAM:
 // the shadow program's main must call d_add() (the eliminator loop), never
 // native arithmetic on constructor records (the badarith of the parked bug).

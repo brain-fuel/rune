@@ -1181,6 +1181,13 @@ func (s *Session) EmitProgram(main string) (codegen.Program, error) {
 	// collision guard sees only reachable foreigns -- an unreachable colliding
 	// foreign in the prelude must not block a program that never uses it.
 	p = codegen.Shake(p)
+	// Drift gate, numeral half: a reachable numeral literal cannot deploy
+	// against a drifted (record-form) builtin-nat group; refuse loudly. Runs
+	// POST-shake so an unreachable prelude numeral never blocks a program
+	// that only uses constructors.
+	if err := s.checkNatLitDrift(p, env.natDrift); err != nil {
+		return p, err
+	}
 	// Guard against two distinct qualified foreigns sharing a prim segment that
 	// maps to a known ioPrim -- that would silently gate the wrong host body.
 	if err := codegen.CheckPrimCollisions(p); err != nil {
@@ -1242,8 +1249,12 @@ func (s *Session) EmitExpr(e surface.Exp) (codegen.Program, error) {
 	// neutral value — so `:run do ... end` (and `:run printNat 1`) performs its
 	// effects rather than showing the unforced thunk.
 	p.IOMain = s.isIOType(ty)
-	// Tree-shake and guard against prim collisions, mirroring EmitProgram.
+	// Tree-shake and guard against prim collisions and drifted-group numerals,
+	// mirroring EmitProgram.
 	p = codegen.Shake(p)
+	if err := s.checkNatLitDrift(p, env.natDrift); err != nil {
+		return p, err
+	}
 	if err := codegen.CheckPrimCollisions(p); err != nil {
 		return p, err
 	}
@@ -1258,6 +1269,15 @@ type emitEnv struct {
 	typeRefs   map[core.Hash]bool
 	tainted    map[string]string
 	eraser     *elaborate.TypedEraser
+	// natDrift is non-empty when a `builtin nat` binding is active in
+	// data-constructor form but its data group will NOT emit natively (a
+	// hash-equal shadow made the group emit under a different, latest-wins
+	// name, so it compiles to constructor records). It holds the drifted
+	// declaration name for diagnostics; EmitProgram/EmitExpr refuse a
+	// program that still contains a numeral literal (codegen LitNat) after
+	// tree-shaking, because LitNat always emits the backend's NATIVE integer,
+	// which is meaningless among constructor records.
+	natDrift string
 }
 
 // emitDefs lowers every session definition to the erased IR program (no Main)
@@ -1268,7 +1288,32 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	// A registered `builtin nat` group compiles to machine integers (rung 6)
 	// — only in its data-constructor form. A generalized binding (numerals
 	// meaning an integer, a rational, …) computes through its successor term.
+	//
+	// DRIFT GATE: p.Nat set does NOT by itself imply the group emits natively.
+	// The backends' emitNat fast path fires per data group only when
+	// d.ElimName == p.Nat.ElimName, and a DataSpec's ElimName comes from the
+	// stored decl, where the LATEST hash-equal declaration wins. A user file
+	// redeclaring a structurally identical `data Nat is zero | succ end` makes
+	// the shared group hash emit under NatElim, mismatching the binding's
+	// WholeElim: the group then compiles to constructor records. natNative
+	// records whether the group WILL emit natively (no drift); when it will
+	// not, the Ops export below is suppressed (no native arithmetic on
+	// records) and numeral literals are refused at emit time (LitNat always
+	// emits the backend's native integer, which has no meaning in a record
+	// world; EmitProgram/EmitExpr check post-shake via emitEnv.natDrift).
+	// p.Nat itself is kept so the numeral runtime stays available on the
+	// undrifted paths and REPL sessions.
+	natNative := false
+	natDrift := ""
 	if s.nat != nil && s.natCtors {
+		var driftName string
+		natNative, driftName = s.natGroupEmitsNatively()
+		if !natNative {
+			natDrift = driftName
+			if natDrift == "" {
+				natDrift = s.nat.TyName
+			}
+		}
 		p.Nat = &codegen.NatSpec{Zero: s.nat.Zero, Succ: s.nat.Succ, ElimName: s.nat.TyName + "Elim"}
 	}
 	// Datatype formers denote types: at runtime they erase to the unit token.
@@ -1363,7 +1408,9 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	// NatSpec so each backend can emit a call to a registered natAdd/natMul/
 	// natMonus def as the host's native arithmetic (mirroring how ElimName flows
 	// to the emitNat fast path). Only done when the builtin-nat data group itself
-	// compiles to native integers (p.Nat set above), otherwise there is no native
+	// WILL emit natively (natNative: the drift gate above; p.Nat set alone is
+	// not enough, a hash-equal data-group shadow makes the group emit as
+	// constructor records), otherwise there is no native
 	// representation to add on. PROVENANCE GATE: natAccel keys are def hashes,
 	// and structurally identical defs hash equal, so a user def that shadows the
 	// hash under a DIFFERENT name (e.g. a user `add` hash-equal to the prelude's
@@ -1374,7 +1421,7 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	// fall back to the eliminator loop. The kernel/normalizer accel
 	// (natAccelTable.NatOpOf) stays hash-keyed: the differential gate proved the
 	// function IS that op, so the same-hash fast path is sound there.
-	if p.Nat != nil && len(s.natAccel) > 0 {
+	if p.Nat != nil && natNative && len(s.natAccel) > 0 {
 		ops := map[string]core.NatOp{}
 		for h, op := range s.natAccel {
 			name, ok := emitNames[h]
@@ -1510,7 +1557,113 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	// v1, the whole SCC group in T4) so the backends with a driver flatten deep
 	// (mutual) tail recursion onto the heap. A no-op when nothing is partial.
 	codegen.MarkTailBounces(&p)
-	return p, emitEnv{eraseNames: eraseNames, typeRefs: typeRefs, tainted: tainted, eraser: eraser}, nil
+	return p, emitEnv{eraseNames: eraseNames, typeRefs: typeRefs, tainted: tainted, eraser: eraser, natDrift: natDrift}, nil
+}
+
+// natGroupEmitsNatively reports whether the active `builtin nat` data group
+// will actually be emitted NATIVELY by the backends. The backends key the
+// emitNat fast path on d.ElimName == p.Nat.ElimName, and a DataSpec's names
+// come from the STORED decl, where the latest hash-equal declaration wins
+// (store.AddData overwrites dataByHash; refNames is latest-wins the same
+// way). So the binding's group emits natively exactly when every emitted
+// name of the group (former, both constructors, eliminator) still IS the
+// binding's own name. When any of them drifted, the group compiles to
+// constructor records and there is no native integer representation; the
+// second return is the drifted declaration name for diagnostics.
+// Precondition: s.nat != nil.
+func (s *Session) natGroupEmitsNatively() (bool, string) {
+	h, ok := s.refs[s.nat.TyName]
+	if !ok {
+		return false, s.nat.TyName
+	}
+	decl, ctors, elim, ok := s.st.DataDeclOf(h)
+	if !ok {
+		return false, s.refNames[h]
+	}
+	// plain reports that hh still emits under exactly the name n: n is its
+	// latest display name AND n still resolves to hh (emitDefs would neither
+	// rename nor suffix it).
+	plain := func(hh core.Hash, n string) bool {
+		return s.refNames[hh] == n && s.refs[n] == hh
+	}
+	if decl.Name != s.nat.TyName || len(ctors) != 2 ||
+		decl.CtorNames[0] != s.nat.Zero || decl.CtorNames[1] != s.nat.Succ ||
+		!plain(h, s.nat.TyName) || !plain(ctors[0], s.nat.Zero) ||
+		!plain(ctors[1], s.nat.Succ) || !plain(elim, s.nat.TyName+"Elim") {
+		return false, decl.Name
+	}
+	return true, ""
+}
+
+// checkNatLitDrift refuses a (tree-shaken) program that mixes a numeral
+// literal with a DRIFTED builtin-nat group. Numerals erase to codegen
+// ILit{LitNat}, which every backend emits as its native integer on the
+// assumption that the builtin-nat group is native too; under drift the group
+// emits constructor records instead, so the mix would silently compute wrong
+// (native arithmetic and shows on records, or records fed to integer code).
+// A clear emit-time error is the sound behavior; drift == "" is a no-op.
+func (s *Session) checkNatLitDrift(p codegen.Program, drift string) error {
+	if drift == "" {
+		return nil
+	}
+	def, ok := findLitNat(p)
+	if !ok {
+		return nil
+	}
+	return fmt.Errorf(
+		"cannot emit %q: it contains a numeral literal, but the builtin nat data group (%s) is shadowed by a structurally identical data declaration under the name %q, so the group compiles to constructor records with no native numeral representation; write the constructors (%s / %s) explicitly, or remove the shadowing declaration",
+		def, s.nat.TyName, drift, s.nat.Zero, s.nat.Succ)
+}
+
+// findLitNat reports the first emitted definition whose body contains a
+// compressed numeral literal (codegen.ILit with Kind LitNat), walking every
+// Ir node. The type switch is EXHAUSTIVE over the Ir node set (mirroring
+// codegen.Shake's walker): an unknown node panics loudly so a future Ir
+// addition fails in tests rather than silently skipping a numeral.
+func findLitNat(p codegen.Program) (string, bool) {
+	var has func(codegen.Ir) bool
+	has = func(ir codegen.Ir) bool {
+		switch x := ir.(type) {
+		case codegen.IUnit, codegen.IVar, codegen.IGlobal, codegen.IForeign:
+			return false
+		case codegen.ILit:
+			return x.Kind == codegen.LitNat
+		case codegen.ILam:
+			return has(x.Body)
+		case codegen.IApp:
+			return has(x.Fn) || has(x.Arg)
+		case codegen.ILet:
+			return has(x.Val) || has(x.Body)
+		case codegen.IPair:
+			return has(x.A) || has(x.B)
+		case codegen.IFst:
+			return has(x.P)
+		case codegen.ISnd:
+			return has(x.P)
+		case codegen.IField:
+			return has(x.Scrut)
+		case codegen.ICase:
+			if has(x.Scrut) {
+				return true
+			}
+			for _, arm := range x.Arms {
+				if has(arm.Body) {
+					return true
+				}
+			}
+			return false
+		case codegen.IBounce:
+			return has(x.Call)
+		default:
+			panic("session.findLitNat: unknown Ir node type; update the walker")
+		}
+	}
+	for _, d := range p.Defs {
+		if has(d.Body) {
+			return d.Name, true
+		}
+	}
+	return "", false
 }
 
 // innerTaint reports the inner-layer name (a fibrant value member, or a
