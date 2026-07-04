@@ -320,6 +320,7 @@ func runCommand(s *session.Session, cfg Config, st *replState, line string, out 
 	case ":reset":
 		s.Reset()
 		st.lineNo, st.lastResult = 0, 0
+		st.historyExps = nil
 		if !cfg.NoPrelude {
 			if err := loadPrelude(s); err != nil {
 				return err

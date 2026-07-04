@@ -48,6 +48,33 @@ func TestREPLExplain(t *testing.T) {
 	}
 }
 
+// TestREPLExplainResetClearsHistory is the regression test for the :reset bug:
+// after :reset, :explain $1 must report "no result $1 in this session" rather
+// than rendering stale historyExps from the previous session. The expression
+// (fn (x : U1) is x end) U is a lambda application that would produce
+// "[Apply Function" output if historyExps were not cleared (proving the stale
+// rendering path). After the fix, historyExps is nil and the error path fires.
+func TestREPLExplainResetClearsHistory(t *testing.T) {
+	script := []string{
+		"(fn (x : U1) is x end) U", // expression at lineNo=1 -> $1 in historyExps
+		":reset",
+		":explain $1",
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := RunWith(in, &out, Config{NoPrelude: true}); err != nil {
+		t.Fatalf("RunWith: %v", err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "no result $1 in this session") {
+		t.Errorf("after :reset, :explain $1 should report missing result; got:\n%s", got)
+	}
+	if strings.Contains(got, "[Apply Function") {
+		t.Errorf("after :reset, :explain $1 must not render stale history; got:\n%s", got)
+	}
+}
+
 // TestREPLExplainCoreFlag: the depth dial reaches the REPL frontend.
 func TestREPLExplainCoreFlag(t *testing.T) {
 	script := []string{
