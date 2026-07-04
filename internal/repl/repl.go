@@ -123,6 +123,11 @@ type replState struct {
 	lineNo     int
 	lastResult int
 	lastLoad   string // the most recent :load path, for :reload (the D7 dev-loop)
+	// historyExps retains each numbered result's SURFACE expression (as
+	// entered, after $N expansion), so :explain $N can render it. The core
+	// binding (__resN via BindResult) stays the evaluation authority; this is
+	// display-side only.
+	historyExps map[int]surface.Exp
 }
 
 // resultRefRe matches a numbered result reference $N (jshell-style). It is rewritten
@@ -241,6 +246,10 @@ func runExpr(s *session.Session, st *replState, e surface.Exp, out io.Writer) er
 	fmt.Fprintf(out, "$%d ==> %s : %s\n", n, s.Pretty(nf), s.Pretty(s.NormalizeExprFolded(ty)))
 	// Bind the result so later input can name it ($N, or a bare $ for the latest).
 	s.BindResult(fmt.Sprintf("__res%d", n), tm, ty)
+	if st.historyExps == nil {
+		st.historyExps = map[int]surface.Exp{}
+	}
+	st.historyExps[n] = e
 	st.lastResult = n
 	return nil
 }
@@ -344,6 +353,8 @@ func runCommand(s *session.Session, cfg Config, st *replState, line string, out 
 		return showType(s, arg, out)
 	case ":run":
 		return runShadow(s, arg, out)
+	case ":explain":
+		return runExplain(s, st, arg, out)
 	default:
 		return fmt.Errorf("unknown command %q (try :help)", cmd)
 	}
@@ -433,6 +444,7 @@ func printHelp(out io.Writer) {
 	fmt.Fprintln(out, "  :hash <expr>    show the content hash of the resolved core")
 	fmt.Fprintln(out, "  :type <expr>    (:t) type checking arrives in Phase 1")
 	fmt.Fprintln(out, "  :run <expr>    evaluate through the erased shadow (fast, computation only — no certificate)")
+	fmt.Fprintln(out, "  :explain <name|$N> [--depth n|core] [--annotate] [--width n]   English step view of a definition or a numbered result")
 	fmt.Fprintln(out, "  :list           list session definitions")
 	fmt.Fprintln(out, "  :load <path>    load definitions from a file")
 	fmt.Fprintln(out, "  :reload         re-load the last :load'd file (hot reload; content-addressed cache)")
