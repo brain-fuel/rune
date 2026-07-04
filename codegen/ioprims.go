@@ -2,6 +2,7 @@ package codegen
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -423,4 +424,32 @@ func usesForeign(p Program, name string) bool {
 		}
 	}
 	return false
+}
+
+// IOPrimNames returns every host-op prim name declared in this file, sorted
+// and deduplicated: the ioPrims map plus the auxiliary prim families
+// (data-plane, Bin, net, fs) and the singleton prims procRun, sha256, tlsGet.
+// The explainer's template-coverage gate (internal/explain) enumerates this
+// list and fails if any prim lacks an English template, so a future host op
+// cannot ship unexplained.
+func IOPrimNames() []string {
+	seen := map[string]bool{}
+	for n := range ioPrims {
+		seen[n] = true
+	}
+	fams := [][]string{fileEnvPrims, streamPrims, dataPlanePrims, binPrims, netPrims, fsPrims}
+	for _, fam := range fams {
+		for _, n := range fam {
+			seen[n] = true
+		}
+	}
+	for _, n := range []string{"procRun", "sha256", "tlsGet"} {
+		seen[n] = true
+	}
+	names := make([]string, 0, len(seen))
+	for n := range seen {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	return names
 }
