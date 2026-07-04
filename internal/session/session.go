@@ -92,6 +92,13 @@ type Session struct {
 	// meta is per-name surface metadata the ledger reads but the store never
 	// hashes (postulate-ness + reason). Keyed by def name; absent => zero value.
 	meta map[string]defMeta
+	// surfaceDefs retains the import-qualified SURFACE definition of every
+	// loaded def that has a body (plain, instance, partial; foreign axioms
+	// are bodiless and not retained). The explainer (internal/explain) reads
+	// program STRUCTURE from here so its output matches what the reader sees
+	// on screen; the core stays the authority on types. Latest-wins on
+	// redefinition, exactly like refs.
+	surfaceDefs map[string]surface.Def
 }
 
 // natAccelTable is the session's core.NatAccelInfo: it reports the accelerated
@@ -166,6 +173,7 @@ func (s *Session) resetBuiltins() {
 	s.natAccel = map[core.Hash]core.NatOp{}
 	s.natAccelDecl = map[core.Hash]string{}
 	s.meta = map[string]defMeta{}
+	s.surfaceDefs = map[string]surface.Def{}
 	hs := s.st.AddQuot()
 	for i, n := range store.QuotNames() {
 		s.refs[n] = hs[i]
@@ -391,6 +399,7 @@ func (s *Session) AddDef(d surface.Def) (Def, error) {
 	s.refs[d.Name] = h
 	s.refNames[h] = d.Name
 	s.byHash[h] = rd
+	s.surfaceDefs[d.Name] = d
 	// C2: register a typeclass instance under its class key, so a later
 	// constrained use resolves the dictionary by implicit search.
 	if d.IsInstance {
@@ -453,6 +462,7 @@ func (s *Session) addPartialDef(d surface.Def) (Def, error) {
 	s.refs[d.Name] = h
 	s.refNames[h] = d.Name
 	s.byHash[h] = rd
+	s.surfaceDefs[d.Name] = d
 	return rd, nil
 }
 
@@ -479,6 +489,9 @@ func (s *Session) AddDefGroup(g surface.DefGroup) ([]string, error) {
 		s.refs[names[i]] = h
 		s.refNames[h] = names[i]
 		s.byHash[h] = rd
+	}
+	for _, m := range g.Members {
+		s.surfaceDefs[m.Name] = m
 	}
 	return names, nil
 }
@@ -1152,6 +1165,26 @@ func (s *Session) Assumed(name string) bool {
 func (s *Session) Lookup(name string) (core.Hash, bool) {
 	h, ok := s.refs[name]
 	return h, ok
+}
+
+// SurfaceDef returns the retained, import-qualified surface definition of
+// name. Only definitions with a body are retained; foreign axioms, builtin
+// group members, and data constructors return ok=false.
+func (s *Session) SurfaceDef(name string) (surface.Def, bool) {
+	d, ok := s.surfaceDefs[name]
+	return d, ok
+}
+
+// Accelerated reports whether name is registered as a kernel-accelerated
+// builtin arithmetic op (builtin natAdd/natMul/natMonus/natDiv/natMod). The
+// explainer keeps such definitions one-line at every inline depth: their
+// eliminator bodies are an implementation detail, not the meaning.
+func (s *Session) Accelerated(name string) bool {
+	h, ok := s.refs[name]
+	if !ok {
+		return false
+	}
+	return s.natAccel[h] != core.NatOpNone
 }
 
 // EmitProgram lowers the whole session to the erased IR program, in

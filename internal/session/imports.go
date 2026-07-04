@@ -55,9 +55,18 @@ func (sc *importScope) moduleKnown(mod string) bool {
 }
 
 // addImport records an 'import M' directive after validating the module.
+// Duplicate imports are silently dropped: a module already in scope via a
+// self-import (added when module body members appear in local) need not be
+// re-appended, as a second entry would cause the ambiguity check in
+// resolveName to report the same qualified name twice.
 func (sc *importScope) addImport(mod string) error {
 	if !sc.moduleKnown(mod) {
 		return fmt.Errorf("import %q: no definitions found for module %q", mod, mod)
+	}
+	for _, m := range sc.imports {
+		if m == mod {
+			return nil
+		}
 	}
 	sc.imports = append(sc.imports, mod)
 	return nil
