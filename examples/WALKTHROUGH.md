@@ -86,6 +86,26 @@ raw socket — the wavelet kv/queue abstraction reads and writes a REAL Valkey, 
 with no third-party dependency. (Gated by `TestLiveKVRoundTrip`, which runs all three
 backends against one broker.)
 
+## The five outputs — one source set, one gate
+
+Beta success criterion 2, checkable: from {`examples/twotab/counter.rune`,
+`examples/wavelet_demo.rune`, `listings/ch538_control_catalog.rune`} the same
+content hashes produce all five outputs:
+
+```sh
+rune ledger listings/ch538_control_catalog.rune            # 1 proof + ledger view
+rune simulate examples/twotab/counter.rune 2               # 2 fault sim (partition + heal)
+rune deploy --manifest examples/wavelet_demo.rune --backend aws   > demo.tf   # 3 Terraform
+rune deploy --manifest examples/wavelet_demo.rune --backend azure > demo.tf   #   (x3 clouds)
+rune deploy --manifest examples/wavelet_demo.rune --backend gcp   > demo.tf
+(cd examples/twotab && node build.mjs)                     # 4 the running two-tab app
+rune calm emit > demo.calm.json && rune calm validate demo.calm.json   # 5 CALM, re-validates 1:1
+```
+
+The binding is literal: the convergence control in the ledger/CALM doc and the
+`merge` the browser tabs run are the SAME content hash (`rune hash` shows it;
+`TestFiveOutputs*` in cmd/rune gates it, including the hash pin).
+
 ---
 
 **One verified source → proven → simulated → deployed (any cloud) → run (any backend) →

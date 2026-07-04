@@ -66,11 +66,7 @@ checklist of everything between HEAD and a shippable beta.
 
 The remaining Tier A:
 
-6. **Five-outputs integration.** One demo source producing, from the same content
-   hashes: (1) proof + ledger view, (2) fault sim run, (3) 3-cloud Terraform,
-   (4) the running two-tab app, (5) a CALM doc that re-validates 1:1. The pieces
-   all exist; the wiring and a single gate test do not. Acceptance = design-spec
-   criteria 2 and 3.
+6. ~~Five-outputs integration~~ DONE (gate `TestFiveOutputs*` in cmd/rune; unified manifest `examples/wavelet_demo.rune`; ch538 convergence hash-bound to the app's GC).
 7. **6g: the GTM script / book chapter.** The proven-minimal-IAM diff moment and
    the Ledger view moment, scripted. Depends on 6f (now done) and the rename
    decision (below).
