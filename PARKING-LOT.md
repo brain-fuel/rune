@@ -577,23 +577,44 @@ for a demo.
   without breaking existing listings; parked until a user-facing DX complaint
   arises.
 
-- **`rune run` builtin-accel cross-registration via the always-on prelude
-  (FIXED: declaring-name provenance gate).** Structurally identical datatypes
-  and defs hash equal in de Bruijn core, so a user file declaring its own
-  `data Nat is zero | succ end` (WITHOUT `builtin nat`) plus an
-  eliminator-shaped `add` identical to the prelude's `addW` used to get the
-  prelude's `builtin natAdd` acceleration cross-registered onto it under the
-  always-on prelude: codegen emitted native arithmetic on the user's
+- **Builtin-accel cross-registration via the always-on prelude (FIXED, two
+  gates: declaring-name provenance + data-group drift).** Structurally
+  identical datatypes and defs hash equal in de Bruijn core, which opened two
+  hash-equal-shadow variants that both used to emit native arithmetic onto a
   constructor-record data group (BEAM badarith, JS `[object Object]` concat,
-  Go interface-conversion panic). Fixed in internal/session: `AddBuiltinNatOp`
-  records the declaring def name (`natAccelDecl`) and `emitDefs` exports a
-  `NatSpec.Ops` entry only when the hash's emitted name equals it, so
-  hash-equal shadows conservatively fall back to the eliminator loop
-  (nataccel_test.go locks both halves). The kernel/normalizer accel stays
-  hash-keyed, sound by the registration-time differential gate. History: the
-  delivery path (`rune build`/`rune deploy`) had already been closed by
-  demand-driven prelude loading (`sourcesNeedPrelude`); that mechanism stays,
-  and the provenance gate closes the remaining `rune run`/`rune emit` reach.
+  Go interface-conversion panic). Variant 1, op-def shadow: a user
+  eliminator-shaped `add` identical to the prelude's `addW` inherited the
+  `builtin natAdd` export by hash. Fixed by the PROVENANCE GATE:
+  `AddBuiltinNatOp` records the declaring def name (`natAccelDecl`) and
+  `emitDefs` exports a `NatSpec.Ops` entry only when the hash's emitted name
+  equals it. Variant 2, data-group shadow: a user file redeclaring only
+  `data Nat is zero | succ end` (hash equal to the prelude's `Whole`) while
+  calling the UNSHADOWED `addW` directly; the shared group hash emits under
+  the latest name (`NatElim`), mismatching `p.Nat.ElimName` (`WholeElim`), so
+  the group compiles to records, yet `addW`'s Ops export legitimately passed
+  the provenance gate and its call sites emitted native `+` on records. Fixed
+  by the DRIFT GATE: `emitDefs` (`natGroupEmitsNatively`) checks that the
+  binding's former, constructors, and eliminator all still emit under the
+  binding's own names; on drift the whole Ops export is suppressed and the
+  program compiles through the ordinary eliminator loop. Numeral decision:
+  numeral literals (codegen `LitNat`) always emit the backend's NATIVE
+  integer, which is meaningless among records, so a drifted program that
+  still contains a numeral after tree-shaking is REFUSED with a clear
+  emit-time error (`checkNatLitDrift` in EmitProgram and EmitExpr) rather
+  than silently miscompiled; `p.Nat` itself stays set so undrifted numeral
+  emission is untouched. Tested: nataccel_test.go locks the provenance gate
+  (positive export, hash-equal shadow drop, decl-name rebind drop, BEAM
+  eliminator-call shape) and the drift gate (Ops suppressed + eliminator-call
+  shape for the pure-constructor variant, emit-time refusal for the numeral
+  variant); CLI conformance was verified by hand on erl/go/js (`rune run`,
+  `rune emit`, `rune build`): the pure-constructor repro prints
+  `succ (succ (succ zero))` and the normal prelude case still emits `(2 + 3)`
+  and runs to 5. The kernel/normalizer accel stays hash-keyed, sound by the
+  registration-time differential gate. History: the delivery path
+  (`rune build`/`rune deploy`) had already been closed by demand-driven
+  prelude loading (`sourcesNeedPrelude`); that mechanism stays, and the two
+  emit-time gates close the `rune run`/`rune emit` reach (and `rune build`
+  under an explicit `import Std`).
 
 - **`sourcesNeedPrelude` substring conservatism + run-vs-build asymmetry.**
   `import StdX` (any module name starting with `Std`) loads the prelude for
