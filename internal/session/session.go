@@ -81,6 +81,14 @@ type Session struct {
 	// instead of O(a·b) eliminator peeling. It is consulted by every Machine the
 	// session builds (set as m.NatAccel). Empty means no acceleration.
 	natAccel map[core.Hash]core.NatOp
+	// natAccelDecl records, per natAccel hash, the NAME the acceleration was
+	// declared under (`builtin natAdd addW` records "addW"). The kernel accel
+	// stays hash-keyed (sound: the differential gate proved the function IS
+	// that op, and hash-equal defs are the same function), but the CODEGEN
+	// export is provenance-gated: a hash-equal user def bound under a
+	// different name must not inherit native-arithmetic emission, because its
+	// data group may compile to constructor records, not native integers.
+	natAccelDecl map[core.Hash]string
 	// meta is per-name surface metadata the ledger reads but the store never
 	// hashes (postulate-ness + reason). Keyed by def name; absent => zero value.
 	meta map[string]defMeta
@@ -156,6 +164,7 @@ func (s *Session) resetBuiltins() {
 	s.nat = nil
 	s.natCtors = false
 	s.natAccel = map[core.Hash]core.NatOp{}
+	s.natAccelDecl = map[core.Hash]string{}
 	s.meta = map[string]defMeta{}
 	hs := s.st.AddQuot()
 	for i, n := range store.QuotNames() {
@@ -742,7 +751,9 @@ func (s *Session) AddBuiltinNatOp(b surface.BuiltinNatOp) error {
 				b.Kind, b.DefName, b.Kind, p[0], p[1], got, want)
 		}
 	}
-	s.natAccel[s.refs[b.DefName]] = kind.op
+	h := s.refs[b.DefName]
+	s.natAccel[h] = kind.op
+	s.natAccelDecl[h] = b.DefName
 	return nil
 }
 
@@ -1351,10 +1362,18 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	// C7 / R-NUM Decision 4: thread the registered accel-op def NAMES into the
 	// NatSpec so each backend can emit a call to a registered natAdd/natMul/
 	// natMonus def as the host's native arithmetic (mirroring how ElimName flows
-	// to the emitNat fast path). natAccel keys are def hashes; the accel def is
-	// the current (unshadowed) binding, so its emit name is the plain name. Only
-	// done when the builtin-nat data group itself compiles to native integers
-	// (p.Nat set above) — otherwise there is no native representation to add on.
+	// to the emitNat fast path). Only done when the builtin-nat data group itself
+	// compiles to native integers (p.Nat set above), otherwise there is no native
+	// representation to add on. PROVENANCE GATE: natAccel keys are def hashes,
+	// and structurally identical defs hash equal, so a user def that shadows the
+	// hash under a DIFFERENT name (e.g. a user `add` hash-equal to the prelude's
+	// `addW`) would otherwise inherit the export and get native arithmetic
+	// emitted onto its constructor-record data group. Export an op only when the
+	// hash's emitted name IS the declaring name recorded at registration
+	// (natAccelDecl); hash-equal shadows conservatively lose codegen accel and
+	// fall back to the eliminator loop. The kernel/normalizer accel
+	// (natAccelTable.NatOpOf) stays hash-keyed: the differential gate proved the
+	// function IS that op, so the same-hash fast path is sound there.
 	if p.Nat != nil && len(s.natAccel) > 0 {
 		ops := map[string]core.NatOp{}
 		for h, op := range s.natAccel {
@@ -1362,7 +1381,7 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 			if !ok {
 				name = s.refNames[h]
 			}
-			if name != "" {
+			if name != "" && name == s.natAccelDecl[h] {
 				ops[name] = op
 			}
 		}

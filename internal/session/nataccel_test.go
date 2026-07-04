@@ -2,8 +2,10 @@ package session
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
+	"goforge.dev/rune/v3/codegen"
 	"goforge.dev/rune/v3/core"
 	"goforge.dev/rune/v3/surface"
 )
@@ -343,5 +345,118 @@ builtin natAdd add
 	// mul still computes correctly by its body (it calls the accelerated add).
 	if got := litValue(t, s, "mul 6 7"); got != 42 {
 		t.Fatalf("mul 6 7 = %d, want 42", got)
+	}
+}
+
+// accelProviderSrc mimics the always-on prelude's shape (internal/prelude/
+// prelude.rune): a builtin-nat datatype plus an eliminator-shaped addW carrying
+// the `builtin natAdd` acceleration.
+const accelProviderSrc = `
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+builtin natAdd addW
+`
+
+// accelShadowUserSrc mimics a user file loaded AFTER the prelude with NO
+// builtin declarations of its own: its Nat and add are structurally identical
+// to Whole and addW, so they hash equal in the de Bruijn core.
+const accelShadowUserSrc = `
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+
+add : Nat -> Nat -> Nat is
+  fn (m : Nat) (n : Nat) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+main : Nat is
+  add (succ (succ zero)) (succ zero)
+end
+`
+
+// TestNatAccelNotExportedForHashEqualShadow is the provenance RED test: a user
+// def that never declared an acceleration, but is hash-equal to a registered
+// accel def, must NOT appear in the codegen NatSpec.Ops export. (The kernel
+// accel staying hash-keyed for it is fine and separately locked by
+// TestNatAccelOnlyFiresForRegisteredHash; the codegen export is the unsound
+// half, because the user's data group compiles to constructor records.)
+func TestNatAccelNotExportedForHashEqualShadow(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(accelProviderSrc); err != nil {
+		t.Fatalf("load provider source: %v", err)
+	}
+	if _, err := s.LoadSource(accelShadowUserSrc); err != nil {
+		t.Fatalf("load user source: %v", err)
+	}
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatalf("EmitProgram: %v", err)
+	}
+	if p.Nat == nil {
+		t.Fatalf("expected a NatSpec: the provider source declared a builtin nat binding")
+	}
+	if op, ok := p.Nat.Ops["add"]; ok {
+		t.Fatalf("user def add never declared an acceleration, but codegen exported Ops[%q] = %v (cross-registered from addW by hash equality)", "add", op)
+	}
+}
+
+// TestNatAccelShadowEmitsEliminatorCall pins the emitted-source shape on BEAM:
+// the shadow program's main must call d_add() (the eliminator loop), never
+// native arithmetic on constructor records (the badarith of the parked bug).
+func TestNatAccelShadowEmitsEliminatorCall(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(accelProviderSrc); err != nil {
+		t.Fatalf("load provider source: %v", err)
+	}
+	if _, err := s.LoadSource(accelShadowUserSrc); err != nil {
+		t.Fatalf("load user source: %v", err)
+	}
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatalf("EmitProgram: %v", err)
+	}
+	be, ok := codegen.ByTarget("erl")
+	if !ok {
+		t.Fatalf("no erl backend registered")
+	}
+	src, err := be.Emit(p)
+	if err != nil {
+		t.Fatalf("Emit erl: %v", err)
+	}
+	var mainLine string
+	for _, line := range strings.Split(string(src), "\n") {
+		if strings.HasPrefix(line, "d_main()") {
+			mainLine = line
+			break
+		}
+	}
+	if mainLine == "" {
+		t.Fatalf("emitted BEAM source has no d_main() definition")
+	}
+	if strings.Contains(mainLine, "+") {
+		t.Fatalf("shadow add emitted native arithmetic on constructor records (BEAM badarith): %s", mainLine)
+	}
+	if !strings.Contains(mainLine, "d_add()") {
+		t.Fatalf("shadow add should emit an ordinary call to d_add(): %s", mainLine)
 	}
 }
