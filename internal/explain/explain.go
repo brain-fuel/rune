@@ -181,8 +181,11 @@ func (c *ctx) primSteps(t primTemplate, e surface.Exp, expl []surface.Exp, binde
 }
 
 // callStep renders a call to a user definition (or a bodiless axiom without
-// a template) as one line, named and typed via the elaborator. Task 5 adds
-// depth-n inlining here.
+// a template) as one line, named and typed via the elaborator.
+// With a positive depth budget the callee's retained surface body inlines as
+// Kids, one budget unit per level; prims, foreign axioms (no surface body),
+// and builtin-accelerated defs stay one-line. The decrementing budget bounds
+// recursion through partial/self-referential definitions.
 func (c *ctx) callStep(full string, expl []surface.Exp, e surface.Exp, binder string) Step {
 	d := c.defs[full]
 	text := "Apply `" + short(full) + "`"
@@ -197,7 +200,14 @@ func (c *ctx) callStep(full string, expl []surface.Exp, e surface.Exp, binder st
 	if binder != "" {
 		text += " as `" + binder + "`"
 	}
-	return Step{Text: text, Code: printExp(e)}
+	st := Step{Text: text, Code: printExp(e)}
+	if c.depth > 0 && !c.s.Accelerated(full) {
+		if sd, ok := c.s.SurfaceDef(full); ok {
+			sub := &ctx{s: c.s, defs: c.defs, depth: c.depth - 1}
+			st.Kids = sub.steps(sd.Body, "")
+		}
+	}
+	return st
 }
 
 // fallbackStep is the bracket-code form for anything without a template: an
