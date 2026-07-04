@@ -623,3 +623,5 @@ for a demo.
   works under `rune run` (always-on) but not `rune build` (demand-driven); the
   documented pattern (`import Std.Float`) works everywhere. Parked with this
   note as the record.
+
+- explain --annotate runtime TTY width detection (x/term.GetSize): parked to keep the dependency graph closed; --width flag (default 80) is the deterministic override and goldens fix both layouts.

@@ -17,6 +17,8 @@ type explainArgs struct {
 	main      string
 	opts      explain.Options
 	noPrelude bool
+	annotate  bool
+	width     int
 }
 
 // parseExplainArgs mirrors parseEmitArgs: positional <path...> [name] with
@@ -26,12 +28,29 @@ type explainArgs struct {
 // last one does not; the name defaults to "main".
 func parseExplainArgs(args []string) (explainArgs, error) {
 	var ea explainArgs
+	ea.width = 80
 	var pos []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == "--no-prelude":
 			ea.noPrelude = true
+		case a == "--annotate":
+			ea.annotate = true
+		case a == "--width" || strings.HasPrefix(a, "--width="):
+			v := strings.TrimPrefix(a, "--width=")
+			if a == "--width" {
+				if i+1 >= len(args) {
+					return ea, fmt.Errorf("--width needs a value")
+				}
+				i++
+				v = args[i]
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 {
+				return ea, fmt.Errorf("--width needs a positive number, got %q", v)
+			}
+			ea.width = n
 		case a == "--core":
 			ea.opts.Core = true
 		case a == "--depth" || strings.HasPrefix(a, "--depth="):
@@ -115,6 +134,10 @@ func runExplainCLI(args []string, w io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.WriteString(w, explain.RenderText(root))
+	out := explain.RenderText(root)
+	if ea.annotate {
+		out = explain.RenderAnnotate(root, ea.width)
+	}
+	_, err = io.WriteString(w, out)
 	return err
 }

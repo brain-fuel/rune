@@ -48,6 +48,8 @@ func TestExplainGoldens(t *testing.T) {
 		{"ch567_depth0", []string{"../../listings/ch567_float_format.rune", "main"}},
 		{"ch568_depth0", []string{"../../listings/ch568_dotted_foreign_run.rune", "main"}},
 		{"ch568_core", []string{"../../listings/ch568_dotted_foreign_run.rune", "main", "--core"}},
+		{"double_annotate_wide", []string{"../../examples/double.rune", "main", "--annotate", "--width", "120"}},
+		{"double_annotate_narrow", []string{"../../examples/double.rune", "main", "--annotate", "--width", "60"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

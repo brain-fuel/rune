@@ -1,0 +1,4 @@
+main : IO Float                  [Entrypoint: main]
+getFloat                         [Get Float `x` from Command Line]
+fmul x (fromNat 2)               [Apply Function (fmul x (fromNat 2))]
+printFloat (fmul x (fromNat 2))  [Print Result to Command Line]
