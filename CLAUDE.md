@@ -1024,6 +1024,15 @@ first and forces only on mismatch, so the fast path logs nothing.
       is the 7-line demo (fromNat + fmul via Std.Float, 9-way). Parked:
       WASM off-corpus float rounding; native show %g vs __fmtf divergence;
       prelude Std namespacing follow-up.
+    - **English explainer.** `rune explain FILES [name]`, REPL `:explain
+      name|$N`, and `--annotate` render a checked definition as deterministic
+      English steps from ONE Step-tree renderer (internal/explain): structure
+      from the retained qualified surface Def (session.SurfaceDef), types from
+      the elaborated core, bindIO chains flattened, every ioprims.go prim
+      carrying an English template (coverage-gated via codegen.IOPrimNames()),
+      depth dial 0|n|core, goldens lock phrasing (cmd/rune/testdata/explain).
+      REPL retains $N surface expressions (historyExps). No new deps: --width
+      flag (default 80), no TTY probe; x/term parked.
 
 ## Standing rules
 

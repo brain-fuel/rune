@@ -262,6 +262,30 @@ rune run examples/double.rune main --target js <<< "3.14"
 
 The program is 9-way byte-identical across js/py/go/rs/erl/jvm/c/ll/wasm.
 
+### The explainer
+
+`rune explain` renders a checked program as deterministic English steps, so a
+non-programmer can read what a program does without learning the syntax first:
+
+```sh
+rune explain examples/double.rune main
+# [Entrypoint: main]
+# [Get Float `x` from Command Line]
+# [Apply Function (fmul x (fromNat 2))]
+# [Print Result to Command Line]
+```
+
+`--depth n` inlines called user definitions n levels deep (prims and
+builtin-accelerated definitions stay one line); `--depth core` (or `--core`)
+shows the elaborated core walk with implicits visible. `--annotate` pairs each
+code fragment with its English: two columns at `--width` 100 or more,
+interleaved `--` comment lines below that (width defaults to 80; no TTY
+probing, so output is deterministic). The REPL has the same view:
+`:explain <name>` or `:explain $N`. Every host-op prim carries an English
+template, enforced by a coverage test against `codegen.IOPrimNames()`, and
+golden files lock the phrasing. The output is compiler-derived; no LLM is
+involved.
+
 ### The --no-prelude flag
 
 `rune repl --no-prelude` and `rune run FILE NAME --no-prelude` skip the standard
