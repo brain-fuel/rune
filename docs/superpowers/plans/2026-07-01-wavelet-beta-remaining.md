@@ -68,8 +68,9 @@ The remaining Tier A:
 
 6. ~~Five-outputs integration~~ DONE (gate `TestFiveOutputs*` in cmd/rune; unified manifest `examples/wavelet_demo.rune`; ch538 convergence hash-bound to the app's GC).
 7. **6g: the GTM script / book chapter.** The proven-minimal-IAM diff moment and
-   the Ledger view moment, scripted. Depends on 6f (now done) and the rename
-   decision (below).
+   the Ledger view moment, scripted. Depends on 6f (now done). Rename dependency
+   RESOLVED 2026-07-04: the author decided the project stays RUNE for now, so 6g
+   is scripted with `rune` verbs; the rename comes later (see item 12).
 
 ## Tier B: credibility gates (parallelizable with Tier A)
 
@@ -88,10 +89,12 @@ The remaining Tier A:
 ## Tier C: productization
 
 12. **Plan 7: the rename.** rune -> wavelet; `wvl`, `wvli`, `wvlc`; module/docs
-    consistent; conformance green. RECOMMENDATION from the review: do this BEFORE
-    6g and any recorded demo artifacts, not after; a demo video showing `rune`
-    verbs is rework at the funder-contact moment. Rename is mechanical (hashes are
-    name-independent).
+    consistent; conformance green. SEQUENCING DECIDED 2026-07-04 (author):
+    the project stays RUNE for now; THREE major rune version bumps (module path
+    v3 -> v4 -> v5 -> v6, contents to be defined) precede cutting a Wavelet
+    beta, and the rename rides that sequence, not the 6g artifact. The earlier
+    rename-before-6g recommendation is superseded. Rename remains mechanical
+    (hashes are name-independent).
 13. **6e: ARC on C + LLVM** (replace mark-sweep). Post-beta acceptable; the demo
     does not need it.
 14. **Doc sweep on release:** README matrix count and FOSS list (fixed 2026-07-01),
@@ -109,5 +112,5 @@ The remaining Tier A:
 
 1. RESOLVED 2026-07-02: author confirmed nothing load-bearing was in the
    unreachable claude.ai conversation; index caveat closed.
-2. Rename timing (item 12): before or after the demo artifact.
+2. Rename timing (item 12): DECIDED 2026-07-04 - stays rune; 3 major bumps then rename then beta cut.
 3. Which cloud goes live first for item 8 (AWS is the working default).
