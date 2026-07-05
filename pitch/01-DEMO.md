@@ -188,6 +188,8 @@ merge laws (CvRDT join):
   inflationary:ok  (updates only grow the state)
   - not commutative: merge s0 s1 = lw (succ (succ zero)), but merge s1 s0 = lw zero
   ... (further violations elided)
+verdict: NOT a CvRDT on the samples - convergence is not guaranteed
+
 verdict: NOT GUARANTEED to converge - merge is not a join (see the failed law
 above). This run ended [succ zero succ (succ zero)], but that is schedule luck,
 not a property.
