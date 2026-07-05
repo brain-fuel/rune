@@ -32,6 +32,7 @@ today.
 | `08-ROADMAP-FUNDED.md` | What the money buys, mapped to the remaining DAG |
 | `09-RISKS-FALLBACKS.md` | Honest risks, kill criteria, and who funds this if Elon does not |
 | `10-SUSTAINABILITY.md` | After year 3: endowment + membership + commercial arm, and the endgame states |
+| `11-DEMO-CHAPTER.md` | The demo, in full: a technical-diligence read (the long-form chapter behind the script) |
 
 ## The discipline this package holds itself to
 

@@ -67,10 +67,13 @@ checklist of everything between HEAD and a shippable beta.
 The remaining Tier A:
 
 6. ~~Five-outputs integration~~ DONE (gate `TestFiveOutputs*` in cmd/rune; unified manifest `examples/wavelet_demo.rune`; ch538 convergence hash-bound to the app's GC).
-7. **6g: the GTM script / book chapter.** The proven-minimal-IAM diff moment and
-   the Ledger view moment, scripted. Depends on 6f (now done). Rename dependency
-   RESOLVED 2026-07-04: the author decided the project stays RUNE for now, so 6g
-   is scripted with `rune` verbs; the rename comes later (see item 12).
+7. ~~6g: the GTM script / book chapter~~ DONE. The proven-minimal-IAM diff moment
+   and the Ledger view moment, scripted: `pitch/01-DEMO.md` rewritten on the
+   two-tab/five-outputs/IAM-diff/ledger/schedule-luck/hash-binding/close spine,
+   plus the long-form technical-diligence chapter `pitch/11-DEMO-CHAPTER.md`.
+   Depended on 6f (done). Scripted with `rune` verbs per the 2026-07-04
+   sequencing decision (the author decided the project stays RUNE for now; the
+   rename comes later, see item 12).
 
 ## Tier B: credibility gates (parallelizable with Tier A)
 
