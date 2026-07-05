@@ -147,10 +147,8 @@ rune ledger listings/ch538_control_catalog.rune
 
 rune: leastPrivProof: This `refl` does not prove the equation.
 
-  `refl` proves only that a thing equals itself, so both sides of the
-  equation must reduce to the SAME normal form - and these do not: the
-  left-hand side reduces to `eqCodes granted needed`, while the right-hand
-  side reduces to `true`.
+  ... the left-hand side reduces to `eqCodes granted needed`, while the
+  right-hand side reduces to `true`. (full Socratic diagnostic elided)
 exit status 1
 ```
 
@@ -230,11 +228,14 @@ minimal proven G-Counter whose `merge` is verbatim-identical to the app's:
 ```
 rune simulate examples/gcounter.rune 2
 
+... (steps elided) ...
 merge laws (CvRDT join):
   commutative: ok
   idempotent:  ok
   associative: ok
   inflationary:ok  (updates only grow the state)
+verdict: a CvRDT (join merge + inflationary updates) - will converge
+
 verdict: CONVERGED to succ (succ (succ zero)) on all 2 replicas (and the join
 laws hold, so under any schedule).
 ```
@@ -244,12 +245,16 @@ Then a Last-Writer-Wins counter that happens to land on a value this run:
 ```
 rune simulate examples/lww.rune 2
 
+... (steps elided) ...
 merge laws (CvRDT join):
   commutative: FAIL
   idempotent:  ok
   associative: ok
   inflationary:ok  (updates only grow the state)
   - not commutative: merge s0 s1 = lw (succ (succ zero)), but merge s1 s0 = lw zero
+  ... (further violations elided) ...
+verdict: NOT a CvRDT on the samples - convergence is not guaranteed
+
 verdict: NOT GUARANTEED to converge - merge is not a join (see the failed law
 above). This run ended [succ zero succ (succ zero)], but that is schedule luck,
 not a property.
@@ -270,7 +275,7 @@ they are opposite things here.
 
 **What this does not claim.** The law linter samples: it evaluates the merge on a
 finite set of states drawn from the run and reports the laws it can check on those
-samples, which is what "NOT a CvRDT on the samples" means in the raw output. That
+samples, which is what "NOT a CvRDT on the samples" means in the transcript above. That
 finite check is what flags the Last-Writer-Wins counter, and it is genuinely useful,
 but it is not the source of the universal guarantee. The universal guarantee for the
 G-Counter comes from the machine-checked proofs in the source
