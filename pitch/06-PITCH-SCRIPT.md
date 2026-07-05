@@ -15,10 +15,12 @@ world's infrastructure, it is the trust boundary that checks what the AI builds.
 ## The deck (10 slides, demo-first)
 
 **Slide 0, the demo, not a slide.** Open by running it, or playing the 3-minute video. Do
-not introduce yourself first. Show two browser tabs converge over WebRTC, one file get
-proven, simulated under a partition, the IAM sabotage fail to compile, the ledger view,
-deployed to three clouds, run on the BEAM, connected live. Then say the one-liner. You have
-now earned the next eight minutes.
+not introduce yourself first. Show two browser tabs converging live over WebRTC, one source
+producing five outputs (the assurance ledger, a fault simulation under a partition,
+Terraform for three clouds, the app itself, and a CALM doc that re-validates 1:1), the
+over-broad IAM role failing to compile, the ledger's labeled postulate, schedule luck
+exposed against a proven property, and the same content hash in the compliance doc and the
+browser. Then say the one-liner. You have now earned the next eight minutes.
 
 **Slide 1, the problem (Lightbulb 1).** Civilization runs on distributed software, and AI is
 about to write most of it. Today's tools (Terraform, Pulumi, CDK, Winglang) generate

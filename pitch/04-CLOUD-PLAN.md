@@ -41,7 +41,7 @@ accounts buy is not capability, it is validation against the genuine cloud APIs 
   intent).
 - Take `examples/app.rune` (the 9-resource web app) to a live `apply` on AWS first. Confirm
   the app serves traffic. Capture the run as the next demo artifact (a real URL on three
-  clouds is the upgrade to the 90-second video).
+  clouds is the upgrade to the 3-minute video).
 - Promote the existing `--apply` path from LocalStack/FOSS to real accounts: drop the
   LocalStack override (credentials from the environment), add state management and safe
   rollback. The lifecycle is built; this points it at billed endpoints.

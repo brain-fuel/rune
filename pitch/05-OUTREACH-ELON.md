@@ -11,9 +11,11 @@ the plan must not depend on it.
 ## The core insight: lead with the artifact, not the ask
 
 Elon responds to demonstrated engineering, not pitches. The unit of outreach is therefore
-not an email; it is **the demo video** from `01-DEMO.md`. A 90-second screen recording of one
-file being proven, simulated under a partition, deployed to three clouds, run on the BEAM,
-and connected to a live database, with a single clear sentence of narration, is the asset.
+not an email; it is **the demo video** from `01-DEMO.md`. A 3-minute screen recording of two
+browser tabs converging live, one source producing five outputs (proofs, a fault simulation
+under a partition, Terraform for three clouds, the running app, a re-validating CALM doc),
+and an over-broad IAM role failing to compile, with a single clear sentence of narration, is
+the asset.
 Everything below is about getting that asset in front of the right eyes.
 
 ## The channels, ranked by realistic expected value
