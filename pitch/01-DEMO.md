@@ -50,7 +50,7 @@ five outputs. Run them in sequence:
 
 ```
 rune ledger listings/ch538_control_catalog.rune      # 1. assurance ledger  (Shot 4)
-rune simulate examples/twotab/counter.rune 2         # 2. fault simulation   (Shot 5)
+rune simulate examples/twotab/counter.rune 2         # 2. fault simulation
 rune deploy --manifest examples/wavelet_demo.rune --backend aws   # 3. cloud Terraform
 node build.mjs   # (in examples/twotab/)              # 4. the app you just watched
 rune calm emit --manifest examples/wavelet_demo.rune \
@@ -152,7 +152,10 @@ upgrade path. The tier is on the page, not in a footnote."
 
 ### Shot 5 - schedule luck versus a property
 
-On screen: two simulate runs, side by side. First the app's own G-Counter:
+On screen: two simulate runs, side by side. First `examples/gcounter.rune`, the
+minimal proven G-Counter, the shape-identical pair to the app's
+`examples/twotab/counter.rune`: their `merge` definitions are verbatim-identical, so
+under content addressing they carry the same hash (the one Shot 6 shows).
 
 ```
 rune simulate examples/gcounter.rune 2
@@ -167,6 +170,9 @@ merge laws (CvRDT join):
   associative: ok
   inflationary:ok  (updates only grow the state)
 verdict: a CvRDT (join merge + inflationary updates) - will converge
+
+verdict: CONVERGED to succ (succ (succ zero)) on all 2 replicas (and the join
+laws hold, so under any schedule).
 ```
 
 Then a Last-Writer-Wins counter that happens to land on a value this run:
