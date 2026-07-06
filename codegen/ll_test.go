@@ -3,7 +3,6 @@ package codegen_test
 import (
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -42,50 +41,6 @@ func runLL(t *testing.T, ll string) string {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// runLLGC is runLL but compiles with a chosen GC threshold and stats on, so the
-// linked mark-sweep collector (the same conservative-roots / precise-slots
-// collector as the C backend, via the shared rep) can be forced to fire repeatedly.
-// Returns (stdout, number-of-collections).
-func runLLGC(t *testing.T, ll string, thresholdBytes int) (string, int) {
-	t.Helper()
-	if _, err := exec.LookPath("clang"); err != nil {
-		t.Skip("clang not in PATH")
-	}
-	dir := t.TempDir()
-	llf := dir + "/program.ll"
-	rtf := dir + "/runtime.c"
-	bin := dir + "/main"
-	if err := os.WriteFile(llf, []byte(ll), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(rtf, []byte(codegen.LL{}.EmitRuntime()), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	def := "-DRUNE_GC_THRESHOLD=" + strconv.Itoa(thresholdBytes)
-	if out, err := exec.Command("clang", def, "-DRUNE_GC_STATS", llf, rtf, "-o", bin).CombinedOutput(); err != nil {
-		t.Fatalf("clang: %v\n%s\n--- emitted .ll ---\n%s", err, out, ll)
-	}
-	cmd := exec.Command(bin)
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("run: %v\nstderr=%s", err, stderr.String())
-	}
-	n := 0
-	if i := strings.Index(stderr.String(), "collections="); i >= 0 {
-		tail := stderr.String()[i+len("collections="):]
-		j := 0
-		for j < len(tail) && tail[j] >= '0' && tail[j] <= '9' {
-			j++
-		}
-		if j > 0 {
-			n, _ = strconv.Atoi(tail[:j])
-		}
-	}
-	return strings.TrimSpace(stdout.String()), n
 }
 
 // TestLLEmitListLength is the second-native-backend keystone: a recursive ListElim
@@ -188,56 +143,5 @@ p : Pairing Nat Nat is mk Nat Nat (succ zero) (succ (succ zero)) end
 		if cOut != llOut {
 			t.Fatalf("%s: LLVM output %q != C oracle %q", tc.main, llOut, cOut)
 		}
-	}
-}
-
-// TestLLGCConformanceUnderTinyHeap proves the linked GC is transparent on the LLVM
-// backend too: conformance-shaped programs run byte-identical under a tiny heap (so
-// the mark-sweep collector fires) and the default heap. The collector is the same
-// conservative-roots / precise-slots mark-sweep as the C backend (shared rep), so a
-// long boxed fold survives many collections.
-func TestLLGCConformanceUnderTinyHeap(t *testing.T) {
-	t.Skip("mark-sweep deleted; ARC pressure gate replaces this in Task 3")
-	src := natSrc + `
-data List : U -> U is
-  nil : (A : U) -> List A
-| cons : (A : U) -> A -> List A -> List A
-end
-replicate : Nat -> List Nat is
-  fn (n : Nat) is
-    NatElim (fn (x : Nat) is List Nat end)
-      (nil Nat)
-      (fn (k : Nat) (ih : List Nat) is cons Nat zero ih end)
-      n
-  end
-end
-length : (A : U) -> List A -> Nat is
-  fn (A : U) (xs : List A) is
-    ListElim A (fn (x : List A) is Nat end)
-      zero
-      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
-      xs
-  end
-end
-two : Nat is succ (succ zero) end
-four : Nat is add two two end
-eight : Nat is add four four end
-big : Nat is length Nat (replicate eight) end
-`
-	want := succChain(8)
-	emitted := emitWith(t, codegen.LL{}, src, "big")
-	got, ncol := runLLGC(t, emitted, 1024)
-	if got != want {
-		t.Fatalf("ll gc-stress (tiny heap): got %q, want %q", got, want)
-	}
-	if ncol == 0 {
-		t.Fatalf("ll gc-stress: expected the collector to FIRE under a 1 KiB heap, but it never collected")
-	}
-	got2, ncol2 := runLLGC(t, emitted, 1<<30)
-	if got2 != want {
-		t.Fatalf("ll gc-stress (no collection): got %q, want %q", got2, want)
-	}
-	if ncol2 != 0 {
-		t.Fatalf("ll gc-stress: did not expect collections under a 1 GiB heap, got %d", ncol2)
 	}
 }
