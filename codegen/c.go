@@ -39,14 +39,41 @@ import (
 // host LITERAL FFI (LitInt/LitStr/LitPtr) and IForeign are emitted but a foreign
 // program needs a host-linked accessor, exactly as on the other backends.
 //
-// Memory: this backend uses ARC — Perceus-style reference counting
-// (`arc_alloc`/`rt_retain`/`rt_release`), the WASM backend's discipline ported
-// native (spec Decision 3/4). Every heap object carries an `rc` header (1 at
-// birth); rt_release decrements and, at zero, runs a per-kind free walker then
-// free()s the block. rune heap values are immutable and acyclic, so counting is
-// complete — no cycle collector. The mark-sweep collector this replaced (roots
-// table, conservative stack scan, gc_collect) is deleted wholesale; the static
-// thunk caches are now ordinary owned references held for the process lifetime.
+// Memory: this backend is ARC (Automatic Reference Counting), Perceus-style
+// (Reinking-Xie-de Moura-Leijen, PLDI 2021; Lean 4 "Counting Immutable Beans").
+// The SAME ownership pass the WASM backend runs (codegen/perceus.go, wired in
+// at Emit below) annotates the shared closure-converted IR with CDup/CDrop;
+// this backend lowers them to rt_retain/rt_release calls over a plain malloc
+// heap instead of WASM's linear-memory arena. Every heap object carries an
+// `rc` header (1 at birth); rt_release decrements and, at zero, runs a
+// per-kind free walker (K_CLO releases its env slots, K_CON its fields,
+// K_PAIR both halves, K_BOUNCE its collected args, leaves free their own
+// buffers) then free()s the block. The ownership rules are PATH B, ported
+// verbatim from WASM (spec docs/superpowers/specs/2026-07-05-native-arc-design.md,
+// Decision 4): apply() consumes both operands (dup first to retain use);
+// builders (closures, constructors, pairs, bounce args) take ownership of
+// their slot arguments; CGlobal thunk reads and CForeign accessor reads are
+// BORROWED and dup'd on consumption; foreign prim bodies receive BORROWED
+// arguments and return OWNED results.
+//
+// Counting is complete because rune heap values are immutable inductive data:
+// no mutation means no cycles, so every value's refcount exactly tracks its
+// live owning references and nothing is ever unreachable-but-nonzero: no
+// cycle collector is needed or present. The mark-sweep collector this
+// replaces (roots table, conservative stack scan, gc_collect, gc_find_obj's
+// O(N_live) membership test) is deleted wholesale; static thunk caches are
+// now ordinary owned references held for the process lifetime, needing no
+// root registration.
+//
+// Known residual (parked, not a regression here): a pair PROJECTION used
+// outside a CLet-bound shape leaks identically on WASM, a shared-pass
+// limitation, not a C-specific bug. Fixing it changes frozen WASM emission,
+// so it stays a pass-level item for a future plan rather than being patched
+// around in this backend.
+//
+// LLVM (codegen/ll.go, codegen/ll_runtime.go) still runs the old mark-sweep
+// collector; mirroring this same Perceus conversion there is Plan B of the
+// native-ARC design and is not done by this backend's change.
 type C struct{}
 
 func (C) Target() string { return "c" }

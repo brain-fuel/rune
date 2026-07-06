@@ -474,6 +474,12 @@ across the WHOLE write vocabulary at once (writeFileCode + writeChunk + sortFile
 consistent. No consumer now -> parked (Standing Rule 1).
 
 ## Native GC gc_find_obj is O(N_live) -- codec-over-corpus impractically slow (2026-07-01, bible cross-backend tier 3)
+SUPERSEDED on the C backend (2026-07-06, native-ARC design Plan A): the C emitter now runs Perceus
+ARC (rt_retain/rt_release, no cycle collector, no gc_find_obj) in place of mark-sweep, so this entry's
+C half no longer applies -- there is no conservative stack scan to be slow. LLVM (codegen/ll.go,
+codegen/ll_runtime.go) still runs the mark-sweep collector described below; this entry stays open for
+LLVM until Plan B mirrors the same ARC conversion there, at which point it closes fully and the
+bible real-data scale gate can admit both native backends.
 The native C/LLVM runtimes' conservative stack scan calls `gc_find_obj` (codegen/c.go), an O(N_live)
 LINEAR scan per stack word. The bible builders allocate ~8000 bignums per file (the packed-String codec
 + splitOn/jsonStrField cells); over the real-data lexicon (~1500 sampled files) GC dominates -- native runs
@@ -625,3 +631,12 @@ for a demo.
   note as the record.
 
 - explain --annotate runtime TTY width detection (x/term.GetSize): parked to keep the dependency graph closed; --width flag (default 80) is the deterministic override and goldens fix both layouts.
+
+## Perceus pair-projection leak outside a CLet-bound shape (2026-07-06, native-ARC design Plan A, C backend)
+A pair PROJECTION (`CFst`/`CSnd`) used directly, outside the CLet-bound shape the Perceus pass
+recognizes, leaks a reference identically on WASM and now on C -- this is a shared-pass limitation
+ported along with everything else the C backend inherited from R-PERCEUS.md, not a defect introduced
+by the C port. Not fixed here because fixing it changes the pass's annotation shape and, by the
+byte-identity constraint, frozen WASM emission with it -- out of scope for a memory-only backend task.
+Park (no consumer forcing the fix now; revisit as a pass-level item alongside Plan B, since LLVM will
+inherit the same residual when it mirrors this conversion).

@@ -103,7 +103,13 @@ The remaining Tier A:
     classification. Unlocks the native backends for the scale gate (mark-sweep's
     O(N) live-heap walks excluded them from the bible-ops scale gate) and aligns
     all nine backends on one memory discipline (WASM's Perceus/ARC is the
-    reference implementation).
+    reference implementation). C HALF DONE (2026-07-06, Plan A, branch
+    feat/native-arc-c): the C backend is fully ARC (rc header, malloc/free, a
+    per-kind free walker, the shared Perceus pass wired at codegen/c.go's Emit,
+    PATH B ownership rules on every prim body, the pair-projection residual
+    parked honestly in PARKING-LOT.md) with the 12-test TestCARC gate family
+    passing including pressure + ASAN. LLVM half (Plan B, ll.go/ll_runtime.go
+    mirror + the scale-gate exclusion removal) is next.
 14. **Doc sweep on release:** README matrix count and FOSS list (fixed 2026-07-01),
     index statuses (fixed 2026-07-01), keep R-INFRA.md the single as-built source.
 

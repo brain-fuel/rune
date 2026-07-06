@@ -54,7 +54,10 @@ Per-node rules (the translation target; the algorithm in Task 3+ realizes them):
   and Arg is also dup'd before the pair. (Implementation freedom, gate-arbitrated:
   the post-call closure release MAY instead be emitted in the WASM `emitCase`-style
   lowering of `AppClosure`, WASM-only; the pass-level `CDrop` is preferred for
-  portability to the C/LLVM ARC port. Either way `$rt_apply` stays unchanged.)
+  portability to the C/LLVM ARC port. Either way `$rt_apply` stays unchanged.
+  The C port landed (the native-ARC design's Plan A): `Perceus(cp)` now runs
+  on the C emission path too, and the pass has real C call sites lowering
+  CDup/CDrop to rt_retain/rt_release, not just the WASM ones described above.)
 - `MkClosure{Code, Env}`: each env term is stored into the closure (an owning
   reference). A variable that is captured AND still live afterwards is dup'd.
 - `CLet{x=v, b}`: translate v (consuming its free vars), bind x; translate b with
