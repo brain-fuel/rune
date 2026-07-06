@@ -546,3 +546,14 @@ func TestLLARCPackedDecodeFast(t *testing.T) {
 		t.Fatalf("packed decode too slow: %s (> 10s ceiling) for a %d-byte payload -- the small-divisor divmod fast path is missing", elapsed, len(payload))
 	}
 }
+
+// TestLLARCDivmodSmallProperty is the LL twin of TestCARCDivmodSmallProperty:
+// the same fixed-seed multi-limb/small-divisor case set (one compiled program),
+// printed q/r checked against Go's math/big QuoRem oracle.
+func TestLLARCDivmodSmallProperty(t *testing.T) {
+	src, want := divmodSmallPropertySrc(divmodSmallCases())
+	got, _ := buildAndRunLLWithReport(t, src, "main")
+	if got != want {
+		t.Fatalf("ll divmod-small property mismatch vs math/big oracle:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}

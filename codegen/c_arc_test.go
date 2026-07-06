@@ -12,6 +12,7 @@ package codegen_test
 import (
 	"fmt"
 	"math/big"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strconv"
@@ -686,5 +687,133 @@ func TestCARCPackedDecodeFast(t *testing.T) {
 	}
 	if elapsed > 10*time.Second {
 		t.Fatalf("packed decode too slow: %s (> 10s ceiling) for a %d-byte payload -- the small-divisor divmod fast path is missing", elapsed, len(payload))
+	}
+}
+
+// divmodCase is one (a, d) probe for the small-divisor divmod property test.
+type divmodCase struct {
+	a *big.Int // dividend, up to ~40 base-1e9 limbs
+	d int64    // divisor, single base-1e9 limb: [1, 999999999]
+}
+
+// divmodSmallCases returns the fixed-seed case set for the divmod-small property
+// tests: explicit limb-boundary edges (a = 0, a < d, a = d, a = 1e9^k exactly, the
+// max single limb, d = 1, d = BIG_BASE-1) plus seeded-random multi-limb dividends
+// spanning 1..40 limbs. Fixed seed => deterministic program + expected output.
+func divmodSmallCases() []divmodCase {
+	bigBase := big.NewInt(1000000000)
+	pow := func(k int) *big.Int { return new(big.Int).Exp(bigBase, big.NewInt(int64(k)), nil) }
+	cases := []divmodCase{
+		{big.NewInt(0), 7},                 // a = 0
+		{big.NewInt(5), 999999999},         // a < d (q=0, r=a)
+		{big.NewInt(123456789), 123456789}, // a = d (q=1, r=0)
+		{pow(1), 256},                      // a = 1e9 exactly (2-limb boundary)
+		{pow(4), 1},                        // d = 1 (q=a, r=0), 5-limb boundary
+		{new(big.Int).Sub(pow(2), big.NewInt(1)), 999999999}, // all-nines 2 limbs, max d
+	}
+	rng := rand.New(rand.NewSource(0x5eed))
+	for i := 0; i < 6; i++ {
+		nl := 1 + rng.Intn(40) // limb count 1..40
+		a := big.NewInt(0)
+		for j := 0; j < nl; j++ {
+			limb := int64(rng.Intn(1000000000))
+			if j == nl-1 && limb == 0 {
+				limb = 1 // keep the top limb non-zero so a really spans nl limbs
+			}
+			a.Mul(a, bigBase)
+			a.Add(a, big.NewInt(limb))
+		}
+		d := int64(1 + rng.Intn(999999999))
+		cases = append(cases, divmodCase{a, d})
+	}
+	return cases
+}
+
+// divmodSmallPropertySrc builds ONE rune program (a single compile per backend)
+// that prints divN a d and modN a d for every case, with divN/modN registered as
+// the natDiv/natMod builtins (the ch501 shape) so each call accel-dispatches to
+// the runtime's nat_div/nat_mod -> big_divmod -> the small-divisor fast path
+// (every d here is a single base-1e9 limb). The fuel-bounded Euclidean fallback
+// bodies exist only to type the builtins; the accel replaces them.
+func divmodSmallPropertySrc(cases []divmodCase) (src, want string) {
+	var b strings.Builder
+	b.WriteString(`data Bool : U is false : Bool | true : Bool end
+data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+foreign printNat : Nat -> IO Nat end
+pred : Nat -> Nat is fn (n : Nat) is case n of | zero -> zero | succ m -> m end end end
+addN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) b (fn (k : Nat) (ih : Nat) is succ ih end) a end
+end
+mulN : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is addN b ih end) a end
+end
+monus : Nat -> Nat -> Nat is
+  fn (a : Nat) (b : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat end) (fn (x : Nat) is x end)
+      (fn (k : Nat) (ih : Nat -> Nat) is fn (x : Nat) is pred (ih x) end end) b a
+  end
+end
+leb : Nat -> Nat -> Bool is fn (a : Nat) (b : Nat) is case monus a b of | zero -> true | succ k -> false end end end
+divModGo : Nat -> Nat -> Nat -> Nat is
+  fn (fuel : Nat) is
+    NatElim (fn (x : Nat) is Nat -> Nat -> Nat end) (fn (a : Nat) (b : Nat) is 0 end)
+      (fn (f : Nat) (ih : Nat -> Nat -> Nat) is
+         fn (a : Nat) (b : Nat) is case leb b a of | true -> succ (ih (monus a b) b) | false -> 0 end end
+      end)
+      fuel
+  end
+end
+divN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is case b of | zero -> 0 | succ k -> divModGo a a b end end end
+modN : Nat -> Nat -> Nat is fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end end
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
+builtin natDiv divN
+builtin natMod modN
+
+main : IO Nat is
+`)
+	// One bindIO chain printing q then r per case; the last print is the chain tail.
+	var lines []string
+	depth := 0
+	emit := func(expr string, last bool) {
+		if last {
+			b.WriteString(strings.Repeat(" ", depth+2) + "printNat (" + expr + ")\n")
+			return
+		}
+		b.WriteString(strings.Repeat(" ", depth+2) + fmt.Sprintf("bindIO Nat Nat (printNat (%s)) (fn (x%d : Nat) is\n", expr, depth))
+		depth++
+	}
+	for i, c := range cases {
+		q, r := new(big.Int).QuoRem(c.a, big.NewInt(c.d), new(big.Int))
+		// The oracle: q*d + r == a and 0 <= r < d hold for big.Int QuoRem by
+		// construction; matching the printed q and r against it pins the runtime.
+		lines = append(lines, q.String(), r.String())
+		emit(fmt.Sprintf("divN %s %d", c.a.String(), c.d), false)
+		emit(fmt.Sprintf("modN %s %d", c.a.String(), c.d), i == len(cases)-1)
+	}
+	for ; depth > 0; depth-- {
+		b.WriteString(strings.Repeat(" ", depth+1) + "end)\n")
+	}
+	b.WriteString("end\n")
+	// The runtime shows main's final value after the IO chain runs (the same
+	// convention as the foldLines gate's "50\n50"), so the last modN result
+	// appears once from its printNat and once as the program value.
+	lines = append(lines, lines[len(lines)-1])
+	return b.String(), strings.Join(lines, "\n")
+}
+
+// TestCARCDivmodSmallProperty is the randomized invariant gate for the new
+// small-divisor big_divmod fast path: 12 fixed-seed cases (multi-limb dividends
+// spanning 1..40 base-1e9 limbs incl exact limb-boundary values, single-limb
+// divisors in [1, 999999999]) compiled into ONE C program, its printed q/r
+// checked against Go's math/big QuoRem oracle (which guarantees q*d + r == a
+// and r < d). Divisors are all <= 1 limb, so every division takes the new path.
+func TestCARCDivmodSmallProperty(t *testing.T) {
+	src, want := divmodSmallPropertySrc(divmodSmallCases())
+	got, _ := buildAndRunCWithReport(t, src, "main")
+	if got != want {
+		t.Fatalf("c divmod-small property mismatch vs math/big oracle:\ngot:\n%s\nwant:\n%s", got, want)
 	}
 }
