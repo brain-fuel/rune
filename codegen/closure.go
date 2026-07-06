@@ -245,7 +245,7 @@ func NatElimSpine(natElim string, app AppClosure) ([]CIr, bool) {
 // the native backends can emit a one-peel dispatch instead of the eager fold —
 // turning the super-exponential `beqNat`-shape into linear (matches js/go/rust).
 func StepIgnoresIH(blocks map[string]CodeBlock, c1 CIr) bool {
-	outerMk, ok := c1.(MkClosure)
+	outerMk, ok := peelToMkClosure(c1)
 	if !ok {
 		return false
 	}
@@ -253,7 +253,7 @@ func StepIgnoresIH(blocks map[string]CodeBlock, c1 CIr) bool {
 	if !ok {
 		return false
 	}
-	innerMk, ok := outer.Body.(MkClosure)
+	innerMk, ok := peelToMkClosure(outer.Body)
 	if !ok {
 		return false
 	}
@@ -262,6 +262,44 @@ func StepIgnoresIH(blocks map[string]CodeBlock, c1 CIr) bool {
 		return false
 	}
 	return !cirUsesArg(inner.Body, 0)
+}
+
+// peelToMkClosure strips the ownership-annotation wrappers the Perceus pass layers around
+// a value position -- CDup/CDrop management markers and the consumeOwning box
+// CLet{$own, Val, Body: CDup{CVar0, CVar0}} -- to recover the underlying MkClosure. On
+// PRE-Perceus IR (js/go/rust/beam/jvm/ll never annotate) there are no wrappers, so this is
+// a plain type-assert. It exists for StepIgnoresIH: the C backend runs Perceus, so a step
+// closure `fn (k)(ih) is BODY` has its OUTER code-block body wrapped as
+// `CDrop{dead k?, CLet{$own, innerMk, CDup{0,0}}}` -- the bare `outer.Body.(MkClosure)`
+// assertion then fails and EVERY IH-ignoring eliminator falls back to the eager b3 fold,
+// re-exponentializing the lambda-wrapped beqNat-shape parser guards (ch521's parseList/
+// parseObj, applied |byte-delim| times per descent). WASM never calls StepIgnoresIH (it
+// has no `_case`; it always b3-folds), so this does not touch WASM output.
+func peelToMkClosure(t CIr) (MkClosure, bool) {
+	for {
+		switch x := t.(type) {
+		case MkClosure:
+			return x, true
+		case CDup:
+			t = x.K
+		case CDrop:
+			t = x.K
+		case CLet:
+			// consumeOwning boxes a compound value as CLet{$own, Val, CDup{CVar0, CVar0}}.
+			d, ok := x.Body.(CDup)
+			if !ok {
+				return MkClosure{}, false
+			}
+			v0, okV := d.V.(CVar)
+			k0, okK := d.K.(CVar)
+			if !okV || !okK || v0.Idx != 0 || k0.Idx != 0 {
+				return MkClosure{}, false
+			}
+			t = x.Val
+		default:
+			return MkClosure{}, false
+		}
+	}
 }
 
 // cirUsesArg reports whether the de Bruijn index idx is referenced in t, scanning
@@ -305,9 +343,19 @@ func cirUsesArg(t CIr, idx int) bool {
 	case CBounce:
 		return cirUsesArg(x.Call, idx)
 	case CDup:
-		return cirUsesArg(x.V, idx) || cirUsesArg(x.K, idx)
+		// A CDup{V, K} RETAINS V then evaluates K; the genuine data-use is in K (the pass
+		// only inserts a dup when V is really consumed there). V is a management marker.
+		return cirUsesArg(x.K, idx)
 	case CDrop:
-		return cirUsesArg(x.V, idx) || cirUsesArg(x.K, idx)
+		// A CDrop{V, K} RELEASES V then evaluates K; V is DEAD after (that is why it is
+		// dropped), so it is NOT a genuine use -- only K is. This matters for StepIgnoresIH
+		// on the POST-Perceus IR (the C backend runs Perceus): the pass wraps an
+		// IH-ignoring step's inner body in `CDrop{V: CVar{0} (the dead ih), K: body}`, and
+		// counting that drop's V as a use would defeat the O(n) one-peel `_case` dispatch
+		// (falling back to the O(n^2) eager fold). Pre-Perceus consumers (js/py/go/rust/
+		// beam/jvm/ll, which never run Perceus) see no CDup/CDrop, so this is inert there;
+		// the Perceus pass itself only ever calls cirUsesArg on pre-annotation IR.
+		return cirUsesArg(x.K, idx)
 	default:
 		return false
 	}

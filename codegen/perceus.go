@@ -431,6 +431,23 @@ func (pp *perceusPass) annotate(t CIr, owned []bool) CIr {
 			}
 		}
 
+		// DOUBLE-DROP GUARD (dead-in-both). The mirror of the consume-in-Val guard above:
+		// when an owned local is dead in BOTH the CLet Val and the Body, this scope owns no
+		// live reference to it -- its lifetime is the ENCLOSING ownScope's responsibility,
+		// which dead-drops it (cirUsesArg over the whole scope is false). Leaving bodyOwned
+		// true here made the inner Body ownScope ALSO dead-drop it, so a dead binder (e.g. a
+		// `succ k with ih` step that ignores ih, then `let e = parseVal … in …` -- ch521's
+		// parseList/parseObj steps) was released twice: the outer ownScope drop AND the inner
+		// Body-ownScope drop on a single (rc-1) reference -- a double free. No dup ever raised
+		// its rc (it is used nowhere), so both drops hit the same block. The used-in-Val cases
+		// (consume / borrow) are handled above / by the CDup below; only the truly-dead-here
+		// binder reaches this guard, so suppressing the inner drop can never leak.
+		for i := 0; i < len(owned); i++ {
+			if owned[i] && !cirUsesArg(x.Val, i) && !cirUsesArg(x.Body, i+1) {
+				bodyOwned[i+1] = false
+			}
+		}
+
 		body := pp.ownScope(x.Body, bodyOwned)
 
 		if pairDeadInBody {

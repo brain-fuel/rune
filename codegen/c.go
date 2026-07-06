@@ -56,6 +56,12 @@ func (C) Target() string { return "c" }
 // definition thunks, and a `main` that evaluates the entry and `$show`s it.
 func (C) Emit(p Program) (TargetSource, error) {
 	cp := ClosureConvert(p)
+	// Perceus ownership pass: insert CDup/CDrop so the ARC runtime
+	// (rt_retain/rt_release) reference-counts heap values. Mirrors wasm.go:51-52 --
+	// the WASM lowering is the ownership REFERENCE this backend aligns with. Under
+	// the interim ladder (Task 1's runtime with NO annotations) this was a pure leak
+	// with unchanged output; wiring the pass makes releases fire (memory-only).
+	cp = Perceus(cp)
 	em := &cEmitter{}
 	if p.Nat != nil {
 		em.natElim = p.Nat.ElimName
@@ -316,21 +322,50 @@ func (em *cEmitter) emitCtorC(b *strings.Builder, c CtorSpec) {
 // closure incrementing its argument, the eliminator a fold loop — exactly the
 // rep the other backends give nat (so the conformance output is byte-identical).
 func (em *cEmitter) emitNatC(b *strings.Builder, n NatSpec) {
-	// zero: the empty bignum.
-	fmt.Fprintf(b, "static Value %s(void) { return big_from_long(0); }\n", cThunkName(n.Zero))
-	// succ: x -> x+1 (bignum increment).
-	fmt.Fprintf(b, "static Value %s_code(Value arg, Value* env) { (void)env; return big_succ(arg); }\n", cName(n.Succ))
-	fmt.Fprintf(b, "static Value %s(void) { return mkclo(&%s_code, 0); }\n", cThunkName(n.Succ), cName(n.Succ))
+	// zero / succ / the eliminator are MEMOIZED thunks (static done/cache), exactly like
+	// emitCtorC's ctor thunks and WASM's emitCachedThunk: under ARC a CGlobal thunk read
+	// is a BORROWED cached root the cache owns (Perceus never releases it). A NON-memoized
+	// `mkclo`/`big_from_long` per call would allocate a fresh object each reference that
+	// nothing releases -- e.g. `succ (succ ih)` calling def_succ twice would leak two K_CLO
+	// per fold iteration. Caching makes each nat thunk one immortal root, matching the pass.
+	// zero: the empty bignum (cached).
+	fmt.Fprintf(b, "static Value %s(void) { static int done=0; static Value cache=0; if(done) return cache; done=1; cache=big_from_long(0); return cache; }\n", cThunkName(n.Zero))
+	// succ: x -> x+1 (bignum increment). big_succ BORROW-reads $arg and returns a fresh
+	// K_BIG; under PATH B the caller hands the closure an OWNED arg (Perceus dups a
+	// borrowed operand at the owning position), so succ must FREE its arg like any user
+	// closure code block -- otherwise a succ-chain leaks every intermediate K_BIG per
+	// run. The C dual of emitNat's succ_code release (wasm.go:648-649).
+	fmt.Fprintf(b, "static Value %s_code(Value arg, Value* env) { (void)env; Value r = big_succ(arg); rt_release(arg); return r; }\n", cName(n.Succ))
+	fmt.Fprintf(b, "static Value %s(void) { static int done=0; static Value cache=0; if(done) return cache; done=1; cache=mkclo(&%s_code, 0); return cache; }\n", cThunkName(n.Succ), cName(n.Succ))
 	// eliminator: m -> c0 -> c1 -> x -> fold (m erased/ignored)
 	base := cName(n.ElimName)
 	// 4 curried code blocks capturing m, c0, c1; the last folds c1 over 0..x-1
 	// with a BIGNUM counter (arg = x is a bignum, possibly past i64). O(x) by
 	// construction — the same cost the succ-chain elimination always had.
+	// The fold, ported from the WASM emitNatFold ARC protocol (wasm.go:682-713):
+	//   - $acc starts as a BORROWED alias of env[1] (the base c0); RETAIN it so the loop
+	//     owns its own reference (the step consumes+returns a fresh acc each iteration,
+	//     and a 0-iteration fold returns acc directly, independent of env-slot ownership).
+	//   - env[2] (c1, the step) and $arg (x, the bound) are BORROWED -- do NOT release
+	//     them here. (In WASM satElimDispatch releases x; C has no satElimDispatch, so x
+	//     is borrowed by the fold and its one release is deferred -- a constant per-fold
+	//     leak, not a per-iteration one, so the fold is steady-flat. Task 4 closes it.)
+	//   - $k is owned by the loop: RETAIN it before the step apply (the step gets its own
+	//     copy), RELEASE the old $k after advancing, RELEASE the final $k after the loop.
+	//   - $step (the partial application apply(c1,k)) is a fresh K_CLO -- RELEASE it after
+	//     the second apply; nothing else owns it.
 	fmt.Fprintf(b, "static Value %s_b3(Value arg, Value* env) {\n", base)
-	b.WriteString("  /* arg = x (bignum); env = {m, c0, c1} */\n")
-	b.WriteString("  Value acc = env[1];\n")
-	b.WriteString("  for (Value k = big_from_long(0); big_cmp(k, arg) < 0; k = big_succ(k))\n")
-	b.WriteString("    acc = apply(apply(env[2], k), acc);\n")
+	b.WriteString("  /* arg = x (bignum, BORROWED); env = {m, c0, c1} */\n")
+	b.WriteString("  Value acc = env[1]; rt_retain(acc);\n")
+	b.WriteString("  Value k = big_from_long(0);\n")
+	b.WriteString("  while (big_cmp(k, arg) < 0) {\n")
+	b.WriteString("    rt_retain(k);\n")
+	b.WriteString("    Value step = apply(env[2], k);\n")
+	b.WriteString("    acc = apply(step, acc);\n")
+	b.WriteString("    rt_release(step);\n")
+	b.WriteString("    Value knext = big_succ(k); rt_release(k); k = knext;\n")
+	b.WriteString("  }\n")
+	b.WriteString("  rt_release(k);\n")
 	b.WriteString("  return acc;\n}\n")
 	fmt.Fprintf(b, "static Value %s_b2(Value arg, Value* env) {\n", base)
 	fmt.Fprintf(b, "  Value c = mkclo(&%s_b3, 3); clo_set(c,0,env[0]); clo_set(c,1,env[1]); clo_set(c,2,arg); return c;\n}\n", base)
@@ -338,15 +373,26 @@ func (em *cEmitter) emitNatC(b *strings.Builder, n NatSpec) {
 	fmt.Fprintf(b, "  Value c = mkclo(&%s_b2, 2); clo_set(c,0,env[0]); clo_set(c,1,arg); return c;\n}\n", base)
 	fmt.Fprintf(b, "static Value %s_b0(Value arg, Value* env) {\n", base)
 	fmt.Fprintf(b, "  (void)env; Value c = mkclo(&%s_b1, 1); clo_set(c,0,arg); return c;\n}\n", base)
-	fmt.Fprintf(b, "static Value %s(void) { return mkclo(&%s_b0, 0); }\n", cThunkName(n.ElimName), base)
+	fmt.Fprintf(b, "static Value %s(void) { static int done=0; static Value cache=0; if(done) return cache; done=1; cache=mkclo(&%s_b0, 0); return cache; }\n", cThunkName(n.ElimName), base)
 	// One-peel CASE form for an eliminator whose step ignores its IH (see
 	// StepIgnoresIH): zero -> c0, succ k -> c1 k unit. The emitter calls this
 	// instead of the b3 fold when it can prove the step is IH-independent, turning
 	// the super-exponential `beqNat`-shape into linear (the b3 fold evaluates the
 	// step at every index 0..x-1, which compounds multiplicatively under nesting).
+	// ARC ownership: c0/c1/x arrive OWNED (natDispatch fires only on a recognized
+	// NatElimSpine, so annotateBareSpine consumeOwning'd each leaf). This helper consumes
+	// each exactly once -- the C `_case` analogue of what satElimDispatch's b3 fold does on
+	// WASM (which has no `_case`). zero: return c0 (transferred out), release the dead c1/x.
+	// succ: apply c1 to (x-1) then unit, releasing the intermediate step closure + the dead
+	// c0 + the borrow-read x. Internal `one` temp is freed (like big_succ). The zero test
+	// uses big_nlimbs (a nat is zero iff it has no limbs) to avoid allocating a comparand.
 	fmt.Fprintf(b, "static Value %s_case(Value c0, Value c1, Value x) {\n", base)
-	b.WriteString("  if (big_cmp(x, big_from_long(0)) == 0) return c0;\n")
-	b.WriteString("  return apply(apply(c1, big_monus(x, big_from_long(1))), UNIT);\n}\n")
+	b.WriteString("  if (big_nlimbs(x) == 0) { rt_release(c1); rt_release(x); return c0; }\n")
+	b.WriteString("  Value one = big_from_long(1); Value km = big_monus(x, one); rt_release(one);\n")
+	b.WriteString("  Value stepclo = apply(c1, km);\n")
+	b.WriteString("  Value r = apply(stepclo, UNIT);\n")
+	b.WriteString("  rt_release(stepclo); rt_release(c1); rt_release(c0); rt_release(x);\n")
+	b.WriteString("  return r;\n}\n")
 }
 
 // natDispatch emits the constant-time one-peel CASE for a saturated `NatElim m c0
@@ -358,8 +404,19 @@ func (em *cEmitter) natDispatch(app AppClosure, locals []string) (string, bool) 
 	if !ok || !StepIgnoresIH(em.blocks, args[2]) {
 		return "", false
 	}
-	out := fmt.Sprintf("%s_case(%s, %s, %s)", cName(em.natElim),
-		em.exprIn(args[1], locals), em.exprIn(args[2], locals), em.exprIn(args[3], locals))
+	// Evaluate the four spine operands in source order (motive, c0, c1, x) into stable
+	// locals -- so a nested allocating operand does not interleave, and C's unspecified
+	// argument-evaluation order does not matter. The MOTIVE (args[0]) is erased -- `_case`
+	// never reads it -- so evaluate it (running its consumeOwning side effects) and RELEASE
+	// it, matching WASM satElimDispatch (wasm.go:1008-1009). c0/c1/x are then consumed by
+	// `_case`. All four arrive OWNED (annotateBareSpine consumeOwning'd each leaf).
+	mot, c0, c1, x := em.fresh(), em.fresh(), em.fresh(), em.fresh()
+	out := fmt.Sprintf("({ Value %s = %s; rt_release(%s); Value %s = %s; Value %s = %s; Value %s = %s; %s_case(%s, %s, %s); })",
+		mot, em.exprIn(args[0], locals), mot,
+		c0, em.exprIn(args[1], locals),
+		c1, em.exprIn(args[2], locals),
+		x, em.exprIn(args[3], locals),
+		cName(em.natElim), c0, c1, x)
 	for _, extra := range args[4:] {
 		out = fmt.Sprintf("apply(%s, %s)", out, em.exprIn(extra, locals))
 	}
@@ -440,6 +497,16 @@ func (em *cEmitter) exprIn(t CIr, locals []string) string {
 		return em.caseExpr(x, locals)
 	case CBounce:
 		return em.bounceExpr(x.Call, locals)
+	case CDup:
+		// Retain V (a CVar/CEnv -- a pure NAME, no side effect) then evaluate K. The
+		// statement expression keeps the emitter expression-oriented (same pattern as
+		// CLet). The WASM twin is emitIn's CDup arm (wasm.go:808-812).
+		return fmt.Sprintf("({ rt_retain(%s); %s; })", em.exprIn(x.V, locals), em.exprIn(x.K, locals))
+	case CDrop:
+		// Release V then evaluate K (WASM twin: wasm.go:813-817). V is a CVar/CEnv the
+		// pass proved in scope at this point; exprIn renders it to the textually-visible
+		// C local / env slot, valid inside the nested statement expression.
+		return fmt.Sprintf("({ rt_release(%s); %s; })", em.exprIn(x.V, locals), em.exprIn(x.K, locals))
 	default:
 		panic(fmt.Sprintf("codegen(c): unknown CIr node %T", t))
 	}
@@ -538,19 +605,28 @@ func (em *cEmitter) emitPartialC(b *strings.Builder, name string, arity int, bod
 		fmt.Fprintf(b, "static Value %s(Value arg, Value* env) {\n", cDrvName(name, i))
 		b.WriteString("  (void)arg; (void)env;\n")
 		if i < arity-1 {
-			// Collect: build the next driver closure capturing env[0..i-1] + arg.
+			// Collect: build the next driver closure capturing env[0..i-1] + arg. Unlike
+			// emitCtorC (constructor spines are recognized-bare + never released), a DRIVER
+			// intermediate IS released by the generic apply path, so each forwarded env value
+			// must be RETAINED into the child (the child takes its own reference; the parent's
+			// later release is then balanced). The fresh $arg is owned by this block, so it
+			// MOVES. Mirrors WASM emitPartialDriverBlock (wasm.go:530-534).
 			fmt.Fprintf(b, "  Value c = mkclo(&%s, %d);\n", cDrvName(name, i+1), i+1)
 			for k := 0; k < i; k++ {
-				fmt.Fprintf(b, "  clo_set(c, %d, env[%d]);\n", k, k)
+				fmt.Fprintf(b, "  rt_retain(env[%d]); clo_set(c, %d, env[%d]);\n", k, k, k)
 			}
 			fmt.Fprintf(b, "  clo_set(c, %d, arg);\n", i)
 			b.WriteString("  return c;\n}\n")
 			continue
 		}
-		// Last block: saturate _step with env[0..i-1] + arg, then drive once.
+		// Last block: saturate _step with env[0..i-1] + arg, then drive once. The driver
+		// closure OWNS its captured env (released by the caller after this returns), so each
+		// env value is RETAINED before the apply that consumes it (the _step machinery takes
+		// its own reference; the driver keeps its own). The fresh $arg is owned by this block,
+		// so it MOVES. step() is a BORROWED cached root (not released by apply).
 		fmt.Fprintf(b, "  Value f = %s();\n", step)
 		for k := 0; k < i; k++ {
-			fmt.Fprintf(b, "  f = apply(f, env[%d]);\n", k)
+			fmt.Fprintf(b, "  rt_retain(env[%d]); f = apply(f, env[%d]);\n", k, k)
 		}
 		b.WriteString("  f = apply(f, arg);\n  return tramp(f);\n}\n")
 	}
@@ -571,19 +647,30 @@ func (em *cEmitter) accelDispatch(app AppClosure, locals []string) (string, bool
 		return "", false
 	}
 	ea, eb := em.exprIn(a, locals), em.exprIn(b, locals)
+	// The accel op BORROW-reads both operands (nat_* read the inputs and return a
+	// fresh K_BIG), so both are dead after. Every operand reaching here is a PRIVATE
+	// OWNED reference (annotateBareSpine routes each accel leaf through consumeOwning,
+	// and a shared owned local is dup'd once), so the op must FREE both -- the C dual
+	// of the WASM accelDispatch (wasm.go:1069-1070). Bind to locals first so a nested
+	// allocating operand expression is evaluated exactly once, then released once.
+	var fn string
 	switch op {
 	case core.NatOpAdd:
-		return fmt.Sprintf("nat_add(%s, %s)", ea, eb), true
+		fn = "nat_add"
 	case core.NatOpMul:
-		return fmt.Sprintf("nat_mul(%s, %s)", ea, eb), true
+		fn = "nat_mul"
 	case core.NatOpMonus:
-		return fmt.Sprintf("nat_monus(%s, %s)", ea, eb), true
+		fn = "nat_monus"
 	case core.NatOpDiv:
-		return fmt.Sprintf("nat_div(%s, %s)", ea, eb), true
+		fn = "nat_div"
 	case core.NatOpMod:
-		return fmt.Sprintf("nat_mod(%s, %s)", ea, eb), true
+		fn = "nat_mod"
+	default:
+		return "", false
 	}
-	return "", false
+	na, nb, nr := em.fresh(), em.fresh(), em.fresh()
+	return fmt.Sprintf("({ Value %s = %s; Value %s = %s; Value %s = %s(%s, %s); rt_release(%s); rt_release(%s); %s; })",
+		na, ea, nb, eb, nr, fn, na, nb, na, nb, nr), true
 }
 
 // accelMatchC recognizes a saturated 2-argument application of a registered
@@ -1340,12 +1427,10 @@ static void rt_release(Value v) {
   if (!rt_counted(v)) return;
   Obj* o = obj(v);
   if (--o->rc > 0) return;
-  /* rc hit zero: release children per kind, then free the block. The per-kind
-     traced-slot sets mirror the old gc_mark_obj EXACTLY (K_BOUNCE releases
-     slots[0] (the step closure) + the collected args, nfield = nargs+1). K_STR
-     (->str is a literal / emitter buffer we never own), K_PTR, K_UNIT, K_FLOAT
-     are leaves; K_BIG / K_BYTES hold limbs / bytes INLINE in slots[] (raw words,
-     never Values), freed with the block. */
+  /* rc hit zero: release children per kind, then free the block. K_STR (->str is a
+     literal / emitter buffer we never own), K_PTR, K_UNIT, K_FLOAT are leaves; K_BIG /
+     K_BYTES hold limbs / bytes INLINE in slots[] (raw words, never Values), freed with
+     the block. */
   switch (o->kind) {
     case K_CLO:
       for (int i = 0; i < o->nenv; i++) rt_release(o->slots[i]);
@@ -1357,7 +1442,13 @@ static void rt_release(Value v) {
       rt_release(o->slots[0]); rt_release(o->slots[1]);
       break;
     case K_BOUNCE:
-      for (int i = 0; i < o->nfield; i++) rt_release(o->slots[i]);
+      /* slot[0] is the BORROWED cached _step root (mkbounce stores it WITHOUT a retain,
+         matching WASM $rt_mkbounce). Release only the OWNED args (slots[1..nfield-1]);
+         the WASM $rt_free K_BOUNCE arm skips the step likewise (base = arg slots). A
+         bounce forced through tramp is shell-freed (args moved) and never reaches here;
+         one dropped as a dead value (e.g. an unused IH bound to a bounce) frees its
+         args but must leave the borrowed step alone. */
+      for (int i = 1; i < o->nfield; i++) rt_release(o->slots[i]);
       break;
     default: break;
   }
@@ -1440,11 +1531,26 @@ static Value mkbounce(Value step, int nargs) {
   return (Value)o;
 }
 static void bounce_set(Value bnc, int i, Value x) { obj(bnc)->slots[i] = x; }
+/* shell-free: reclaim the bounce object WITHOUT releasing the args (moved into the
+   step applies) or the step (slots[0], borrowed). The ARC dual of $rt_bounce_free_shell
+   (wasm_runtime.go:743-751). */
+static void bounce_free_shell(Value bnc) { Obj* o = obj(bnc); rt_live--; free(o); }
+/* tramp: force the bounce chain, porting the WASM $rt_tramp ARC protocol
+   (wasm_runtime.go:756-782). Re-apply the BORROWED step (slots[0]) to each OWNED arg
+   (slots[1..nargs], MOVED into the applies). Each apply but the first builds an owned
+   intermediate closure that nothing else frees -- RELEASE the previous intermediate
+   before the next apply (i>1; the step at i==1 is borrowed, not released). Then
+   shell-free the spent bounce (args moved, step borrowed) and continue. O(1) C stack. */
 static Value tramp(Value v) {
   while (!IS_INT(v) && obj(v)->kind == K_BOUNCE) {
     Obj* o = obj(v);
     Value f = o->slots[0];
-    for (int i = 1; i <= o->tag; i++) f = apply(f, o->slots[i]);
+    for (int i = 1; i <= o->tag; i++) {
+      Value next = apply(f, o->slots[i]);
+      if (i > 1) rt_release(f); /* release the previous intermediate (not the borrowed step) */
+      f = next;
+    }
+    bounce_free_shell(v);
     v = f;
   }
   return v;
@@ -1574,35 +1680,58 @@ static Value big_monus(Value a, Value b) {
   return big_norm(r);
 }
 
-static Value big_succ(Value a) { return big_add(a, big_from_long(1)); }
+/* big_succ: a+1. big_add reads both inputs and returns a fresh K_BIG; the "1" we
+   allocate is OURS to own, so release it once big_add has consumed it. Without this,
+   every big_succ (the per-iteration counter step in the nat fold, and every builtin
+   succ application) leaks one K_BIG(1) per call. Mirrors WASM's $rt_big_succ. */
+static Value big_succ(Value a) { Value one = big_from_long(1); Value r = big_add(a, one); rt_release(one); return r; }
 
 /* Schoolbook long division (base-1e9 limbs), MS-limb first with a per-limb binary
    search for the quotient digit (using big_cmp/big_mul over existing ops). Returns
    the quotient; *rem receives the remainder. Division by zero yields q=0, r=a (the
    DIV-LAW-at-0 convention matching the kernel's NatOp). */
+/* an independent (fresh, owned) copy of a normed bignum's magnitude. */
+static Value big_copy(Value a) {
+  int n = big_nlimbs(a);
+  Value r = mkbig(n);
+  for (int i = 0; i < n; i++) big_setlimb(r, i, big_limb(a, i));
+  return r;
+}
+/* ARC discipline: q and *rem are FRESH owned results that never alias an input, and
+   every internal K_BIG temporary is released. The pre-ARC version set *rem = a in the
+   short-circuit arms (aliasing the input) and never freed its loop temps -- under ARC
+   that made big_mod x y (x<y) return the OPERAND, which accelDispatch then freed out
+   from under the result (a use-after-free, TestMathBits), plus a per-call temp leak. */
 static Value big_divmod(Value a, Value b, Value* rem) {
-  if (big_nlimbs(b) == 0) { *rem = a; return big_from_long(0); }
-  if (big_cmp(a, b) < 0) { *rem = a; return big_from_long(0); }
+  if (big_nlimbs(b) == 0) { *rem = big_copy(a); return big_from_long(0); }
+  if (big_cmp(a, b) < 0) { *rem = big_copy(a); return big_from_long(0); }
   int n = big_nlimbs(a);
   Value q = mkbig(n);
   Value r = big_from_long(0);
   Value base = big_from_long(BIG_BASE);
   for (int i = n - 1; i >= 0; i--) {
-    r = big_add(big_mul(r, base), big_from_long(big_limb(a, i)));
+    Value t1 = big_mul(r, base), t2 = big_from_long(big_limb(a, i)), rn = big_add(t1, t2);
+    rt_release(t1); rt_release(t2); rt_release(r); r = rn;
     long lo = 0, hi = BIG_BASE - 1, d = 0;
     while (lo <= hi) {
       long mid = lo + (hi - lo) / 2;
-      if (big_cmp(big_mul(b, big_from_long(mid)), r) <= 0) { d = mid; lo = mid + 1; }
-      else hi = mid - 1;
+      Value m1 = big_from_long(mid), m2 = big_mul(b, m1);
+      int cmp = big_cmp(m2, r);
+      rt_release(m1); rt_release(m2);
+      if (cmp <= 0) { d = mid; lo = mid + 1; } else hi = mid - 1;
     }
     big_setlimb(q, i, d);
-    r = big_monus(r, big_mul(b, big_from_long(d)));
+    Value dd = big_from_long(d), bd = big_mul(b, dd), rr = big_monus(r, bd);
+    rt_release(dd); rt_release(bd); rt_release(r); r = rr;
   }
+  rt_release(base);
   *rem = big_norm(r);
   return big_norm(q);
 }
-static Value big_div(Value a, Value b) { Value r; return big_divmod(a, b, &r); }
-static Value big_mod(Value a, Value b) { Value r; big_divmod(a, b, &r); return r; }
+/* big_div returns the quotient and DISCARDS the (now fresh, owned) remainder -- release
+   it. big_mod returns the remainder and discards the quotient -- release that. */
+static Value big_div(Value a, Value b) { Value r; Value q = big_divmod(a, b, &r); rt_release(r); return q; }
+static Value big_mod(Value a, Value b) { Value r; Value q = big_divmod(a, b, &r); rt_release(q); return r; }
 
 /* print a bignum as a decimal magnitude (top limb plain, the rest 0-padded). */
 static void big_print(Value v) {
@@ -1710,17 +1839,41 @@ static Value def_qind(void) { return mkclo(&quot_qind0, 0); }
 // (a unit-argument closure); pureIO returns a constant thunk; bindIO sequences —
 // run m (apply to UNIT), feed its result to k, run that. Type arguments arrive
 // as units. Mirrors js.go's ioRuntime for byte-identical observable output.
+/* The IO monad (bindIO/pureIO), ARC-aligned with the WASM twins emitPureIOWasm /
+   emitBindIOWasm (wasm.go:2379-2447). The curry intermediates (io_pure1, io_bind1..3)
+   are ORDINARY closures the generic apply path RELEASES after each call ($clo drop), so
+   a forwarded env capture must be RETAINED into the child (else releasing the parent
+   frees a value the child still owns -- the io_bind3-forwards-m use-after-free ASAN
+   caught on ch43). def_pureIO/def_bindIO are MEMOIZED cached roots (borrowed by the
+   pass), like every other thunk. */
 const cIORuntime = `
-/* pureIO A a u = a  (a constant world thunk capturing a) */
-static Value io_pure2(Value arg, Value* env) { (void)arg; return env[0]; }
+/* pureIO A a u = a  (a constant world thunk capturing a). The world step RETAINS +
+   returns the captured value as an independent owned reference (io_bind4 consumes it). */
+static Value io_pure2(Value arg, Value* env) { (void)arg; rt_retain(env[0]); return env[0]; }
 static Value io_pure1(Value arg, Value* env) { (void)env; Value c = mkclo(&io_pure2, 1); clo_set(c, 0, arg); return c; }
 static Value io_pure0(Value arg, Value* env) { (void)arg; (void)env; return mkclo(&io_pure1, 0); }
-static Value def_pureIO(void) { return mkclo(&io_pure0, 0); }
-/* bindIO A B m k u = k (m ()) ()   (captures m then k, sequences on force) */
-static Value io_bind4(Value arg, Value* env) { (void)arg; /* env = {m, k} */ return apply(apply(env[1], apply(env[0], UNIT)), UNIT); }
-static Value io_bind3(Value arg, Value* env) { /* env = {m} */ Value c = mkclo(&io_bind4, 2); clo_set(c, 0, env[0]); clo_set(c, 1, arg); return c; }
+static Value def_pureIO(void) { static int done=0; static Value cache=0; if(done) return cache; done=1; cache=mkclo(&io_pure0, 0); return cache; }
+/* bindIO A B m k u = k (m ()) ()   (captures m then k, sequences on force). io_bind4
+   runs m (borrowed from env), feeds its value to k (borrowed), and runs the resulting
+   action. io_bind3 RETAINS the forwarded m into io_bind4 (the ch43 UAF fix) and MOVES
+   the owned k.
+
+   NOTE (Task 3 dependency): the fresh action act is NOT released here, unlike the WASM
+   twin (which does rt_release on it). Several C IO world-steps -- printNat/printFloat/
+   printStrCode/writeChunk -- RETURN their captured value WITHOUT retaining it (a foreign
+   prim-body ARC gap; the WASM twins retain, e.g. printNat_w). Releasing act would free
+   that returned value out from under r (a use-after-free that renders it as UNIT, as
+   TestIOFloatDoubleDemo showed). Leaking act is a CONSTANT per bindIO (output-identical);
+   the release re-enables once the print-and-return prim bodies retain their result (Task 3
+   prim sweep) -- then this line releases act, matching WASM. */
+static Value io_bind4(Value arg, Value* env) { (void)arg; /* env = {m, k} */
+  Value v = apply(env[0], UNIT);
+  Value act = apply(env[1], v);
+  return apply(act, UNIT);
+}
+static Value io_bind3(Value arg, Value* env) { /* env = {m} */ Value c = mkclo(&io_bind4, 2); rt_retain(env[0]); clo_set(c, 0, env[0]); clo_set(c, 1, arg); return c; }
 static Value io_bind2(Value arg, Value* env) { (void)env; Value c = mkclo(&io_bind3, 1); clo_set(c, 0, arg); return c; }
 static Value io_bind1(Value arg, Value* env) { (void)arg; (void)env; return mkclo(&io_bind2, 0); }
 static Value io_bind0(Value arg, Value* env) { (void)arg; (void)env; return mkclo(&io_bind1, 0); }
-static Value def_bindIO(void) { return mkclo(&io_bind0, 0); }
+static Value def_bindIO(void) { static int done=0; static Value cache=0; if(done) return cache; done=1; cache=mkclo(&io_bind0, 0); return cache; }
 `
