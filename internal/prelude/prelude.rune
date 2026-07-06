@@ -78,36 +78,6 @@ data Bool : U is
 end
 
 -- ====================================================================
--- THE ARITHMETIC CLASSES.  Operators are overloaded across the numeric tower by
--- typeclass dispatch — a class is a type family, an instance is a value of it
--- registered in the session, and an operator is a class-constrained function whose
--- dictionary the elaborator resolves from the TYPE of its arguments.
---
--- `Num` bundles the operations a level is CLOSED under — `+` and `*` (wholes,
--- integers, and fractions are each closed under both). It is ONE Σ-record, not two
--- one-method classes `Add A`/`Mul A`: those would each be `A -> A -> A`, hence
--- HASH-IDENTICAL (identity is structure, not name), so their instances collide on a
--- single key. Bundling distinguishes them by position (the Nat-vs-Whole-Σ trap).
---
--- Subtraction is NOT here: ℕ is not closed under it (2 − 5 has no whole answer), so
--- `-` PROMOTES (Whole → Int) and gets its own result-typed class `Sub` below.
--- (`/` likewise leaves ℕ for the rationals; `// %` are integer ops at Whole.)
--- ====================================================================
-Num : U -> U is
-  fn (A : U) is Sig (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) end
-end
-mkNum : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> Num A is
-  fn (A : U) (a : A -> A -> A) (m : A -> A -> A) is
-    Pair (A -> A -> A) (fn (_p : A -> A -> A) is A -> A -> A end) a m
-  end
-end
-
-instance numWhole : Num Whole is mkNum Whole addW mulW end
-
-+ : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.1) x y end end
-* : {A : U} -> {d : Num A} -> A -> A -> A is fn {A : U} {d : Num A} (x : A) (y : A) is (d.2) x y end end
-
--- ====================================================================
 -- THE ALGEBRAIC OPS LADDER (v4). Three Σ-record classes carrying OPERATIONS
 -- ONLY: Semiring {add, zero, mul, one} -> Ring {+neg} -> DivRing {+recip}.
 -- Laws live in SEPARATE records (SemiringLaws and friends, below), so a type
@@ -162,6 +132,24 @@ mkDivRing : (A : U) -> Ring A -> (A -> A) -> DivRing A is
   fn (A : U) (r : Ring A) (rc : A -> A) is
     Pair (Ring A) (fn (_r : Ring A) is A -> A end) r rc
   end
+end
+
+-- ====================================================================
+-- ARITHMETIC DISPATCH. `+` and `*` are Semiring-constrained: the elaborator
+-- resolves the dictionary from the argument TYPE (class = type family,
+-- instance = registered value; see the ops-ladder banner above). Whole,
+-- Int, and Frac each register a Semiring instance below at their rungs.
+-- Subtraction is NOT here: ℕ is not closed under it (2 − 5 has no whole
+-- answer), so `-` PROMOTES (Whole → Int) via the result-typed `SubR` class
+-- below; `/` likewise promotes to Frac; `// %` are integer ops at Whole.
+-- ====================================================================
+instance semiringWhole : Semiring Whole is mkSemiring Whole addW zero mulW (succ zero) end
+
++ : {A : U} -> {d : Semiring A} -> A -> A -> A is
+  fn {A : U} {d : Semiring A} (x : A) (y : A) is (d.1) x y end
+end
+* : {A : U} -> {d : Semiring A} -> A -> A -> A is
+  fn {A : U} {d : Semiring A} (x : A) (y : A) is (d.2.2.1) x y end
 end
 
 -- ====================================================================
@@ -508,7 +496,24 @@ addF : Frac -> Frac -> Frac is
 end
 subF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is addF x (fnegate y) end end
 
-instance numFrac : Num Frac is mkNum Frac addF mulF end
+-- Frac's full rung is a DivRing: reciprocal swaps numerator and denominator
+-- (keeping the sign); recip of zero is the junk value zero itself (0/1),
+-- per the ops-ladder convention. A reduced fraction swaps to a reduced
+-- fraction, so no re-reduce is needed.
+recipF : Frac -> Frac is
+  fn (f : Frac) is
+    case fnum f of
+    | zero -> f
+    | succ k -> frac (fneg f) (fden f) (fnum f)
+    end
+  end
+end
+divRingFrac : DivRing Frac is
+  mkDivRing Frac
+    (mkRing Frac (mkSemiring Frac addF (frac false zero (succ zero)) mulF (frac false (succ zero) (succ zero))) fnegate)
+    recipF
+end
+instance semiringFrac : Semiring Frac is divRingFrac.1.1 end
 
 -- ====================================================================
 -- THE INT RUNG (ℤ).  Whole is not closed under subtraction, so `-` PROMOTES into
@@ -552,7 +557,12 @@ wsub : Whole -> Whole -> Int is
     end
   end
 end
-instance numInt : Num Int is mkNum Int iadd imul end
+-- Int's full rung is a Ring (ℤ is not closed under reciprocal; division
+-- promotes to Frac via divIF below).
+ringInt : Ring Int is
+  mkRing Int (mkSemiring Int iadd (int false zero) imul (int false (succ zero))) ineg
+end
+instance semiringInt : Semiring Int is ringInt.1 end
 
 -- Int / Int climbs to ℚ, exactly as Whole / Whole does (ℤ is not closed under
 -- division). So `-1` (an Int from prefix `-`) divides: `-1/3` is the Frac -1/3.

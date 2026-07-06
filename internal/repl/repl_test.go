@@ -239,6 +239,8 @@ func TestREPLTowerArithmetic(t *testing.T) {
 		"1/3 - 1/3",     // to zero
 		"2/4",           // a typed fraction reduces to lowest terms
 		"2/3 * 3/2",     // product reduces to a whole-valued fraction
+		"4000 * 4000",   // Semiring dispatch still hits the bigint accel post-rewire
+		"(1/2) * (2/3)", // fraction multiplication through the same dispatch
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -248,14 +250,16 @@ func TestREPLTowerArithmetic(t *testing.T) {
 	}
 	got := out.String()
 	wants := []string{
-		"2 : Whole",   // 1 + 1
-		"-1/3 : Frac", // 1/3 - 2/3 (and the parenthesised form)
-		"1 : Frac",    // 1/3 + 2/3
-		"5/6 : Frac",  // 2/3 + 1/6
-		"2/3 : Frac",  // 1/3 * 2
-		"1/6 : Frac",  // 1/(3*2)
-		"0 : Frac",    // 1/3 - 1/3
-		"1/2 : Frac",  // 2/4 reduced
+		"2 : Whole",        // 1 + 1
+		"-1/3 : Frac",      // 1/3 - 2/3 (and the parenthesised form)
+		"1 : Frac",         // 1/3 + 2/3
+		"5/6 : Frac",       // 2/3 + 1/6
+		"2/3 : Frac",       // 1/3 * 2
+		"1/6 : Frac",       // 1/(3*2)
+		"0 : Frac",         // 1/3 - 1/3
+		"1/2 : Frac",       // 2/4 reduced
+		"1/3 : Frac",       // (1/2) * (2/3)
+		"16000000 : Whole", // 4000 * 4000, accelerated, through Semiring dispatch
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
