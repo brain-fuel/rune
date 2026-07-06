@@ -54,6 +54,56 @@ main : Nat is guard 7 end`
 	}
 }
 
+// TestCARCFoldPrimBalance is the Task-3 prim-body gate: `foldLines` over a temp file
+// is the highest-risk foreign shape (apply-in-loop). The world step (foldLines_c5)
+// borrows `step` (env[0]) and threads the accumulator; each line the emitted apply chain
+// `apply(apply(apply(step, s), line), UNIT)` produces two fresh intermediate closures
+// that NOTHING releases unless the prim body releases them, so a pre-sweep body leaks two
+// K_CLO per line -> the retained heap scales with line count. It also returns the
+// accumulator without retaining it (a borrowed env slot handed back as owned), which
+// double-frees / reads-freed once Perceus releases the fold's IO result. Both are fixed
+// by the sweep; this asserts (a) the count is correct and (b) rt_live does NOT scale with
+// the number of lines.
+func TestCARCFoldPrimBalance(t *testing.T) {
+	srcTmpl := `data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+foreign foldLines : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign printNat  : Nat -> IO Nat end
+step : Nat -> Nat -> IO Nat is
+  fn (count : Nat) (line : Nat) is pureIO Nat (succ count) end
+end
+main : IO Nat is
+  bindIO Nat Nat (foldLines Nat (codeOf "%s") step zero)
+    (fn (n : Nat) is printNat n end)
+end`
+	mkfile := func(n int) string {
+		dir := t.TempDir()
+		p := dir + "/lines.txt"
+		var b strings.Builder
+		for i := 0; i < n; i++ {
+			b.WriteString("line\n")
+		}
+		if err := os.WriteFile(p, []byte(b.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	pSmall := mkfile(5)
+	pBig := mkfile(2000)
+	outSmall, liveSmall := buildAndRunCWithReport(t, fmt.Sprintf(srcTmpl, pSmall), "main")
+	outBig, liveBig := buildAndRunCWithReport(t, fmt.Sprintf(srcTmpl, pBig), "main")
+	// main : IO Nat prints the count (printNat) then show() prints the returned nat.
+	if outSmall != "5\n5" || outBig != "2000\n2000" {
+		t.Fatalf("foldLines count wrong: %q (5 lines), %q (2000 lines)", outSmall, outBig)
+	}
+	if liveBig-liveSmall > 64 {
+		t.Fatalf("foldLines retained heap scales with line count: rt_live %d (5 lines) vs %d (2000 lines) -- prim apply-in-loop leaks its per-line intermediates", liveSmall, liveBig)
+	}
+}
+
 // buildAndRunCWithReport emits the C backend for `main`, compiles it with
 // -DRUNE_ARC_REPORT, runs it, and returns (trimmed stdout, rt_live). It skips
 // gracefully when no C compiler is on PATH.

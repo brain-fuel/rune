@@ -222,7 +222,7 @@ func TestForeignMultiConformance(t *testing.T) {
 				shim := "/* FFI gate host accessors: hostId = identity, hostConst = first projection. */\n" +
 					"static Value hostId_code(Value arg, Value* env) { (void)env; return arg; }\n" +
 					"static Value hostId(void) { return mkclo(&hostId_code, 0); }\n" +
-					"static Value hostConst_inner(Value b, Value* env) { (void)b; return env[0]; }\n" +
+					"static Value hostConst_inner(Value b, Value* env) { (void)b; rt_retain(env[0]); return env[0]; }\n" +
 					"static Value hostConst_code(Value a, Value* env) { (void)env; Value c = mkclo(&hostConst_inner, 1); clo_set(c, 0, a); return c; }\n" +
 					"static Value hostConst(void) { return mkclo(&hostConst_code, 0); }\n"
 				i := strings.Index(src, "static Value def_")
