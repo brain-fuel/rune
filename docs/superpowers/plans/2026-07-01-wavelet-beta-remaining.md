@@ -100,16 +100,27 @@ The remaining Tier A:
     (hashes are name-independent).
 13. **6e: ARC on C + LLVM** (replace mark-sweep). PRIMARY per the author
     (2026-07-05): next work item, in-beta, supersedes the earlier post-beta
-    classification. Unlocks the native backends for the scale gate (mark-sweep's
-    O(N) live-heap walks excluded them from the bible-ops scale gate) and aligns
-    all nine backends on one memory discipline (WASM's Perceus/ARC is the
-    reference implementation). C HALF DONE (2026-07-06, Plan A, branch
-    feat/native-arc-c): the C backend is fully ARC (rc header, malloc/free, a
-    per-kind free walker, the shared Perceus pass wired at codegen/c.go's Emit,
-    PATH B ownership rules on every prim body, the pair-projection residual
-    parked honestly in PARKING-LOT.md) with the 12-test TestCARC gate family
-    passing including pressure + ASAN. LLVM half (Plan B, ll.go/ll_runtime.go
-    mirror + the scale-gate exclusion removal) is next.
+    classification. Aligns all nine backends on one memory discipline (WASM's
+    Perceus/ARC is the reference implementation). ~~ARC CONVERSION DONE~~
+    (2026-07-06): the C backend (Plan A, branch feat/native-arc-c) and the LLVM
+    backend (Plan B, branch feat/native-arc-ll) are BOTH fully ARC -- rc header,
+    malloc/free, per-kind free walker, the shared Perceus pass wired at Emit,
+    PATH B ownership rules on every prim body, the pair-projection residual parked
+    honestly in PARKING-LOT.md. TestCARC (12 tests, pressure + ASAN) and
+    TestLLConformsToC + the LLVM ARC gate family are green; mark-sweep is retired
+    on both native backends.
+    BUT the STATED PAYOFF -- native backends rejoining the bible real-data SCALE
+    gate -- did NOT materialize, and the exclusion STAYS. The premise was that
+    mark-sweep's O(N) live-heap walk was the sole blocker; MEASUREMENT (2026-07-06,
+    BIBLE_REPO set, exclusion removed, N=1500) disproved it: with the GC scan gone,
+    the native rows are still dominated by the ch559 builder's ~8000-bignum-per-file
+    allocation volume under per-alloc ARC -- c ran 23m54s (~956 ms/entry, byte-
+    identical + query-equivalent, so CORRECT at scale) and ll did not finish inside
+    the 30m suite budget, versus 15-35 ms/entry for every source backend. Admitting
+    c/ll times the whole gate out, so the scale gate keeps its c/ll exclusion (now
+    with a measured logged reason). This is a residual bignum/codec-allocation PERF
+    item, re-characterized and parked in PARKING-LOT.md ("Native codec-over-corpus
+    impractically slow -- residual per-alloc ARC cliff"); not a correctness gap.
 14. **Doc sweep on release:** README matrix count and FOSS list (fixed 2026-07-01),
     index statuses (fixed 2026-07-01), keep R-INFRA.md the single as-built source.
 

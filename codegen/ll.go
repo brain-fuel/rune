@@ -17,8 +17,9 @@ import (
 // LLVM `switch`, CField is a runtime field load, CLit{LitNat} is an immediate.
 //
 // RUNTIME STRATEGY (pragmatic, low-risk — R-NATIVE stage 2): the LLVM backend
-// REUSES the C runtime. Re-implementing the tagged-word Value rep, the mark-sweep
-// GC, and `$show` by hand in LLVM IR would be enormous and unforgiving; instead
+// REUSES the C runtime. Re-implementing the tagged-word Value rep, the ARC runtime
+// (retain/release, mark-sweep retired), and `$show` by hand in LLVM IR would be
+// enormous and unforgiving; instead
 // the generated CODE is real LLVM IR that CALLS into a small linked C runtime
 // (`llRuntimeC`, the external-linkage twin of cRuntime). This is a legitimate LLVM
 // backend: the codegen target IS LLVM IR; the runtime is a linked C shim exactly

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"goforge.dev/rune/v3/codegen"
 )
@@ -388,24 +389,30 @@ func TestBibleConformanceRealData(t *testing.T) {
 		// The native backends (c/ll) are byte-identity-proven on REAL Greek+Hebrew by the
 		// synthetic TestBibleConformanceBuilders gate (its lexdbfix fixture holds Hebrew/Greek
 		// through the full jsonStrField/sqlQuote/sortFile path) and by construction (the codec is
-		// raw-byte, so no charset re-encode is possible). They are excluded from THIS 1500-entry
-		// SCALE gate only: the native GC's O(N_live) conservative stack scan makes the bignum
-		// codec over 1500 files impractically slow (~30s/entry) -- a parked perf item, not a
-		// correctness gap. See PARKING-LOT.md "native GC gc_find_obj O(N_live)".
+		// raw-byte, so no charset re-encode is possible). They remain excluded from THIS 1500-entry
+		// SCALE gate. The 6e native-ARC conversion (Plan A/B) retired the mark-sweep GC and its
+		// O(N_live) conservative stack scan, but MEASUREMENT (2026-07-06, BIBLE_REPO set, native-arc
+		// branch) shows the perf cliff is NOT the GC: the ch559 builder allocates ~8000 bignums per
+		// file (the packed-String codec + splitOn/jsonStrField cells), and per-allocation ARC
+		// retain/release over the 1500-file sample runs the C row at ~956 ms/entry (23m54s total,
+		// byte-identical + query-equivalent -- correctness confirmed at scale) versus 15-35 ms/entry
+		// for every source backend; the LLVM row did not finish inside the 30m suite budget. So
+		// admitting c/ll here times the whole gate out. This is a residual PERF item, not a
+		// correctness gap -- see PARKING-LOT.md "Native codec-over-corpus impractically slow".
 		if bk.name == "c" || bk.name == "ll" {
 			// Deliberate scale-only exclusion -- NOT a missing-toolchain "inconclusive" (do not
 			// append to `skipped`, which would trip the partial-toolchain skip and drop the whole
 			// gate's assertion). The remaining backends still form the divergence lock.
-			t.Logf("real-data scale gate excludes %s (byte-identity proven by TestBibleConformanceBuilders; native GC too slow at N=1500 -- PARKING-LOT)", bk.name)
+			t.Logf("real-data scale gate excludes %s (byte-identity proven by TestBibleConformanceBuilders; native ARC still ~956 ms/entry at N=1500, blows the 30m budget -- PARKING-LOT)", bk.name)
 			continue
 		}
 		// WASM DELIBERATELY JOINS this scale gate (unlike native c/ll above): its allocator
-		// is ARC + a size-classed freelist with NO scanning GC (no O(N_live) sweep), so it does
-		// not share native's perf cliff. A local synthetic-scale timing (1500 lexicon-shaped
-		// fixtures, same ch559 builder, since BIBLE_REPO is not available in every environment)
-		// ran wasmtime in well under 1s -- an order of magnitude faster than the JS backend on
-		// the same input -- so excluding WASM here would be unwarranted, not merely cautious.
+		// is ARC + a size-classed freelist AND it avoids native's per-bignum retain/release
+		// cliff. A local synthetic-scale timing (1500 lexicon-shaped fixtures, same ch559 builder,
+		// since BIBLE_REPO is not available in every environment) ran wasmtime in well under 1s --
+		// an order of magnitude faster than the JS backend on the same input.
 		dir := t.TempDir()
+		bkStart := time.Now()
 		// Sample real Greek+Hebrew lexicon entries (not the whole 23,681-file corpus:
 		// the per-backend bignum codec over every file totals >1hr across 5 backends).
 		// A balanced sample proves cross-backend byte-identity on REAL non-ASCII data in
@@ -470,6 +477,7 @@ func TestBibleConformanceRealData(t *testing.T) {
 		if n := strings.Count(strings.TrimSpace(string(dump)), "\n") + 1; n < 400 {
 			t.Errorf("[%s] lexicon dump only %d rows -- build likely failed", bk.name, n)
 		}
+		t.Logf("real-data scale gate: [%s] sample+emit+compile+run+query = %s", bk.name, time.Since(bkStart).Round(time.Millisecond))
 	}
 	if len(skipped) > 0 {
 		t.Skipf("divergence gate inconclusive -- missing backend toolchain(s): %v", skipped)

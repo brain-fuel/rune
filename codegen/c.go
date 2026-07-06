@@ -71,9 +71,10 @@ import (
 // so it stays a pass-level item for a future plan rather than being patched
 // around in this backend.
 //
-// LLVM (codegen/ll.go, codegen/ll_runtime.go) still runs the old mark-sweep
-// collector; mirroring this same Perceus conversion there is Plan B of the
-// native-ARC design and is not done by this backend's change.
+// LLVM (codegen/ll.go, codegen/ll_runtime.go) now runs this same Perceus ARC
+// conversion (Plan B of the native-ARC design, branch feat/native-arc-ll); its
+// external-linkage runtime is the twin of this one, so both native backends
+// share one memory discipline and mark-sweep is retired on both.
 type C struct{}
 
 func (C) Target() string { return "c" }

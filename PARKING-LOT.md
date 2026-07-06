@@ -473,24 +473,30 @@ introducing a one-off. FIX when a non-ASCII WRITE consumer appears: emit `Buffer
 across the WHOLE write vocabulary at once (writeFileCode + writeChunk + sortFile), so they stay
 consistent. No consumer now -> parked (Standing Rule 1).
 
-## Native GC gc_find_obj is O(N_live) -- codec-over-corpus impractically slow (2026-07-01, bible cross-backend tier 3)
-SUPERSEDED on the C backend (2026-07-06, native-ARC design Plan A): the C emitter now runs Perceus
-ARC (rt_retain/rt_release, no cycle collector, no gc_find_obj) in place of mark-sweep, so this entry's
-C half no longer applies -- there is no conservative stack scan to be slow. LLVM (codegen/ll.go,
-codegen/ll_runtime.go) still runs the mark-sweep collector described below; this entry stays open for
-LLVM until Plan B mirrors the same ARC conversion there, at which point it closes fully and the
-bible real-data scale gate can admit both native backends.
-The native C/LLVM runtimes' conservative stack scan calls `gc_find_obj` (codegen/c.go), an O(N_live)
-LINEAR scan per stack word. The bible builders allocate ~8000 bignums per file (the packed-String codec
-+ splitOn/jsonStrField cells); over the real-data lexicon (~1500 sampled files) GC dominates -- native runs
-at ~30s/entry (the source backends finish in seconds), so `TestBibleConformanceRealData` at N=1500 times out
-on c/ll. NOT a correctness bug: native byte-identity on real Greek+Hebrew is PROVEN by the synthetic 8-way
-`TestBibleConformanceBuilders` gate (lexdbfix fixture holds Hebrew `אב` + Greek `Α` routed through
-jsonStrField/sqlQuote/sortFile -> lexicon.sql, sha256 c4246e3 identical across all 8 backends) + by
-construction (raw-byte codec, no charset re-encode possible). So the RealData SCALE gate skips c/ll with a
-logged reason (harness/bible_conformance_test.go). FIX (a real perf item, already flagged in c.go's GC
-comment as "a sorted-bounds / bitmap speedup is a later perf item"): replace gc_find_obj's linear scan with
-a sorted-interval tree or an allocation bitmap so conservative marking is sub-linear. Park (Standing Rule 1,
+## Native codec-over-corpus impractically slow -- residual per-alloc ARC cliff (2026-07-01; RE-CHARACTERIZED 2026-07-06, bible cross-backend tier 3)
+STILL OPEN, but the ROOT CAUSE was measured and is NOT what this entry originally claimed. The 6e
+native-ARC conversion (Plan A on C, Plan B on LLVM; branch feat/native-arc-ll) retired mark-sweep and its
+conservative stack scan entirely -- both native runtimes now run Perceus ARC (rt_retain/rt_release, no
+cycle collector, no gc_find_obj), so the O(N_live) LINEAR-scan cost this entry blamed is GONE. The
+expectation (beta item 13) was that removing that scan would let the native backends rejoin the bible
+real-data SCALE gate. IT DID NOT. Measured 2026-07-06 with BIBLE_REPO set, exclusion removed, at N=1500:
+  - c row: 23m54s total = ~956 ms/entry -- and it PASSED every assertion (byte-identical to the reference
+    .sql + query-equivalent + >400 rows), so correctness holds at 1500-scale; the problem is purely wall-clock.
+  - ll row: did NOT finish inside the 30m suite budget; the whole `TestBibleConformanceRealData` panicked
+    at the 30m timeout (FAIL, 1800s).
+  - source backends for comparison: js 23.5s / go 22.8s / py 25.2s / rs 30.9s / erl 52.9s / jvm 25.2s TOTAL
+    (15-35 ms/entry) -- native is ~30-62x slower per entry.
+The residual cliff is the SHEER ALLOCATION VOLUME under per-alloc ARC, not a GC walk: the ch559 builder
+allocates ~8000 bignums per file (the packed-String codec + splitOn/jsonStrField cells), and every one takes
+a malloc + rt_retain/rt_release traffic that the source backends' native GCs / value reps absorb far more
+cheaply. So the native SCALE-gate re-admission is BLOCKED on a real bignum/codec-allocation perf item, not on
+the (now-retired) GC scan. The RealData scale gate therefore keeps its c/ll exclusion, now with a measured
+logged reason (harness/bible_conformance_test.go). Native byte-identity on real Greek+Hebrew stays PROVEN
+independently by the synthetic 9-way `TestBibleConformanceBuilders` gate (lexdbfix fixture holds Hebrew `אב`
++ Greek `Α` routed through jsonStrField/sqlQuote/sortFile -> lexicon.sql, byte-identical across all backends)
++ by construction (raw-byte codec, no charset re-encode possible). FIX (a real perf item): reduce the codec's
+per-file allocation count (arena/bump the throwaway decode cells, or a small-int fast lane so codec bignums
+under 2^63 skip heap boxing) so native per-entry cost approaches the source backends. Park (Standing Rule 1,
 no perf consumer -- the corpus ETL runs go-only in production; native is a conformance target, not the ETL).
 
 ## WASM foldDir suffix window aliased the shared codec scratch -- FIXED (2026-07-02, bible cross-backend tier 4)
