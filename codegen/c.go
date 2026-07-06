@@ -446,8 +446,15 @@ func (em *cEmitter) exprIn(t CIr, locals []string) string {
 	case CGlobal:
 		return cThunkName(x.Name) + "()"
 	case CForeign:
-		// Host-linked accessor: the host defines `Value <name>(void)`.
-		return cName(x.Name) + "()"
+		// Host-linked accessor: the host defines `Value <name>(void)`. Spec Decision 4:
+		// a CForeign accessor read is BORROWED (a cached root the pass never releases;
+		// callers dup on consumption). The host accessor allocates a fresh closure per
+		// call, so an unmemoized read leaks one closure PER READ (scaling inside a fold
+		// loop — the byteLen-per-line leak). Memoize per call site with a block-scope
+		// static, the dual of WASM's emitCachedThunk ($def_<op>) and of emitDefThunk's
+		// CGlobal cache: the cache holds one never-released root for the process life.
+		n := cName(x.Name)
+		return fmt.Sprintf("({ static Value _fc_%s; if (!_fc_%s) _fc_%s = %s(); _fc_%s; })", n, n, n, n, n)
 	case CUnit:
 		return "UNIT"
 	case CLit:
@@ -793,22 +800,27 @@ func emitStreamPrimsC(b *strings.Builder, p Program) {
 		b.WriteString("static unsigned char* d6_s2h(Value code, size_t* outlen) { Value one = big_from_long(1); Value d256 = big_from_long(256); size_t cap = 16, n = 0; unsigned char* buf = (unsigned char*)malloc(cap); Value b = code; while (big_cmp(b, one) > 0) { Value rem; Value q = big_divmod(b, d256, &rem); int byte = (big_nlimbs(rem) == 0) ? 0 : (int)(big_limb(rem, 0) & 255); rt_release(rem); if (n == cap) { cap *= 2; buf = (unsigned char*)realloc(buf, cap); } buf[n++] = (unsigned char)byte; if (b != code) rt_release(b); b = q; } if (b != code) rt_release(b); rt_release(one); rt_release(d256); *outlen = n; return buf; }\n")
 		b.WriteString("static Value d6_h2s(const unsigned char* s, size_t len) { Value n = big_from_long(1); Value m = big_from_long(256); size_t i = len; while (i-- > 0) { Value nm = big_mul(n, m); Value d = big_from_long((long)s[i]); Value nn = big_add(nm, d); rt_release(nm); rt_release(d); rt_release(n); n = nn; } rt_release(m); return n; }\n")
 	}
+	// ARC (terminal pure ops): apply CONSUMES its argument, so a terminal body OWNS its
+	// direct arg and must RELEASE it when it neither stores nor returns it — exactly the
+	// WASM twins (byteLen_c1 wasm.go:1262 "the owned $arg is consumed (released)";
+	// splitOn/jsonStrField/sqlQuote; fromNat/fmul_c2 in wasm_float.go). env[i] slots stay
+	// BORROWED (freed when the curry closure dies) — only the DIRECT arg is owned.
 	if usesForeign(p, "byteLen") {
-		b.WriteString("static Value byteLen_c1(Value c, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(c, &len); free(buf); return big_from_long((long)len); }\n")
+		b.WriteString("static Value byteLen_c1(Value c, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(c, &len); free(buf); rt_release(c); return big_from_long((long)len); }\n")
 		b.WriteString("static Value byteLen(void) { return mkclo(&byteLen_c1, 0); }\n")
 	}
 	if usesForeign(p, "splitOn") {
-		b.WriteString("static Value splitOn_c2(Value c, Value* env) { long sb = big_nlimbs(env[0]) == 0 ? 0 : (big_limb(env[0], 0) & 255); size_t len; unsigned char* data = d6_s2h(c, &len); Value lst = mkcon(0, \"nil\", 1); con_set(lst, 0, UNIT); size_t segstart = 0; size_t nsegs = 0; size_t* starts = (size_t*)malloc(sizeof(size_t) * (len + 2)); size_t* ends = (size_t*)malloc(sizeof(size_t) * (len + 2)); for (size_t i = 0; i <= len; i++) { if (i == len || data[i] == (unsigned char)sb) { starts[nsegs] = segstart; ends[nsegs] = i; nsegs++; segstart = i + 1; } } for (size_t s = nsegs; s-- > 0; ) { Value part = d6_h2s(data + starts[s], ends[s] - starts[s]); Value cons = mkcon(1, \"cons\", 3); con_set(cons, 0, UNIT); con_set(cons, 1, part); con_set(cons, 2, lst); lst = cons; } free(starts); free(ends); free(data); return lst; }\n")
+		b.WriteString("static Value splitOn_c2(Value c, Value* env) { long sb = big_nlimbs(env[0]) == 0 ? 0 : (big_limb(env[0], 0) & 255); size_t len; unsigned char* data = d6_s2h(c, &len); Value lst = mkcon(0, \"nil\", 1); con_set(lst, 0, UNIT); size_t segstart = 0; size_t nsegs = 0; size_t* starts = (size_t*)malloc(sizeof(size_t) * (len + 2)); size_t* ends = (size_t*)malloc(sizeof(size_t) * (len + 2)); for (size_t i = 0; i <= len; i++) { if (i == len || data[i] == (unsigned char)sb) { starts[nsegs] = segstart; ends[nsegs] = i; nsegs++; segstart = i + 1; } } for (size_t s = nsegs; s-- > 0; ) { Value part = d6_h2s(data + starts[s], ends[s] - starts[s]); Value cons = mkcon(1, \"cons\", 3); con_set(cons, 0, UNIT); con_set(cons, 1, part); con_set(cons, 2, lst); lst = cons; } free(starts); free(ends); free(data); rt_release(c); return lst; }\n")
 		b.WriteString("static Value splitOn_c1(Value sep, Value* env) { (void)env; Value f = mkclo(&splitOn_c2, 1); clo_set(f, 0, sep); return f; }\n")
 		b.WriteString("static Value splitOn(void) { return mkclo(&splitOn_c1, 0); }\n")
 	}
 	if usesForeign(p, "jsonStrField") {
-		b.WriteString("static Value jsonStrField_c2(Value doc, Value* env) { size_t fl; unsigned char* fnb = d6_s2h(env[0], &fl); size_t dl; unsigned char* ds = d6_s2h(doc, &dl); size_t nl = fl + 2; unsigned char* needle = (unsigned char*)malloc(nl); needle[0] = '\"'; memcpy(needle + 1, fnb, fl); needle[fl + 1] = '\"'; Value none = mkcon(0, \"none\", 1); con_set(none, 0, UNIT); Value result = none; long found = -1; if (nl <= dl) { for (size_t i = 0; i + nl <= dl; i++) { if (memcmp(ds + i, needle, nl) == 0) { found = (long)i; break; } } } if (found >= 0) { size_t j = (size_t)found + nl; while (j < dl && (ds[j] == ' ' || ds[j] == '\\t' || ds[j] == ':')) j++; if (j < dl && ds[j] == '\"') { j++; size_t k = j; while (k < dl && ds[k] != '\"') k++; Value val = d6_h2s(ds + j, k - j); Value some = mkcon(1, \"some\", 2); con_set(some, 0, UNIT); con_set(some, 1, val); result = some; } } free(fnb); free(ds); free(needle); if (result != none) rt_release(none); return result; }\n")
+		b.WriteString("static Value jsonStrField_c2(Value doc, Value* env) { size_t fl; unsigned char* fnb = d6_s2h(env[0], &fl); size_t dl; unsigned char* ds = d6_s2h(doc, &dl); size_t nl = fl + 2; unsigned char* needle = (unsigned char*)malloc(nl); needle[0] = '\"'; memcpy(needle + 1, fnb, fl); needle[fl + 1] = '\"'; Value none = mkcon(0, \"none\", 1); con_set(none, 0, UNIT); Value result = none; long found = -1; if (nl <= dl) { for (size_t i = 0; i + nl <= dl; i++) { if (memcmp(ds + i, needle, nl) == 0) { found = (long)i; break; } } } if (found >= 0) { size_t j = (size_t)found + nl; while (j < dl && (ds[j] == ' ' || ds[j] == '\\t' || ds[j] == ':')) j++; if (j < dl && ds[j] == '\"') { j++; size_t k = j; while (k < dl && ds[k] != '\"') k++; Value val = d6_h2s(ds + j, k - j); Value some = mkcon(1, \"some\", 2); con_set(some, 0, UNIT); con_set(some, 1, val); result = some; } } free(fnb); free(ds); free(needle); if (result != none) rt_release(none); rt_release(doc); return result; }\n")
 		b.WriteString("static Value jsonStrField_c1(Value field, Value* env) { (void)env; Value f = mkclo(&jsonStrField_c2, 1); clo_set(f, 0, field); return f; }\n")
 		b.WriteString("static Value jsonStrField(void) { return mkclo(&jsonStrField_c1, 0); }\n")
 	}
 	if usesForeign(p, "sqlQuote") {
-		b.WriteString("static Value sqlQuote_c1(Value s, Value* env) { (void)env; size_t len; unsigned char* in = d6_s2h(s, &len); unsigned char* out = (unsigned char*)malloc(len * 2 + 2); size_t o = 0; out[o++] = '\\''; for (size_t i = 0; i < len; i++) { if (in[i] == '\\'') out[o++] = '\\''; out[o++] = in[i]; } out[o++] = '\\''; Value r = d6_h2s(out, o); free(in); free(out); return r; }\n")
+		b.WriteString("static Value sqlQuote_c1(Value s, Value* env) { (void)env; size_t len; unsigned char* in = d6_s2h(s, &len); unsigned char* out = (unsigned char*)malloc(len * 2 + 2); size_t o = 0; out[o++] = '\\''; for (size_t i = 0; i < len; i++) { if (in[i] == '\\'') out[o++] = '\\''; out[o++] = in[i]; } out[o++] = '\\''; Value r = d6_h2s(out, o); free(in); free(out); rt_release(s); return r; }\n")
 		b.WriteString("static Value sqlQuote(void) { return mkclo(&sqlQuote_c1, 0); }\n")
 	}
 	// D6 / R-EFFECT: the standard OS vocabulary on native C (env / file / argv /
@@ -962,7 +974,7 @@ func emitFloatIOPrimsC(b *strings.Builder, p Program) {
 	//   4. else:      d[0][.d[1..]]e+/-(|n-1|)
 	b.WriteString("static void __fmtf(double x, char* out) { if (x != x) { strcpy(out, \"NaN\"); return; } if (x > 1.7976931348623157e308) { strcpy(out, \"Infinity\"); return; } if (x < -1.7976931348623157e308) { strcpy(out, \"-Infinity\"); return; } if (x == 0.0) { strcpy(out, \"0\"); return; } int neg = (x < 0); if (neg) x = -x; char buf[40]; int p; for (p = 1; p <= 17; p++) { snprintf(buf, sizeof buf, \"%.*e\", p - 1, x); if (strtod(buf, NULL) == x) break; } char* ep = strchr(buf, 'e'); int n = atoi(ep + 1) + 1; int k = p; char s[20]; s[0] = buf[0]; int si = 1; if (p > 1) { int ii; for (ii = 2; ii < p + 1; ii++) s[si++] = buf[ii]; } s[si] = '\\0'; char* o = out; if (neg) *o++ = '-'; if (k <= n && n <= 21) { memcpy(o, s, k); o += k; int ii; for (ii = k; ii < n; ii++) *o++ = '0'; } else if (n > 0 && n < k) { memcpy(o, s, n); o += n; *o++ = '.'; memcpy(o, s + n, k - n); o += k - n; } else if (n >= -5 && n <= 0) { *o++ = '0'; *o++ = '.'; int ii; for (ii = 0; ii < -n; ii++) *o++ = '0'; memcpy(o, s, k); o += k; } else { *o++ = s[0]; if (k > 1) { *o++ = '.'; memcpy(o, s + 1, k - 1); o += k - 1; } *o++ = 'e'; int en = n - 1; o += sprintf(o, en >= 0 ? \"+%d\" : \"%d\", en); } *o = '\\0'; }\n")
 	if usesForeign(p, "parseFloat") {
-		b.WriteString("static Value parseFloat_c(Value code, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(code, &len); if (!d6_validate_float(buf, len)) { free(buf); Value none = mkcon(0, \"none\", 1); con_set(none, 0, UNIT); return none; } char* tmp = (char*)malloc(len + 1); memcpy(tmp, buf, len); tmp[len] = 0; double d = strtod(tmp, NULL); free(tmp); free(buf); Value some = mkcon(1, \"some\", 2); con_set(some, 0, UNIT); con_set(some, 1, mkfloat(d)); return some; }\n")
+		b.WriteString("static Value parseFloat_c(Value code, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(code, &len); if (!d6_validate_float(buf, len)) { free(buf); rt_release(code); Value none = mkcon(0, \"none\", 1); con_set(none, 0, UNIT); return none; } char* tmp = (char*)malloc(len + 1); memcpy(tmp, buf, len); tmp[len] = 0; double d = strtod(tmp, NULL); free(tmp); free(buf); rt_release(code); Value some = mkcon(1, \"some\", 2); con_set(some, 0, UNIT); con_set(some, 1, mkfloat(d)); return some; }\n")
 		b.WriteString("static Value parseFloat(void) { return mkclo(&parseFloat_c, 0); }\n")
 	}
 	if usesForeign(p, "getFloat") {
@@ -988,12 +1000,12 @@ func emitBinPrimsC(b *strings.Builder, p Program) {
 		return
 	}
 	b.WriteString("static Value binEmpty(void) { return mkbytes(0); }\n")
-	b.WriteString(`static Value binCons_c2(Value bb, Value* env) { Value c = env[0]; int bv = (big_nlimbs(c) == 0 ? 0 : (int)big_limb(c, 0)) & 255; int n = bytes_len(bb); Value r = mkbytes(n + 1); bytes_set(r, 0, bv); for (int i = 0; i < n; i++) bytes_set(r, i + 1, bytes_at(bb, i)); return r; }
+	b.WriteString(`static Value binCons_c2(Value bb, Value* env) { Value c = env[0]; int bv = (big_nlimbs(c) == 0 ? 0 : (int)big_limb(c, 0)) & 255; int n = bytes_len(bb); Value r = mkbytes(n + 1); bytes_set(r, 0, bv); for (int i = 0; i < n; i++) bytes_set(r, i + 1, bytes_at(bb, i)); rt_release(bb); return r; }
 static Value binCons_c1(Value c, Value* env) { (void)env; Value k = mkclo(&binCons_c2, 1); clo_set(k, 0, c); return k; }
 static Value binCons(void) { return mkclo(&binCons_c1, 0); }
-static Value binLen_c1(Value bb, Value* env) { (void)env; return big_from_long(bytes_len(bb)); }
+static Value binLen_c1(Value bb, Value* env) { (void)env; Value r = big_from_long(bytes_len(bb)); rt_release(bb); return r; }
 static Value binLen(void) { return mkclo(&binLen_c1, 0); }
-static Value binAt_c2(Value i, Value* env) { Value bb = env[0]; long k = (big_nlimbs(i) == 0 ? 0 : big_limb(i, 0)); int n = bytes_len(bb); if (k >= 0 && k < n) return big_from_long(bytes_at(bb, (int)k)); return big_from_long(0); }
+static Value binAt_c2(Value i, Value* env) { Value bb = env[0]; long k = (big_nlimbs(i) == 0 ? 0 : big_limb(i, 0)); rt_release(i); int n = bytes_len(bb); if (k >= 0 && k < n) return big_from_long(bytes_at(bb, (int)k)); return big_from_long(0); }
 static Value binAt_c1(Value bb, Value* env) { (void)env; Value k = mkclo(&binAt_c2, 1); clo_set(k, 0, bb); return k; }
 static Value binAt(void) { return mkclo(&binAt_c1, 0); }
 static Value printBin_c2(Value w, Value* env) { (void)w; Value bb = env[0]; int n = bytes_len(bb); putchar('"'); for (int i = 0; i < n; i++) { int x = bytes_at(bb, i); if (x >= 0x20 && x < 0x7f && x != 0x22 && x != 0x5c) putchar(x); else printf("\\x%02x", x); } putchar('"'); putchar('\n'); return mkunit(); }
@@ -1060,7 +1072,7 @@ func emitCryptoPrimsC(b *strings.Builder, p Program) {
 	if !usesCrypto(p) {
 		return
 	}
-	b.WriteString(`static Value sha256_c1(Value data, Value* env) { (void)env; int n = bytes_len(data); unsigned char* buf = (unsigned char*)malloc(n > 0 ? n : 1); for (int i = 0; i < n; i++) buf[i] = (unsigned char) bytes_at(data, i); unsigned char out[32]; br_sha256_context ctx; br_sha256_init(&ctx); br_sha256_update(&ctx, buf, n); br_sha256_out(&ctx, out); free(buf); Value r = mkbytes(32); for (int i = 0; i < 32; i++) bytes_set(r, i, out[i]); return r; }
+	b.WriteString(`static Value sha256_c1(Value data, Value* env) { (void)env; int n = bytes_len(data); unsigned char* buf = (unsigned char*)malloc(n > 0 ? n : 1); for (int i = 0; i < n; i++) buf[i] = (unsigned char) bytes_at(data, i); unsigned char out[32]; br_sha256_context ctx; br_sha256_init(&ctx); br_sha256_update(&ctx, buf, n); br_sha256_out(&ctx, out); free(buf); rt_release(data); Value r = mkbytes(32); for (int i = 0; i < 32; i++) bytes_set(r, i, out[i]); return r; }
 static Value sha256(void) { return mkclo(&sha256_c1, 0); }
 `)
 }
@@ -1150,34 +1162,34 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	if usesForeign(p, "pyFactorial") {
 		b.WriteString("static void big_to_decstr(Value v, char* out, int outsz) { int n = big_nlimbs(v); if (n == 0) { snprintf(out, outsz, \"0\"); return; } int off = snprintf(out, outsz, \"%ld\", big_limb(v, n - 1)); for (int i = n - 2; i >= 0 && off < outsz; i--) off += snprintf(out + off, outsz - off, \"%09ld\", big_limb(v, i)); }\n")
 		b.WriteString("static Value big_from_decstr(const char* s) { Value n = mkbig(0); Value ten = big_from_long(10); for (; *s; s++) { if (*s < '0' || *s > '9') continue; Value nm = big_mul(n, ten); Value d = big_from_long(*s - '0'); Value nn = big_add(nm, d); rt_release(nm); rt_release(d); rt_release(n); n = nn; } rt_release(ten); return n; }\n")
-		b.WriteString("static Value pyFactorial_c(Value aa, Value* env) { (void)env; char inbuf[512]; if (IS_INT(aa)) snprintf(inbuf, sizeof inbuf, \"%ld\", INT_VAL(aa)); else big_to_decstr(aa, inbuf, sizeof inbuf); rune_py_ensure(); char buf[600]; snprintf(buf, sizeof buf, \"str(__import__('math').factorial(%s))\", inbuf); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); Value res = big_from_long(0); if (r) { const char* s = PyUnicode_AsUTF8(r); if (s) res = big_from_decstr(s); Py_XDECREF(r); } else { PyErr_Clear(); } return res; }\n")
+		b.WriteString("static Value pyFactorial_c(Value aa, Value* env) { (void)env; char inbuf[512]; if (IS_INT(aa)) snprintf(inbuf, sizeof inbuf, \"%ld\", INT_VAL(aa)); else big_to_decstr(aa, inbuf, sizeof inbuf); rune_py_ensure(); char buf[600]; snprintf(buf, sizeof buf, \"str(__import__('math').factorial(%s))\", inbuf); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); Value res = big_from_long(0); if (r) { const char* s = PyUnicode_AsUTF8(r); if (s) { rt_release(res); res = big_from_decstr(s); } Py_XDECREF(r); } else { PyErr_Clear(); } rt_release(aa); return res; }\n")
 		b.WriteString("static Value pyFactorial(void) { return mkclo(&pyFactorial_c, 0); }\n")
 	}
 	if usesForeign(p, "pyPow") {
-		b.WriteString("static Value pyPow_c2(Value bb, Value* env) { Value aa = env[0]; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); long b = IS_INT(bb) ? INT_VAL(bb) : (long)big_to_double(bb); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"pow(%ld,%ld)\", a, b); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); long res = 0; if (r) { res = PyLong_AsLong(r); Py_XDECREF(r); } else { PyErr_Clear(); } return big_from_long(res); }\n")
+		b.WriteString("static Value pyPow_c2(Value bb, Value* env) { Value aa = env[0]; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); long b = IS_INT(bb) ? INT_VAL(bb) : (long)big_to_double(bb); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"pow(%ld,%ld)\", a, b); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); long res = 0; if (r) { res = PyLong_AsLong(r); Py_XDECREF(r); } else { PyErr_Clear(); } rt_release(bb); return big_from_long(res); }\n")
 		b.WriteString("static Value pyPow_c1(Value a, Value* env) { (void)env; Value c = mkclo(&pyPow_c2, 1); clo_set(c, 0, a); return c; }\n")
 		b.WriteString("static Value pyPow(void) { return mkclo(&pyPow_c1, 0); }\n")
 	}
 	// pySqrt n = Python's math.sqrt(n) in the embedded interpreter — a FLOAT return (and a
 	// stdlib import via __import__), so the embed marshals both directions: nat in, f64 out.
 	if usesForeign(p, "pySqrt") {
-		b.WriteString("static Value pySqrt_c(Value aa, Value* env) { (void)env; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"__import__('math').sqrt(%ld)\", a); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); double d = 0.0; if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } return mkfloat(d); }\n")
+		b.WriteString("static Value pySqrt_c(Value aa, Value* env) { (void)env; long a = IS_INT(aa) ? INT_VAL(aa) : (long)big_to_double(aa); rune_py_ensure(); char buf[80]; snprintf(buf, sizeof buf, \"__import__('math').sqrt(%ld)\", a); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); double d = 0.0; if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } rt_release(aa); return mkfloat(d); }\n")
 		b.WriteString("static Value pySqrt(void) { return mkclo(&pySqrt_c, 0); }\n")
 	}
 	if usesForeign(p, "Float") {
 		b.WriteString("static Value Float(void) { return UNIT; }\n")
 	}
 	if usesForeign(p, "fromNat") {
-		b.WriteString("static Value fromNat_c(Value a, Value* env) { (void)env; return mkfloat(big_to_double(a)); }\n")
+		b.WriteString("static Value fromNat_c(Value a, Value* env) { (void)env; Value r = mkfloat(big_to_double(a)); rt_release(a); return r; }\n")
 		b.WriteString("static Value fromNat(void) { return mkclo(&fromNat_c, 0); }\n")
 	}
 	if usesForeign(p, "floatToNat") {
-		b.WriteString("static Value floatToNat_c(Value x, Value* env) { (void)env; return big_from_long((long)float_val(x)); }\n")
+		b.WriteString("static Value floatToNat_c(Value x, Value* env) { (void)env; Value r = big_from_long((long)float_val(x)); rt_release(x); return r; }\n")
 		b.WriteString("static Value floatToNat(void) { return mkclo(&floatToNat_c, 0); }\n")
 	}
 	bin := func(name, op string) {
 		if usesForeign(p, name) {
-			fmt.Fprintf(b, "static Value %s_c2(Value y, Value* env) { return mkfloat(float_val(env[0]) %s float_val(y)); }\n", name, op)
+			fmt.Fprintf(b, "static Value %s_c2(Value y, Value* env) { Value r = mkfloat(float_val(env[0]) %s float_val(y)); rt_release(y); return r; }\n", name, op)
 			fmt.Fprintf(b, "static Value %s_c1(Value x, Value* env) { (void)env; Value c = mkclo(&%s_c2, 1); clo_set(c, 0, x); return c; }\n", name, name)
 			fmt.Fprintf(b, "static Value %s(void) { return mkclo(&%s_c1, 0); }\n", name, name)
 		}
@@ -1187,25 +1199,25 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	bin("fmul", "*")
 	bin("fdiv", "/")
 	if usesForeign(p, "fleqN") {
-		b.WriteString("static Value fleqN_c2(Value y, Value* env) { return float_val(env[0]) <= float_val(y) ? big_from_long(1) : big_from_long(0); }\n")
+		b.WriteString("static Value fleqN_c2(Value y, Value* env) { Value r = float_val(env[0]) <= float_val(y) ? big_from_long(1) : big_from_long(0); rt_release(y); return r; }\n")
 		b.WriteString("static Value fleqN_c1(Value x, Value* env) { (void)env; Value c = mkclo(&fleqN_c2, 1); clo_set(c, 0, x); return c; }\n")
 		b.WriteString("static Value fleqN(void) { return mkclo(&fleqN_c1, 0); }\n")
 	}
 	if usesForeign(p, "fsqrt") {
 		b.WriteString("#include <math.h>\n")
-		b.WriteString("static Value fsqrt_c(Value x, Value* env) { (void)env; return mkfloat(sqrt(float_val(x))); }\n")
+		b.WriteString("static Value fsqrt_c(Value x, Value* env) { (void)env; Value r = mkfloat(sqrt(float_val(x))); rt_release(x); return r; }\n")
 		b.WriteString("static Value fsqrt(void) { return mkclo(&fsqrt_c, 0); }\n")
 	}
 	if usesForeign(p, "fpow") {
 		if !usesForeign(p, "fsqrt") {
 			b.WriteString("#include <math.h>\n")
 		}
-		b.WriteString("static Value fpow_c2(Value e, Value* env) { return mkfloat(pow(float_val(env[0]), float_val(e))); }\n")
+		b.WriteString("static Value fpow_c2(Value e, Value* env) { Value r = mkfloat(pow(float_val(env[0]), float_val(e))); rt_release(e); return r; }\n")
 		b.WriteString("static Value fpow_c1(Value bs, Value* env) { (void)env; Value c = mkclo(&fpow_c2, 1); clo_set(c, 0, bs); return c; }\n")
 		b.WriteString("static Value fpow(void) { return mkclo(&fpow_c1, 0); }\n")
 	}
 	if usesForeign(p, "fabsP") {
-		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); return mkfloat(d < 0 ? -d : d); }\n")
+		b.WriteString("static Value fabsP_c(Value x, Value* env) { (void)env; double d = float_val(x); rt_release(x); return mkfloat(d < 0 ? -d : d); }\n")
 		b.WriteString("static Value fabsP(void) { return mkclo(&fabsP_c, 0); }\n")
 	}
 	// the OpenBLAS swap: the dot/matrix product(s) run through cblas_*, not a hand loop.
@@ -1255,7 +1267,7 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// numpy reduces it, the scalar comes back. So the native binary runs actual numpy on a Rune
 	// list, not just builtins/stdlib. (fl_fill/fl_len + rune_py_ensure defined above.)
 	if usesForeign(p, "pyNpSum") {
-		b.WriteString("static Value pyNpSum_c(Value xs, Value* env) { (void)env; int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); free(X); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); double d = 0.0; if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"xs\", lst); PyObject* r = PyRun_String(\"float(np.array(xs).sum())\", Py_eval_input, g, g); if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(lst); return mkfloat(d); }\n")
+		b.WriteString("static Value pyNpSum_c(Value xs, Value* env) { (void)env; int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); free(X); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); double d = 0.0; if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"xs\", lst); PyObject* r = PyRun_String(\"float(np.array(xs).sum())\", Py_eval_input, g, g); if (r) { d = PyFloat_AsDouble(r); Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(lst); rt_release(xs); return mkfloat(d); }\n")
 		b.WriteString("static Value pyNpSum(void) { return mkclo(&pyNpSum_c, 0); }\n")
 	}
 	// pyNpScale xs k = (numpy.array(xs) * k).tolist() — the REVERSE structured-marshalling
@@ -1263,7 +1275,7 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// (mkcon fcons/fnil, built tail-first). With pyNpSum this closes the bidirectional
 	// structured-value bridge: Rune list -> numpy -> Rune list. [1,2,3,4]*3 = [3,6,9,12].
 	if usesForeign(p, "pyNpScale") {
-		b.WriteString("static Value pyNpScale_c2(Value kk, Value* env) { Value xs = env[0]; long k = IS_INT(kk) ? INT_VAL(kk) : (long)big_to_double(kk); int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); free(X); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); Value res = mkcon(0, \"fnil\", 0); if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"xs\", lst); char buf[80]; snprintf(buf, sizeof buf, \"(np.array(xs) * %ld).tolist()\", k); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); if (r) { int rn = (int)PyList_Size(r); Value acc = mkcon(0, \"fnil\", 0); for (int i = rn - 1; i >= 0; i--) { double d = PyFloat_AsDouble(PyList_GetItem(r, i)); Value c = mkcon(1, \"fcons\", 2); con_set(c, 0, mkfloat(d)); con_set(c, 1, acc); acc = c; } rt_release(res); res = acc; Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(lst); return res; }\n")
+		b.WriteString("static Value pyNpScale_c2(Value kk, Value* env) { Value xs = env[0]; long k = IS_INT(kk) ? INT_VAL(kk) : (long)big_to_double(kk); int n = fl_len(xs); double* X = (double*)malloc(sizeof(double) * (n > 0 ? n : 1)); fl_fill(xs, X); rune_py_ensure(); PyObject* lst = PyList_New(n); for (int i = 0; i < n; i++) PyList_SetItem(lst, i, PyFloat_FromDouble(X[i])); free(X); PyObject* m = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(m); PyObject* np = PyImport_ImportModule(\"numpy\"); Value res = mkcon(0, \"fnil\", 0); if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"xs\", lst); char buf[80]; snprintf(buf, sizeof buf, \"(np.array(xs) * %ld).tolist()\", k); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); if (r) { int rn = (int)PyList_Size(r); Value acc = mkcon(0, \"fnil\", 0); for (int i = rn - 1; i >= 0; i--) { double d = PyFloat_AsDouble(PyList_GetItem(r, i)); Value c = mkcon(1, \"fcons\", 2); con_set(c, 0, mkfloat(d)); con_set(c, 1, acc); acc = c; } rt_release(res); res = acc; Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(lst); rt_release(kk); return res; }\n")
 		b.WriteString("static Value pyNpScale_c1(Value xs, Value* env) { (void)env; Value c = mkclo(&pyNpScale_c2, 1); clo_set(c, 0, xs); return c; }\n")
 		b.WriteString("static Value pyNpScale(void) { return mkclo(&pyNpScale_c1, 0); }\n")
 	}
@@ -1272,14 +1284,14 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// result returns as a Rune FList. So the embed handles SHAPED 2-D operands, not just 1-D —
 	// a step toward the general Array-dt-sh handle. [[1,2],[3,4]] @ [5,6] = [17,39].
 	if usesForeign(p, "pyNpMatVec") {
-		b.WriteString("static Value pyNpMatVec_c4(Value v, Value* env) { Value A = env[0]; long m = IS_INT(env[1]) ? INT_VAL(env[1]) : (long)big_to_double(env[1]); long k = IS_INT(env[2]) ? INT_VAL(env[2]) : (long)big_to_double(env[2]); int an = fl_len(A), vn = fl_len(v); double* AA = (double*)malloc(sizeof(double) * (an > 0 ? an : 1)); fl_fill(A, AA); double* VV = (double*)malloc(sizeof(double) * (vn > 0 ? vn : 1)); fl_fill(v, VV); rune_py_ensure(); PyObject* pa = PyList_New(an); for (int i = 0; i < an; i++) PyList_SetItem(pa, i, PyFloat_FromDouble(AA[i])); PyObject* pv = PyList_New(vn); for (int i = 0; i < vn; i++) PyList_SetItem(pv, i, PyFloat_FromDouble(VV[i])); free(AA); free(VV); PyObject* mm = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(mm); PyObject* np = PyImport_ImportModule(\"numpy\"); Value res = mkcon(0, \"fnil\", 0); if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"A\", pa); PyDict_SetItemString(g, \"v\", pv); char buf[120]; snprintf(buf, sizeof buf, \"(np.array(A).reshape(%ld,%ld) @ np.array(v)).tolist()\", m, k); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); if (r) { int rn = (int)PyList_Size(r); Value acc = mkcon(0, \"fnil\", 0); for (int i = rn - 1; i >= 0; i--) { double d = PyFloat_AsDouble(PyList_GetItem(r, i)); Value c = mkcon(1, \"fcons\", 2); con_set(c, 0, mkfloat(d)); con_set(c, 1, acc); acc = c; } rt_release(res); res = acc; Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(pa); Py_XDECREF(pv); return res; }\n")
+		b.WriteString("static Value pyNpMatVec_c4(Value v, Value* env) { Value A = env[0]; long m = IS_INT(env[1]) ? INT_VAL(env[1]) : (long)big_to_double(env[1]); long k = IS_INT(env[2]) ? INT_VAL(env[2]) : (long)big_to_double(env[2]); int an = fl_len(A), vn = fl_len(v); double* AA = (double*)malloc(sizeof(double) * (an > 0 ? an : 1)); fl_fill(A, AA); double* VV = (double*)malloc(sizeof(double) * (vn > 0 ? vn : 1)); fl_fill(v, VV); rune_py_ensure(); PyObject* pa = PyList_New(an); for (int i = 0; i < an; i++) PyList_SetItem(pa, i, PyFloat_FromDouble(AA[i])); PyObject* pv = PyList_New(vn); for (int i = 0; i < vn; i++) PyList_SetItem(pv, i, PyFloat_FromDouble(VV[i])); free(AA); free(VV); PyObject* mm = PyImport_AddModule(\"__main__\"); PyObject* g = PyModule_GetDict(mm); PyObject* np = PyImport_ImportModule(\"numpy\"); Value res = mkcon(0, \"fnil\", 0); if (np) { PyDict_SetItemString(g, \"np\", np); PyDict_SetItemString(g, \"A\", pa); PyDict_SetItemString(g, \"v\", pv); char buf[120]; snprintf(buf, sizeof buf, \"(np.array(A).reshape(%ld,%ld) @ np.array(v)).tolist()\", m, k); PyObject* r = PyRun_String(buf, Py_eval_input, g, g); if (r) { int rn = (int)PyList_Size(r); Value acc = mkcon(0, \"fnil\", 0); for (int i = rn - 1; i >= 0; i--) { double d = PyFloat_AsDouble(PyList_GetItem(r, i)); Value c = mkcon(1, \"fcons\", 2); con_set(c, 0, mkfloat(d)); con_set(c, 1, acc); acc = c; } rt_release(res); res = acc; Py_XDECREF(r); } else { PyErr_Clear(); } Py_XDECREF(np); } else { PyErr_Clear(); } Py_XDECREF(pa); Py_XDECREF(pv); rt_release(v); return res; }\n")
 		b.WriteString("static Value pyNpMatVec_c3(Value k, Value* env) { Value c = mkclo(&pyNpMatVec_c4, 3); rt_retain(env[0]); clo_set(c, 0, env[0]); rt_retain(env[1]); clo_set(c, 1, env[1]); clo_set(c, 2, k); return c; }\n")
 		b.WriteString("static Value pyNpMatVec_c2(Value m, Value* env) { Value c = mkclo(&pyNpMatVec_c3, 2); rt_retain(env[0]); clo_set(c, 0, env[0]); clo_set(c, 1, m); return c; }\n")
 		b.WriteString("static Value pyNpMatVec_c1(Value A, Value* env) { (void)env; Value c = mkclo(&pyNpMatVec_c2, 1); clo_set(c, 0, A); return c; }\n")
 		b.WriteString("static Value pyNpMatVec(void) { return mkclo(&pyNpMatVec_c1, 0); }\n")
 	}
 	if usesForeign(p, "dot2") {
-		b.WriteString("static Value dot2_c4(Value b1, Value* env) { double X[2] = { float_val(env[0]), float_val(env[1]) }; double Y[2] = { float_val(env[2]), float_val(b1) }; return mkfloat(cblas_ddot(2, X, 1, Y, 1)); }\n")
+		b.WriteString("static Value dot2_c4(Value b1, Value* env) { double X[2] = { float_val(env[0]), float_val(env[1]) }; double Y[2] = { float_val(env[2]), float_val(b1) }; rt_release(b1); return mkfloat(cblas_ddot(2, X, 1, Y, 1)); }\n")
 		b.WriteString("static Value dot2_c3(Value b0, Value* env) { Value c = mkclo(&dot2_c4, 3); rt_retain(env[0]); clo_set(c, 0, env[0]); rt_retain(env[1]); clo_set(c, 1, env[1]); clo_set(c, 2, b0); return c; }\n")
 		b.WriteString("static Value dot2_c2(Value a1, Value* env) { Value c = mkclo(&dot2_c3, 2); rt_retain(env[0]); clo_set(c, 0, env[0]); clo_set(c, 1, a1); return c; }\n")
 		b.WriteString("static Value dot2_c1(Value a0, Value* env) { (void)env; Value c = mkclo(&dot2_c2, 1); clo_set(c, 0, a0); return c; }\n")
@@ -1289,30 +1301,30 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// Float head in slot 0, the tail in slot 1) into a C double[], then cblas_ddot
 	// over the common prefix. This is the array-marshalling boundary D4 numerics need.
 	if usesForeign(p, "dotList") {
-		b.WriteString("static Value dotList_c2(Value ys, Value* env) { Value xs = env[0]; int n = fl_len(xs), m = fl_len(ys); int k = n < m ? n : m; double* X = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); double* Y = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); fl_fill(xs, X); fl_fill(ys, Y); double r = cblas_ddot(k, X, 1, Y, 1); free(X); free(Y); return mkfloat(r); }\n")
+		b.WriteString("static Value dotList_c2(Value ys, Value* env) { Value xs = env[0]; int n = fl_len(xs), m = fl_len(ys); int k = n < m ? n : m; double* X = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); double* Y = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); fl_fill(xs, X); fl_fill(ys, Y); double r = cblas_ddot(k, X, 1, Y, 1); free(X); free(Y); rt_release(ys); return mkfloat(r); }\n")
 		b.WriteString("static Value dotList_c1(Value xs, Value* env) { (void)env; Value c = mkclo(&dotList_c2, 1); clo_set(c, 0, xs); return c; }\n")
 		b.WriteString("static Value dotList(void) { return mkclo(&dotList_c1, 0); }\n")
 	}
 	// D4 interop: npDot on the native backends is the OpenBLAS gift (cblas_ddot over the
 	// marshalled FLists) — the same uniform capability the py backend serves with NumPy.
 	if usesForeign(p, "npDot") {
-		b.WriteString("static Value npDot_c2(Value ys, Value* env) { Value xs = env[0]; int n = fl_len(xs), m = fl_len(ys); int k = n < m ? n : m; double* X = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); double* Y = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); fl_fill(xs, X); fl_fill(ys, Y); double r = cblas_ddot(k, X, 1, Y, 1); free(X); free(Y); return mkfloat(r); }\n")
+		b.WriteString("static Value npDot_c2(Value ys, Value* env) { Value xs = env[0]; int n = fl_len(xs), m = fl_len(ys); int k = n < m ? n : m; double* X = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); double* Y = (double*)malloc(sizeof(double) * (k > 0 ? k : 1)); fl_fill(xs, X); fl_fill(ys, Y); double r = cblas_ddot(k, X, 1, Y, 1); free(X); free(Y); rt_release(ys); return mkfloat(r); }\n")
 		b.WriteString("static Value npDot_c1(Value xs, Value* env) { (void)env; Value c = mkclo(&npDot_c2, 1); clo_set(c, 0, xs); return c; }\n")
 		b.WriteString("static Value npDot(void) { return mkclo(&npDot_c1, 0); }\n")
 	}
 	// D4 interop: npMean — hand sum/count (no BLAS); py serves real numpy.mean.
 	if usesForeign(p, "npMean") {
-		b.WriteString("static Value npMean_c(Value xs, Value* env) { (void)env; double s = 0; int n = 0; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { s += float_val(obj(xs)->slots[0]); n++; xs = obj(xs)->slots[1]; } return mkfloat(n > 0 ? s / n : 0); }\n")
+		b.WriteString("static Value npMean_c(Value xs, Value* env) { (void)env; Value h = xs; double s = 0; int n = 0; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { s += float_val(obj(xs)->slots[0]); n++; xs = obj(xs)->slots[1]; } rt_release(h); return mkfloat(n > 0 ? s / n : 0); }\n")
 		b.WriteString("static Value npMean(void) { return mkclo(&npMean_c, 0); }\n")
 	}
 	// D4 interop: npVar — 2-pass hand body (no BLAS); py serves real numpy.var.
 	if usesForeign(p, "npVar") {
-		b.WriteString("static Value npVar_c(Value xs, Value* env) { (void)env; double s = 0; int n = 0; Value t = xs; while (!IS_INT(t) && obj(t)->kind == K_CON && obj(t)->tag == 1) { s += float_val(obj(t)->slots[0]); n++; t = obj(t)->slots[1]; } double m = n > 0 ? s / n : 0; double v = 0; Value u = xs; while (!IS_INT(u) && obj(u)->kind == K_CON && obj(u)->tag == 1) { double d = float_val(obj(u)->slots[0]) - m; v += d * d; u = obj(u)->slots[1]; } return mkfloat(n > 0 ? v / n : 0); }\n")
+		b.WriteString("static Value npVar_c(Value xs, Value* env) { (void)env; double s = 0; int n = 0; Value t = xs; while (!IS_INT(t) && obj(t)->kind == K_CON && obj(t)->tag == 1) { s += float_val(obj(t)->slots[0]); n++; t = obj(t)->slots[1]; } double m = n > 0 ? s / n : 0; double v = 0; Value u = xs; while (!IS_INT(u) && obj(u)->kind == K_CON && obj(u)->tag == 1) { double d = float_val(obj(u)->slots[0]) - m; v += d * d; u = obj(u)->slots[1]; } rt_release(xs); return mkfloat(n > 0 ? v / n : 0); }\n")
 		b.WriteString("static Value npVar(void) { return mkclo(&npVar_c, 0); }\n")
 	}
 	// D4 interop: npMax — fold-max hand body (no BLAS); py serves real numpy.max.
 	if usesForeign(p, "npMax") {
-		b.WriteString("static Value npMax_c(Value xs, Value* env) { (void)env; double m = 0; int first = 1; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { double x = float_val(obj(xs)->slots[0]); if (first || x > m) { m = x; first = 0; } xs = obj(xs)->slots[1]; } return mkfloat(m); }\n")
+		b.WriteString("static Value npMax_c(Value xs, Value* env) { (void)env; Value h = xs; double m = 0; int first = 1; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { double x = float_val(obj(xs)->slots[0]); if (first || x > m) { m = x; first = 0; } xs = obj(xs)->slots[1]; } rt_release(h); return mkfloat(m); }\n")
 		b.WriteString("static Value npMax(void) { return mkclo(&npMax_c, 0); }\n")
 	}
 	// D4 interop: npNorm — sqrt(sum of squares) hand body (math.h, -lm); py serves numpy.linalg.norm.
@@ -1320,7 +1332,7 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 		if !usesForeign(p, "fsqrt") {
 			b.WriteString("#include <math.h>\n")
 		}
-		b.WriteString("static Value npNorm_c(Value xs, Value* env) { (void)env; double s = 0; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { double x = float_val(obj(xs)->slots[0]); s += x * x; xs = obj(xs)->slots[1]; } return mkfloat(sqrt(s)); }\n")
+		b.WriteString("static Value npNorm_c(Value xs, Value* env) { (void)env; Value h = xs; double s = 0; while (!IS_INT(xs) && obj(xs)->kind == K_CON && obj(xs)->tag == 1) { double x = float_val(obj(xs)->slots[0]); s += x * x; xs = obj(xs)->slots[1]; } rt_release(h); return mkfloat(sqrt(s)); }\n")
 		b.WriteString("static Value npNorm(void) { return mkclo(&npNorm_c, 0); }\n")
 	}
 	// MATRIX BLAS: gemmSum m k n A B marshals two flat row-major Rune FLists into C
@@ -1329,7 +1341,7 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// host→Rune matrix construction (the observable stays a Float). The dims arrive as
 	// builtin-nats (big_to_double → int).
 	if usesForeign(p, "gemmSum") {
-		b.WriteString("static Value gemmSum_c5(Value Bm, Value* env) { int m = (int)big_to_double(env[0]), k = (int)big_to_double(env[1]), n = (int)big_to_double(env[2]); Value A = env[3]; int al = m*k, bl = k*n, cl = m*n; double* AA = (double*)malloc(sizeof(double)*(al>0?al:1)); double* BB = (double*)malloc(sizeof(double)*(bl>0?bl:1)); double* CC = (double*)malloc(sizeof(double)*(cl>0?cl:1)); fl_fill(A, AA); fl_fill(Bm, BB); cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, AA, k, BB, n, 0.0, CC, n); double s = 0; for (int i = 0; i < cl; i++) s += CC[i]; free(AA); free(BB); free(CC); return mkfloat(s); }\n")
+		b.WriteString("static Value gemmSum_c5(Value Bm, Value* env) { int m = (int)big_to_double(env[0]), k = (int)big_to_double(env[1]), n = (int)big_to_double(env[2]); Value A = env[3]; int al = m*k, bl = k*n, cl = m*n; double* AA = (double*)malloc(sizeof(double)*(al>0?al:1)); double* BB = (double*)malloc(sizeof(double)*(bl>0?bl:1)); double* CC = (double*)malloc(sizeof(double)*(cl>0?cl:1)); fl_fill(A, AA); fl_fill(Bm, BB); cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, AA, k, BB, n, 0.0, CC, n); double s = 0; for (int i = 0; i < cl; i++) s += CC[i]; free(AA); free(BB); free(CC); rt_release(Bm); return mkfloat(s); }\n")
 		b.WriteString("static Value gemmSum_c4(Value A, Value* env) { Value c = mkclo(&gemmSum_c5, 4); rt_retain(env[0]); clo_set(c, 0, env[0]); rt_retain(env[1]); clo_set(c, 1, env[1]); rt_retain(env[2]); clo_set(c, 2, env[2]); clo_set(c, 3, A); return c; }\n")
 		b.WriteString("static Value gemmSum_c3(Value n, Value* env) { Value c = mkclo(&gemmSum_c4, 3); rt_retain(env[0]); clo_set(c, 0, env[0]); rt_retain(env[1]); clo_set(c, 1, env[1]); clo_set(c, 2, n); return c; }\n")
 		b.WriteString("static Value gemmSum_c2(Value k, Value* env) { Value c = mkclo(&gemmSum_c3, 2); rt_retain(env[0]); clo_set(c, 0, env[0]); clo_set(c, 1, k); return c; }\n")
@@ -1339,7 +1351,7 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 	// D4 interop: npMatSum on the native backends is the OpenBLAS gift (cblas_dgemm),
 	// the same uniform 2-D capability the py backend serves with numpy matmul.
 	if usesForeign(p, "npMatSum") {
-		b.WriteString("static Value npMatSum_c5(Value Bm, Value* env) { int m = (int)big_to_double(env[0]), k = (int)big_to_double(env[1]), n = (int)big_to_double(env[2]); Value A = env[3]; int al = m*k, bl = k*n, cl = m*n; double* AA = (double*)malloc(sizeof(double)*(al>0?al:1)); double* BB = (double*)malloc(sizeof(double)*(bl>0?bl:1)); double* CC = (double*)malloc(sizeof(double)*(cl>0?cl:1)); fl_fill(A, AA); fl_fill(Bm, BB); cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, AA, k, BB, n, 0.0, CC, n); double s = 0; for (int i = 0; i < cl; i++) s += CC[i]; free(AA); free(BB); free(CC); return mkfloat(s); }\n")
+		b.WriteString("static Value npMatSum_c5(Value Bm, Value* env) { int m = (int)big_to_double(env[0]), k = (int)big_to_double(env[1]), n = (int)big_to_double(env[2]); Value A = env[3]; int al = m*k, bl = k*n, cl = m*n; double* AA = (double*)malloc(sizeof(double)*(al>0?al:1)); double* BB = (double*)malloc(sizeof(double)*(bl>0?bl:1)); double* CC = (double*)malloc(sizeof(double)*(cl>0?cl:1)); fl_fill(A, AA); fl_fill(Bm, BB); cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, AA, k, BB, n, 0.0, CC, n); double s = 0; for (int i = 0; i < cl; i++) s += CC[i]; free(AA); free(BB); free(CC); rt_release(Bm); return mkfloat(s); }\n")
 		b.WriteString("static Value npMatSum_c4(Value A, Value* env) { Value c = mkclo(&npMatSum_c5, 4); rt_retain(env[0]); clo_set(c, 0, env[0]); rt_retain(env[1]); clo_set(c, 1, env[1]); rt_retain(env[2]); clo_set(c, 2, env[2]); clo_set(c, 3, A); return c; }\n")
 		b.WriteString("static Value npMatSum_c3(Value n, Value* env) { Value c = mkclo(&npMatSum_c4, 3); rt_retain(env[0]); clo_set(c, 0, env[0]); rt_retain(env[1]); clo_set(c, 1, env[1]); clo_set(c, 2, n); return c; }\n")
 		b.WriteString("static Value npMatSum_c2(Value k, Value* env) { Value c = mkclo(&npMatSum_c3, 2); rt_retain(env[0]); clo_set(c, 0, env[0]); clo_set(c, 1, k); return c; }\n")

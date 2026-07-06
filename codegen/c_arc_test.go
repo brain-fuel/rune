@@ -104,6 +104,57 @@ end`
 	}
 }
 
+// TestCARCTerminalPrimArgBalance is the terminal-prim-arg gate (the Task-3 fixup):
+// apply CONSUMES its argument, so a TERMINAL pure prim body (byteLen_c1 here) OWNS its
+// direct arg and must rt_release it when it neither stores nor returns it -- exactly
+// what every WASM twin does (byteLen_c1 wasm.go:1262 "the owned $arg is consumed
+// (released)"; splitOn/jsonStrField/sqlQuote; fromNat/fmul_c2 in wasm_float.go). The
+// step routes each boxed line (a fresh owned K_BIG foldLines builds once per line)
+// through byteLen: a body that fails to release its consumed arg leaks one packed
+// bignum per line, so rt_live scales with line count. env[i] slots stay BORROWED --
+// only the direct arg of the terminal step is owned.
+func TestCARCTerminalPrimArgBalance(t *testing.T) {
+	srcTmpl := `data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+foreign foldLines : (S : U) -> Nat -> (S -> Nat -> IO S) -> S -> IO S end
+foreign byteLen   : Nat -> Nat end
+foreign printNat  : Nat -> IO Nat end
+step : Nat -> Nat -> IO Nat is
+  fn (total : Nat) (line : Nat) is pureIO Nat (byteLen line) end
+end
+main : IO Nat is
+  bindIO Nat Nat (foldLines Nat (codeOf "%s") step zero)
+    (fn (n : Nat) is printNat n end)
+end`
+	mkfile := func(n int) string {
+		dir := t.TempDir()
+		p := dir + "/lines.txt"
+		var b strings.Builder
+		for i := 0; i < n; i++ {
+			b.WriteString("word\n")
+		}
+		if err := os.WriteFile(p, []byte(b.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	pSmall := mkfile(5)
+	pBig := mkfile(2000)
+	outSmall, liveSmall := buildAndRunCWithReport(t, fmt.Sprintf(srcTmpl, pSmall), "main")
+	outBig, liveBig := buildAndRunCWithReport(t, fmt.Sprintf(srcTmpl, pBig), "main")
+	// Every line is "word" (4 bytes); the step yields byteLen of the current line, so
+	// the fold's final value is 4. printNat prints it, then show() prints it again.
+	if outSmall != "4\n4" || outBig != "4\n4" {
+		t.Fatalf("byteLen fold wrong: %q (5 lines), %q (2000 lines), want 4\\n4", outSmall, outBig)
+	}
+	if liveBig-liveSmall > 64 {
+		t.Fatalf("terminal prim leaks its owned direct arg: rt_live %d (5 lines) vs %d (2000 lines) -- byteLen_c1 must release the consumed line", liveSmall, liveBig)
+	}
+}
+
 // buildAndRunCWithReport emits the C backend for `main`, compiles it with
 // -DRUNE_ARC_REPORT, runs it, and returns (trimmed stdout, rt_live). It skips
 // gracefully when no C compiler is on PATH.
