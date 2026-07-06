@@ -197,6 +197,7 @@ p : Pairing Nat Nat is mk Nat Nat (succ zero) (succ (succ zero)) end
 // conservative-roots / precise-slots mark-sweep as the C backend (shared rep), so a
 // long boxed fold survives many collections.
 func TestLLGCConformanceUnderTinyHeap(t *testing.T) {
+	t.Skip("mark-sweep deleted; ARC pressure gate replaces this in Task 3")
 	src := natSrc + `
 data List : U -> U is
   nil : (A : U) -> List A

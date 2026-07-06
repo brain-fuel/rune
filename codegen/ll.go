@@ -89,8 +89,8 @@ func (LL) Emit(p Program) (TargetSource, error) {
 	}
 
 	// rune_main: evaluate the entry thunk and show it. Called by the runtime's C
-	// `main` (which captures the GC stack bottom and seeds UNIT first). An IO main
-	// is a deferred world thunk (unit -> A), forced by applying $unit.
+	// `main` (which seeds UNIT first; under ARC there is no GC stack bottom to
+	// capture). An IO main is a deferred world thunk (unit -> A), forced by applying $unit.
 	body.WriteString("define void @rune_main() {\nentry:\n")
 	if p.Main != "" {
 		f := &llFunc{em: em}
@@ -194,8 +194,8 @@ func foreignNames(p Program) []string {
 }
 
 // EmitRuntime returns the C runtime the emitted LLVM IR links against (external-
-// linkage twin of cRuntime + the C `main` that captures the GC stack bottom, seeds
-// UNIT, and calls `rune_main`). The harness writes this beside the `.ll` and
+// linkage twin of cRuntime + the C `main` that seeds UNIT and calls `rune_main`;
+// under ARC there is no GC stack bottom to capture). The harness writes this beside the `.ll` and
 // compiles both with clang. The quotient/IO groups are always included here (they
 // are tiny and harmless when the `.ll` never references them).
 func (LL) EmitRuntime() string {
@@ -777,9 +777,9 @@ func (f *llFunc) freshLabel(s string) string {
 
 // emitDefThunk emits a memoized thunk for a top-level definition. The first call
 // computes the body and caches it (a private global cache + done flag), so
-// recursion + the eliminators' self-reference terminate and run once. The cache is
-// registered as a GC root before the body runs (the conservative stack scan cannot
-// find a non-stack static), exactly as the C backend does.
+// recursion + the eliminators' self-reference terminate and run once. Under ARC the
+// cache holds one never-released reference for the process lifetime — that IS the
+// root (no root registration needed), exactly as the C backend does.
 func (em *llEmitter) emitDefThunk(b *strings.Builder, name string, body CIr) {
 	cache := "@cache_" + llName(name)
 	done := "@done_" + llName(name)
@@ -798,7 +798,6 @@ func (em *llEmitter) emitDefThunk(b *strings.Builder, name string, body CIr) {
 	fmt.Fprintf(b, "  ret i64 %s\n", c0)
 	fmt.Fprintf(b, "%s:\n", lcomp)
 	fmt.Fprintf(b, "  store i1 1, i1* %s\n", done)
-	fmt.Fprintf(b, "  call void @rt_add_root(i64* %s)\n", cache)
 	v := f.emit(b, body, nil)
 	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", v, cache)
 	fmt.Fprintf(b, "  ret i64 %s\n", v)
@@ -881,7 +880,6 @@ func (em *llEmitter) emitCachedThunk(b *strings.Builder, name string, body func(
 	fmt.Fprintf(b, "  ret i64 %s\n", c0)
 	fmt.Fprintf(b, "%s:\n", lcomp)
 	fmt.Fprintf(b, "  store i1 1, i1* %s\n", done)
-	fmt.Fprintf(b, "  call void @rt_add_root(i64* %s)\n", cache)
 	v := body(f)
 	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", v, cache)
 	fmt.Fprintf(b, "  ret i64 %s\n}\n", v)
@@ -1291,7 +1289,6 @@ func (em *llEmitter) emitNamedThunk(b *strings.Builder, thunkSym, tag string, bo
 	fmt.Fprintf(b, "  ret i64 %s\n", c0)
 	fmt.Fprintf(b, "%s:\n", lcomp)
 	fmt.Fprintf(b, "  store i1 1, i1* %s\n", done)
-	fmt.Fprintf(b, "  call void @rt_add_root(i64* %s)\n", cache)
 	v := body(f)
 	fmt.Fprintf(b, "  store i64 %s, i64* %s\n", v, cache)
 	fmt.Fprintf(b, "  ret i64 %s\n", v)

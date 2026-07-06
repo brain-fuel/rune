@@ -3,7 +3,7 @@ package codegen
 // ll_runtime.go — the LLVM backend's module preamble + runtime-helper declares,
 // and the linkable C runtime (the external-linkage twin of cRuntime in c.go). The
 // emitted `.ll` is genuine LLVM IR for the program LOGIC; the tagged-word Value
-// rep, the mark-sweep GC, `apply`, and `$show` live in this C shim, compiled and
+// rep, the ARC runtime (retain/release), `apply`, and `$show` live in this C shim, compiled and
 // linked by clang alongside the `.ll` (`clang program.ll runtime.c -o exe`). The C
 // backend (c.go) is UNTOUCHED — this is a parallel, external-linkage copy so the
 // two native backends share the rep without either depending on the other's
@@ -46,7 +46,8 @@ declare i64 @rt_big_parse(i8*)
 declare i64 @rt_big_succ(i64)
 declare i64 @rt_big_cmp(i64, i64)
 declare void @rt_abort()
-declare void @rt_add_root(i64*)
+declare void @rt_retain(i64)
+declare void @rt_release(i64)
 declare void @rt_show_line(i64)
 `
 
@@ -66,18 +67,18 @@ declare i64 @def_pureIO()
 declare i64 @def_bindIO()
 `
 
-// llRuntimeC is the linkable C runtime: the SAME tagged-word Value rep + mark-sweep
-// GC + apply/show as cRuntime, but with EXTERNAL `rt_*` wrappers the emitted LLVM IR
-// calls, and an external UNIT global. Kept byte-compatible with the C backend's rep
-// so $show is byte-identical. (Distinct symbol namespace `rt_*` so it never clashes
-// with c.go's `static` runtime if both ever shared a TU — they do not.)
+// llRuntimeC is the linkable C runtime: the SAME tagged-word Value rep + ARC
+// (Perceus-style reference counting) + apply/show as cRuntime, but with EXTERNAL
+// `rt_*` wrappers the emitted LLVM IR calls, and an external UNIT global. Kept
+// byte-compatible with the C backend's rep so $show is byte-identical. (Distinct
+// symbol namespace `rt_*` so it never clashes with c.go's `static` runtime if both
+// ever shared a TU — they do not.)
 const llRuntimeC = `/* rune llvm-backend runtime — the external-linkage twin of the C backend's
    embedded runtime. Compiled and linked by clang alongside the emitted .ll. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <setjmp.h>
 
 typedef intptr_t Value;
 
@@ -85,8 +86,9 @@ enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG
 
 typedef struct Obj {
   int kind;
-  struct Obj* gc_next;
-  int gc_mark;
+  /* ARC reference count; 1 at birth (arc_alloc). rt_retain increments,
+     rt_release decrements and frees the block (per-kind free walker) at zero. */
+  long rc;
   Value (*code)(Value, Value*);
   int nenv;
   int tag;
@@ -102,119 +104,86 @@ typedef struct Obj {
 #define IS_INT(v)   ((v) & 1)
 #define INT_VAL(v)  ((long)((v) >> 1))
 
-/* ---- GC: conservative-roots / precise-slots non-moving mark-sweep (== c.go) ---- */
-static Obj* gc_objs = 0;
-static size_t gc_live_bytes = 0;
-static size_t gc_threshold = 0;
-#ifndef RUNE_GC_THRESHOLD
-#define RUNE_GC_THRESHOLD (8u * 1024u * 1024u)
+/* ===========================================================================
+   ARC — Perceus-style reference counting (== c.go's cRuntime ARC core; the
+   spec's docs/superpowers/specs/2026-07-05-native-arc-design.md Decision 3/4).
+   THE TWIN'S LINKAGE: rt_retain / rt_release / rt_live are EXTERN here (the
+   emitted .ll calls them), where c.go's are static; arc_alloc / rt_counted /
+   arc_report stay static (only the C runtime calls them). Ownership rules
+   (PATH B): apply() consumes both operands; the mk* builders take ownership of
+   their slot arguments; thunk-cache reads (CGlobal) and foreign accessors are
+   BORROWED; foreign prim bodies receive borrowed args and return owned results.
+   rune heap values are immutable and acyclic, so counting is complete — no
+   cycle collector.
+   =========================================================================== */
+long rt_live = 0;
+
+#ifdef RUNE_ARC_REPORT
+static void arc_report(void) { fprintf(stderr, "rt_live=%ld\n", rt_live); }
 #endif
-#define GC_MAX_STATIC_ROOTS 4096
-static Value* gc_static_roots[GC_MAX_STATIC_ROOTS];
-static int gc_n_static_roots = 0;
-static void* volatile gc_stack_bottom = 0;
-static long gc_n_collections = 0;
-static void gc_collect(void);
 
-void rt_add_root(Value* slot) {
-  if (gc_n_static_roots >= GC_MAX_STATIC_ROOTS) {
-    fprintf(stderr, "rune-ll: too many GC static roots\n"); exit(1);
-  }
-  gc_static_roots[gc_n_static_roots++] = slot;
-}
-
-static void* gc_alloc(size_t n) {
+static void* arc_alloc(size_t n) {
+  /* align to pointer size so the int low-bit tag is never set on a real pointer */
   size_t a = sizeof(void*);
   n = (n + a - 1) & ~(a - 1);
-  if (gc_threshold == 0) gc_threshold = RUNE_GC_THRESHOLD;
-  if (gc_live_bytes + n > gc_threshold && gc_stack_bottom != 0) {
-    gc_collect();
-    while (gc_live_bytes + n > gc_threshold) gc_threshold *= 2;
-  }
+  /* ZERO the whole object: the emitted code allocates an object then fills its
+     slots one at a time; a zeroed header/slot reads as null, so a half-built
+     object never exposes a wild pointer to the free walker. */
   Obj* o = (Obj*)calloc(1, n);
   if (!o) { fprintf(stderr, "rune-ll: out of memory\n"); exit(1); }
-  o->gc_next = gc_objs; o->gc_mark = 0;
-  gc_objs = o; gc_live_bytes += n;
+  o->rc = 1;
+  rt_live++;
   return o;
 }
 
-static size_t gc_obj_size(Obj* o) {
-  size_t base = sizeof(Obj);
-  int extra = 0;
-  switch (o->kind) {
-    case K_CLO:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break;
-    case K_CON:  extra = o->nfield > 0 ? o->nfield - 1 : 0; break;
-    case K_PAIR: extra = 1; break;
-    case K_BIG:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break; /* nenv = limb capacity */
-    case K_BYTES: extra = o->nenv  > 0 ? o->nenv   - 1 : 0; break; /* Phase 0 Bin: 1 byte/slot, nenv = count */
-    case K_BOUNCE: extra = o->nfield > 0 ? o->nfield - 1 : 0; break; /* T2: step + args */
-    default:     extra = 0; break;
-  }
-  size_t sz = base + (size_t)extra * sizeof(Value);
-  size_t a = sizeof(void*);
-  return (sz + a - 1) & ~(a - 1);
+Value UNIT;                  /* the boxed singleton made in main (extern: the .ll references @UNIT) */
+
+static Obj* obj(Value v) { return (Obj*)v; }
+
+/* rt_counted: is v a counted heap object? Immediates, null, and the UNIT
+   singleton (a never-released global) are not. */
+static int rt_counted(Value v) {
+  if (v == 0 || IS_INT(v) || v == UNIT) return 0;
+  return 1;
 }
 
-static Obj* gc_find_obj(Value v) {
-  if (v == 0 || (v & 1)) return 0;
-  if ((v & (Value)(sizeof(void*) - 1)) != 0) return 0;
-  char* q = (char*)v;
-  for (Obj* o = gc_objs; o; o = o->gc_next) {
-    char* lo = (char*)o;
-    char* hi = lo + gc_obj_size(o);
-    if (q >= lo && q < hi) return o;
-  }
-  return 0;
+void rt_retain(Value v) {
+  if (!rt_counted(v)) return;
+  obj(v)->rc++;
 }
 
-static void gc_mark_value(Value v);
-static void gc_mark_obj(Obj* o) {
-  if (o->gc_mark) return;
-  o->gc_mark = 1;
+void rt_release(Value v) {
+  if (!rt_counted(v)) return;
+  Obj* o = obj(v);
+  if (--o->rc > 0) return;
+  /* rc hit zero: release children per kind, then free the block. K_STR (->str is a
+     literal / emitter buffer we never own), K_PTR, K_UNIT, K_FLOAT are leaves; K_BIG /
+     K_BYTES hold limbs / bytes INLINE in slots[] (raw words, never Values), freed with
+     the block. */
   switch (o->kind) {
-    case K_CLO:  for (int i = 0; i < o->nenv;   i++) gc_mark_value(o->slots[i]); break;
-    case K_CON:  for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
-    case K_PAIR: gc_mark_value(o->slots[0]); gc_mark_value(o->slots[1]); break;
-    case K_BOUNCE: for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
+    case K_CLO:
+      for (int i = 0; i < o->nenv; i++) rt_release(o->slots[i]);
+      break;
+    case K_CON:
+      for (int i = 0; i < o->nfield; i++) rt_release(o->slots[i]);
+      break;
+    case K_PAIR:
+      rt_release(o->slots[0]); rt_release(o->slots[1]);
+      break;
+    case K_BOUNCE:
+      /* slot[0] is the BORROWED cached _step root (mkbounce stores it WITHOUT a retain,
+         matching WASM $rt_mkbounce). Release only the OWNED args (slots[1..nfield-1]);
+         the WASM $rt_free K_BOUNCE arm skips the step likewise (base = arg slots). A
+         bounce forced through tramp is shell-freed (args moved) and never reaches here;
+         one dropped as a dead value (e.g. an unused IH bound to a bounce) frees its
+         args but must leave the borrowed step alone. */
+      for (int i = 1; i < o->nfield; i++) rt_release(o->slots[i]);
+      break;
     default: break;
   }
+  rt_live--;
+  free(o);
 }
-static void gc_mark_value(Value v) {
-  if (v == 0 || (v & 1)) return;
-  gc_mark_obj((Obj*)v);
-}
-
-static void gc_scan_range(char* lo, char* hi) {
-  if (lo > hi) { char* t = lo; lo = hi; hi = t; }
-  while (((uintptr_t)lo % sizeof(void*)) != 0) lo++;
-  for (char* p = lo; p + sizeof(Value) <= hi; p += sizeof(void*)) {
-    Value v = *(Value*)p;
-    Obj* o = gc_find_obj(v);
-    if (o) gc_mark_obj(o);
-  }
-}
-
-static void gc_collect(void) {
-  gc_n_collections++;
-  jmp_buf regs;
-  if (setjmp(regs)) return;
-  (void)regs;
-  for (int i = 0; i < gc_n_static_roots; i++) gc_mark_value(*gc_static_roots[i]);
-  char* sp = (char*)__builtin_frame_address(0);
-  char* bottom = (char*)gc_stack_bottom;
-  gc_scan_range(sp, bottom);
-  gc_scan_range((char*)&regs, (char*)&regs + sizeof(regs));
-  Obj** link = &gc_objs;
-  while (*link) {
-    Obj* o = *link;
-    if (o->gc_mark) { o->gc_mark = 0; link = &o->gc_next; }
-    else { *link = o->gc_next; gc_live_bytes -= gc_obj_size(o); free(o); }
-  }
-}
-
-/* ---- the Value rep + the rt_* helpers the emitted LLVM IR calls ---- */
-Value UNIT;
-static Obj* obj(Value v) { return (Obj*)v; }
 
 Value rt_mkint(long n) { return INT_TAG(n); }
 long rt_as_int(Value v) {
@@ -223,14 +192,14 @@ long rt_as_int(Value v) {
 }
 
 Value rt_mkclo(Value (*code)(Value, Value*), int nenv) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (nenv > 0 ? (nenv - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (nenv > 0 ? (nenv - 1) : 0) * sizeof(Value));
   o->kind = K_CLO; o->code = code; o->nenv = nenv;
   return (Value)o;
 }
 void rt_clo_set(Value c, int i, Value x) { obj(c)->slots[i] = x; }
 
 Value rt_mkcon(int tag, const char* name, int nfield) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (nfield > 0 ? (nfield - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (nfield > 0 ? (nfield - 1) : 0) * sizeof(Value));
   o->kind = K_CON; o->tag = tag; o->name = name; o->nfield = nfield;
   return (Value)o;
 }
@@ -239,7 +208,7 @@ Value rt_con_get(Value c, int i) { return obj(c)->slots[i]; }
 int rt_con_tag(Value c) { return obj(c)->tag; }
 
 Value rt_mkpair(Value a, Value b) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + sizeof(Value));
   o->kind = K_PAIR; o->slots[0] = a; o->slots[1] = b;
   return (Value)o;
 }
@@ -247,25 +216,25 @@ Value rt_pair_fst(Value p) { return obj(p)->slots[0]; }
 Value rt_pair_snd(Value p) { return obj(p)->slots[1]; }
 
 Value rt_mkstr(const char* s) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_STR; o->str = s;
   return (Value)o;
 }
 Value rt_mkptr(long h) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_PTR; o->handle = h;
   return (Value)o;
 }
 /* D3 machine float (f64): box/unbox a double (kind K_FLOAT), shared by the baked
    float/BLAS host bodies appended by EmitRuntimeFor. */
 static Value mkfloat(double d) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_FLOAT; o->dval = d;
   return (Value)o;
 }
 static double float_val(Value v) { return obj(v)->dval; }
 static Value mkunit(void) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_UNIT;
   return (Value)o;
 }
@@ -282,7 +251,7 @@ Value rt_apply(Value clo, Value arg) {
    builds a K_BOUNCE {step, args...}; the public driver forces the chain so deep
    tail recursion runs in O(1) native stack. */
 Value rt_mkbounce(Value step, int nargs) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (size_t)nargs * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (size_t)nargs * sizeof(Value));
   o->kind = K_BOUNCE; o->tag = nargs; o->nfield = nargs + 1; o->slots[0] = step;
   return (Value)o;
 }
@@ -304,7 +273,7 @@ Value rt_tramp(Value v) {
 #define BIG_BASE 1000000000L
 
 static Value mkbig(int nlimbs) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (nlimbs > 0 ? (nlimbs - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (nlimbs > 0 ? (nlimbs - 1) : 0) * sizeof(Value));
   o->kind = K_BIG; o->tag = 0; o->nfield = nlimbs; o->nenv = nlimbs;
   return (Value)o;
 }
@@ -314,7 +283,7 @@ static void big_setlimb(Value v, int i, long x) { obj(v)->slots[i] = (Value)x; }
 /* Phase 0 real byte strings (Bin): K_BYTES stores one byte per Value slot,
    nfield = nenv = the byte count (mirrors K_BIG; raw bytes are never traced). */
 static Value mkbytes(int n) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (n > 0 ? (n - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (n > 0 ? (n - 1) : 0) * sizeof(Value));
   o->kind = K_BYTES; o->nfield = n; o->nenv = n;
   return (Value)o;
 }
@@ -415,30 +384,52 @@ Value rt_big_parse(const char* s) {
 }
 /* Schoolbook long division (base-1e9), MS-limb first with per-limb binary search.
    Returns quotient; *rem receives remainder. Div by zero: q=0, r=a. */
+/* an independent (fresh, owned) copy of a normed bignum's magnitude. */
+static Value big_copy(Value a) {
+  int n = big_nlimbs(a);
+  Value r = mkbig(n);
+  for (int i = 0; i < n; i++) big_setlimb(r, i, big_limb(a, i));
+  return r;
+}
+/* ARC discipline (== c.go's big_divmod): q and *rem are FRESH owned results that never
+   alias an input, and every internal K_BIG temporary is released. The pre-ARC version
+   set *rem = a in the short-circuit arms (aliasing the input) and never freed its loop
+   temps -- under ARC that made big_mod x y (x<y) return the OPERAND, which the discard
+   release in big_div/big_mod then freed out from under the result (a use-after-free),
+   plus a per-call temp leak. */
 static Value big_divmod(Value a, Value b, Value* rem) {
-  if (big_nlimbs(b) == 0) { *rem = a; return rt_big_from_long(0); }
-  if (big_cmp(a, b) < 0) { *rem = a; return rt_big_from_long(0); }
+  if (big_nlimbs(b) == 0) { *rem = big_copy(a); return rt_big_from_long(0); }
+  if (big_cmp(a, b) < 0) { *rem = big_copy(a); return rt_big_from_long(0); }
   int n = big_nlimbs(a);
   Value q = mkbig(n);
   Value r = rt_big_from_long(0);
   Value base = rt_big_from_long(BIG_BASE);
   for (int i = n - 1; i >= 0; i--) {
-    r = big_add(big_mul(r, base), rt_big_from_long(big_limb(a, i)));
+    Value t1 = big_mul(r, base), t2 = rt_big_from_long(big_limb(a, i)), rn = big_add(t1, t2);
+    rt_release(t1); rt_release(t2); rt_release(r); r = rn;
     long lo = 0, hi = BIG_BASE - 1, d = 0;
     while (lo <= hi) {
       long mid = lo + (hi - lo) / 2;
-      if (big_cmp(big_mul(b, rt_big_from_long(mid)), r) <= 0) { d = mid; lo = mid + 1; }
-      else hi = mid - 1;
+      Value m1 = rt_big_from_long(mid), m2 = big_mul(b, m1);
+      int cmp = big_cmp(m2, r);
+      rt_release(m1); rt_release(m2);
+      if (cmp <= 0) { d = mid; lo = mid + 1; } else hi = mid - 1;
     }
     big_setlimb(q, i, d);
-    r = big_monus(r, big_mul(b, rt_big_from_long(d)));
+    Value dd = rt_big_from_long(d), bd = big_mul(b, dd), rr = big_monus(r, bd);
+    rt_release(dd); rt_release(bd); rt_release(r); r = rr;
   }
+  rt_release(base);
   *rem = big_norm(r);
   return big_norm(q);
 }
-static Value big_div(Value a, Value b) { Value r; return big_divmod(a, b, &r); }
-static Value big_mod(Value a, Value b) { Value r; big_divmod(a, b, &r); return r; }
-Value rt_big_succ(Value a) { return big_add(a, rt_big_from_long(1)); }
+/* big_div returns the quotient and DISCARDS the (now fresh, owned) remainder -- release
+   it. big_mod returns the remainder and discards the quotient -- release that. */
+static Value big_div(Value a, Value b) { Value r; Value q = big_divmod(a, b, &r); rt_release(r); return q; }
+static Value big_mod(Value a, Value b) { Value r; Value q = big_divmod(a, b, &r); rt_release(q); return r; }
+/* big_succ: a+1. big_add reads both inputs and returns a fresh K_BIG; the "1" we
+   allocate is OURS to own, so release it once big_add has consumed it (== c.go). */
+Value rt_big_succ(Value a) { Value one = rt_big_from_long(1); Value r = big_add(a, one); rt_release(one); return r; }
 long  rt_big_cmp(Value a, Value b) { return big_cmp(a, b); }
 
 Value rt_nat_add(Value a, Value b) { return big_add(a, b); }
@@ -536,21 +527,17 @@ Value def_bindIO(void) { return rt_mkclo(&io_bind0, 0); }
 `
 
 // llRuntimeMain is the C entrypoint the emitted module's rune_main is called from:
-// it captures the GC stack bottom, seeds + roots UNIT, then calls rune_main (which
-// the .ll defines). Optional GC stats on stderr (-DRUNE_GC_STATS) mirror c.go so a
-// test can confirm the collector fired.
+// it seeds UNIT, then calls rune_main (which the .ll defines). Under ARC there is no
+// GC stack bottom or root registration; the optional ARC leak report (-DRUNE_ARC_REPORT)
+// registers arc_report as an atexit hook, mirroring c.go's emitted main.
 const llRuntimeMain = `
 extern void rune_main(void);
 int main(void) {
-  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;
   UNIT = mkunit();
-  rt_add_root(&UNIT);
-  rune_main();
-#ifdef RUNE_GC_STATS
-  fprintf(stderr, "rune-ll: gc collections=%ld\n", gc_n_collections);
-#else
-  (void)gc_n_collections;
+#ifdef RUNE_ARC_REPORT
+  atexit(arc_report);
 #endif
+  rune_main();
   return 0;
 }
 `
@@ -563,15 +550,11 @@ const llRuntimeMainArgv = `
 extern void rune_main(void);
 int main(int argc, char** argv) {
   rune_argc = argc; rune_argv = argv;
-  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;
   UNIT = mkunit();
-  rt_add_root(&UNIT);
-  rune_main();
-#ifdef RUNE_GC_STATS
-  fprintf(stderr, "rune-ll: gc collections=%ld\n", gc_n_collections);
-#else
-  (void)gc_n_collections;
+#ifdef RUNE_ARC_REPORT
+  atexit(arc_report);
 #endif
+  rune_main();
   return 0;
 }
 `
@@ -584,15 +567,11 @@ const llRuntimeMainFloat = `
 extern void rune_main(void);
 int main(void) {
   setlocale(LC_NUMERIC, "C");
-  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;
   UNIT = mkunit();
-  rt_add_root(&UNIT);
-  rune_main();
-#ifdef RUNE_GC_STATS
-  fprintf(stderr, "rune-ll: gc collections=%ld\n", gc_n_collections);
-#else
-  (void)gc_n_collections;
+#ifdef RUNE_ARC_REPORT
+  atexit(arc_report);
 #endif
+  rune_main();
   return 0;
 }
 `
@@ -605,15 +584,11 @@ extern void rune_main(void);
 int main(int argc, char** argv) {
   rune_argc = argc; rune_argv = argv;
   setlocale(LC_NUMERIC, "C");
-  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;
   UNIT = mkunit();
-  rt_add_root(&UNIT);
-  rune_main();
-#ifdef RUNE_GC_STATS
-  fprintf(stderr, "rune-ll: gc collections=%ld\n", gc_n_collections);
-#else
-  (void)gc_n_collections;
+#ifdef RUNE_ARC_REPORT
+  atexit(arc_report);
 #endif
+  rune_main();
   return 0;
 }
 `
