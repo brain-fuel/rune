@@ -69,15 +69,32 @@ SemiringLaws A (s : Semiring A) = {
   addAssoc, addComm, addZeroL, addZeroR,
   mulAssoc, mulOneL, mulOneR,
   distribL, distribR, mulZeroL, mulZeroR }
-RingLaws A (r : Ring A) = { semiringLaws : SemiringLaws A (projection), negAddInv }
-DivRingLaws A (d : DivRing A) = { ringLaws : RingLaws A (projection),
-  recipInvL/R : (x : A) -> Neq x zero -> Eq A (mul x (recip x)) one,
-  oneNeqZero }
+RingLaws A (r : Ring A) = { semiringLaws : SemiringLaws A (projection), negAddInvL/R }
+DivRingLaws A (d : DivRing A) (nz : A -> U) = { ringLaws : RingLaws A (projection),
+  recipInvL/R : (x : A) -> nz x -> Eq A (mul x (recip x)) one }
 CommLaws A (s : Semiring A) = { mulComm }
 ```
 
-- Exact statements (argument orders, Eq shapes) are fixed at plan time to
-  match the existing listing lemmas so proofs port rather than re-prove.
+- The laws bodies are built from REUSABLE statement formers (AssocT, CommT,
+  IdLT/IdRT, DistribLT/DistribRT, AnnihLT/AnnihRT) chained with a
+  non-dependent `And` (a Sig with a constant family), so each law is one
+  named proposition and the records stay readable.
+- DivRingLaws is parameterized by a nonzero PREDICATE `nz : A -> U` rather
+  than a global Neq: the prelude has no Empty/negation encoding, each
+  carrier states nonzeroness its own way (Frac: the numerator's isZero is
+  false), and the guard is exactly what the law needs. oneNeqZero is
+  DROPPED for now (needs a negation encoding, no consumer yet; returns
+  with the Real/IEEE754 sub-spec).
+- Exact statements (argument orders, Eq shapes) follow the actual prelude
+  kernels (addW/mulW recurse on the FIRST argument via `case`, mulW steps
+  by `addW ih n`), with ch107's inductions as the shape guide. ch107
+  proves over its OWN data Nat, so the Whole proofs are re-derived with
+  the same induction shapes, not literally ported.
+- STAGING (realism): the law-record TYPES all land in this sub-project,
+  and Whole's SemiringLaws instance is PROVEN here. The Int RingLaws and
+  Frac DivRingLaws INSTANCES are their own follow-up proof campaigns
+  (sign-magnitude case theory for iadd; gcd/reduce theory for Frac) and
+  ship as separate sub-specs. Ops instances for all three types land now.
 - `CommLaws` stands alone so "commutative ring" = Ring + RingLaws +
   CommLaws and "field" = DivRing + DivRingLaws + CommLaws by composition,
   with no extra ops shapes.
@@ -86,11 +103,15 @@ CommLaws A (s : Semiring A) = { mulComm }
 
 ## Decision 4: instances in this sub-project (existing types only)
 
-- Whole: Semiring + SemiringLaws (port/reference the existing arithmetic
-  lemmas from the book listings).
-- Int: Ring + RingLaws + CommLaws (ch107 int_ring_complete already proves
-  the ring axioms; port).
-- Frac: DivRing + DivRingLaws + CommLaws (a field).
+- Whole: Semiring + SemiringLaws PROVEN (re-derived over addW/mulW by
+  WholeElim, ch107-shaped inductions).
+- Int: Ring ops instance now; RingLaws + CommLaws instances deferred
+  (follow-up sub-spec; ch107 proves the ring axioms over a quotient
+  representation, not the prelude's sign-magnitude Int, so the proofs do
+  not port directly).
+- Frac: DivRing ops instance now (recip total, `recip 0 = 0/1` junk via
+  numerator case); DivRingLaws + CommLaws instances deferred (gcd/reduce
+  theory campaign).
 - Nat (counting, no zero): NO semiring instance; it remains a graph node
   injected into Whole by wholeOf. Its arithmetic stays as today.
 - Later sub-specs slot in without hierarchy changes: IEEE754 = DivRing ops
@@ -102,7 +123,12 @@ CommLaws A (s : Semiring A) = { mulComm }
 ## Decision 5: operator rewiring + Num deletion
 
 - `+` and `*` become Semiring-constrained functions (dispatch identical in
-  kind to today's Num dispatch; the elaborator machinery is unchanged).
+  kind to today's Num dispatch; the elaborator machinery is unchanged; no
+  hardcoded Num references exist in elaborate/ or internal/session, verified).
+- ONLY Semiring instances enter the instance table (semiringWhole/Int/Frac,
+  the Int and Frac ones by projection from named ringInt/divRingFrac
+  defs). Ring/DivRing values stay plain defs until a class-constrained
+  consumer exists (YAGNI; registering them buys nothing today).
 - `Num` is DELETED, not deprecated (Rule 5: subsumed by Semiring). All
   listings and prelude code using Num migrate in place, no compat shim.
 - Promotion classes (`Sub`/`Div`/`NegR` result-typed) are UNTOUCHED: they
@@ -117,11 +143,17 @@ CommLaws A (s : Semiring A) = { mulComm }
 
 - Named injection functions per edge (no Into typeclass; one-field classes
   are a hash-collision trap and nothing needs the abstraction yet):
-  wholeOf (Nat to Whole, exists), intOfWhole, ratOfInt, ratOfWhole.
-- Per edge, homomorphism lemmas: preserves add, preserves mul, preserves
-  one (and zero where the source has it).
-- Coherence: ratOfWhole agrees with ratOfInt composed with intOfWhole
-  (propositional lemma if not definitional).
+  wholeOf (Nat to Whole, exists), intOf (Whole to Int, exists), fracOf
+  (Whole to Frac, exists), ratOfInt (Int to Frac, NEW: keep sign and
+  magnitude over denominator 1).
+- intOf edge homomorphism lemmas PROVEN now: preserves add, mul, one
+  (each reduces to the `mkInt false m = int false m` normalization lemma,
+  a two-branch case).
+- fracOf/ratOfInt edge homomorphism lemmas DEFERRED with the Frac laws
+  campaign: addF/mulF reduce through gcd, so the lemmas need the same
+  gcd/reduce theory.
+- Coherence triangle PROVEN now: ratOfInt (intOf n) = fracOf n is
+  definitional (both sides are `frac false n 1`), pinned by refl.
 - The graph is documentation-real: a diagram in the chapter naming every
   node, edge, and lemma.
 
