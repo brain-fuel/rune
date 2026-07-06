@@ -242,7 +242,7 @@ func TestForeignMultiConformance(t *testing.T) {
 					"\n/* FFI gate host accessors: hostId = identity, hostConst = first projection. */\n" +
 					"static Value hostId_code(Value arg, Value* env) { (void)env; return arg; }\n" +
 					"Value hostId(void) { return rt_mkclo(&hostId_code, 0); }\n" +
-					"static Value hostConst_inner(Value b, Value* env) { (void)b; return env[0]; }\n" +
+					"static Value hostConst_inner(Value b, Value* env) { (void)b; rt_retain(env[0]); return env[0]; }\n" +
 					"static Value hostConst_code(Value a, Value* env) { (void)env; Value c = rt_mkclo(&hostConst_inner, 1); rt_clo_set(c, 0, a); return c; }\n" +
 					"Value hostConst(void) { return rt_mkclo(&hostConst_code, 0); }\n"
 			}},

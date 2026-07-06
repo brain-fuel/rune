@@ -256,11 +256,26 @@ Value rt_mkbounce(Value step, int nargs) {
   return (Value)o;
 }
 void rt_bounce_set(Value bnc, int i, Value x) { obj(bnc)->slots[i] = x; }
+/* shell-free: reclaim the bounce object WITHOUT releasing the args (moved into the
+   step applies) or the step (slots[0], borrowed). == c.go's bounce_free_shell (the
+   dual of WASM's $rt_bounce_free_shell). */
+static void bounce_free_shell(Value bnc) { Obj* o = obj(bnc); rt_live--; free(o); }
+/* tramp: force the bounce chain under ARC (== c.go's tramp; WASM's $rt_tramp). Re-apply
+   the BORROWED step (slots[0]) to each OWNED arg (slots[1..tag], MOVED into the applies).
+   Each apply but the first builds an owned intermediate closure that nothing else frees --
+   RELEASE the previous intermediate before the next apply (i>1; the step at i==1 is
+   borrowed, not released). Then shell-free the spent bounce (args moved, step borrowed)
+   and continue. O(1) native stack. */
 Value rt_tramp(Value v) {
   while (!IS_INT(v) && obj(v)->kind == K_BOUNCE) {
     Obj* o = obj(v);
     Value f = o->slots[0];
-    for (int i = 1; i <= o->tag; i++) f = rt_apply(f, o->slots[i]);
+    for (int i = 1; i <= o->tag; i++) {
+      Value next = rt_apply(f, o->slots[i]);
+      if (i > 1) rt_release(f); /* release the previous intermediate (not the borrowed step) */
+      f = next;
+    }
+    bounce_free_shell(v);
     v = f;
   }
   return v;
@@ -489,7 +504,7 @@ static Value quot_qin1(Value arg, Value* env) { (void)arg; (void)env; return rt_
 static Value quot_qin0(Value arg, Value* env) { (void)arg; (void)env; return rt_mkclo(&quot_qin1, 0); }
 Value def_qin(void) { return rt_mkclo(&quot_qin0, 0); }
 static Value quot_qlift5(Value arg, Value* env) { return rt_apply(env[0], arg); }
-static Value quot_qlift4(Value arg, Value* env) { (void)arg; Value c = rt_mkclo(&quot_qlift5, 1); rt_clo_set(c, 0, env[0]); return c; }
+static Value quot_qlift4(Value arg, Value* env) { (void)arg; Value c = rt_mkclo(&quot_qlift5, 1); rt_retain(env[0]); rt_clo_set(c, 0, env[0]); return c; }
 static Value quot_qlift3(Value arg, Value* env) { (void)env; Value c = rt_mkclo(&quot_qlift4, 1); rt_clo_set(c, 0, arg); return c; }
 static Value quot_qlift2(Value arg, Value* env) { (void)arg; (void)env; return rt_mkclo(&quot_qlift3, 0); }
 static Value quot_qlift1(Value arg, Value* env) { (void)arg; (void)env; return rt_mkclo(&quot_qlift2, 0); }
@@ -513,17 +528,31 @@ Value def_qind(void) { return rt_mkclo(&quot_qind0, 0); }
 // llRuntimeIO is the erased IO monad group with EXTERNAL linkage (twin of
 // cIORuntime). Always linked; harmless when unreferenced.
 const llRuntimeIO = `
-/* IO monad builtins (erased), external linkage. */
-static Value io_pure2(Value arg, Value* env) { (void)arg; return env[0]; }
+/* IO monad builtins (erased), external linkage. ARC-aligned with c.go's cIORuntime /
+   the WASM twins: the curry intermediates (io_pure1, io_bind1..3) are ORDINARY closures
+   the generic apply path RELEASES after each call, so a forwarded env capture must be
+   RETAINED into the child; def_pureIO/def_bindIO are MEMOIZED cached roots (borrowed by
+   the pass). io_pure2 RETAINS + returns its captured value as an independent owned
+   reference (io_bind4 consumes it); io_bind4 runs m, feeds its value to k, runs the
+   resulting action act, RELEASES act (reclaim its env), and yields r -- valid because
+   every print-and-return prim body / fold accumulator RETAINS its result (Task 3 sweep),
+   so r is independent. */
+static Value io_pure2(Value arg, Value* env) { (void)arg; rt_retain(env[0]); return env[0]; }
 static Value io_pure1(Value arg, Value* env) { (void)env; Value c = rt_mkclo(&io_pure2, 1); rt_clo_set(c, 0, arg); return c; }
 static Value io_pure0(Value arg, Value* env) { (void)arg; (void)env; return rt_mkclo(&io_pure1, 0); }
-Value def_pureIO(void) { return rt_mkclo(&io_pure0, 0); }
-static Value io_bind4(Value arg, Value* env) { (void)arg; return rt_apply(rt_apply(env[1], rt_apply(env[0], UNIT)), UNIT); }
-static Value io_bind3(Value arg, Value* env) { Value c = rt_mkclo(&io_bind4, 2); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, arg); return c; }
+Value def_pureIO(void) { static int done=0; static Value cache=0; if(done) return cache; done=1; cache=rt_mkclo(&io_pure0, 0); return cache; }
+static Value io_bind4(Value arg, Value* env) { (void)arg; /* env = {m, k} */
+  Value v = rt_apply(env[0], UNIT);
+  Value act = rt_apply(env[1], v);
+  Value r = rt_apply(act, UNIT);
+  rt_release(act);
+  return r;
+}
+static Value io_bind3(Value arg, Value* env) { Value c = rt_mkclo(&io_bind4, 2); rt_retain(env[0]); rt_clo_set(c, 0, env[0]); rt_clo_set(c, 1, arg); return c; }
 static Value io_bind2(Value arg, Value* env) { (void)env; Value c = rt_mkclo(&io_bind3, 1); rt_clo_set(c, 0, arg); return c; }
 static Value io_bind1(Value arg, Value* env) { (void)arg; (void)env; return rt_mkclo(&io_bind2, 0); }
 static Value io_bind0(Value arg, Value* env) { (void)arg; (void)env; return rt_mkclo(&io_bind1, 0); }
-Value def_bindIO(void) { return rt_mkclo(&io_bind0, 0); }
+Value def_bindIO(void) { static int done=0; static Value cache=0; if(done) return cache; done=1; cache=rt_mkclo(&io_bind0, 0); return cache; }
 `
 
 // llRuntimeMain is the C entrypoint the emitted module's rune_main is called from:
