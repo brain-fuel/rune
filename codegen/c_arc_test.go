@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"goforge.dev/rune/v3/codegen"
 )
@@ -625,4 +626,65 @@ end`
 			t.Fatalf("foldLines shape under ASAN: got %q, want \"50\\n50\"", out)
 		}
 	})
+}
+
+// packedDecodeSrc builds a String literal of the given repeated payload and
+// returns its byte length via the d6 `byteLen` host op. byteLen decodes the
+// packed-String bignum by repeated division-by-256 (d6_s2h) -- the exact
+// small-divisor workload the fast path accelerates.
+func packedDecodeSrc(payload string) string {
+	return fmt.Sprintf(`data Nat : U is zero : Nat | succ : Nat -> Nat end
+builtin nat Nat zero succ
+data List : U -> U is nil : (A : U) -> List A | cons : (A : U) -> A -> List A -> List A end
+data Bytes : U is bytes : Nat -> Bytes end
+String : U is Bytes end
+codeOf : Bytes -> Nat is fn (s : Bytes) is case s of | bytes n -> n end end end
+foreign byteLen : Nat -> Nat end
+main : Nat is byteLen (codeOf "%s") end`, payload)
+}
+
+// runGoStdout emits the Go backend for `main`, runs it under `go run`, and
+// returns trimmed stdout. It is the correctness oracle for the native backends:
+// the go big.Int divmod is unaffected by the C small-divisor specialization, so
+// its output is the reference the C/LL stdout must byte-match.
+func runGoStdout(t *testing.T, src, mainName string) string {
+	t.Helper()
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	gosrc := emitWith(t, codegen.Go{}, src, mainName)
+	dir := t.TempDir()
+	f := dir + "/main.go"
+	if err := os.WriteFile(f, []byte(gosrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("go", "run", f).CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run: %v\n%s", err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestCARCPackedDecodeFast pins the small-divisor division specialization:
+// decoding a ~1KB packed-String payload must complete in seconds, not the
+// tens of seconds the general binary-search divmod takes (the v3.371.0
+// scale-gate miss, profiled to d6_s2h -> big_divmod). Correctness is pinned
+// by comparing the program's stdout against the go backend's for the same
+// source; the ceiling pins the specialization.
+func TestCARCPackedDecodeFast(t *testing.T) {
+	const payloadBytes = 6000
+	payload := strings.Repeat("abcdefgh", payloadBytes/8)
+	src := packedDecodeSrc(payload)
+
+	start := time.Now()
+	got, _ := buildAndRunCWithReport(t, src, "main")
+	elapsed := time.Since(start)
+	t.Logf("packed-decode C build+run of %d-byte payload: %s, stdout=%q", len(payload), elapsed, got)
+
+	if want := runGoStdout(t, src, "main"); got != want {
+		t.Fatalf("c stdout %q != go stdout %q (byteLen mismatch)", got, want)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("packed decode too slow: %s (> 10s ceiling) for a %d-byte payload -- the small-divisor divmod fast path is missing", elapsed, len(payload))
+	}
 }

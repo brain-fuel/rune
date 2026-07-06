@@ -406,6 +406,24 @@ static Value big_copy(Value a) {
   for (int i = 0; i < n; i++) big_setlimb(r, i, big_limb(a, i));
   return r;
 }
+/* Small-divisor fast path (== c.go's big_divmod_small / wasm $big_divmod_small):
+   ONE descending-limb pass with an i64 running remainder -- cur = rem*1e9 + limb;
+   q_limb = cur/d; rem = cur%d -- instead of the general path's per-limb binary
+   search over allocating big_mul/big_cmp temporaries. d is a single base-1e9 limb
+   (< 1e9), so cur fits an unsigned 64-bit word. Returns the quotient (fresh, rc=1,
+   big_norm'd, no temps); *rem_out receives the scalar remainder (< d) to box. */
+static Value big_divmod_small(Value a, long d, long* rem_out) {
+  int n = big_nlimbs(a);
+  Value q = mkbig(n);                      /* arc_alloc zero-inits the limbs */
+  unsigned long rem = 0, dd = (unsigned long)d;
+  for (int i = n - 1; i >= 0; i--) {
+    unsigned long cur = rem * (unsigned long)BIG_BASE + (unsigned long)big_limb(a, i);
+    big_setlimb(q, i, (long)(cur / dd));
+    rem = cur % dd;
+  }
+  *rem_out = (long)rem;
+  return big_norm(q);
+}
 /* ARC discipline (== c.go's big_divmod): q and *rem are FRESH owned results that never
    alias an input, and every internal K_BIG temporary is released. The pre-ARC version
    set *rem = a in the short-circuit arms (aliasing the input) and never freed its loop
@@ -414,6 +432,14 @@ static Value big_copy(Value a) {
    plus a per-call temp leak. */
 static Value big_divmod(Value a, Value b, Value* rem) {
   if (big_nlimbs(b) == 0) { *rem = big_copy(a); return rt_big_from_long(0); }
+  /* Small-divisor fast path (== c.go): one descending-limb pass, no temps. The
+     general binary-search path below serves multi-limb divisors only. Subsumes the
+     a<b short-circuit for single-limb b (that pass yields q=0, rem=a). */
+  if (big_nlimbs(b) <= 1) {
+    long rr; Value q = big_divmod_small(a, big_limb(b, 0), &rr);
+    *rem = rt_big_from_long(rr);
+    return q;
+  }
   if (big_cmp(a, b) < 0) { *rem = big_copy(a); return rt_big_from_long(0); }
   int n = big_nlimbs(a);
   Value q = mkbig(n);

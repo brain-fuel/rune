@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"goforge.dev/rune/v3/codegen"
 	"goforge.dev/rune/v3/internal/session"
@@ -522,4 +523,26 @@ end`
 			t.Fatalf("foldLines shape under ASAN: got %q, want \"50\\n50\"", out)
 		}
 	})
+}
+
+// TestLLARCPackedDecodeFast is the LL twin of TestCARCPackedDecodeFast: the same
+// ~6KB packed-String decode must clear the seconds ceiling once the small-divisor
+// big_divmod_small fast path is present in llRuntimeC. Correctness oracle is the
+// go backend's stdout for the same source (its big.Int divmod is unaffected).
+func TestLLARCPackedDecodeFast(t *testing.T) {
+	const payloadBytes = 6000
+	payload := strings.Repeat("abcdefgh", payloadBytes/8)
+	src := packedDecodeSrc(payload)
+
+	start := time.Now()
+	got, _ := buildAndRunLLWithReport(t, src, "main")
+	elapsed := time.Since(start)
+	t.Logf("packed-decode LL build+run of %d-byte payload: %s, stdout=%q", len(payload), elapsed, got)
+
+	if want := runGoStdout(t, src, "main"); got != want {
+		t.Fatalf("ll stdout %q != go stdout %q (byteLen mismatch)", got, want)
+	}
+	if elapsed > 10*time.Second {
+		t.Fatalf("packed decode too slow: %s (> 10s ceiling) for a %d-byte payload -- the small-divisor divmod fast path is missing", elapsed, len(payload))
+	}
 }
