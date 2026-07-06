@@ -98,29 +98,26 @@ The remaining Tier A:
     beta, and the rename rides that sequence, not the 6g artifact. The earlier
     rename-before-6g recommendation is superseded. Rename remains mechanical
     (hashes are name-independent).
-13. **6e: ARC on C + LLVM** (replace mark-sweep). PRIMARY per the author
-    (2026-07-05): next work item, in-beta, supersedes the earlier post-beta
-    classification. Aligns all nine backends on one memory discipline (WASM's
-    Perceus/ARC is the reference implementation). ~~ARC CONVERSION DONE~~
-    (2026-07-06): the C backend (Plan A, branch feat/native-arc-c) and the LLVM
-    backend (Plan B, branch feat/native-arc-ll) are BOTH fully ARC -- rc header,
+13. ~~6e: ARC on C + LLVM (replace mark-sweep)~~ DONE (two stages). Stage 1,
+    the ARC conversion (v3.370.0-v3.371.0, branches feat/native-arc-c +
+    feat/native-arc-ll): both native backends fully ARC -- rc header,
     malloc/free, per-kind free walker, the shared Perceus pass wired at Emit,
-    PATH B ownership rules on every prim body, the pair-projection residual parked
-    honestly in PARKING-LOT.md. TestCARC (12 tests, pressure + ASAN) and
-    TestLLConformsToC + the LLVM ARC gate family are green; mark-sweep is retired
-    on both native backends.
-    BUT the STATED PAYOFF -- native backends rejoining the bible real-data SCALE
-    gate -- did NOT materialize, and the exclusion STAYS. The premise was that
-    mark-sweep's O(N) live-heap walk was the sole blocker; MEASUREMENT (2026-07-06,
-    BIBLE_REPO set, exclusion removed, N=1500) disproved it: with the GC scan gone,
-    the native rows are still dominated by the ch559 builder's ~8000-bignum-per-file
-    allocation volume under per-alloc ARC -- c ran 23m54s (~956 ms/entry, byte-
-    identical + query-equivalent, so CORRECT at scale) and ll did not finish inside
-    the 30m suite budget, versus 15-35 ms/entry for every source backend. Admitting
-    c/ll times the whole gate out, so the scale gate keeps its c/ll exclusion (now
-    with a measured logged reason). This is a residual bignum/codec-allocation PERF
-    item, re-characterized and parked in PARKING-LOT.md ("Native codec-over-corpus
-    impractically slow -- residual per-alloc ARC cliff"); not a correctness gap.
+    PATH B ownership rules on every prim body; TestCARC (12 tests, pressure +
+    ASAN), TestLLConformsToC and the LLVM ARC gate family green; mark-sweep
+    retired. All nine backends now share one memory discipline. Stage 2, the
+    stated payoff -- native c/ll rejoining the bible real-data SCALE gate --
+    landed on branch feat/divmod-small (2026-07-06): profiling showed the
+    residual cliff was NOT ARC traffic but a missing small-divisor division
+    specialization WASM already had (base-256 packed decode divides by small
+    constants; without the fast lane each fell through to full bignum long
+    division). Ported to both native runtimes (~47-68x on the packed-decode
+    shape; C microshape 22.3s -> 0.47s), exclusion removed, and
+    TestBibleConformanceRealData PASSED 9-way at N=1500 real Greek+Hebrew in
+    258s: c 27.2s / ll 27.1s per row (~18.1 ms/entry), mid-pack versus js
+    23.2s / go 22.8s / py 25.7s / rs 31.5s / erl 49.6s / jvm 24.9s / wasm
+    26.1s -- versus the pre-fix ~956 ms/entry (c) and DNF-at-30m (ll). The
+    PARKING-LOT entry ("Native codec-over-corpus impractically slow") is
+    CLOSED with the corrected attribution.
 14. **Doc sweep on release:** README matrix count and FOSS list (fixed 2026-07-01),
     index statuses (fixed 2026-07-01), keep R-INFRA.md the single as-built source.
 

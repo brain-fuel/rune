@@ -389,24 +389,14 @@ func TestBibleConformanceRealData(t *testing.T) {
 		// The native backends (c/ll) are byte-identity-proven on REAL Greek+Hebrew by the
 		// synthetic TestBibleConformanceBuilders gate (its lexdbfix fixture holds Hebrew/Greek
 		// through the full jsonStrField/sqlQuote/sortFile path) and by construction (the codec is
-		// raw-byte, so no charset re-encode is possible). They remain excluded from THIS 1500-entry
-		// SCALE gate. The 6e native-ARC conversion (Plan A/B) retired the mark-sweep GC and its
-		// O(N_live) conservative stack scan, but MEASUREMENT (2026-07-06, BIBLE_REPO set, native-arc
-		// branch) shows the perf cliff is NOT the GC: the ch559 builder allocates ~8000 bignums per
-		// file (the packed-String codec + splitOn/jsonStrField cells), and per-allocation ARC
-		// retain/release over the 1500-file sample runs the C row at ~956 ms/entry (23m54s total,
-		// byte-identical + query-equivalent -- correctness confirmed at scale) versus 15-35 ms/entry
-		// for every source backend; the LLVM row did not finish inside the 30m suite budget. So
-		// admitting c/ll here times the whole gate out. This is a residual PERF item, not a
-		// correctness gap -- see PARKING-LOT.md "Native codec-over-corpus impractically slow".
-		if bk.name == "c" || bk.name == "ll" {
-			// Deliberate scale-only exclusion -- NOT a missing-toolchain "inconclusive" (do not
-			// append to `skipped`, which would trip the partial-toolchain skip and drop the whole
-			// gate's assertion). The remaining backends still form the divergence lock.
-			t.Logf("real-data scale gate excludes %s (byte-identity proven by TestBibleConformanceBuilders; native ARC still ~956 ms/entry at N=1500, blows the 30m budget -- PARKING-LOT)", bk.name)
-			continue
-		}
-		// WASM DELIBERATELY JOINS this scale gate (unlike native c/ll above): its allocator
+		// raw-byte, so no charset re-encode is possible). They now ALSO run through THIS 1500-entry
+		// SCALE gate (divmod-small, 2026-07-06): profiling found the prior perf cliff was
+		// misattributed to per-alloc ARC traffic -- the true cause was a missing small-divisor
+		// division specialization in the native runtimes that WASM already had (base-256 decode
+		// divides repeatedly by small constants; without the fast path every division fell
+		// through to full bignum long division). Ported to both native runtimes; see
+		// PARKING-LOT.md "Native codec-over-corpus impractically slow" for the measured numbers.
+		// WASM DELIBERATELY JOINS this scale gate (like native c/ll above): its allocator
 		// is ARC + a size-classed freelist AND it avoids native's per-bignum retain/release
 		// cliff. A local synthetic-scale timing (1500 lexicon-shaped fixtures, same ch559 builder,
 		// since BIBLE_REPO is not available in every environment) ran wasmtime in well under 1s --

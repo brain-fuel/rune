@@ -473,31 +473,22 @@ introducing a one-off. FIX when a non-ASCII WRITE consumer appears: emit `Buffer
 across the WHOLE write vocabulary at once (writeFileCode + writeChunk + sortFile), so they stay
 consistent. No consumer now -> parked (Standing Rule 1).
 
-## Native codec-over-corpus impractically slow -- residual per-alloc ARC cliff (2026-07-01; RE-CHARACTERIZED 2026-07-06, bible cross-backend tier 3)
-STILL OPEN, but the ROOT CAUSE was measured and is NOT what this entry originally claimed. The 6e
-native-ARC conversion (Plan A on C, Plan B on LLVM; branch feat/native-arc-ll) retired mark-sweep and its
-conservative stack scan entirely -- both native runtimes now run Perceus ARC (rt_retain/rt_release, no
-cycle collector, no gc_find_obj), so the O(N_live) LINEAR-scan cost this entry blamed is GONE. The
-expectation (beta item 13) was that removing that scan would let the native backends rejoin the bible
-real-data SCALE gate. IT DID NOT. Measured 2026-07-06 with BIBLE_REPO set, exclusion removed, at N=1500:
-  - c row: 23m54s total = ~956 ms/entry -- and it PASSED every assertion (byte-identical to the reference
-    .sql + query-equivalent + >400 rows), so correctness holds at 1500-scale; the problem is purely wall-clock.
-  - ll row: did NOT finish inside the 30m suite budget; the whole `TestBibleConformanceRealData` panicked
-    at the 30m timeout (FAIL, 1800s).
-  - source backends for comparison: js 23.5s / go 22.8s / py 25.2s / rs 30.9s / erl 52.9s / jvm 25.2s TOTAL
-    (15-35 ms/entry) -- native is ~30-62x slower per entry.
-The residual cliff is the SHEER ALLOCATION VOLUME under per-alloc ARC, not a GC walk: the ch559 builder
-allocates ~8000 bignums per file (the packed-String codec + splitOn/jsonStrField cells), and every one takes
-a malloc + rt_retain/rt_release traffic that the source backends' native GCs / value reps absorb far more
-cheaply. So the native SCALE-gate re-admission is BLOCKED on a real bignum/codec-allocation perf item, not on
-the (now-retired) GC scan. The RealData scale gate therefore keeps its c/ll exclusion, now with a measured
-logged reason (harness/bible_conformance_test.go). Native byte-identity on real Greek+Hebrew stays PROVEN
-independently by the synthetic 9-way `TestBibleConformanceBuilders` gate (lexdbfix fixture holds Hebrew `אב`
-+ Greek `Α` routed through jsonStrField/sqlQuote/sortFile -> lexicon.sql, byte-identical across all backends)
-+ by construction (raw-byte codec, no charset re-encode possible). FIX (a real perf item): reduce the codec's
-per-file allocation count (arena/bump the throwaway decode cells, or a small-int fast lane so codec bignums
-under 2^63 skip heap boxing) so native per-entry cost approaches the source backends. Park (Standing Rule 1,
-no perf consumer -- the corpus ETL runs go-only in production; native is a conformance target, not the ETL).
+## Native codec-over-corpus impractically slow -- CLOSED (2026-07-06, divmod-small; was "residual per-alloc ARC cliff")
+CLOSED, and the ATTRIBUTION THIS ENTRY CARRIED WAS WRONG. The entry blamed per-allocation ARC
+retain/release traffic over the ch559 builder's ~8000 bignums per file. Profiling (2026-07-06, perf on the
+compiled C row over the packed-decode shape) showed the real cause: the native runtimes were MISSING the
+small-divisor division specialization the WASM runtime already had. The packed-String codec's base-256
+decode divides repeatedly by small constants, and without the fast lane every one of those divisions fell
+through to full O(n^2) bignum long division -- an algorithmic gap, not an allocator cliff. PORTED to both
+native runtimes (codegen/c.go rt_divmod_small + codegen/ll_runtime.go, branch feat/divmod-small, commit
+6d8219c, WASM-parity semantics, randomized invariant vs big.Int oracle): the packed-decode microshape went
+from 22.3s to 0.47s on C (~47-68x across shapes). The bible real-data SCALE gate (TestBibleConformanceRealData,
+BIBLE_REPO set, N=1500 real Greek+Hebrew lexicon entries) then re-admitted c/ll and PASSED 9-way in 258s
+total: c 27.2s and ll 27.1s per row (~18.1 ms/entry), MID-PACK versus the source backends (js 23.2s / go
+22.8s / py 25.7s / rs 31.5s / erl 49.6s / jvm 24.9s / wasm 26.1s, i.e. 15-33 ms/entry) -- versus the
+pre-fix ~956 ms/entry C row (23m54s) and ll DNF at 30m. Byte-identity + query-equivalence assertions all
+green. The 6e ARC conversion remains in place and correct (beta item 13); it was necessary hygiene but was
+never the scale-gate blocker this entry claimed. Nothing left to park here.
 
 ## WASM foldDir suffix window aliased the shared codec scratch -- FIXED (2026-07-02, bible cross-backend tier 4)
 `foldDir`'s WAT emission (`emitFoldDirWasm`, codegen/wasm.go) decoded the walk's dir path into `$D6BUF`
