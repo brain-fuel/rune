@@ -1,11 +1,9 @@
 package codegen_test
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -187,157 +185,6 @@ func TestCNatLitAndAccelRun(t *testing.T) {
 		if got := runC(t, emitWith(t, codegen.C{}, tc.src, tc.main)); got != tc.want {
 			t.Fatalf("c %s: got %q, want %q", tc.main, got, tc.want)
 		}
-	}
-}
-
-// runCGC is runC but compiles with a chosen GC threshold (and GC stats on) so the
-// non-moving mark-sweep collector can be forced to fire MANY times during the run.
-// Returns (stdout, number-of-collections). The collector must produce output
-// byte-identical to a no-collection run regardless of how often it fires.
-func runCGC(t *testing.T, src string, thresholdBytes int) (string, int) {
-	t.Helper()
-	cc := ""
-	for _, cand := range []string{"cc", "gcc", "clang"} {
-		if _, err := exec.LookPath(cand); err == nil {
-			cc = cand
-			break
-		}
-	}
-	if cc == "" {
-		t.Skip("no C compiler (cc/gcc/clang) in PATH")
-	}
-	dir := t.TempDir()
-	f := dir + "/main.c"
-	bin := dir + "/main"
-	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	def := "-DRUNE_GC_THRESHOLD=" + strconv.Itoa(thresholdBytes)
-	if out, err := exec.Command(cc, def, "-DRUNE_GC_STATS", "-o", bin, f).CombinedOutput(); err != nil {
-		t.Fatalf("%s: %v\n%s\n--- emitted ---\n%s", cc, err, out, src)
-	}
-	cmd := exec.Command(bin)
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("run: %v\nstderr=%s", err, stderr.String())
-	}
-	// parse "rune-c: gc collections=N" from stderr
-	n := 0
-	if i := strings.Index(stderr.String(), "collections="); i >= 0 {
-		fmt.Sscanf(stderr.String()[i:], "collections=%d", &n)
-	}
-	return strings.TrimSpace(stdout.String()), n
-}
-
-// TestCGCForcesCollection is the GC SOUNDNESS gate (telos-2 / M4). It builds a
-// long boxed list (each cons/succ is a heap object) and folds it back, under a
-// TINY GC threshold so the mark-sweep collector fires repeatedly DURING both
-// construction and folding. A correct result proves the collector preserved every
-// reachable survivor across many collections (conservative roots find the live
-// list on the stack; precise slot tracing keeps its spine + elements alive) and
-// never freed a reachable object. The same program with an effectively-infinite
-// threshold (no collection) must give the IDENTICAL answer.
-func TestCGCForcesCollection(t *testing.T) {
-	t.Skip("mark-sweep deleted; ARC pressure gate replaces this in Task 4")
-	// replicate N builds [zero, zero, ...] of length N via NatElim; length folds it
-	// back to N. zero/succ/cons are all BOXED (no builtin-nat here), so the run
-	// allocates the succ^N nat result + N cons cells + the eliminator closures —
-	// many thousands of objects for N in the dozens.
-	src := natSrc + `
-data List : U -> U is
-  nil : (A : U) -> List A
-| cons : (A : U) -> A -> List A -> List A
-end
-replicate : Nat -> List Nat is
-  fn (n : Nat) is
-    NatElim (fn (x : Nat) is List Nat end)
-      (nil Nat)
-      (fn (k : Nat) (ih : List Nat) is cons Nat zero ih end)
-      n
-  end
-end
-length : (A : U) -> List A -> Nat is
-  fn (A : U) (xs : List A) is
-    ListElim A (fn (x : List A) is Nat end)
-      zero
-      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
-      xs
-  end
-end
-two : Nat is succ (succ zero) end
-four : Nat is add two two end
-eight : Nat is add four four end
-big : Nat is length Nat (replicate eight) end
-`
-	// big = length(replicate 8) = succ^8 zero. The magnitude is kept modest (the
-	// C backend's eliminator recursion is not tail-call-optimized, so a very deep
-	// nat blows the native stack — unrelated to GC); the heap PRESSURE that forces
-	// collections comes from the tiny threshold below, not the list length. Each
-	// zero/succ/cons/closure is a boxed object, so even N=8 allocates hundreds of
-	// objects and a 1 KiB heap collects many times.
-	want := succChain(8)
-	emitted := emitWith(t, codegen.C{}, src, "big")
-	// 1 KiB threshold => collection fires many times during the run.
-	got, ncol := runCGC(t, emitted, 1024)
-	if got != want {
-		t.Fatalf("c gc-stress (tiny heap): got %q, want %q", got, want)
-	}
-	if ncol == 0 {
-		t.Fatalf("c gc-stress: expected the collector to FIRE under a 4 KiB heap, but it never collected")
-	}
-	// And byte-identical with an effectively-infinite threshold (no collection).
-	got2, ncol2 := runCGC(t, emitted, 1<<30)
-	if got2 != want {
-		t.Fatalf("c gc-stress (no collection): got %q, want %q", got2, want)
-	}
-	if ncol2 != 0 {
-		t.Fatalf("c gc-stress: did not expect collections under a 1 GiB heap, got %d", ncol2)
-	}
-}
-
-// TestCGCConformanceUnderTinyHeap is the "corpus byte-identical WITH the GC
-// actively collecting" gate. It runs several conformance-shaped programs (nat
-// arithmetic, list length, a constructor with multiple fields) under a TINY heap
-// (so the mark-sweep collector fires during each run) and requires the SAME
-// output as the default (no-collection) compile — proving the GC is transparent.
-func TestCGCConformanceUnderTinyHeap(t *testing.T) {
-	t.Skip("mark-sweep deleted; ARC pressure gate replaces this in Task 4")
-	cases := []struct{ src, main string }{
-		{natSrc + `three : Nat is add (succ zero) (succ (succ zero)) end`, "three"},
-		{natSrc + `
-data List : U -> U is
-  nil : (A : U) -> List A
-| cons : (A : U) -> A -> List A -> List A
-end
-length : (A : U) -> List A -> Nat is
-  fn (A : U) (xs : List A) is
-    ListElim A (fn (x : List A) is Nat end)
-      zero
-      (fn (x : A) (rest : List A) (ih : Nat) is succ ih end)
-      xs
-  end
-end
-two : Nat is length Nat (cons Nat zero (cons Nat (succ zero) (nil Nat))) end
-`, "two"},
-		{natSrc + `
-data Pairing : U -> U -> U is
-  mk : (A : U) -> (B : U) -> A -> B -> Pairing A B
-end
-p : Pairing Nat Nat is mk Nat Nat (succ zero) (succ (succ zero)) end
-`, "p"},
-	}
-	for _, tc := range cases {
-		emitted := emitWith(t, codegen.C{}, tc.src, tc.main)
-		// default (effectively no-collection) reference output
-		ref := runC(t, emitted)
-		// same program under a tiny heap so the collector fires
-		got, ncol := runCGC(t, emitted, 1024)
-		if got != ref {
-			t.Fatalf("c gc-conformance %q: tiny-heap output %q != reference %q", tc.main, got, ref)
-		}
-		_ = ncol // collection may or may not fire per program; the byte-identity is the gate
 	}
 }
 
