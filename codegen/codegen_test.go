@@ -240,6 +240,7 @@ func runCGC(t *testing.T, src string, thresholdBytes int) (string, int) {
 // never freed a reachable object. The same program with an effectively-infinite
 // threshold (no collection) must give the IDENTICAL answer.
 func TestCGCForcesCollection(t *testing.T) {
+	t.Skip("mark-sweep deleted; ARC pressure gate replaces this in Task 4")
 	// replicate N builds [zero, zero, ...] of length N via NatElim; length folds it
 	// back to N. zero/succ/cons are all BOXED (no builtin-nat here), so the run
 	// allocates the succ^N nat result + N cons cells + the eliminator closures —
@@ -302,6 +303,7 @@ big : Nat is length Nat (replicate eight) end
 // (so the mark-sweep collector fires during each run) and requires the SAME
 // output as the default (no-collection) compile — proving the GC is transparent.
 func TestCGCConformanceUnderTinyHeap(t *testing.T) {
+	t.Skip("mark-sweep deleted; ARC pressure gate replaces this in Task 4")
 	cases := []struct{ src, main string }{
 		{natSrc + `three : Nat is add (succ zero) (succ (succ zero)) end`, "three"},
 		{natSrc + `

@@ -16,7 +16,7 @@ import (
 //
 //   - a uniform tagged-word `Value` (immediate ints for builtin-nat, a pointer to
 //     a boxed object for closures/constructors/pairs);
-//   - `alloc` — a garbage-collected heap (a mark-sweep collector, see GC below);
+//   - `arc_alloc` — an rc-header heap under ARC reference counting (see Memory below);
 //   - `apply(clo, arg)` — unpack a closure's {code, env} and indirect-call;
 //   - constructor objects (tag + fields), pairs, and `$show` over the header tag,
 //     producing byte-identical observable output to the other backends.
@@ -39,19 +39,14 @@ import (
 // host LITERAL FFI (LitInt/LitStr/LitPtr) and IForeign are emitted but a foreign
 // program needs a host-linked accessor, exactly as on the other backends.
 //
-// GC: this iteration ships a CONSERVATIVE-ROOTS / PRECISE-SLOTS NON-MOVING
-// MARK-SWEEP collector (`gc_alloc`/`gc_collect`). It unblocks long-running /
-// unbounded-allocation programs (a bump allocator only worked because the
-// conformance corpus is finite). Mark-sweep (not the R-NATIVE-recommended
-// semispace copying) is the sound choice HERE because the runtime memoizes
-// definitions in `static Value cache` slots that do not live on the C stack: a
-// non-moving collector only needs those slots MARKED (each is registered as a
-// root via gc_add_root), where a copying collector would have to rewrite them.
-// Roots = registered static caches (precise) ∪ a conservative C-stack scan
-// (setjmp spills registers, scan SP..stack-bottom); object slots are traced
-// PRECISELY from the header kind+count. See the runtime's gc section for the
-// full rationale. NEXT: precise stack maps / a copying collector / perf (the
-// O(live) heap-membership test is the obvious first speedup).
+// Memory: this backend uses ARC — Perceus-style reference counting
+// (`arc_alloc`/`rt_retain`/`rt_release`), the WASM backend's discipline ported
+// native (spec Decision 3/4). Every heap object carries an `rc` header (1 at
+// birth); rt_release decrements and, at zero, runs a per-kind free walker then
+// free()s the block. rune heap values are immutable and acyclic, so counting is
+// complete — no cycle collector. The mark-sweep collector this replaced (roots
+// table, conservative stack scan, gc_collect) is deleted wholesale; the static
+// thunk caches are now ordinary owned references held for the process lifetime.
 type C struct{}
 
 func (C) Target() string { return "c" }
@@ -187,14 +182,12 @@ func (C) Emit(p Program) (TargetSource, error) {
 	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
 		b.WriteString("  setlocale(LC_NUMERIC, \"C\");\n")
 	}
-	// Capture the C stack bottom for the conservative GC root scan: every live
-	// Value used by the evaluation lives in a frame above this point, so the
-	// collector scans from the current SP up to here.
-	b.WriteString("  void* gc_anchor = 0; gc_stack_bottom = (void*)&gc_anchor;\n")
+	// UNIT is a static global (a boxed singleton) never released under ARC
+	// (rt_counted excludes it), so show()'s `v == UNIT` comparison stays valid.
 	b.WriteString("  UNIT = mkunit();\n")
-	// UNIT is a static global (a boxed singleton); register it as a GC root so a
-	// collection never frees it and show()'s `v == UNIT` comparison stays valid.
-	b.WriteString("  gc_add_root(&UNIT);\n")
+	// Optional ARC leak report (compile with -DRUNE_ARC_REPORT): print the live
+	// object count at exit on stderr so a test can inspect steady-state balance.
+	b.WriteString("#ifdef RUNE_ARC_REPORT\n  atexit(arc_report);\n#endif\n")
 	if p.Main != "" {
 		mainExpr := cThunkName(p.Main) + "()"
 		if p.IOMain {
@@ -203,11 +196,6 @@ func (C) Emit(p Program) (TargetSource, error) {
 		fmt.Fprintf(&b, "  show(%s);\n", mainExpr)
 		b.WriteString("  putchar('\\n');\n")
 	}
-	// Optional GC stats (compile with -DRUNE_GC_STATS) — lets a test confirm the
-	// collector actually fired during the run, on stderr so stdout stays clean.
-	b.WriteString("#ifdef RUNE_GC_STATS\n")
-	b.WriteString("  fprintf(stderr, \"rune-c: gc collections=%ld\\n\", gc_n_collections);\n")
-	b.WriteString("#endif\n")
 	b.WriteString("  return 0;\n}\n")
 	return TargetSource(b.String()), nil
 }
@@ -259,11 +247,8 @@ func (em *cEmitter) emitDefThunk(b *strings.Builder, name string, body CIr) {
 	b.WriteString("  static int done = 0; static Value cache = 0;\n")
 	b.WriteString("  if (done) return cache;\n")
 	b.WriteString("  done = 1;\n")
-	// Register the cache slot as a GC root BEFORE computing the body: the cache
-	// is a static (non-stack) live root the conservative stack scan cannot find,
-	// and it is initialized to 0 so a collection during body evaluation scans a
-	// safe (null) slot. Non-moving GC means the cached pointer stays valid.
-	b.WriteString("  gc_add_root(&cache);\n")
+	// The cache holds one never-released reference for the process lifetime —
+	// that IS the root under ARC (no root registration needed).
 	fmt.Fprintf(b, "  cache = %s;\n", em.expr(body))
 	b.WriteString("  return cache;\n}\n")
 }
@@ -288,9 +273,7 @@ func (em *cEmitter) emitCtorC(b *strings.Builder, c CtorSpec) {
 		fmt.Fprintf(b, "static Value %s(void) {\n", cThunkName(c.Name))
 		b.WriteString("  static int done = 0; static Value cache = 0;\n")
 		b.WriteString("  if (done) return cache;\n  done = 1;\n")
-		// The memoized cache is a static (non-stack) GC root: register it so a
-		// collection never frees this cached constructor object.
-		b.WriteString("  gc_add_root(&cache);\n")
+		// The cache holds one never-released reference for the process lifetime.
 		fmt.Fprintf(b, "  cache = mkcon(%d, %q, 0);\n", c.Tag, c.Name)
 		b.WriteString("  return cache;\n}\n")
 		return
@@ -324,9 +307,7 @@ func (em *cEmitter) emitCtorC(b *strings.Builder, c CtorSpec) {
 	fmt.Fprintf(b, "static Value %s(void) {\n", cThunkName(c.Name))
 	b.WriteString("  static int done = 0; static Value cache = 0;\n")
 	b.WriteString("  if (done) return cache;\n  done = 1;\n")
-	// The memoized cache is a static (non-stack) GC root: register it so a
-	// collection never frees this cached constructor entry closure.
-	b.WriteString("  gc_add_root(&cache);\n")
+	// The cache holds one never-released reference for the process lifetime.
 	fmt.Fprintf(b, "  cache = mkclo(&%s_0, 0);\n", base)
 	b.WriteString("  return cache;\n}\n")
 }
@@ -543,13 +524,13 @@ func (em *cEmitter) emitPartialC(b *strings.Builder, name string, arity int, bod
 	// The _step thunk: the body, memoized exactly like a normal def thunk.
 	fmt.Fprintf(b, "static Value %s(void) {\n", step)
 	b.WriteString("  static int done = 0; static Value cache = 0;\n")
-	b.WriteString("  if (done) return cache;\n  done = 1;\n  gc_add_root(&cache);\n")
+	b.WriteString("  if (done) return cache;\n  done = 1;\n")
 	fmt.Fprintf(b, "  cache = %s;\n  return cache;\n}\n", em.expr(body))
 	if arity == 0 {
 		// No args to collect: the public entry just drives the (bounce-free) step.
 		fmt.Fprintf(b, "static Value %s(void) {\n", cThunkName(name))
 		b.WriteString("  static int done = 0; static Value cache = 0;\n")
-		b.WriteString("  if (done) return cache;\n  done = 1;\n  gc_add_root(&cache);\n")
+		b.WriteString("  if (done) return cache;\n  done = 1;\n")
 		fmt.Fprintf(b, "  cache = tramp(%s());\n  return cache;\n}\n", step)
 		return
 	}
@@ -576,7 +557,7 @@ func (em *cEmitter) emitPartialC(b *strings.Builder, name string, arity int, bod
 	// The public thunk: a closure entering the first driver block (no captures).
 	fmt.Fprintf(b, "static Value %s(void) {\n", cThunkName(name))
 	b.WriteString("  static int done = 0; static Value cache = 0;\n")
-	b.WriteString("  if (done) return cache;\n  done = 1;\n  gc_add_root(&cache);\n")
+	b.WriteString("  if (done) return cache;\n  done = 1;\n")
 	fmt.Fprintf(b, "  cache = mkclo(&%s, 0);\n  return cache;\n}\n", cDrvName(name, 0))
 }
 
@@ -1267,11 +1248,11 @@ func emitFloatPrimsC(b *strings.Builder, p Program) {
 
 // cRuntime is the embedded native closure runtime (R-NATIVE ABI piece 1+2+3 at
 // the simplest correct point). A `Value` is a tagged word: an immediate int (low
-// bit 1) or a pointer to a boxed Obj (low bit 0). Allocation is garbage-collected
-// by a conservative-roots / precise-slots non-moving MARK-SWEEP collector
-// (`gc_alloc`/`gc_collect`), so unbounded-allocation programs run. `apply`
-// unpacks a closure's {code, env} and indirect-calls; `show` renders a value
-// matching the other backends' observable output.
+// bit 1) or a pointer to a boxed Obj (low bit 0). Memory is managed by ARC —
+// Perceus-style reference counting (`arc_alloc`/`rt_retain`/`rt_release`), the
+// WASM backend's discipline ported native (spec Decision 3/4). `apply` unpacks a
+// closure's {code, env} and indirect-calls; `show` renders a value matching the
+// other backends' observable output.
 const cRuntime = `#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1285,11 +1266,9 @@ enum { K_CLO = 0, K_CON = 1, K_PAIR = 2, K_STR = 3, K_PTR = 4, K_UNIT = 5, K_BIG
 
 typedef struct Obj {
   int kind;
-  /* GC: a forward-linked list of every live object + a mark bit. The collector
-     is a CONSERVATIVE (roots) / PRECISE (slots) NON-MOVING MARK-SWEEP — see the
-     gc section below. Non-moving keeps the static thunk caches valid. */
-  struct Obj* gc_next;
-  int gc_mark;
+  /* ARC reference count; 1 at birth (arc_alloc). rt_retain increments,
+     rt_release decrements and frees the block (per-kind free walker) at zero. */
+  long rc;
   /* closure */
   Value (*code)(Value, Value*);
   int nenv;
@@ -1300,8 +1279,8 @@ typedef struct Obj {
   /* string / opaque ptr */
   const char* str;
   long handle;
-  /* D3 machine float (f64): a boxed IEEE-754 double, kind K_FLOAT. Traces no slots
-     (the double is not a heap pointer), so the GC mark/size defaults cover it. */
+  /* D3 machine float (f64): a boxed IEEE-754 double, kind K_FLOAT. Carries no heap
+     pointer, so the free walker treats it as a leaf. */
   double dval;
   /* trailing slots: env (closure) or fields (constructor) */
   Value slots[1];
@@ -1313,210 +1292,78 @@ typedef struct Obj {
 #define INT_VAL(v)  ((long)((v) >> 1))
 
 /* ===========================================================================
-   GARBAGE COLLECTOR — a conservative-roots / precise-slots NON-MOVING MARK-SWEEP.
-
-   R-NATIVE's first cut for long-running native programs. Mark-sweep (not the
-   recommended semispace copying) is the SOUND choice for THIS runtime because:
-
-   - The runtime memoizes every top-level definition in a 'static Value cache'
-     (emitDefThunk) and builds the quotient/IO builtins as 'static' closures.
-     Those caches are live roots that DO NOT live on the C stack, so a stack-only
-     scan cannot find them. A COPYING collector would also have to rewrite them
-     in place. A non-moving collector only needs them MARKED, and we register
-     each cache slot's address with the GC (gc_add_root) the first time a thunk
-     runs — so the static caches are exact roots, never freed, never corrupted.
-   - Non-moving = no forwarding pointers, no slot rewriting. A mistraced slot
-     can never silently relocate a live object to a stale address. Worse-is-
-     better, per R-NATIVE: a correct mark-sweep beats a buggy copying collector.
-
-   ROOTS = the registered static cache slots (precise) UNION a CONSERVATIVE scan
-   of the C stack between a saved stack bottom (captured in main) and the current
-   SP (setjmp spills callee-saved registers first). Any word-aligned stack word
-   whose low bit is 0 and which points at the start of a tracked heap object is
-   treated as a root (a false positive merely keeps an object alive — safe).
-
-   SLOT TRACING is PRECISE: the header kind + count says exactly which words are
-   'Value' slots (env for K_CLO, fields for K_CON, the two K_PAIR words); the
-   'code' function pointer, 'str', and 'handle' are NEVER traced. Each Value slot
-   is itself checked low-bit (immediate int) vs. Obj* before recursing.
+   ARC — Perceus-style reference counting (the WASM backend's discipline,
+   spec docs/superpowers/specs/2026-07-05-native-arc-design.md Decision 3/4).
+   Ownership rules (PATH B): apply() consumes both operands; the mk* builders
+   take ownership of their slot arguments; thunk-cache reads (CGlobal) and
+   foreign accessors are BORROWED (callers dup on consumption); foreign prim
+   bodies receive borrowed args and return owned results. rune heap values are
+   immutable and acyclic, so counting is complete — no cycle collector.
    =========================================================================== */
+static long rt_live = 0;
 
-/* Every live object is on this singly-linked list (newest first), threaded
-   through Obj.gc_next; gc_live_bytes tracks the working-set size. */
-static Obj* gc_objs = 0;
-static size_t gc_live_bytes = 0;
-static size_t gc_threshold = 0;
-/* Default initial GC threshold (bytes of live working set before a collection
-   is triggered). Overridable at compile time with -DRUNE_GC_THRESHOLD=N to force
-   collections under a tiny heap for stress testing. */
-#ifndef RUNE_GC_THRESHOLD
-#define RUNE_GC_THRESHOLD (8u * 1024u * 1024u)
+#ifdef RUNE_ARC_REPORT
+static void arc_report(void) { fprintf(stderr, "rt_live=%ld\n", rt_live); }
 #endif
 
-/* Static (non-stack) roots: the addresses of thunk/builtin cache slots. */
-#define GC_MAX_STATIC_ROOTS 4096
-static Value* gc_static_roots[GC_MAX_STATIC_ROOTS];
-static int gc_n_static_roots = 0;
-static void gc_add_root(Value* slot) {
-  /* Dropping a static root would let the collector free a still-reachable cached
-     value (a soundness bug), so abort rather than silently lose one. Raise
-     GC_MAX_STATIC_ROOTS if a program legitimately has more memoized definitions. */
-  if (gc_n_static_roots >= GC_MAX_STATIC_ROOTS) {
-    fprintf(stderr, "rune-c: too many GC static roots (raise GC_MAX_STATIC_ROOTS)\n"); exit(1);
-  }
-  gc_static_roots[gc_n_static_roots++] = slot;
-}
-
-/* The C stack bottom, captured in main before evaluation begins. The scan walks
-   from the current SP up to this address. 'volatile' so the scan is not elided. */
-static void* volatile gc_stack_bottom = 0;
-
-#include <setjmp.h>
-
-static void gc_collect(void);
-
-static void* gc_alloc(size_t n) {
+static void* arc_alloc(size_t n) {
   /* align to pointer size so the int low-bit tag is never set on a real pointer */
   size_t a = sizeof(void*);
   n = (n + a - 1) & ~(a - 1);
-  if (gc_threshold == 0) gc_threshold = RUNE_GC_THRESHOLD;
-  if (gc_live_bytes + n > gc_threshold && gc_stack_bottom != 0) {
-    gc_collect();
-    /* If still over the threshold after collecting, the live set genuinely grew;
-       raise the bar (a doubling heuristic) so we do not collect on every alloc. */
-    while (gc_live_bytes + n > gc_threshold) gc_threshold *= 2;
-  }
   /* ZERO the whole object: the emitted code allocates an object then fills its
-     slots one at a time, and each fill EXPRESSION may itself allocate (triggering
-     a collection) while the object is only PARTIALLY built. Zeroed slots read as
-     null (ignored by tracing), and a zeroed header has kind K_CLO + nenv 0 so a
-     half-built object traces no slots — never a wild pointer through a garbage
-     slot. The caller overwrites kind/counts/slots synchronously, with no alloc in
-     between, before any further allocation. */
+     slots one at a time; a zeroed header/slot reads as null, so a half-built
+     object never exposes a wild pointer to the free walker. */
   Obj* o = (Obj*)calloc(1, n);
   if (!o) { fprintf(stderr, "rune-c: out of memory\n"); exit(1); }
-  o->gc_next = gc_objs; o->gc_mark = 0;
-  gc_objs = o; gc_live_bytes += n;
-  /* The sweep recomputes each object's byte-size from its header (gc_obj_size),
-     so no per-object size word is stored. */
+  o->rc = 1;
+  rt_live++;
   return o;
 }
 
-/* Object byte-size from its header (kind + slot count). Mirrors the mk* sizes. */
-static size_t gc_obj_size(Obj* o) {
-  size_t base = sizeof(Obj);
-  int extra = 0;
-  switch (o->kind) {
-    case K_CLO:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break;
-    case K_CON:  extra = o->nfield > 0 ? o->nfield - 1 : 0; break;
-    case K_PAIR: extra = 1; break; /* mkpair allocates sizeof(Obj)+sizeof(Value) => slots[0..1] */
-    /* K_BIG sizes off nenv = the ALLOCATED limb capacity (nfield is the LOGICAL
-       limb count, which big_norm may shrink — so capacity, not nfield, bounds the
-       object). The limbs are raw words, never traced (default in gc_mark_obj). */
-    case K_BIG:  extra = o->nenv   > 0 ? o->nenv   - 1 : 0; break;
-    /* K_BYTES (Phase 0 real byte string): one byte per Value slot, nenv = count.
-       Raw bytes, never traced (default in gc_mark_obj). */
-    case K_BYTES: extra = o->nenv  > 0 ? o->nenv   - 1 : 0; break;
-    /* K_BOUNCE (T2 trampoline): nfield Value slots — slots[0] = the head partial's
-       _step closure, slots[1..tag] = the evaluated tail-call arguments. */
-    case K_BOUNCE: extra = o->nfield > 0 ? o->nfield - 1 : 0; break;
-    default:     extra = 0; break; /* K_STR, K_PTR, K_UNIT: just the header */
-  }
-  size_t sz = base + (size_t)extra * sizeof(Value);
-  size_t a = sizeof(void*);
-  return (sz + a - 1) & ~(a - 1);
-}
-
-/* If v points anywhere WITHIN a tracked heap object, return that object; else 0.
-   INTERIOR pointers must count: 'apply' calls a code block with env = &clo->slots
-   (a pointer PAST the closure header, not to its start), and that interior env
-   pointer may be the only live reference to the closure on the stack. Treating
-   only object-start pointers as roots would free a closure still in use — the
-   "apply of non-closure" crash. Conservative membership test, O(live) per
-   candidate word (a sorted-bounds / bitmap speedup is a later perf item). */
-static Obj* gc_find_obj(Value v) {
-  if (v == 0 || (v & 1)) return 0;               /* null or immediate int */
-  if ((v & (Value)(sizeof(void*) - 1)) != 0) return 0; /* not word-aligned */
-  char* q = (char*)v;
-  for (Obj* o = gc_objs; o; o = o->gc_next) {
-    char* lo = (char*)o;
-    char* hi = lo + gc_obj_size(o);
-    if (q >= lo && q < hi) return o;
-  }
-  return 0;
-}
-
-/* PRECISE slot tracing: mark v if it is a heap object, then recurse into its
-   Value slots (only the slots the header declares; never code/str/handle). */
-static void gc_mark_value(Value v);
-static void gc_mark_obj(Obj* o) {
-  if (o->gc_mark) return;
-  o->gc_mark = 1;
-  switch (o->kind) {
-    case K_CLO:  for (int i = 0; i < o->nenv;   i++) gc_mark_value(o->slots[i]); break;
-    case K_CON:  for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
-    case K_PAIR: gc_mark_value(o->slots[0]); gc_mark_value(o->slots[1]); break;
-    case K_BOUNCE: for (int i = 0; i < o->nfield; i++) gc_mark_value(o->slots[i]); break;
-    default: break; /* K_STR, K_PTR, K_UNIT carry no heap pointers */
-  }
-}
-static void gc_mark_value(Value v) {
-  if (v == 0 || (v & 1)) return;                 /* null or immediate int */
-  gc_mark_obj((Obj*)v);
-}
-
-/* Conservatively scan a word-range [lo, hi) for anything that looks like a
-   pointer to a tracked object, and mark it (with full precise sub-tracing). */
-static void gc_scan_range(char* lo, char* hi) {
-  if (lo > hi) { char* t = lo; lo = hi; hi = t; }
-  /* advance lo to a word boundary */
-  while (((uintptr_t)lo % sizeof(void*)) != 0) lo++;
-  for (char* p = lo; p + sizeof(Value) <= hi; p += sizeof(void*)) {
-    Value v = *(Value*)p;
-    Obj* o = gc_find_obj(v);
-    if (o) gc_mark_obj(o);
-  }
-}
-
-/* Collection counter, exposed for tests: a program compiled with -DRUNE_GC_STATS
-   prints "rune-c: gc collections=N" to stderr at exit so a test can confirm that
-   collection actually fired during the run. */
-static long gc_n_collections = 0;
-
-static void gc_collect(void) {
-  gc_n_collections++;
-  /* spill callee-saved registers onto the stack so the scan sees them */
-  jmp_buf regs;
-  if (setjmp(regs)) return; /* never longjmp'd; just forces the spill */
-  (void)regs;
-
-  /* 1. precise static roots (thunk/builtin caches) */
-  for (int i = 0; i < gc_n_static_roots; i++) gc_mark_value(*gc_static_roots[i]);
-
-  /* 2. conservative stack scan (current SP .. saved bottom) + the jmp_buf */
-  char* sp = (char*)__builtin_frame_address(0);
-  char* bottom = (char*)gc_stack_bottom;
-  gc_scan_range(sp, bottom);
-  gc_scan_range((char*)&regs, (char*)&regs + sizeof(regs));
-
-  /* 3. sweep: free unmarked, unlink them, clear marks on survivors */
-  Obj** link = &gc_objs;
-  while (*link) {
-    Obj* o = *link;
-    if (o->gc_mark) {
-      o->gc_mark = 0;
-      link = &o->gc_next;
-    } else {
-      *link = o->gc_next;
-      gc_live_bytes -= gc_obj_size(o);
-      free(o);
-    }
-  }
-}
-
-static Value UNIT;
+static Value UNIT;                  /* the boxed singleton made in main */
 
 static Obj* obj(Value v) { return (Obj*)v; }
+
+/* rt_counted: is v a counted heap object? Immediates, null, and the UNIT
+   singleton (a never-released global) are not. */
+static int rt_counted(Value v) {
+  if (v == 0 || IS_INT(v) || v == UNIT) return 0;
+  return 1;
+}
+
+static void rt_retain(Value v) {
+  if (!rt_counted(v)) return;
+  obj(v)->rc++;
+}
+
+static void rt_release(Value v) {
+  if (!rt_counted(v)) return;
+  Obj* o = obj(v);
+  if (--o->rc > 0) return;
+  /* rc hit zero: release children per kind, then free the block. The per-kind
+     traced-slot sets mirror the old gc_mark_obj EXACTLY (K_BOUNCE releases
+     slots[0] (the step closure) + the collected args, nfield = nargs+1). K_STR
+     (->str is a literal / emitter buffer we never own), K_PTR, K_UNIT, K_FLOAT
+     are leaves; K_BIG / K_BYTES hold limbs / bytes INLINE in slots[] (raw words,
+     never Values), freed with the block. */
+  switch (o->kind) {
+    case K_CLO:
+      for (int i = 0; i < o->nenv; i++) rt_release(o->slots[i]);
+      break;
+    case K_CON:
+      for (int i = 0; i < o->nfield; i++) rt_release(o->slots[i]);
+      break;
+    case K_PAIR:
+      rt_release(o->slots[0]); rt_release(o->slots[1]);
+      break;
+    case K_BOUNCE:
+      for (int i = 0; i < o->nfield; i++) rt_release(o->slots[i]);
+      break;
+    default: break;
+  }
+  rt_live--;
+  free(o);
+}
 
 static Value mkint(long n) { return INT_TAG(n); }
 static long as_int(Value v) {
@@ -1525,14 +1372,14 @@ static long as_int(Value v) {
 }
 
 static Value mkclo(Value (*code)(Value, Value*), int nenv) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (nenv > 0 ? (nenv - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (nenv > 0 ? (nenv - 1) : 0) * sizeof(Value));
   o->kind = K_CLO; o->code = code; o->nenv = nenv;
   return (Value)o;
 }
 static void clo_set(Value c, int i, Value x) { obj(c)->slots[i] = x; }
 
 static Value mkcon(int tag, const char* name, int nfield) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (nfield > 0 ? (nfield - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (nfield > 0 ? (nfield - 1) : 0) * sizeof(Value));
   o->kind = K_CON; o->tag = tag; o->name = name; o->nfield = nfield;
   return (Value)o;
 }
@@ -1541,7 +1388,7 @@ static Value con_get(Value c, int i) { return obj(c)->slots[i]; }
 static int con_tag(Value c) { return obj(c)->tag; }
 
 static Value mkpair(Value a, Value b) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + sizeof(Value));
   o->kind = K_PAIR; o->slots[0] = a; o->slots[1] = b;
   return (Value)o;
 }
@@ -1549,24 +1396,24 @@ static Value pair_fst(Value p) { return obj(p)->slots[0]; }
 static Value pair_snd(Value p) { return obj(p)->slots[1]; }
 
 static Value mkstr(const char* s) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_STR; o->str = s;
   return (Value)o;
 }
 static Value mkptr(long h) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_PTR; o->handle = h;
   return (Value)o;
 }
 /* D3 machine float: box/unbox an IEEE-754 double (kind K_FLOAT). */
 static Value mkfloat(double d) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_FLOAT; o->dval = d;
   return (Value)o;
 }
 static double float_val(Value v) { return obj(v)->dval; }
 static Value mkunit(void) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj));
   o->kind = K_UNIT;
   return (Value)o;
 }
@@ -1588,7 +1435,7 @@ static Value apply(Value clo, Value arg) {
    (running ONE iteration of the partial body, which returns the next bounce or a
    value) until a non-bounce surfaces. So deep tail recursion runs in O(1) C stack. */
 static Value mkbounce(Value step, int nargs) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (size_t)nargs * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (size_t)nargs * sizeof(Value));
   o->kind = K_BOUNCE; o->tag = nargs; o->nfield = nargs + 1; o->slots[0] = step;
   return (Value)o;
 }
@@ -1609,18 +1456,18 @@ static Value tramp(Value v) {
    A nat/whole is a K_BIG object: a sign (tag; 0 = nonneg — nat is always
    nonneg, the field is kept for the eventual signed Int) and a magnitude as
    base-1e9 limbs (little-endian, each in [0,1e9)). nfield = the LOGICAL limb
-   count (big_norm strips leading zeros); nenv = the ALLOCATED capacity (sizes
-   the object for the GC). Zero is the empty bignum (nfield 0).
+   count (big_norm strips leading zeros); nenv = the ALLOCATED capacity. Zero is
+   the empty bignum (nfield 0).
 
    This is the NAIVE cut (schoolbook add/mul, saturating magnitude monus): every
    nat is boxed, no immediate-int fast path for small values — that optimization
    lands later. The native FFI LitInt keeps the IS_INT immediate rep; only
    builtin-nat is bignum, so the two coexist. The limbs are raw words, never heap
-   pointers, so K_BIG traces no slots (default in gc_mark_obj). =============== */
+   pointers, so K_BIG is a leaf for the ARC free walker. =================== */
 #define BIG_BASE 1000000000L
 
 static Value mkbig(int nlimbs) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (nlimbs > 0 ? (nlimbs - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (nlimbs > 0 ? (nlimbs - 1) : 0) * sizeof(Value));
   o->kind = K_BIG; o->tag = 0; o->nfield = nlimbs; o->nenv = nlimbs;
   return (Value)o;
 }
@@ -1630,9 +1477,9 @@ static void big_setlimb(Value v, int i, long x) { obj(v)->slots[i] = (Value)x; }
 
 /* Phase 0 real byte strings (Bin): K_BYTES stores one byte per Value slot,
    nfield = nenv = the byte count (mirrors K_BIG's inline layout; raw bytes are
-   never traced by the GC). */
+   never Values, so K_BYTES is a leaf for the ARC free walker). */
 static Value mkbytes(int n) {
-  Obj* o = (Obj*)gc_alloc(sizeof(Obj) + (n > 0 ? (n - 1) : 0) * sizeof(Value));
+  Obj* o = (Obj*)arc_alloc(sizeof(Obj) + (n > 0 ? (n - 1) : 0) * sizeof(Value));
   o->kind = K_BYTES; o->nfield = n; o->nenv = n;
   return (Value)o;
 }
@@ -1700,7 +1547,7 @@ static Value big_add(Value a, Value b) {
 static Value big_mul(Value a, Value b) {
   int na = big_nlimbs(a), nb = big_nlimbs(b);
   if (na == 0 || nb == 0) return mkbig(0);
-  Value r = mkbig(na + nb);                 /* gc_alloc zeroes the limbs */
+  Value r = mkbig(na + nb);                 /* arc_alloc zeroes the limbs */
   for (int i = 0; i < na; i++) {
     long carry = 0, ai = big_limb(a, i);
     for (int j = 0; j < nb; j++) {
