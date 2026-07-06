@@ -98,8 +98,12 @@ The remaining Tier A:
     beta, and the rename rides that sequence, not the 6g artifact. The earlier
     rename-before-6g recommendation is superseded. Rename remains mechanical
     (hashes are name-independent).
-13. **6e: ARC on C + LLVM** (replace mark-sweep). Post-beta acceptable; the demo
-    does not need it.
+13. **6e: ARC on C + LLVM** (replace mark-sweep). PRIMARY per the author
+    (2026-07-05): next work item, in-beta, supersedes the earlier post-beta
+    classification. Unlocks the native backends for the scale gate (mark-sweep's
+    O(N) live-heap walks excluded them from the bible-ops scale gate) and aligns
+    all nine backends on one memory discipline (WASM's Perceus/ARC is the
+    reference implementation).
 14. **Doc sweep on release:** README matrix count and FOSS list (fixed 2026-07-01),
     index statuses (fixed 2026-07-01), keep R-INFRA.md the single as-built source.
 
