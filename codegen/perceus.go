@@ -8,8 +8,9 @@ import (
 
 // perceus.go -- the Perceus ownership-insertion pass over the closure-converted
 // CIr. It inserts CDup/CDrop so heap values are reference-counted by the Plan 6a
-// ARC runtime (rt_retain/rt_release). Only the WASM backend runs it (Wasm.Emit);
-// the C/LLVM and source backends consume the un-annotated CIr.
+// ARC runtime (rt_retain/rt_release). The WASM backend (Wasm.Emit) and the C
+// backend (C.Emit, native ARC Plan A) both run it; the LLVM and source
+// backends consume the un-annotated CIr (LLVM mirrors in Plan B).
 //
 // Soundness rests on the erased IR being immutable, total, and acyclic (R-ARC):
 // reference counting with no cycle collector is sound and complete. v1 inserts
