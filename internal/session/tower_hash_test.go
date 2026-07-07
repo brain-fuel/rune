@@ -186,3 +186,23 @@ func TestFracQuotientPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestToRadixPipelinePresent pins the Task-2 re-foundation: the class-invariant
+// observers ported from ch203 (toRadixRep + toRadixRespects, the decimal
+// expansion's QRel-invariance; floorRep + floorUnique, the floor's) and their
+// qlifts onto the quotient Frac (to_radix, floorQ), plus the re-lifted rounding
+// family and the rebuilt demotion trio (toWhole/toInt/toNat over the observers).
+func TestToRadixPipelinePresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"toRadixRep", "toRadixRespects", "to_radix", "floorRep", "floorUnique", "floorQ",
+		"to_radix_sigplace", "to_radix_sigfig", "toWhole", "toInt", "toNat",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}

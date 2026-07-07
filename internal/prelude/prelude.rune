@@ -3107,87 +3107,6 @@ divChecked : Whole -> Whole -> Result Frac ArithErr is
   end
 end
 
--- ============================================================
--- TASK 2 REWIRES: the checked demotion trio (toInt / toWhole /
--- toNat) is TEMPORARILY GATED OUT by the Frac quotient
--- re-foundation (a Frac observation needs a qlift respect proof;
--- the naive one is lowest-terms uniqueness, which is forbidden).
--- Task 2 rebuilds the trio on the ported class-invariant
--- observers: integrality read off the to_radix RDec expansion,
--- the integer part via floorQ (ch203 floorRep / floorUnique /
--- floorQ port alongside toRadixRespects). Semantics and REPL pin
--- strings are UNCHANGED when it returns.
--- ============================================================
--- -- ====================================================================
--- -- DEMOTION, checked.  Climbing the tower (− promotes, / climbs to ℚ) is implicit;
--- -- coming back DOWN is not - `3/1` is `3 : Frac`, a rational that happens to be
--- -- whole. `toInt`/`toWhole` are the deliberate, checked descents: a fraction lands
--- -- in Int (resp. Whole) only when it is integral (denominator 1 in lowest terms),
--- -- and `toWhole` additionally only when it is non-negative; otherwise `err`. (Lisp
--- -- demotes implicitly because it is dynamically typed; here, where the type is a
--- -- static commitment, the divisibility check is made explicit and returns a Result.)
--- -- ====================================================================
--- toInt : Frac -> Result Int ArithErr is
---   fn (f : Frac) is
---     let r : Frac = reduce f in
---     case fden r of
---     | zero   -> err Int ArithErr (notIntegral f)
---     | succ k ->
---         case k of
---         | succ j -> err Int ArithErr (notIntegral f)         -- denominator >= 2: not integral
---         | zero   -> ok Int ArithErr (signOfMag (fneg r) (fnum r)) -- denominator 1: the integer
---         end
---     end
---   end
--- end
--- toWhole : Frac -> Result Whole ArithErr is
---   fn (f : Frac) is
---     let r : Frac = reduce f in
---     case fden r of
---     | zero   -> err Whole ArithErr (notIntegral f)
---     | succ k ->
---         case k of
---         | succ j -> err Whole ArithErr (notIntegral f)   -- denominator >= 2: not integral
---         | zero   ->
---             case fnum r of
---             | zero   -> ok Whole ArithErr 0              -- zero is whole (any sign)
---             | succ n ->
---                 case fneg r of
---                 | false -> ok Whole ArithErr (fnum r)    -- positive integer
---                 | true  -> err Whole ArithErr (negative f) -- negative: no whole answer
---                 end
---             end
---         end
---     end
---   end
--- end
--- -- toNat descends to the COUNTING numbers {1,2,3,…} (the positive-whole Σ, Nat): it
--- -- additionally rejects zero, since zero is not a counting number. The ok payload is
--- -- built from the pattern variable `succ n` (not `fnum r`), so `isPos (succ n)`
--- -- computes to `true` and the nonzero proof is `refl true`.
--- toNat : Frac -> Result Nat ArithErr is
---   fn (f : Frac) is
---     let r : Frac = reduce f in
---     case fden r of
---     | zero   -> err Nat ArithErr (notIntegral f)
---     | succ k ->
---         case k of
---         | succ j -> err Nat ArithErr (notIntegral f)   -- denominator >= 2: not integral
---         | zero   ->
---             case fnum r of
---             | zero   -> err Nat ArithErr (notCounting f) -- zero: integral, but not a counting number
---             | succ n ->
---                 case fneg r of
---                 | true  -> err Nat ArithErr (negative f) -- negative: no counting answer
---                 | false -> ok Nat ArithErr
---                     (Pair Whole (fn (m : Whole) is Eq Bool (isPos m) true end) (succ n) (refl true))
---                 end
---             end
---         end
---     end
---   end
--- end
-
 powTen : Whole -> Whole is
   fn (n : Whole) is case n of | zero -> 1 | succ k with ih -> 10 * ih end end
 end
@@ -3214,57 +3133,10 @@ digitsOf : Whole -> Whole -> WList is
   end
 end
 
--- A plain pair, the (mantissa, remainder) of a long-division run.
-data P2 : U is p2 : Whole -> Whole -> P2 end
-p2m : P2 -> Whole is fn (x : P2) is case x of | p2 a b -> a end end end
-p2r : P2 -> Whole is fn (x : P2) is case x of | p2 a b -> b end end end
-
--- Long division to `count` fractional digits: (mantissa of those digits, remainder
--- after them). Each step divides rem*10 < den*10, so every // here is small.
-longDiv : Whole -> Whole -> Whole -> P2 is
-  fn (den : Whole) (count : Whole) is
-    case count of
-    | zero -> fn (rem : Whole) is p2 0 rem end
-    | succ k with ih -> fn (rem : Whole) is
-        let r10 : Whole = rem * 10 in
-        let rest : P2 = ih (r10 % den) in
-        p2 ((r10 // den) * powTen k + p2m rest) (p2r rest)
-      end
-    end
-  end
-end
-
 -- The EXACT decimal of a fraction: sign, integer part, fractional digits, where
 -- the repetend begins, and whether it terminates. `rdec false 0 [7,5] _ true` is
 -- 0.75; `rdec true 0 [3] 0 false` is -0.{3}; `rdec false 0 [1,6] 1 false` is 0.1{6}.
 data RDec : U is rdec : Bool -> Whole -> WList -> Whole -> Bool -> RDec end
-
--- ============================================================
--- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
--- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
--- ch203's toRadixQ (qlift + toRadixRespects) and restores the
--- family with unchanged output strings.
--- ============================================================
--- -- Round a fraction to n decimal PLACES (round half up), as a terminating RDec:
--- -- n long-division digits of the magnitude, plus a carry if the next digit is >= 5,
--- -- carrying the fraction's sign.
--- roundTo : Whole -> Frac -> RDec is
---   fn (n : Whole) (f : Frac) is
---     let body  : P2    = longDiv (fden f) n (fnum f % fden f) in
---     let nextd : Whole = (p2r body * 10) // fden f in
---     let bump  : Whole = case leb 5 nextd of | true -> 1 | false -> 0 end in
---     let m     : Whole = (fnum f // fden f) * powTen n + p2m body + bump in
---     rdec (fneg f) (m // powTen n) (digitsOf n (m % powTen n)) 0 true
---   end
--- end
-
--- ============================================================
--- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
--- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
--- ch203's toRadixQ (qlift + toRadixRespects) and restores the
--- family with unchanged output strings.
--- ============================================================
--- to_radix_sigplace : Whole -> Frac -> RDec is fn (n : Whole) (f : Frac) is roundTo n f end end
 
 -- Number of decimal digits of a whole (q < 10 has 1).
 numDigits : Whole -> Whole -> Whole is
@@ -3277,55 +3149,6 @@ numDigits : Whole -> Whole -> Whole is
     end
   end
 end
-
--- ============================================================
--- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
--- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
--- ch203's toRadixQ (qlift + toRadixRespects) and restores the
--- family with unchanged output strings.
--- ============================================================
--- -- Leading zeros after the point for |f| < 1: smallest z with num*10^(z+1) >= den
--- -- (multiplication and comparison only - no division).
--- leadingZeros : Whole -> Frac -> Whole is
---   fn (cap : Whole) (f : Frac) is
---     (case cap of
---      | zero -> fn (z : Whole) is z end
---      | succ c with ih -> fn (z : Whole) is
---          case leb (fden f) (fnum f * powTen (succ z)) of
---          | true  -> z
---          | false -> ih (succ z)
---          end
---        end
---      end : Whole -> Whole) 0
---   end
--- end
-
--- ============================================================
--- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
--- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
--- ch203's toRadixQ (qlift + toRadixRespects) and restores the
--- family with unchanged output strings.
--- ============================================================
--- -- Decimal places for s SIGNIFICANT FIGURES: for |f| >= 1, s - (integer digits);
--- -- for |f| < 1, s + (leading zeros after the point).
--- sigPlaces : Whole -> Frac -> Whole is
---   fn (s : Whole) (f : Frac) is
---     case leb 1 (fnum f // fden f) of
---     | true  -> subW s (numDigits 64 (fnum f // fden f))
---     | false -> s + leadingZeros 64 f
---     end
---   end
--- end
-
--- ============================================================
--- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
--- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
--- ch203's toRadixQ (qlift + toRadixRespects) and restores the
--- family with unchanged output strings.
--- ============================================================
--- to_radix_sigfig : Whole -> Frac -> RDec is
---   fn (s : Whole) (f : Frac) is roundTo (sigPlaces s f) f end
--- end
 
 -- The fractional expansion produced by cycle-detecting long division: the digits,
 -- where the repetend begins, and whether it terminates (no repetend).
@@ -3360,9 +3183,44 @@ windex : Whole -> WList -> Whole is
   end
 end
 
+-- The WHOLE fuelled flooring division + the proof-friendly remainder the ported
+-- to_radix PROOFS reason about (ch203).  `qdivF` is a private copy of the base
+-- `divF` (the name is SHADOWED by the Frac division below).  `cmul` is ch203's
+-- multiplication (add-on-the-LEFT: cmul (succ k) n = n + k*n), the reduction every
+-- ported mul lemma needs (the prelude's `mulW` is the mirror, (k*n)+n).  `qdiv` = //
+-- by value; `qmod a b` = a - (a//b)*b DEFINITIONALLY (not the fuel-based `%`).
+cmul : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> addW n ih
+    end
+  end
+end
+qdivF : Whole -> Whole -> Whole -> Whole is
+  fn (fuel : Whole) is
+    case fuel of
+    | zero -> fn (a : Whole) (b : Whole) is 0 end
+    | succ f with ih -> fn (a : Whole) (b : Whole) is
+        case b of
+        | zero -> 0
+        | succ k ->
+            case leb b a of
+            | true  -> succ (ih (subW a b) b)
+            | false -> 0
+            end
+        end
+      end
+    end
+  end
+end
+qdiv : Whole -> Whole -> Whole is fn (m : Whole) (n : Whole) is qdivF m m n end end
+qmod : Whole -> Whole -> Whole is fn (a : Whole) (b : Whole) is subW a (cmul (qdiv a b) b) end end
+
 -- Long division with cycle detection. fuel bounds the loop (a cycle appears within
 -- `den` steps by pigeonhole); seen records remainders in position order so a recur
--- gives the repetend's start.
+-- gives the repetend's start.  Uses cmul/qdiv/qmod so the expand-respects proofs
+-- unfold it structurally.
 expand : Whole -> Whole -> Whole -> WList -> FBody is
   fn (den : Whole) (fuel : Whole) is
     case fuel of
@@ -3374,9 +3232,9 @@ expand : Whole -> Whole -> Whole -> WList -> FBody is
             case wmember rem seen of
             | true  -> fbody wnil (windex rem seen) false
             | false ->
-                let r10  : Whole = rem * 10 in
-                let rest : FBody = ih (r10 % den) (wsnoc seen rem) in
-                fbody (wcons (r10 // den) (fbDigits rest)) (fbRep rest) (fbTerm rest)
+                let r10  : Whole = cmul rem 10 in
+                let rest : FBody = ih (qmod r10 den) (wsnoc seen rem) in
+                fbody (wcons (qdiv r10 den) (fbDigits rest)) (fbRep rest) (fbTerm rest)
             end
         end
       end
@@ -3384,19 +3242,2980 @@ expand : Whole -> Whole -> Whole -> WList -> FBody is
   end
 end
 
--- ============================================================
--- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
--- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
--- ch203's toRadixQ (qlift + toRadixRespects) and restores the
--- family with unchanged output strings.
--- ============================================================
--- -- The exact decimal of a fraction, sign and repetend and all.
--- to_radix : Frac -> RDec is
---   fn (f : Frac) is
---     let body : FBody = expand (fden f) (succ (fden f)) (fnum f % fden f) wnil in
---     rdec (fneg f) (fnum f // fden f) (fbDigits body) (fbRep body) (fbTerm body)
---   end
--- end
+-- ============================================================================
+-- TASK 2: the to_radix pipeline + demotion trio, re-founded on the quotient Frac.
+-- Ported from listings/ch203_rational_canonical.rune: toRadixRep+toRadixRespects
+-- (class-invariance of the decimal expansion) and floorRep+floorUnique lift onto
+-- Frac by qlift.  ch203's Z is a QUOTIENT integer; ours is canonical data Int, so
+-- every Z-respect step collapses to direct Int algebra (the imag/isign bridges
+-- below).  The pure Whole division + expand number theory ports over ch203's mul
+-- (= cmul, add-on-left; the prelude's mulW is the mirror), lemmas verbatim.
+-- ============================================================================
+
+-- --- equality combinators + base arithmetic + order + division + expand (ch203) ---
+cong : {A : U} -> {B : U} -> (f : A -> B) -> {x : A} -> {y : A} -> Eq A x y -> Eq B (f x) (f y) is
+  fn {A : U} {B : U} (f : A -> B) {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) refl
+  end
+end
+
+sym : {A : U} -> {x : A} -> {y : A} -> Eq A x y -> Eq A y x is
+  fn {A : U} {x : A} {y : A} (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) refl
+  end
+end
+
+trans : {A : U} -> {x : A} -> {y : A} -> {z : A} -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn {A : U} {x : A} {y : A} {z : A} (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- ============================================================================
+-- The Whole SEMIRING lemmas (ch63 / ch81), redeclared verbatim.
+-- ============================================================================
+
+addZeroR : (n : Whole) -> Eq Whole (addW n zero) n is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x zero) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW k zero) k) is
+         subst Whole (addW k zero) k ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) zero) (succ z) end)
+           (refl (addW (succ k) zero))
+       end)
+      n
+  end
+end
+
+addSuccR : (n : Whole) -> (m : Whole) -> Eq Whole (addW n (succ m)) (succ (addW n m)) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x (succ m)) (succ (addW x m)) end)
+      (refl (succ m))
+      (fn (k : Whole) (ih : Eq Whole (addW k (succ m)) (succ (addW k m))) is
+         subst Whole (addW k (succ m)) (succ (addW k m)) ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) (succ m)) (succ z) end)
+           (refl (addW (succ k) (succ m)))
+       end)
+      n
+  end
+end
+
+addAssoc : (a : Whole) -> (b : Whole) -> (c : Whole)
+   -> Eq Whole (addW (addW a b) c) (addW a (addW b c)) is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW (addW x b) c) (addW x (addW b c)) end)
+      (refl (addW b c))
+      (fn (k : Whole) (ih : Eq Whole (addW (addW k b) c) (addW k (addW b c))) is
+         subst Whole (addW (addW k b) c) (addW k (addW b c)) ih
+           (fn (z : Whole) is Eq Whole (succ (addW (addW k b) c)) (succ z) end)
+           (refl (succ (addW (addW k b) c)))
+       end)
+      a
+  end
+end
+
+addComm : (n : Whole) -> (m : Whole) -> Eq Whole (addW n m) (addW m n) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x m) (addW m x) end)
+      (subst Whole (addW m zero) m (addZeroR m)
+         (fn (z : Whole) is Eq Whole z (addW m zero) end)
+         (refl (addW m zero)))
+      (fn (k : Whole) (ih : Eq Whole (addW k m) (addW m k)) is
+         subst Whole (succ (addW m k)) (addW m (succ k))
+           (subst Whole (addW m (succ k)) (succ (addW m k)) (addSuccR m k)
+              (fn (z : Whole) is Eq Whole z (addW m (succ k)) end)
+              (refl (addW m (succ k))))
+           (fn (z : Whole) is Eq Whole (succ (addW k m)) z end)
+           (subst Whole (addW k m) (addW m k) ih
+              (fn (z : Whole) is Eq Whole (succ (addW k m)) (succ z) end)
+              (refl (succ (addW k m))))
+       end)
+      n
+  end
+end
+
+mulZeroR : (n : Whole) -> Eq Whole (cmul n zero) zero is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (cmul x zero) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (cmul k zero) zero) is ih end)
+      n
+  end
+end
+
+-- RIGHT DISTRIBUTIVITY: (a + b) * c = a*c + b*c (ch63).
+
+mulDistR : (a : Whole) -> (b : Whole) -> (c : Whole)
+   -> Eq Whole (cmul (addW a b) c) (addW (cmul a c) (cmul b c)) is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (cmul (addW x b) c) (addW (cmul x c) (cmul b c)) end)
+      (refl (cmul b c))
+      (fn (k : Whole) (ih : Eq Whole (cmul (addW k b) c) (addW (cmul k c) (cmul b c))) is
+         subst Whole
+           (addW c (addW (cmul k c) (cmul b c)))
+           (addW (addW c (cmul k c)) (cmul b c))
+           (subst Whole
+              (addW (addW c (cmul k c)) (cmul b c))
+              (addW c (addW (cmul k c) (cmul b c)))
+              (addAssoc c (cmul k c) (cmul b c))
+              (fn (z : Whole) is Eq Whole z (addW (addW c (cmul k c)) (cmul b c)) end)
+              (refl (addW (addW c (cmul k c)) (cmul b c))))
+           (fn (z : Whole) is Eq Whole (addW c (cmul (addW k b) c)) z end)
+           (subst Whole (cmul (addW k b) c) (addW (cmul k c) (cmul b c)) ih
+              (fn (z : Whole) is Eq Whole (addW c (cmul (addW k b) c)) (addW c z) end)
+              (refl (addW c (cmul (addW k b) c))))
+       end)
+      a
+  end
+end
+
+-- MULTIPLICATIVE SUCCESSOR-SHIFT: cmul n (succ m) = addW (cmul n m) n (ch81).
+
+mulSuccR : (n : Whole) -> (m : Whole) -> Eq Whole (cmul n (succ m)) (addW (cmul n m) n) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim
+      (fn (x : Whole) is Eq Whole (cmul x (succ m)) (addW (cmul x m) x) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (cmul k (succ m)) (addW (cmul k m) k)) is
+         subst Whole
+           (succ (addW (addW m (cmul k m)) k))
+           (addW (addW m (cmul k m)) (succ k))
+           (subst Whole
+              (addW (addW m (cmul k m)) (succ k))
+              (succ (addW (addW m (cmul k m)) k))
+              (addSuccR (addW m (cmul k m)) k)
+              (fn (z : Whole) is Eq Whole z (addW (addW m (cmul k m)) (succ k)) end)
+              (refl (addW (addW m (cmul k m)) (succ k))))
+           (fn (z : Whole) is Eq Whole (cmul (succ k) (succ m)) z end)
+           (subst Whole
+              (addW m (addW (cmul k m) k))
+              (addW (addW m (cmul k m)) k)
+              (subst Whole
+                 (addW (addW m (cmul k m)) k)
+                 (addW m (addW (cmul k m) k))
+                 (addAssoc m (cmul k m) k)
+                 (fn (z : Whole) is Eq Whole z (addW (addW m (cmul k m)) k) end)
+                 (refl (addW (addW m (cmul k m)) k)))
+              (fn (z : Whole) is Eq Whole (cmul (succ k) (succ m)) (succ z) end)
+              (subst Whole
+                 (cmul k (succ m))
+                 (addW (cmul k m) k)
+                 ih
+                 (fn (z : Whole) is Eq Whole (cmul (succ k) (succ m)) (succ (addW m z)) end)
+                 (refl (cmul (succ k) (succ m)))))
+       end)
+      n
+  end
+end
+
+-- COMMUTATIVITY of Whole cmul (ch81), by induction on m.
+
+mulComm : (m : Whole) -> (n : Whole) -> Eq Whole (cmul m n) (cmul n m) is
+  fn (m : Whole) (n : Whole) is
+    WholeElim
+      (fn (x : Whole) is Eq Whole (cmul x n) (cmul n x) end)
+      (subst Whole (cmul n zero) zero (mulZeroR n)
+         (fn (z : Whole) is Eq Whole z (cmul n zero) end)
+         (refl (cmul n zero)))
+      (fn (k : Whole) (ih : Eq Whole (cmul k n) (cmul n k)) is
+         subst Whole
+           (addW (cmul n k) n)
+           (cmul n (succ k))
+           (subst Whole
+              (cmul n (succ k))
+              (addW (cmul n k) n)
+              (mulSuccR n k)
+              (fn (z : Whole) is Eq Whole z (cmul n (succ k)) end)
+              (refl (cmul n (succ k))))
+           (fn (z : Whole) is Eq Whole (cmul (succ k) n) z end)
+           (subst Whole
+              (cmul n k)
+              (cmul k n)
+              (subst Whole (cmul k n) (cmul n k) ih
+                 (fn (z : Whole) is Eq Whole z (cmul k n) end)
+                 (refl (cmul k n)))
+              (fn (z : Whole) is Eq Whole (addW n z) (addW (cmul n k) n) end)
+              (addComm n (cmul n k)))
+       end)
+      m
+  end
+end
+
+-- LEFT DISTRIBUTIVITY: a * (b + c) = a*b + a*c, derived from mulComm + mulDistR.
+
+mulOneR : (n : Whole) -> Eq Whole (cmul n (succ zero)) n is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (cmul x (succ zero)) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (cmul k (succ zero)) k) is
+         cong succ ih
+       end)
+      n
+  end
+end
+
+-- MUL ASSOCIATIVITY: (a * b) * c = a * (b * c) (ch81 sibling), by induction on a.
+--   (succ k * b) * c = (b + k*b) * c           [def]
+--                    = b*c + (k*b)*c           [mulDistR]
+--                    = b*c + k*(b*c)           [IH]
+--                    = (succ k) * (b*c)         [def]
+
+mulAssoc : (a : Whole) -> (b : Whole) -> (c : Whole)
+   -> Eq Whole (cmul (cmul a b) c) (cmul a (cmul b c)) is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (cmul (cmul x b) c) (cmul x (cmul b c)) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (cmul (cmul k b) c) (cmul k (cmul b c))) is
+         trans (mulDistR b (cmul k b) c)
+           (cong (fn (s : Whole) is addW (cmul b c) s end) ih)
+       end)
+      a
+  end
+end
+
+-- ============================================================================
+-- ch07/ch103/ch105 ℤ infrastructure, redeclared verbatim.
+-- ============================================================================
+
+cong2 : {A : U} -> {B : U} -> {C : U} -> (f : A -> B -> C)
+     -> {x : A} -> {y : A} -> {u : B} -> {v : B}
+     -> Eq A x y -> Eq B u v -> Eq C (f x u) (f y v) is
+  fn {A : U} {B : U} {C : U} (f : A -> B -> C)
+     {x : A} {y : A} {u : B} {v : B} (p : Eq A x y) (q : Eq B u v) is
+    trans (cong (fn (z : A) is f z u end) p) (cong (fn (z : B) is f y z end) q)
+  end
+end
+
+or : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is
+    BoolElim (fn (x : Bool) is Bool end) true b a
+  end
+end
+
+-- REFLEXIVITY of leb (ch65).
+
+lteRefl : (n : Whole) -> Eq Bool (leb n n) true is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (leb x x) true end)
+      (refl true)
+      (fn (k : Whole) (ih : Eq Bool (leb k k) true) is ih end)
+      n
+  end
+end
+
+-- ABSURDITY from `false = true`: any leb equation (ch80 idiom).
+
+lteAbsurd : (a : Whole) -> (c : Whole) -> Eq Bool false true -> Eq Bool (leb a c) true is
+  fn (a : Whole) (c : Whole) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Bool (leb a c) true
+         | false -> Eq Bool true true
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- ABSURDITY from `false = true`: any Whole equation (ch82 idiom).
+
+lteAbsurdNat : (a : Whole) -> (b : Whole) -> Eq Bool false true -> Eq Whole a b is
+  fn (a : Whole) (b : Whole) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> Eq Whole a b
+         | false -> Eq Whole a a
+         end
+       end)
+      (refl a)
+  end
+end
+
+-- TRANSITIVITY of leb (ch80, verbatim).
+
+lteTrans : (a : Whole) -> (b : Whole) -> (c : Whole)
+   -> Eq Bool (leb a b) true -> Eq Bool (leb b c) true -> Eq Bool (leb a c) true is
+  fn (a : Whole) is
+    WholeElim
+      (fn (x : Whole) is
+         (b : Whole) -> (c : Whole)
+           -> Eq Bool (leb x b) true -> Eq Bool (leb b c) true
+           -> Eq Bool (leb x c) true end)
+      (fn (b : Whole) (c : Whole)
+          (hab : Eq Bool (leb zero b) true) (hbc : Eq Bool (leb b c) true) is
+         refl true end)
+      (fn (a' : Whole)
+          (ih : (b : Whole) -> (c : Whole)
+                  -> Eq Bool (leb a' b) true -> Eq Bool (leb b c) true
+                  -> Eq Bool (leb a' c) true) is
+         fn (b : Whole) is
+           WholeElim
+             (fn (y : Whole) is
+                (c : Whole)
+                  -> Eq Bool (leb (succ a') y) true -> Eq Bool (leb y c) true
+                  -> Eq Bool (leb (succ a') c) true end)
+             (fn (c : Whole)
+                 (hab : Eq Bool false true) (hbc : Eq Bool (leb zero c) true) is
+                lteAbsurd (succ a') c hab end)
+             (fn (b' : Whole)
+                 (ihb : (c : Whole)
+                          -> Eq Bool (leb (succ a') b') true
+                          -> Eq Bool (leb b' c) true
+                          -> Eq Bool (leb (succ a') c) true) is
+                fn (c : Whole) is
+                  WholeElim
+                    (fn (z : Whole) is
+                       Eq Bool (leb (succ a') (succ b')) true
+                         -> Eq Bool (leb (succ b') z) true
+                         -> Eq Bool (leb (succ a') z) true end)
+                    (fn (hab : Eq Bool (leb a' b') true)
+                        (hbc : Eq Bool false true) is
+                       lteAbsurd (succ a') zero hbc end)
+                    (fn (c' : Whole)
+                        (ihc : Eq Bool (leb (succ a') (succ b')) true
+                                 -> Eq Bool (leb (succ b') c') true
+                                 -> Eq Bool (leb (succ a') c') true) is
+                       fn (hab : Eq Bool (leb a' b') true)
+                          (hbc : Eq Bool (leb b' c') true) is
+                         ih b' c' hab hbc end
+                     end)
+                    c
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- ANTISYMMETRY of leb (ch82, verbatim).
+
+lteAntisym : (a : Whole) -> (b : Whole)
+   -> Eq Bool (leb a b) true -> Eq Bool (leb b a) true -> Eq Whole a b is
+  fn (a : Whole) is
+    WholeElim
+      (fn (x : Whole) is
+         (b : Whole)
+           -> Eq Bool (leb x b) true -> Eq Bool (leb b x) true
+           -> Eq Whole x b end)
+      (fn (b : Whole) is
+         WholeElim
+           (fn (y : Whole) is
+              Eq Bool (leb zero y) true -> Eq Bool (leb y zero) true
+                -> Eq Whole zero y end)
+           (fn (hab : Eq Bool (leb zero zero) true)
+               (hba : Eq Bool (leb zero zero) true) is
+              refl zero end)
+           (fn (b' : Whole)
+               (ihb : Eq Bool (leb zero b') true -> Eq Bool (leb b' zero) true
+                        -> Eq Whole zero b') is
+              fn (hab : Eq Bool (leb zero (succ b')) true)
+                 (hba : Eq Bool false true) is
+                lteAbsurdNat zero (succ b') hba end
+            end)
+           b
+       end)
+      (fn (a' : Whole)
+          (ih : (b : Whole)
+                  -> Eq Bool (leb a' b) true -> Eq Bool (leb b a') true
+                  -> Eq Whole a' b) is
+         fn (b : Whole) is
+           WholeElim
+             (fn (y : Whole) is
+                Eq Bool (leb (succ a') y) true -> Eq Bool (leb y (succ a')) true
+                  -> Eq Whole (succ a') y end)
+             (fn (hab : Eq Bool false true)
+                 (hba : Eq Bool (leb zero (succ a')) true) is
+                lteAbsurdNat (succ a') zero hab end)
+             (fn (b' : Whole)
+                 (ihb : Eq Bool (leb (succ a') b') true
+                          -> Eq Bool (leb b' (succ a')) true
+                          -> Eq Whole (succ a') b') is
+                fn (hab : Eq Bool (leb a' b') true)
+                   (hba : Eq Bool (leb b' a') true) is
+                  subst Whole a' b' (ih b' hab hba)
+                    (fn (z : Whole) is Eq Whole (succ a') (succ z) end)
+                    (refl (succ a'))
+                end
+              end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- TOTALITY of leb (ch83, verbatim).
+
+lteAddCancelL : (k : Whole) -> (x : Whole) -> (y : Whole)
+   -> Eq Bool (leb (addW k x) (addW k y)) (leb x y) is
+  fn (k : Whole) (x : Whole) (y : Whole) is
+    WholeElim (fn (z : Whole) is Eq Bool (leb (addW z x) (addW z y)) (leb x y) end)
+      (refl (leb x y))
+      (fn (j : Whole) (ih : Eq Bool (leb (addW j x) (addW j y)) (leb x y)) is ih end)
+      k
+  end
+end
+
+-- RIGHT CANCELLATION:  leb (x + k) (y + k) = leb x y.  Convert each side to the
+-- left-cancellation form with addComm, then apply lteAddCancelL.
+
+lteMulPos : (n : Whole) -> (x : Whole) -> (y : Whole)
+   -> Eq Bool (leb (cmul x (succ n)) (cmul y (succ n))) (leb x y) is
+  fn (n : Whole) (x : Whole) is
+    WholeElim
+      (fn (w : Whole) is
+         (y : Whole) -> Eq Bool (leb (cmul w (succ n)) (cmul y (succ n))) (leb w y) end)
+      -- x = 0: leb 0 (cmul y k) = true = leb 0 y.
+      (fn (y : Whole) is refl true end)
+      -- x = succ x', IH at x'.
+      (fn (x' : Whole)
+          (ih : (y : Whole) -> Eq Bool (leb (cmul x' (succ n)) (cmul y (succ n))) (leb x' y)) is
+         fn (y : Whole) is
+           WholeElim
+             (fn (w : Whole) is
+                Eq Bool (leb (cmul (succ x') (succ n)) (cmul w (succ n))) (leb (succ x') w) end)
+             -- y = 0: cmul (succ x') (succ n) = succ(...), leb (succ _) 0 = false = leb (succ x') 0.
+             (refl false)
+             -- y = succ y': common (succ n) cancels via lteAddCancelL, then IH.
+             (fn (y' : Whole)
+                 (ihy : Eq Bool (leb (cmul (succ x') (succ n)) (cmul y' (succ n))) (leb (succ x') y')) is
+                -- cmul (succ x')(succ n) = addW (succ n) (cmul x' (succ n)) def.,
+                -- cmul (succ y')(succ n) = addW (succ n) (cmul y' (succ n)) def.,
+                -- so the goal is leb (addW (succ n)(x'·k)) (addW (succ n)(y'·k)) = leb (succ x')(succ y'),
+                -- and leb (succ x')(succ y') = leb x' y' def.
+                trans (lteAddCancelL (succ n) (cmul x' (succ n)) (cmul y' (succ n)))
+                  (ih y')
+              end)
+             y
+         end
+       end)
+      x
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- ℤ ORDER INVARIANCE UNDER A POSITIVE MULTIPLIER, at the REPRESENTATIVE level.
+-- Multiplying both ℤ-sides (as reps) by a positive embedded nat (succ m, 0) leaves
+-- zleP unchanged.  pmul p (sm,0) has rep (a·sm + b·0, a·0 + b·sm); after mulZeroR the
+-- cross sum (a·sm + d·sm) factors (mulDistR) to (a+d)·sm, and lteMulPos cancels sm.
+-- ----------------------------------------------------------------------------
+
+-- the simplification fst(pmul p k) + snd(pmul q k) = (fst p + snd q) · succ m,
+-- where k = (succ m, 0).
+
+zeroMonus : (b : Whole) -> Eq Whole (monus zero b) zero is
+  fn (b : Whole) is
+    case b of
+    | zero -> refl zero
+    | succ k with ih -> cong pred ih
+    end
+  end
+end
+
+monusSuccSucc : (b : Whole) -> (a : Whole) -> Eq Whole (monus (succ a) (succ b)) (monus a b) is
+  fn (b : Whole) is
+    case b of
+    | zero -> fn (a : Whole) is refl a end
+    | succ k with ih -> fn (a : Whole) is cong pred (ih a) end
+    end
+  end
+end
+
+monusAddCancel : (d : Whole) -> (a : Whole) -> Eq Whole (monus (addW a d) d) a is
+  fn (d : Whole) is
+    case d of
+    | zero -> fn (a : Whole) is addZeroR a end
+    | succ k with ih -> fn (a : Whole) is
+        calc monus (addW a (succ k)) (succ k)
+          = monus (succ (addW a k)) (succ k) by cong (fn (s : Whole) is monus s (succ k) end) (addSuccR a k)
+          = monus (addW a k) k               by monusSuccSucc k (addW a k)
+          = a                               by ih a
+        end
+      end
+    end
+  end
+end
+
+succInj : {a : Whole} -> {b : Whole} -> Eq Whole (succ a) (succ b) -> Eq Whole a b is
+  fn {a : Whole} {b : Whole} (p : Eq Whole (succ a) (succ b)) is cong pred p end
+end
+
+-- The workhorse: equal differences have equal monuses (ch12), glyph-free.
+
+qmagNum : QPair -> Whole is fn (p : QPair) is imag (qnum p) end end
+
+qmagDen : QPair -> Whole is fn (p : QPair) is succ (qdpred p) end end
+
+qsign   : QPair -> Bool is fn (p : QPair) is isign (qnum p) end end
+
+toRadixRep : QPair -> RDec is
+  fn (p : QPair) is
+    let body : FBody =
+      expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil in
+    rdec (qsign p) (qdiv (qmagNum p) (qmagDen p)) (fbDigits body) (fbRep body) (fbTerm body)
+  end
+end
+
+-- ----------------------------------------------------------------------------
+-- Certificates: the repeating decimal COMPUTES through the canonical rep.
+-- A QPair (qpair (intOf n) d) denotes n / succ d.
+-- ----------------------------------------------------------------------------
+
+-- 3/4 = 0.75  (terminating): qpair (intOf 3) 3 is 3 / succ 3 = 3/4.
+
+monusAddInv : (b : Whole) -> (a : Whole) -> Eq Bool (leb b a) true -> Eq Whole (addW (monus a b) b) a is
+  fn (b : Whole) is
+    case b of
+    | zero -> fn (a : Whole) (h : Eq Bool true true) is addZeroR (monus a zero) end
+    | succ k with ih -> fn (a : Whole) is
+        case a of
+        | zero -> fn (h : Eq Bool false true) is lteAbsurdNat (addW (monus zero (succ k)) (succ k)) zero h end
+        | succ j -> fn (h : Eq Bool (leb k j) true) is
+            calc addW (monus (succ j) (succ k)) (succ k)
+              = addW (monus j k) (succ k) by cong (fn (s : Whole) is addW s (succ k) end) (monusSuccSucc k j)
+              = succ (addW (monus j k) k)  by addSuccR (monus j k) k
+              = succ j                    by cong succ (ih j h)
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- addW (succ c) x = succ (addW c x).  addW recurses on its 2nd arg, so the leading
+-- successor does not peel definitionally; prove it by induction on x.
+
+addSuccL : (c : Whole) -> (x : Whole) -> Eq Whole (addW (succ c) x) (succ (addW c x)) is
+  fn (c : Whole) (x : Whole) is
+    WholeElim (fn (z : Whole) is Eq Whole (addW (succ c) z) (succ (addW c z)) end)
+      (trans (addZeroR (succ c)) (cong succ (sym (addZeroR c))))
+      (fn (k : Whole) (ih : Eq Whole (addW (succ c) k) (succ (addW c k))) is
+         trans (addSuccR (succ c) k)
+           (trans (cong succ ih) (cong succ (sym (addSuccR c k)))) end)
+      x
+  end
+end
+
+-- leb is monotone under a common left summand: x ≤ y ⟹ c+x ≤ c+y.  Induction on c.
+
+lebAddMono : (c : Whole) -> (x : Whole) -> (y : Whole) -> Eq Bool (leb x y) true
+    -> Eq Bool (leb (addW c x) (addW c y)) true is
+  fn (c : Whole) is
+    case c of
+    | zero -> fn (x : Whole) (y : Whole) (h : Eq Bool (leb x y) true) is h end
+    | succ d with ih -> fn (x : Whole) (y : Whole) (h : Eq Bool (leb x y) true) is
+        subst Whole (succ (addW d x)) (addW (succ d) x) (sym (addSuccL d x))
+          (fn (s : Whole) is Eq Bool (leb s (addW (succ d) y)) true end)
+          (subst Whole (succ (addW d y)) (addW (succ d) y) (sym (addSuccL d y))
+            (fn (t : Whole) is Eq Bool (leb (succ (addW d x)) t) true end)
+            (ih x y h))
+      end
+    end
+  end
+end
+
+-- b ≤ a  and  x ≤ a−b   ⟹   b+x ≤ a.   (monotonicity + monusAddInv.)
+
+lebAddMonus : (a : Whole) -> (b : Whole) -> (x : Whole)
+    -> Eq Bool (leb b a) true -> Eq Bool (leb x (monus a b)) true
+    -> Eq Bool (leb (addW b x) a) true is
+  fn (a : Whole) (b : Whole) (x : Whole) (hba : Eq Bool (leb b a) true)
+     (hx : Eq Bool (leb x (monus a b)) true) is
+    subst Whole (addW b (monus a b)) a (trans (addComm b (monus a b)) (monusAddInv b a hba))
+      (fn (s : Whole) is Eq Bool (leb (addW b x) s) true end)
+      (lebAddMono b x (monus a b) hx)
+  end
+end
+
+-- The divisor step under a known boolean: case on the value `lv` of `leb (succ k) a`
+-- WITH its defining equation, so qdivF's branch reduces and the true branch carries
+-- `leb (succ k) a = true` to feed lebAddMonus.  `q'` is the recursive quotient.
+
+divStepMulLe : (a : Whole) -> (k : Whole) -> (q' : Whole)
+    -> Eq Bool (leb (cmul q' (succ k)) (monus a (succ k))) true
+    -> (lv : Bool) -> Eq Bool (leb (succ k) a) lv
+    -> Eq Bool (leb (cmul (BoolElim (fn (w : Bool) is Whole end) (succ q') zero lv) (succ k)) a) true is
+  fn (a : Whole) (k : Whole) (q' : Whole)
+     (hrec : Eq Bool (leb (cmul q' (succ k)) (monus a (succ k))) true) (lv : Bool) is
+    case lv of
+    | true  -> fn (h : Eq Bool (leb (succ k) a) true) is
+        -- BoolElim ... true = succ q'; cmul (succ q') (succ k) = (succ k) + cmul q' (succ k).
+        lebAddMonus a (succ k) (cmul q' (succ k)) h hrec
+      end
+    | false -> fn (h : Eq Bool (leb (succ k) a) false) is
+        -- BoolElim ... false = zero; cmul 0 (succ k) = 0; leb 0 a = true.
+        refl true
+      end
+    end
+  end
+end
+
+-- The fuelled quotient times the divisor never exceeds the dividend:
+-- (qdivF f a b)·b ≤ a, for ANY fuel.  Induction on fuel; the recursive call's
+-- bound (on a−b) lifts back to a via divStepMulLe.
+
+divFMulLe : (f : Whole) -> (a : Whole) -> (b : Whole) -> Eq Bool (leb (cmul (qdivF f a b) b) a) true is
+  fn (f : Whole) is
+    case f of
+    | zero -> fn (a : Whole) (b : Whole) is refl true end
+    | succ g with ih -> fn (a : Whole) (b : Whole) is
+        case b of
+        | zero -> refl true
+        | succ k ->
+            divStepMulLe a k (qdivF g (monus a (succ k)) (succ k))
+              (ih (monus a (succ k)) (succ k))
+              (leb (succ k) a) (refl (leb (succ k) a))
+        end
+      end
+    end
+  end
+end
+
+-- Specialise to qdiv (fuel = the dividend): (qdiv a b)·b ≤ a.
+
+divMulLe : (a : Whole) -> (b : Whole) -> Eq Bool (leb (cmul (qdiv a b) b) a) true is
+  fn (a : Whole) (b : Whole) is divFMulLe a a b end
+end
+
+-- THE DIVISION LAW (F-convention):  (qdiv a b)·b + qmod a b = a.
+-- qmod a b = a − (qdiv a b)·b, and (qdiv a b)·b ≤ a (divMulLe), so adding the
+-- remainder back recovers a (monusAddInv, commuted).
+
+divLaw : (a : Whole) -> (b : Whole)
+    -> Eq Whole (addW (cmul (qdiv a b) b) (qmod a b)) a is
+  fn (a : Whole) (b : Whole) is
+    trans (addComm (cmul (qdiv a b) b) (qmod a b))
+      (monusAddInv (cmul (qdiv a b) b) a (divMulLe a b))
+  end
+end
+
+-- Strict order (ported from ch13), case-based like leb.
+
+ltb : Whole -> Whole -> Bool is
+  fn (m : Whole) is
+    case m of
+    | zero -> fn (n : Whole) is case n of | zero -> false | succ j -> true end end
+    | succ k with ih -> fn (n : Whole) is case n of | zero -> false | succ j -> ih j end end
+    end
+  end
+end
+
+ltbZero : (r : Whole) -> Eq Bool (ltb r zero) false is
+  fn (r : Whole) is case r of | zero -> refl false | succ k -> refl false end end
+end
+
+Lt : Whole -> Whole -> Prop is fn (a : Whole) (b : Whole) is Eq Bool (ltb a b) true end end
+
+-- monus over a sum:  a − (b + c) = (a − b) − c.   Induction on c (addW recurses there).
+
+monusAdd : (a : Whole) -> (b : Whole) -> (c : Whole)
+    -> Eq Whole (monus a (addW b c)) (monus (monus a b) c) is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (z : Whole) is Eq Whole (monus a (addW b z)) (monus (monus a b) z) end)
+      (cong (fn (s : Whole) is monus a s end) (addZeroR b))
+      (fn (k : Whole) (ih : Eq Whole (monus a (addW b k)) (monus (monus a b) k)) is
+         trans (cong (fn (s : Whole) is monus a s end) (addSuccR b k))
+           (cong pred ih) end)
+      c
+  end
+end
+
+-- leb is transitive (induction on the first argument; same shape as lteTrans).
+
+lebTrans : (a : Whole) -> (b : Whole) -> (c : Whole)
+    -> Eq Bool (leb a b) true -> Eq Bool (leb b c) true -> Eq Bool (leb a c) true is
+  fn (a : Whole) is
+    case a of
+    | zero -> fn (b : Whole) (c : Whole) (hab : Eq Bool true true) (hbc : Eq Bool (leb b c) true) is
+        refl true end
+    | succ a2 with ih -> fn (b : Whole) is
+        case b of
+        | zero -> fn (c : Whole) (hab : Eq Bool false true) (hbc : Eq Bool (leb zero c) true) is
+            lteAbsurd (succ a2) c hab end
+        | succ b2 -> fn (c : Whole) is
+            case c of
+            | zero -> fn (hab : Eq Bool (leb a2 b2) true) (hbc : Eq Bool false true) is
+                lteAbsurd (succ a2) zero hbc end
+            | succ c2 -> fn (hab : Eq Bool (leb a2 b2) true) (hbc : Eq Bool (leb b2 c2) true) is
+                ih b2 c2 hab hbc end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- leb is reflexive (induction on the argument).
+
+lebRefl : (a : Whole) -> Eq Bool (leb a a) true is
+  fn (a : Whole) is
+    case a of
+    | zero -> refl true
+    | succ k with ih -> ih
+    end
+  end
+end
+-- a ≤ succ a (induction on a).
+
+lebSuccSelf : (a : Whole) -> Eq Bool (leb a (succ a)) true is
+  fn (a : Whole) is
+    case a of
+    | zero -> refl true
+    | succ k with ih -> ih
+    end
+  end
+end
+-- a − d ≤ a always.   Induction on a; chains via lebTrans and lebSuccSelf.
+
+monusLe : (a : Whole) -> (d : Whole) -> Eq Bool (leb (monus a d) a) true is
+  fn (a : Whole) is
+    case a of
+    | zero -> fn (d : Whole) is
+        subst Whole zero (monus zero d) (sym (zeroMonus d))
+          (fn (s : Whole) is Eq Bool (leb s zero) true end) (refl true) end
+    | succ a2 with ih -> fn (d : Whole) is
+        case d of
+        | zero -> lebRefl (succ a2)
+        | succ d2 ->
+            subst Whole (monus a2 d2) (monus (succ a2) (succ d2)) (sym (monusSuccSucc d2 a2))
+              (fn (s : Whole) is Eq Bool (leb s (succ a2)) true end)
+              (lebTrans (monus a2 d2) a2 (succ a2) (ih d2) (lebSuccSelf a2))
+        end
+      end
+    end
+  end
+end
+
+-- monus is antitone in its subtrahend:  c ≤ d  ⟹  a−d ≤ a−c.   Induction on a.
+
+monusLeMono2 : (a : Whole) -> (c : Whole) -> (d : Whole)
+    -> Eq Bool (leb c d) true -> Eq Bool (leb (monus a d) (monus a c)) true is
+  fn (a : Whole) is
+    case a of
+    | zero -> fn (c : Whole) (d : Whole) (h : Eq Bool (leb c d) true) is
+        subst Whole zero (monus zero d) (sym (zeroMonus d))
+          (fn (s : Whole) is Eq Bool (leb s (monus zero c)) true end)
+          (subst Whole zero (monus zero c) (sym (zeroMonus c))
+            (fn (t : Whole) is Eq Bool (leb zero t) true end) (refl true)) end
+    | succ a2 with ih -> fn (c : Whole) is
+        case c of
+        | zero -> fn (d : Whole) (h : Eq Bool true true) is
+            -- monus (succ a2) zero = succ a2 (def. monus zero-case); monusLe closes it.
+            monusLe (succ a2) d end
+        | succ c2 -> fn (d : Whole) is
+            case d of
+            | zero -> fn (h : Eq Bool (leb (succ c2) zero) true) is
+                subst Bool false true h
+                  (fn (z : Bool) is case z of
+                     | true  -> Eq Bool (leb (monus (succ a2) zero) (monus (succ a2) (succ c2))) true
+                     | false -> Eq Bool true true end end)
+                  (refl true) end
+            | succ d2 -> fn (h : Eq Bool (leb c2 d2) true) is
+                subst Whole (monus a2 d2) (monus (succ a2) (succ d2)) (sym (monusSuccSucc d2 a2))
+                  (fn (s : Whole) is Eq Bool (leb s (monus (succ a2) (succ c2))) true end)
+                  (subst Whole (monus a2 c2) (monus (succ a2) (succ c2)) (sym (monusSuccSucc c2 a2))
+                    (fn (t : Whole) is Eq Bool (leb (monus a2 d2) t) true end)
+                    (ih c2 d2 h)) end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- From false = true, any Bool-equation goal (the leb-flavoured absurdity).
+
+boolAbsurd : (x : Whole) -> (y : Whole) -> Eq Bool false true -> Eq Bool (leb x y) true is
+  fn (x : Whole) (y : Whole) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is case z of
+         | true  -> Eq Bool (leb x y) true
+         | false -> Eq Bool true true end end)
+      (refl true)
+  end
+end
+
+-- a ≤ succ g  ⟹  pred a ≤ g.   Case on a (no induction; succ-case is leb-definitional).
+
+predLebFuel : (a : Whole) -> (g : Whole) -> Eq Bool (leb a (succ g)) true -> Eq Bool (leb (pred a) g) true is
+  fn (a : Whole) is
+    case a of
+    | zero -> fn (g : Whole) (h : Eq Bool true true) is refl true end
+    | succ j -> fn (g : Whole) (h : Eq Bool (leb j g) true) is h end
+    end
+  end
+end
+
+-- monus a 1 = pred a (monus succ-case then zero-case; definitional).
+
+predIsMonusOne : (a : Whole) -> Eq Whole (monus a (succ zero)) (pred a) is
+  fn (a : Whole) is refl (pred a) end
+end
+
+-- FUEL DESCENT:  succ b0 ≤ a  and  a ≤ succ g   ⟹   a − succ b0 ≤ g.
+-- a−(succ b0) ≤ a−1 = pred a (monusLeMono2, succ 0 ≤ succ b0), and pred a ≤ g.
+
+lebMonusFuel : (a : Whole) -> (b0 : Whole) -> (g : Whole)
+    -> Eq Bool (leb (succ b0) a) true -> Eq Bool (leb a (succ g)) true
+    -> Eq Bool (leb (monus a (succ b0)) g) true is
+  fn (a : Whole) (b0 : Whole) (g : Whole)
+     (hba : Eq Bool (leb (succ b0) a) true) (hfuel : Eq Bool (leb a (succ g)) true) is
+    lebTrans (monus a (succ b0)) (pred a) g
+      (subst Whole (monus a (succ zero)) (pred a) (predIsMonusOne a)
+        (fn (s : Whole) is Eq Bool (leb (monus a (succ b0)) s) true end)
+        (monusLeMono2 a (succ zero) (succ b0) (refl true)))
+      (predLebFuel a g hfuel)
+  end
+end
+
+-- leb (succ b0) a = false  ⟹  a < succ b0  (the false branch of the divisor test
+-- gives the remainder-is-the-dividend bound).   Induction on b0, a varying.
+
+lebFalseLt : (b0 : Whole) -> (a : Whole)
+    -> Eq Bool (leb (succ b0) a) false -> Eq Bool (ltb a (succ b0)) true is
+  fn (b0 : Whole) is
+    case b0 of
+    | zero -> fn (a : Whole) is
+        case a of
+        | zero -> fn (h : Eq Bool false false) is refl true end
+        | succ j -> fn (h : Eq Bool true false) is
+            subst Bool true false h
+              (fn (z : Bool) is case z of
+                 | true  -> Eq Bool true true
+                 | false -> Eq Bool (ltb (succ j) (succ zero)) true end end)
+              (refl true) end
+        end
+      end
+    | succ b1 with ih -> fn (a : Whole) is
+        case a of
+        | zero -> fn (h : Eq Bool false false) is refl true end
+        | succ j -> fn (h : Eq Bool (leb (succ b1) j) false) is ih j h end
+        end
+      end
+    end
+  end
+end
+
+-- The remainder step under a known boolean lv = leb (succ b0) a, WITH its equation.
+-- true:  rem = (a − succ b0) − q'·(succ b0) = the recursive remainder  (< succ b0 by hrec).
+-- false: rem = a,  a < succ b0  by lebFalseLt.
+
+remStepLt : (a : Whole) -> (b0 : Whole) -> (q' : Whole)
+    -> (Eq Bool (leb (succ b0) a) true
+        -> Lt (monus (monus a (succ b0)) (cmul q' (succ b0))) (succ b0))
+    -> (lv : Bool) -> Eq Bool (leb (succ b0) a) lv
+    -> Lt (monus a (cmul (BoolElim (fn (w : Bool) is Whole end) (succ q') zero lv) (succ b0))) (succ b0) is
+  fn (a : Whole) (b0 : Whole) (q' : Whole)
+     (hrec : Eq Bool (leb (succ b0) a) true
+        -> Lt (monus (monus a (succ b0)) (cmul q' (succ b0))) (succ b0)) (lv : Bool) is
+    case lv of
+    | true  -> fn (h : Eq Bool (leb (succ b0) a) true) is
+        -- cmul (succ q') (succ b0) = (succ b0) + q'·(succ b0); monusAdd splits the subtraction.
+        subst Whole (monus (monus a (succ b0)) (cmul q' (succ b0)))
+                  (monus a (addW (succ b0) (cmul q' (succ b0))))
+          (sym (monusAdd a (succ b0) (cmul q' (succ b0))))
+          (fn (s : Whole) is Lt s (succ b0) end)
+          (hrec h)
+      end
+    | false -> fn (h : Eq Bool (leb (succ b0) a) false) is
+        -- BoolElim ... false = 0; cmul 0 (succ b0) = 0; monus a 0 = a; a < succ b0.
+        lebFalseLt b0 a h
+      end
+    end
+  end
+end
+
+-- The fuelled remainder is bounded WHEN the fuel covers the dividend (leb a f).
+
+remLtFuel : (f : Whole) -> (a : Whole) -> (b0 : Whole) -> Eq Bool (leb a f) true
+    -> Lt (monus a (cmul (qdivF f a (succ b0)) (succ b0))) (succ b0) is
+  fn (f : Whole) is
+    case f of
+    | zero -> fn (a : Whole) is
+        case a of
+        | zero -> fn (b0 : Whole) (hf : Eq Bool true true) is refl true end
+        | succ j -> fn (b0 : Whole) (hf : Eq Bool false true) is
+            subst Bool false true hf
+              (fn (z : Bool) is case z of
+                 | true  -> Lt (monus (succ j) (cmul (qdivF zero (succ j) (succ b0)) (succ b0))) (succ b0)
+                 | false -> Eq Bool true true end end)
+              (refl true) end
+        end
+      end
+    | succ g with ih -> fn (a : Whole) (b0 : Whole) (hf : Eq Bool (leb a (succ g)) true) is
+        remStepLt a b0 (qdivF g (monus a (succ b0)) (succ b0))
+          (fn (h : Eq Bool (leb (succ b0) a) true) is
+             ih (monus a (succ b0)) b0 (lebMonusFuel a b0 g h hf) end)
+          (leb (succ b0) a) (refl (leb (succ b0) a))
+      end
+    end
+  end
+end
+
+-- REMAINDER BOUND:  qmod a (succ b0) < succ b0.   qmod unfolds to the fuelled
+-- remainder with fuel = a, and leb a a (lebRefl) discharges the fuel precondition.
+
+remBound : (a : Whole) -> (b0 : Whole) -> Lt (qmod a (succ b0)) (succ b0) is
+  fn (a : Whole) (b0 : Whole) is remLtFuel a a b0 (lebRefl a) end
+end
+
+-- Bool discriminators (ported from ch13).
+
+trueNotFalse : {P : U} -> Eq Bool true false -> P is
+  fn {P : U} (h : Eq Bool true false) is
+    subst Bool true false h (fn (z : Bool) is case z of | true -> P | false -> P end end)
+      (subst Bool false true (sym h) (fn (z : Bool) is case z of | true -> P | false -> P -> P end end)
+        (fn (p : P) is p end))
+  end
+end
+
+falseNotTrue : {P : U} -> Eq Bool false true -> P is
+  fn {P : U} (h : Eq Bool false true) is trueNotFalse (sym h) end
+end
+
+-- addW cancels on the right (ported from ch13's addCancelR; addW recurses on 2nd arg).
+
+addCancelR : (z : Whole) -> (x : Whole) -> (y : Whole) -> Eq Whole (addW x z) (addW y z) -> Eq Whole x y is
+  fn (z : Whole) is
+    case z of
+    | zero -> fn (x : Whole) (y : Whole) (r : Eq Whole (addW x zero) (addW y zero)) is
+        trans (sym (addZeroR x)) (trans r (addZeroR y)) end
+    | succ k with ih -> fn (x : Whole) (y : Whole) (r : Eq Whole (addW x (succ k)) (addW y (succ k))) is
+        ih x y (succInj (trans (sym (addSuccR x k)) (trans r (addSuccR y k)))) end
+    end
+  end
+end
+-- addW cancels on the left (via commutation to addCancelR).
+
+addCancelL : (c : Whole) -> (x : Whole) -> (y : Whole) -> Eq Whole (addW c x) (addW c y) -> Eq Whole x y is
+  fn (c : Whole) (x : Whole) (y : Whole) (r : Eq Whole (addW c x) (addW c y)) is
+    addCancelR c x y (trans (addComm x c) (trans r (addComm c y)))
+  end
+end
+
+-- (x + b) + y is never < b (ported from ch13's notLtMidB), glyph-free.
+
+notLtMidB : (x : Whole) -> (b : Whole) -> (y : Whole) -> Eq Bool (ltb (addW (addW x b) y) b) false is
+  fn (x : Whole) (b : Whole) is
+    case b of
+    | zero -> fn (y : Whole) is ltbZero (addW (addW x zero) y) end
+    | succ b2 with ih -> fn (y : Whole) is
+        subst Whole (succ (addW (addW x b2) y)) (addW (addW x (succ b2)) y)
+          (sym (cong (fn (w : Whole) is addW w y end) (addSuccR x b2)))
+          (fn (z : Whole) is Eq Bool (ltb z (succ b2)) false end)
+          (ih y)
+      end
+    end
+  end
+end
+-- (xx + b) + r = (xx + r) + b   (ported from ch13's midComm), glyph-free.
+
+midComm : (xx : Whole) -> (b : Whole) -> (r : Whole) -> Eq Whole (addW (addW xx b) r) (addW (addW xx r) b) is
+  fn (xx : Whole) (b : Whole) (r : Whole) is
+    trans (addAssoc xx b r) (trans (cong (fn (w : Whole) is addW xx w end) (addComm b r)) (sym (addAssoc xx r b)))
+  end
+end
+
+-- addW zero r = r  (addW recurses on its 2nd arg, so this needs induction on r).
+
+addZeroL : (r : Whole) -> Eq Whole (addW zero r) r is
+  fn (r : Whole) is
+    WholeElim (fn (z : Whole) is Eq Whole (addW zero z) z end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW zero k) k) is
+         trans (addSuccR zero k) (cong succ ih) end)
+      r
+  end
+end
+
+-- QUOTIENT UNIQUENESS (ported from ch13's divUnique; ch203's cmul puts the divisor
+-- on the LEFT — cmul (succ q) b = addW b (cmul q b) — so the leading b cancels via
+-- addCancelL, and the cross-case contradiction reuses notLtMidB after an addComm.)
+
+divUnique : (b : Whole) -> (q1 : Whole) -> (q2 : Whole) -> (r1 : Whole) -> (r2 : Whole)
+    -> Lt r1 b -> Lt r2 b
+    -> Eq Whole (addW (cmul q1 b) r1) (addW (cmul q2 b) r2) -> Eq Whole q1 q2 is
+  fn (b : Whole) (q1 : Whole) is
+    case q1 of
+    | zero -> fn (q2 : Whole) is
+        case q2 of
+        | zero -> fn (r1 : Whole) (r2 : Whole) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Whole (addW zero r1) (addW zero r2)) is refl zero end
+        | succ q2b -> fn (r1 : Whole) (r2 : Whole) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Whole (addW zero r1) (addW (addW b (cmul q2b b)) r2)) is
+            -- r1 < b but r1 = (b + q2b·b) + r2 ≥ b: contradiction.
+            trueNotFalse (trans (sym b1)
+              (trans (cong (fn (z : Whole) is ltb z b end)
+                       (trans (sym (addZeroL r1))
+                         (trans h (cong (fn (w : Whole) is addW w r2 end) (addComm b (cmul q2b b))))))
+                (notLtMidB (cmul q2b b) b r2)))
+          end
+        end
+      end
+    | succ q1b with ih -> fn (q2 : Whole) is
+        case q2 of
+        | zero -> fn (r1 : Whole) (r2 : Whole) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Whole (addW (addW b (cmul q1b b)) r1) (addW zero r2)) is
+            trueNotFalse (trans (sym b2)
+              (trans (cong (fn (z : Whole) is ltb z b end)
+                       (trans (sym (addZeroL r2))
+                         (trans (sym h) (cong (fn (w : Whole) is addW w r1 end) (addComm b (cmul q1b b))))))
+                (notLtMidB (cmul q1b b) b r1)))
+          end
+        | succ q2b -> fn (r1 : Whole) (r2 : Whole) (b1 : Lt r1 b) (b2 : Lt r2 b)
+            (h : Eq Whole (addW (addW b (cmul q1b b)) r1) (addW (addW b (cmul q2b b)) r2)) is
+            -- cancel the leading b: addAssoc reveals addW b (addW (q·b) r), then addCancelL.
+            cong succ (ih q2b r1 r2 b1 b2
+              (addCancelL b (addW (cmul q1b b) r1) (addW (cmul q2b b) r2)
+                (trans (sym (addAssoc b (cmul q1b b) r1))
+                  (trans h (addAssoc b (cmul q2b b) r2)))))
+          end
+        end
+      end
+    end
+  end
+end
+
+-- ltb a s = leb (succ a) s   (ported from ch13's ltLeSucc).
+
+ltLeSucc : (a : Whole) -> (s : Whole) -> Eq Bool (ltb a s) (leb (succ a) s) is
+  fn (a : Whole) is
+    case a of
+    | zero -> fn (s : Whole) is case s of | zero -> refl false | succ s2 -> refl true end end
+    | succ a2 with ih -> fn (s : Whole) is case s of | zero -> refl false | succ s2 -> ih s2 end end
+    end
+  end
+end
+-- ltb x (x + succ m) = true   (ported from ch13's ltbAddSucc; addW recurses on 2nd arg,
+-- and ltb on the first, so we induct on x and peel both via addSuccL is not needed —
+-- x + succ m has a succ head after addSuccR, lining ltb's succ/succ recursion up).
+
+ltbAddSucc : (x : Whole) -> (m : Whole) -> Eq Bool (ltb x (addW x (succ m))) true is
+  fn (x : Whole) is
+    case x of
+    | zero -> fn (m : Whole) is
+        -- ltb 0 (addW 0 (succ m)); addW 0 (succ m) = succ (addW 0 m) is succ-headed.
+        subst Whole (succ (addW zero m)) (addW zero (succ m)) (sym (addSuccR zero m))
+          (fn (z : Whole) is Eq Bool (ltb zero z) true end) (refl true) end
+    | succ x2 with ih -> fn (m : Whole) is
+        -- ltb (succ x2) (addW (succ x2) (succ m)); rewrite the bound to succ (addW x2 (succ m)).
+        subst Whole (succ (addW x2 (succ m))) (addW (succ x2) (succ m)) (sym (addSuccL x2 (succ m)))
+          (fn (z : Whole) is Eq Bool (ltb (succ x2) z) true end) (ih m) end
+    end
+  end
+end
+
+-- STRICT MONOTONICITY of scaling:  r < b  ⟹  r·(succ k) < b·(succ k).
+-- b = (b−succ r) + succ r (monusAddInv); distribute over (succ k); reassociate so the
+-- bound is r·(succ k) + succ M, then ltbAddSucc.
+
+mulLtMono : (r : Whole) -> (b : Whole) -> (k : Whole)
+    -> Lt r b -> Lt (cmul r (succ k)) (cmul b (succ k)) is
+  fn (r : Whole) (b : Whole) (k : Whole) (lt : Lt r b) is
+    let lesr : Eq Bool (leb (succ r) b) true =
+      subst Bool (ltb r b) (leb (succ r) b) (ltLeSucc r b) (fn (z : Bool) is Eq Bool z true end) lt in
+    let g : Whole = monus b (succ r) in
+    let bEq : Eq Whole (addW g (succ r)) b = monusAddInv (succ r) b lesr in
+    -- cmul b (succ k) = cmul (addW g (succ r)) (succ k) = g·k' + (succ k + r·k'), reassociated
+    -- to r·k' + succ (g·k' + k).
+    let A : Whole = cmul g (succ k) in
+    let B : Whole = cmul r (succ k) in
+    let boundEq : Eq Whole (cmul b (succ k)) (addW B (succ (addW A k))) =
+      trans (cong (fn (s : Whole) is cmul s (succ k) end) (sym bEq))
+        (trans (mulDistR g (succ r) (succ k))
+          (trans (cong (fn (s : Whole) is addW A s end) (refl (addW (succ k) B)))
+            (trans (cong (fn (s : Whole) is addW A s end) (addSuccL k B))
+              (trans (addSuccR A (addW k B))
+                (trans (cong succ (sym (addAssoc A k B)))
+                  (trans (cong succ (addComm (addW A k) B))
+                    (sym (addSuccR B (addW A k))))))))) in
+    subst Whole (addW B (succ (addW A k))) (cmul b (succ k)) (sym boundEq)
+      (fn (z : Whole) is Eq Bool (ltb B z) true end)
+      (ltbAddSucc B (addW A k))
+  end
+end
+
+-- qdiv x 0 = 0  (case on x; both qdivF clauses with b=0 return 0).
+
+natDivZero : (x : Whole) -> Eq Whole (qdiv x zero) zero is
+  fn (x : Whole) is case x of | zero -> refl zero | succ j -> refl zero end end
+end
+
+-- cmul (succ b0) (succ k) is succ-headed:  = succ (k + b0·(succ k)).
+-- cmul (succ b0) c = addW c (cmul b0 c) = addW (succ k) (cmul b0 (succ k)) = succ (k + …).
+
+mulSuccPosForm : (b0 : Whole) -> (k : Whole)
+    -> Eq Whole (cmul (succ b0) (succ k)) (succ (addW k (cmul b0 (succ k)))) is
+  fn (b0 : Whole) (k : Whole) is addSuccL k (cmul b0 (succ k)) end
+end
+
+-- SCALED DIVISION LAW:  q·(b·k') + r·k' = a·k'   (q=qdiv a b, r=qmod a b, b=succ b0,
+-- k'=succ k).  Multiply divLaw by k' (mulDistR), then mulAssoc on the quotient term.
+
+scaledDivLaw : (a : Whole) -> (b0 : Whole) -> (k : Whole)
+    -> Eq Whole (addW (cmul (qdiv a (succ b0)) (cmul (succ b0) (succ k)))
+                   (cmul (qmod a (succ b0)) (succ k)))
+              (cmul a (succ k)) is
+  fn (a : Whole) (b0 : Whole) (k : Whole) is
+    trans (cong (fn (s : Whole) is addW s (cmul (qmod a (succ b0)) (succ k)) end)
+             (sym (mulAssoc (qdiv a (succ b0)) (succ b0) (succ k))))
+      (trans (sym (mulDistR (cmul (qdiv a (succ b0)) (succ b0)) (qmod a (succ b0)) (succ k)))
+        (cong (fn (s : Whole) is cmul s (succ k) end) (divLaw a (succ b0))))
+  end
+end
+
+-- remBound transported along a proof that the modulus is succ-headed.
+
+remBoundGen : (x : Whole) -> (b : Whole) -> (b0 : Whole) -> Eq Whole b (succ b0)
+    -> Lt (qmod x b) b is
+  fn (x : Whole) (b : Whole) (b0 : Whole) (hb : Eq Whole b (succ b0)) is
+    subst Whole (succ b0) b (sym hb)
+      (fn (z : Whole) is Lt (qmod x z) z end)
+      (remBound x b0)
+  end
+end
+
+-- DIVISION RESPECTS SCALING:  (a·k') // (b·k') = a // b.   b=0 collapses both to 0;
+-- b=succ b0 invokes divUnique on the scaled division (two presentations of a·k'),
+-- the remainders bounded by remBoundGen and mulLtMono.
+
+natDivScale : (a : Whole) -> (b : Whole) -> (k : Whole)
+    -> Eq Whole (qdiv (cmul a (succ k)) (cmul b (succ k))) (qdiv a b) is
+  fn (a : Whole) (b : Whole) (k : Whole) is
+    case b of
+    | zero -> trans (natDivZero (cmul a (succ k))) (sym (natDivZero a))
+    | succ b0 ->
+        let kp : Whole = succ k in
+        let bp : Whole = succ b0 in
+        let bigB : Whole = cmul bp kp in
+        let q : Whole = qdiv a bp in
+        let r : Whole = qmod a bp in
+        let Q : Whole = qdiv (cmul a kp) bigB in
+        let R : Whole = qmod (cmul a kp) bigB in
+        -- bigB is succ-headed (mulSuccPosForm) ⇒ R < bigB.
+        let ltR : Lt R bigB =
+          remBoundGen (cmul a kp) bigB (addW k (cmul b0 kp)) (mulSuccPosForm b0 k) in
+        -- r < bp (remBound), scaled ⇒ r·kp < bp·kp = bigB.
+        let ltRr : Lt (cmul r kp) bigB = mulLtMono r bp k (remBound a b0) in
+        -- two presentations of a·kp: scaled divLaw vs divLaw of the scaled division.
+        let hEq : Eq Whole (addW (cmul Q bigB) R) (addW (cmul q bigB) (cmul r kp)) =
+          trans (divLaw (cmul a kp) bigB) (sym (scaledDivLaw a b0 k)) in
+        divUnique bigB Q q R (cmul r kp) ltR ltRr hEq
+    end
+  end
+end
+
+-- qmod x 0 = x.   qmod x 0 = x − (qdiv x 0)·0 = x − 0 = x  (mulZeroR, monus zero-case).
+
+natModZero : (x : Whole) -> Eq Whole (qmod x zero) x is
+  fn (x : Whole) is
+    trans (cong (fn (s : Whole) is monus x s end) (mulZeroR (qdiv x zero)))
+      (refl x)
+  end
+end
+
+-- REMAINDER RESPECTS SCALING:  (a·k') % (b·k') = (a % b)·k'.   b=0 collapses both to a·k';
+-- b=succ b0: divUnique gave Q=q, so cancelling q·(b·k') in the two presentations of a·k'
+-- (hEq) leaves R = r·k'.
+
+natModScale : (a : Whole) -> (b : Whole) -> (k : Whole)
+    -> Eq Whole (qmod (cmul a (succ k)) (cmul b (succ k))) (cmul (qmod a b) (succ k)) is
+  fn (a : Whole) (b : Whole) (k : Whole) is
+    case b of
+    | zero -> trans (natModZero (cmul a (succ k)))
+        (sym (cong (fn (s : Whole) is cmul s (succ k) end) (natModZero a)))
+    | succ b0 ->
+        let kp : Whole = succ k in
+        let bp : Whole = succ b0 in
+        let bigB : Whole = cmul bp kp in
+        let q : Whole = qdiv a bp in
+        let r : Whole = qmod a bp in
+        let Q : Whole = qdiv (cmul a kp) bigB in
+        let R : Whole = qmod (cmul a kp) bigB in
+        let qQ : Eq Whole Q q = natDivScale a bp k in
+        let hEq : Eq Whole (addW (cmul Q bigB) R) (addW (cmul q bigB) (cmul r kp)) =
+          trans (divLaw (cmul a kp) bigB) (sym (scaledDivLaw a b0 k)) in
+        -- rewrite Q to q in hEq, then cancel cmul q bigB on the left.
+        addCancelL (cmul q bigB) R (cmul r kp)
+          (subst Whole Q q qQ (fn (z : Whole) is Eq Whole (addW (cmul z bigB) R) (addW (cmul q bigB) (cmul r kp)) end) hEq)
+    end
+  end
+end
+
+-- floorUniqueGeneral: EQUAL FRACTIONS HAVE EQUAL FLOORS.  If a / succ b0 and
+-- c / succ d0 are the same rational (cross-multiplication a·succ d0 = c·succ b0),
+-- their flooring quotients agree.  The Euclidean-uniqueness payoff at Whole: expand
+-- both by divLaw against the COMMON denominator (succ b0)·(succ d0), bound the two
+-- remainders (cmul ra d, cmul rc b) below it, and divUnique forces the quotients
+-- equal.  This is exactly what makes each decimal DIGIT a function of the rational
+-- value — the engine of the to_radix respect proof.
+
+floorUniqueGeneral : (b0 : Whole) -> (d0 : Whole) -> (a : Whole) -> (c : Whole)
+    -> Eq Whole (cmul a (succ d0)) (cmul c (succ b0))
+    -> Eq Whole (qdiv a (succ b0)) (qdiv c (succ d0)) is
+  fn (b0 : Whole) (d0 : Whole) (a : Whole) (c : Whole)
+     (hyp : Eq Whole (cmul a (succ d0)) (cmul c (succ b0))) is
+    let b  : Whole = succ b0 in
+    let d  : Whole = succ d0 in
+    let qa : Whole = qdiv a b in
+    let ra : Whole = qmod a b in
+    let qc : Whole = qdiv c d in
+    let rc : Whole = qmod c d in
+    let bd : Whole = cmul b d in
+    let lhsEq : Eq Whole (addW (cmul qa bd) (cmul ra d)) (cmul a d) =
+      trans (cong (fn (s : Whole) is addW s (cmul ra d) end) (sym (mulAssoc qa b d)))
+        (trans (sym (mulDistR (cmul qa b) ra d))
+          (cong (fn (s : Whole) is cmul s d end) (divLaw a b))) in
+    let rhsEq : Eq Whole (addW (cmul qc bd) (cmul rc b)) (cmul c b) =
+      trans (cong (fn (s : Whole) is addW s (cmul rc b) end)
+              (sym (trans (mulAssoc qc d b)
+                     (cong (fn (s : Whole) is cmul qc s end) (mulComm d b)))))
+        (trans (sym (mulDistR (cmul qc d) rc b))
+          (cong (fn (s : Whole) is cmul s b end) (divLaw c d))) in
+    let keyEq : Eq Whole (addW (cmul qa bd) (cmul ra d)) (addW (cmul qc bd) (cmul rc b)) =
+      trans lhsEq (trans hyp (sym rhsEq)) in
+    let bound1 : Lt (cmul ra d) bd = mulLtMono ra b d0 (remBound a b0) in
+    let bound2 : Lt (cmul rc b) bd =
+      subst Whole (cmul d b) bd (mulComm d b)
+        (fn (s : Whole) is Lt (cmul rc b) s end)
+        (mulLtMono rc d b0 (remBound c d0)) in
+    divUnique bd qa qc (cmul ra d) (cmul rc b) bound1 bound2 keyEq
+  end
+end
+
+-- ============================================================================
+-- APPENDED Int-level lemmas (imag / sign laws).
+-- ============================================================================
+
+-- monus n zero = n.  Definitional: monus scrutinizes its SECOND argument, so
+-- monus m zero ~> m by ι; refl suffices.
+
+monusZeroR : (n : Whole) -> Eq Whole (monus n zero) n is
+  fn (n : Whole) is refl n end
+end
+
+-- |intOf n| = n.  obs (intOf n) = canon (npair n zero) = npair (monus n zero)
+-- (monus zero n) = npair n zero; imag = addW n zero = n.
+
+predMul : (x : Whole) -> (n : Whole) -> Eq Whole (cmul (pred x) n) (monus (cmul x n) n) is
+  fn (x : Whole) (n : Whole) is
+    case x of
+    | zero -> sym (zeroMonus n)
+    | succ k ->
+        sym (trans (cong (fn (s : Whole) is monus s n end) (addComm n (cmul k n)))
+                   (monusAddCancel n (cmul k n)))
+    end
+  end
+end
+
+-- RIGHT-distribution of multiplication over truncated subtraction:
+-- (a − b)·n = a·n − b·n.  TRUE even with underflow (a<b ⇒ both sides 0, since
+-- cmul is order-preserving), but the naive "(a−b)+(c−d) = (a+c)−(b+d)" step is
+-- FALSE truncated, so the proof inducts on b through predMul, never splitting the
+-- monus pair.  Step: monus a (succ k) ≡ pred (monus a k); predMul peels the n,
+-- the IH rewrites, monusAdd re-nests, addComm aligns.
+
+mulMonusDistR : (a : Whole) -> (n : Whole) -> (b : Whole)
+    -> Eq Whole (cmul (monus a b) n) (monus (cmul a n) (cmul b n)) is
+  fn (a : Whole) (n : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (cmul (monus a x) n) (monus (cmul a n) (cmul x n)) end)
+      (refl (cmul a n))
+      (fn (k : Whole) (ih : Eq Whole (cmul (monus a k) n) (monus (cmul a n) (cmul k n))) is
+        trans (predMul (monus a k) n)
+          (trans (cong (fn (s : Whole) is monus s n end) ih)
+            (trans (sym (monusAdd (cmul a n) (cmul k n) n))
+              (cong (fn (s : Whole) is monus (cmul a n) s end)
+                    (addComm (cmul k n) n))))
+      end)
+      b
+  end
+end
+
+-- THE SIGN-BRIDGE (non-negative case): |m · intOf n| = |m| · n.  The full
+-- multiplicativity of imag needs a four-way sign split; here the SECOND factor
+-- is a genuine natural (intOf n, never negative), and that is all the to_radix
+-- respect proof needs (it multiplies a numerator by a positive denominator
+-- zden q = intOf (succ (qdpred q))).  qind drops m to a representative (a, b);
+-- then imul (qin (a,b)) (intOf n) ≡ qin (a·n + b·0, a·0 + b·n), whose canon-abs
+-- is addW (monus (a·n)(b·n)) (monus (b·n)(a·n)) once the 0-products clear — and
+-- |m|·n = (|a−b|)·n distributes to exactly that pair via mulMonusDistR (twice).
+
+-- --- CANONICAL-INT BRIDGES (replacing ch203's quotient-Z natAbs/sign lemmas) ---
+-- ============================================================================
+-- CANONICAL-INT BRIDGES.  ch203's Z is a QUOTIENT integer, so its natAbs/sign
+-- multiplicativity needed qind + canon/obs reasoning.  Our Int is CANONICAL
+-- data (nonneg/negsucc), so these bridges are direct constructor algebra.
+-- The Int ops (imul) are built on the prelude's `mulW`; the ported division/
+-- expand proofs run on `cmul` (ch203's mul, add-on-the-left); mulWEqCmul is the
+-- one lemma that crosses between them.
+-- ============================================================================
+
+-- mulW and cmul compute the same product, add-arguments reversed (mulW is
+-- (k*n)+n, cmul is n+(k*n)); equal by addComm.  The bridge the Int-abs lemmas need.
+mulWEqCmul : (a : Whole) -> (b : Whole) -> Eq Whole (mulW a b) (cmul a b) is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x b) (cmul x b) end)
+      (refl 0)
+      (fn (k : Whole) (ih : Eq Whole (mulW k b) (cmul k b)) is
+         trans (cong (fn (z : Whole) is addW z b end) ih)
+               (addWComm (cmul k b) b)
+       end)
+      a
+  end
+end
+
+-- |intOf n| = n  (intOf n = nonneg n; imag reads the magnitude off the constructor).
+natAbsZfrom : (n : Whole) -> Eq Whole (imag (intOf n)) n is
+  fn (n : Whole) is refl n end
+end
+
+-- |ineg (nonneg X)| = X  (ineg on a nonneg is nonneg 0 / negsucc, imag recovers X).
+imagInegNonneg : (X : Whole) -> Eq Whole (imag (ineg (nonneg X))) X is
+  fn (X : Whole) is
+    case X of
+    | zero   -> refl zero
+    | succ k -> refl (succ k)
+    end
+  end
+end
+
+-- MULTIPLICATIVITY OF |.| on canonical Int, landing in cmul: |a * b| = |a| * |b|.
+-- Four-way case; imul is mulW-based, so each arm bridges mulW -> cmul via mulWEqCmul
+-- (mixed-sign arms first pass through imagInegNonneg).
+imagMul : (a : Int) -> (b : Int) -> Eq Whole (imag (imul a b)) (cmul (imag a) (imag b)) is
+  fn (a : Int) (b : Int) is
+    case a of
+    | nonneg x ->
+        case b of
+        | nonneg y  -> mulWEqCmul x y
+        | negsucc d -> trans (imagInegNonneg (mulW x (succ d))) (mulWEqCmul x (succ d))
+        end
+    | negsucc c ->
+        case b of
+        | nonneg y  -> trans (imagInegNonneg (mulW (succ c) y)) (mulWEqCmul (succ c) y)
+        | negsucc d -> mulWEqCmul (succ c) (succ d)
+        end
+    end
+  end
+end
+
+-- THE SIGN-BRIDGE (non-negative case): |m * intOf n| = |m| * n.  imagMul then the
+-- trivial |intOf n| = n.  (ch203's natAbsMulZfrom, shrunk to canonical Int.)
+natAbsMulZfrom : (m : Int) -> (n : Whole)
+    -> Eq Whole (imag (imul m (intOf n))) (cmul (imag m) n) is
+  fn (m : Int) (n : Whole) is
+    trans (imagMul m (intOf n))
+          (cong (fn (w : Whole) is cmul (imag m) w end) (natAbsZfrom n))
+  end
+end
+
+-- THE SIGN-BRIDGE for the sign bit: sign (m * intOf (succ n)) = sign m.  A positive
+-- factor never flips the sign.  nonneg stays nonneg; negsucc times a positive is
+-- ineg of a positive product = negsucc (dmulSucc makes the product a succ).
+isNegZMulZfromSucc : (m : Int) -> (n : Whole)
+    -> Eq Bool (isign (imul m (intOf (succ n)))) (isign m) is
+  fn (m : Int) (n : Whole) is
+    case m of
+    | nonneg x -> refl false
+    | negsucc c ->
+        subst Whole (succ (dmul c n)) (mulW (succ c) (succ n)) (sym (dmulSucc c n))
+          (fn (w : Whole) is Eq Bool (isign (ineg (nonneg w))) true end)
+          (refl true)
+    end
+  end
+end
+
+-- --- respect lemmas + expand cross-invariance + floor + toRadix well-definedness ---
+intPartResp : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Whole (qdiv (qmagNum p) (qmagDen p)) (qdiv (qmagNum q) (qmagDen q)) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    floorUniqueGeneral (qdpred p) (qdpred q) (qmagNum p) (qmagNum q)
+      (trans (sym (natAbsMulZfrom (qnum p) (succ (qdpred q))))
+        (trans (cong imag h)
+               (natAbsMulZfrom (qnum q) (succ (qdpred p)))))
+  end
+end
+
+-- MULTIPLYING BY A POSITIVE PRESERVES ZERO-NESS (the Bool-sign engine).  The
+-- nonzero-test  case _ of zero->false | succ->true  agrees on  x  and  x·(succ n):
+-- x=0 ⇒ cmul 0 (succ n) ≡ 0 (cmul recurses on its first arg), both false; x=succ j ⇒
+-- cmul (succ j)(succ n) ≡ succ (…) (addW recurses on succ n's head), both true.  This
+-- is the sign analogue of monusZeroR for imag — a positive factor never flips a
+-- nonzero magnitude to zero or back.
+
+nzMulSucc : (x : Whole) -> (n : Whole)
+    -> Eq Bool (case (cmul x (succ n)) of | zero -> false | succ k -> true end)
+               (case x of | zero -> false | succ k -> true end) is
+  fn (x : Whole) (n : Whole) is
+    case x of
+    | zero -> refl false
+    | succ j -> refl true
+    end
+  end
+end
+
+-- THE SIGN-BRIDGE (non-negative case): isign (m · intOf (succ n)) = isign m.  Dual
+-- of natAbsMulZfrom for the sign rather than the magnitude.  qind drops m to (a, b);
+-- then the negative part of m · intOf (succ n) is  snd (canon (pmul (a,b)(succ n, 0)))
+-- = monus (a·0 + b·(succ n)) (a·(succ n) + b·0), whose 0-products clear (snz/feq) to
+-- monus (b·(succ n)) (a·(succ n)) = (b−a)·(succ n)  (mulMonusDistR).  isign m itself
+-- is  case (monus b a) of …,  so the goal is exactly nzMulSucc (monus b a) n: scaling
+-- the negative part b−a by the positive (succ n) cannot change whether it is zero.
+
+signResp : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Bool (qsign p) (qsign q) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    trans (sym (isNegZMulZfromSucc (qnum p) (qdpred q)))
+      (trans (cong isign h)
+             (isNegZMulZfromSucc (qnum q) (qdpred p)))
+  end
+end
+
+-- ============================================================================
+-- RUNG 3 (fractional digits) — foundations.
+-- ============================================================================
+
+-- CANCELLATION of a positive multiplier:  x·(succ k) = y·(succ k)  ⟹  x = y.
+-- The equality gives leb both ways on the products; lteMulPos strips the common
+-- (succ k) from each, and lteAntisym pins x = y.  The Whole injectivity that lets a
+-- cross-equality  rem_p·den_q = rem_q·den_p  be cancelled to compare remainders.
+
+mulRightCancel : (k : Whole) -> (x : Whole) -> (y : Whole)
+    -> Eq Whole (cmul x (succ k)) (cmul y (succ k)) -> Eq Whole x y is
+  fn (k : Whole) (x : Whole) (y : Whole) (h : Eq Whole (cmul x (succ k)) (cmul y (succ k))) is
+    let lexy : Eq Bool (leb (cmul x (succ k)) (cmul y (succ k))) true =
+      subst Whole (cmul x (succ k)) (cmul y (succ k)) h
+        (fn (z : Whole) is Eq Bool (leb (cmul x (succ k)) z) true end)
+        (lteRefl (cmul x (succ k))) in
+    let leyx : Eq Bool (leb (cmul y (succ k)) (cmul x (succ k))) true =
+      subst Whole (cmul x (succ k)) (cmul y (succ k)) h
+        (fn (z : Whole) is Eq Bool (leb z (cmul x (succ k))) true end)
+        (lteRefl (cmul x (succ k))) in
+    lteAntisym x y
+      (trans (sym (lteMulPos k x y)) lexy)
+      (trans (sym (lteMulPos k y x)) leyx)
+  end
+end
+
+-- eqW is REFLEXIVE:  eqW n n = true.  succ/succ reduces to the recursive call by ι.
+
+eqWRefl : (n : Whole) -> Eq Bool (eqW n n) true is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (eqW x x) true end)
+      (refl true)
+      (fn (k : Whole) (ih : Eq Bool (eqW k k) true) is ih end)
+      n
+  end
+end
+
+-- eqW is COMPLETE:  x = y  ⟹  eqW x y = true.  Transport eqWRefl along the equality.
+
+eqWComplete : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Bool (eqW x y) true is
+  fn (x : Whole) (y : Whole) (h : Eq Whole x y) is
+    subst Whole x y h (fn (z : Whole) is Eq Bool (eqW x z) true end) (eqWRefl x)
+  end
+end
+
+-- eqW is SOUND:  eqW x y = true  ⟹  x = y.  Double induction; the mismatched-head
+-- branches discharge an absurd  false = true  via lteAbsurdNat, the succ/succ branch
+-- recurses (eqW (succ k)(succ u) ≡ eqW k u) and re-applies succ.
+
+eqWSound : (x : Whole) -> (y : Whole) -> Eq Bool (eqW x y) true -> Eq Whole x y is
+  fn (x : Whole) is
+    WholeElim (fn (w : Whole) is (y : Whole) -> Eq Bool (eqW w y) true -> Eq Whole w y end)
+      (fn (y : Whole) is
+        WholeElim (fn (u : Whole) is Eq Bool (eqW zero u) true -> Eq Whole zero u end)
+          (fn (h : Eq Bool (eqW zero zero) true) is refl zero end)
+          (fn (u' : Whole) (ihu : Eq Bool (eqW zero u') true -> Eq Whole zero u') is
+            fn (h : Eq Bool (eqW zero (succ u')) true) is
+              lteAbsurdNat zero (succ u') h end
+          end)
+          y
+      end)
+      (fn (k : Whole) (ih : (y : Whole) -> Eq Bool (eqW k y) true -> Eq Whole k y) is
+        fn (y : Whole) is
+          WholeElim (fn (u : Whole) is Eq Bool (eqW (succ k) u) true -> Eq Whole (succ k) u end)
+            (fn (h : Eq Bool (eqW (succ k) zero) true) is
+              lteAbsurdNat (succ k) zero h end)
+            (fn (u' : Whole) (ihu : Eq Bool (eqW (succ k) u') true -> Eq Whole (succ k) u') is
+              fn (h : Eq Bool (eqW (succ k) (succ u')) true) is
+                cong (fn (z : Whole) is succ z end) (ih u' h) end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+-- Boolean conjunction:  and true b = b, and false b = false.
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is BoolElim (fn (x : Bool) is Bool end) b false a end
+end
+
+-- BOOL EXTENSIONALITY:  two bools sharing the same truth value are equal.  The
+-- p=true case syms f (refl true); the p=false case splits q — true contradicts via
+-- g (refl true), false is refl.  The decidable bridge: it turns a biconditional on
+-- nonzero-tests into an actual Bool equality.
+
+boolTrueIff : (p : Bool) -> (q : Bool)
+    -> (Eq Bool p true -> Eq Bool q true)
+    -> (Eq Bool q true -> Eq Bool p true)
+    -> Eq Bool p q is
+  fn (p : Bool) (q : Bool)
+     (f : Eq Bool p true -> Eq Bool q true)
+     (g : Eq Bool q true -> Eq Bool p true) is
+    BoolElim
+      (fn (b : Bool) is
+         (Eq Bool b true -> Eq Bool q true)
+           -> (Eq Bool q true -> Eq Bool b true)
+           -> Eq Bool b q end)
+      (fn (f1 : Eq Bool true true -> Eq Bool q true)
+          (g1 : Eq Bool q true -> Eq Bool true true) is
+         sym (f1 (refl true)) end)
+      (fn (f0 : Eq Bool false true -> Eq Bool q true)
+          (g0 : Eq Bool q true -> Eq Bool false true) is
+         BoolElim
+           (fn (c : Bool) is (Eq Bool c true -> Eq Bool false true) -> Eq Bool false c end)
+           (fn (g0t : Eq Bool true true -> Eq Bool false true) is g0t (refl true) end)
+           (fn (g0f : Eq Bool false true -> Eq Bool false true) is refl false end)
+           q g0 end)
+      p f g
+  end
+end
+
+-- eqW RESPECTS CROSS-EQUALITY:  if rP·sd = rQ·sb and x·sd = y·sb (sb = succ b0,
+-- sd = succ d0), then eqW rP x = eqW rQ y.  Each direction: decode one eqW to a Whole
+-- equality (eqWSound), transport it across the two cross-products and cancel the
+-- positive factor (mulRightCancel) to get the other Whole equality, re-encode
+-- (eqWComplete); boolTrueIff glues the directions.  This is what makes the cycle
+-- detector see the SAME recurrences in two equivalent long divisions even though the
+-- recorded remainders differ.
+
+eqWCross : (b0 : Whole) -> (d0 : Whole) -> (rP : Whole) -> (rQ : Whole) -> (x : Whole) -> (y : Whole)
+    -> Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))
+    -> Eq Whole (cmul x (succ d0)) (cmul y (succ b0))
+    -> Eq Bool (eqW rP x) (eqW rQ y) is
+  fn (b0 : Whole) (d0 : Whole) (rP : Whole) (rQ : Whole) (x : Whole) (y : Whole)
+     (hr : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0)))
+     (hx : Eq Whole (cmul x (succ d0)) (cmul y (succ b0))) is
+    boolTrueIff (eqW rP x) (eqW rQ y)
+      (fn (e : Eq Bool (eqW rP x) true) is
+         let hpx : Eq Whole rP x = eqWSound rP x e in
+         let hqy : Eq Whole rQ y =
+           mulRightCancel b0 rQ y
+             (trans (sym hr)
+               (trans (cong (fn (z : Whole) is cmul z (succ d0) end) hpx) hx)) in
+         eqWComplete rQ y hqy end)
+      (fn (e : Eq Bool (eqW rQ y) true) is
+         let hqy : Eq Whole rQ y = eqWSound rQ y e in
+         let hpx : Eq Whole rP x =
+           mulRightCancel d0 rP x
+             (trans hr
+               (trans (cong (fn (z : Whole) is cmul z (succ b0) end) hqy) (sym hx))) in
+         eqWComplete rP x hpx end)
+  end
+end
+
+-- EX FALSO from a disjoint Bool equation:  false = true entails anything.  The motive
+-- is C at true and the inhabited (Eq Bool false false) at false; subst along the
+-- false=true proof ships refl into C.
+
+boolDisjoint : (C : U) -> Eq Bool false true -> C is
+  fn (C : U) (h : Eq Bool false true) is
+    subst Bool false true h
+      (fn (z : Bool) is
+         case z of
+         | true  -> C
+         | false -> Eq Bool false false
+         end
+       end)
+      (refl false)
+  end
+end
+
+-- Projections of a true conjunction.  and false _ ≡ false, so a false left factor
+-- makes the whole thing a false = true absurdity (boolDisjoint for the right one).
+
+andTrueL : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool a true is
+  fn (a : Bool) (b : Bool) (h : Eq Bool (and a b) true) is
+    BoolElim (fn (x : Bool) is (Eq Bool (and x b) true -> Eq Bool x true) end)
+      (fn (h1 : Eq Bool (and true b) true) is refl true end)
+      (fn (h0 : Eq Bool (and false b) true) is h0 end)
+      a h
+  end
+end
+
+andTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (and a b) true -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) (h : Eq Bool (and a b) true) is
+    BoolElim (fn (x : Bool) is (Eq Bool (and x b) true -> Eq Bool b true) end)
+      (fn (h1 : Eq Bool (and true b) true) is h1 end)
+      (fn (h0 : Eq Bool (and false b) true) is boolDisjoint (Eq Bool b true) h0 end)
+      a h
+  end
+end
+
+-- THE SEEN-LIST CORRESPONDENCE.  wcrossB b0 d0 sP sQ = true means the two recorded
+-- remainder lists have equal length and position-wise cross-equal entries
+-- (sP[i]·(succ d0) = sQ[i]·(succ b0)), checked by eqW on the cross-products.
+-- Structural on sP; the mismatched-length cases are false.
+
+wcrossB : Whole -> Whole -> WList -> WList -> Bool is
+  fn (b0 : Whole) (d0 : Whole) (sP : WList) is
+    WListElim (fn (w : WList) is WList -> Bool end)
+      (fn (sQ : WList) is case sQ of | wnil -> true | wcons y ys -> false end end)
+      (fn (x : Whole) (xs : WList) (ih : WList -> Bool) is
+         fn (sQ : WList) is
+           case sQ of
+           | wnil -> false
+           | wcons y ys -> and (eqW (cmul x (succ d0)) (cmul y (succ b0))) (ih ys)
+           end
+         end
+       end)
+      sP
+  end
+end
+
+-- MEMBERSHIP RESPECTS THE CORRESPONDENCE.  Under wcrossB and a cross-equal current
+-- remainder, the cycle detector reports the same hit/miss in both expansions.  The
+-- head comparison agrees by eqWCross; the tails recurse; cong2 rebuilds the case.
+
+wmemberCross : (b0 : Whole) -> (d0 : Whole) -> (sP : WList) -> (sQ : WList)
+    -> Eq Bool (wcrossB b0 d0 sP sQ) true
+    -> (rP : Whole) -> (rQ : Whole)
+    -> Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))
+    -> Eq Bool (wmember rP sP) (wmember rQ sQ) is
+  fn (b0 : Whole) (d0 : Whole) (sP : WList) is
+    WListElim
+      (fn (w : WList) is
+         (sQ : WList) -> Eq Bool (wcrossB b0 d0 w sQ) true
+           -> (rP : Whole) -> (rQ : Whole)
+           -> Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))
+           -> Eq Bool (wmember rP w) (wmember rQ sQ) end)
+      (fn (sQ : WList) is
+         case sQ of
+         | wnil ->
+             fn (h : Eq Bool (wcrossB b0 d0 wnil wnil) true) (rP : Whole) (rQ : Whole)
+                (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is refl false end
+         | wcons y ys ->
+             fn (h : Eq Bool (wcrossB b0 d0 wnil (wcons y ys)) true) (rP : Whole) (rQ : Whole)
+                (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is
+               boolDisjoint (Eq Bool (wmember rP wnil) (wmember rQ (wcons y ys))) h end
+         end
+       end)
+      (fn (x : Whole) (xs : WList)
+          (ih : (sQ : WList) -> Eq Bool (wcrossB b0 d0 xs sQ) true -> (rP : Whole) -> (rQ : Whole)
+                  -> Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))
+                  -> Eq Bool (wmember rP xs) (wmember rQ sQ)) is
+         fn (sQ : WList) is
+           case sQ of
+           | wnil ->
+               fn (h : Eq Bool (wcrossB b0 d0 (wcons x xs) wnil) true) (rP : Whole) (rQ : Whole)
+                  (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is
+                 boolDisjoint (Eq Bool (wmember rP (wcons x xs)) (wmember rQ wnil)) h end
+           | wcons y ys ->
+               fn (h : Eq Bool (wcrossB b0 d0 (wcons x xs) (wcons y ys)) true) (rP : Whole) (rQ : Whole)
+                  (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is
+                 let hxy : Eq Whole (cmul x (succ d0)) (cmul y (succ b0)) =
+                   eqWSound (cmul x (succ d0)) (cmul y (succ b0))
+                     (andTrueL (eqW (cmul x (succ d0)) (cmul y (succ b0)))
+                               (wcrossB b0 d0 xs ys) h) in
+                 let hTail : Eq Bool (wcrossB b0 d0 xs ys) true =
+                   andTrueR (eqW (cmul x (succ d0)) (cmul y (succ b0)))
+                            (wcrossB b0 d0 xs ys) h in
+                 let hEqW : Eq Bool (eqW rP x) (eqW rQ y) =
+                   eqWCross b0 d0 rP rQ x y hc hxy in
+                 let ihTail : Eq Bool (wmember rP xs) (wmember rQ ys) =
+                   ih ys hTail rP rQ hc in
+                 cong2 (fn (sc : Bool) (fb : Bool) is
+                          BoolElim (fn (w : Bool) is Bool end) true fb sc end)
+                   hEqW ihTail end
+           end
+         end
+       end)
+      sP
+  end
+end
+
+-- THE RECURRENCE INDEX RESPECTS THE CORRESPONDENCE.  Same structure as wmemberCross
+-- but the false-branch carries succ of the recursive index, so the repetend's start
+-- position is identical in both expansions.
+
+windexCross : (b0 : Whole) -> (d0 : Whole) -> (sP : WList) -> (sQ : WList)
+    -> Eq Bool (wcrossB b0 d0 sP sQ) true
+    -> (rP : Whole) -> (rQ : Whole)
+    -> Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))
+    -> Eq Whole (windex rP sP) (windex rQ sQ) is
+  fn (b0 : Whole) (d0 : Whole) (sP : WList) is
+    WListElim
+      (fn (w : WList) is
+         (sQ : WList) -> Eq Bool (wcrossB b0 d0 w sQ) true
+           -> (rP : Whole) -> (rQ : Whole)
+           -> Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))
+           -> Eq Whole (windex rP w) (windex rQ sQ) end)
+      (fn (sQ : WList) is
+         case sQ of
+         | wnil ->
+             fn (h : Eq Bool (wcrossB b0 d0 wnil wnil) true) (rP : Whole) (rQ : Whole)
+                (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is refl zero end
+         | wcons y ys ->
+             fn (h : Eq Bool (wcrossB b0 d0 wnil (wcons y ys)) true) (rP : Whole) (rQ : Whole)
+                (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is
+               boolDisjoint (Eq Whole (windex rP wnil) (windex rQ (wcons y ys))) h end
+         end
+       end)
+      (fn (x : Whole) (xs : WList)
+          (ih : (sQ : WList) -> Eq Bool (wcrossB b0 d0 xs sQ) true -> (rP : Whole) -> (rQ : Whole)
+                  -> Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))
+                  -> Eq Whole (windex rP xs) (windex rQ sQ)) is
+         fn (sQ : WList) is
+           case sQ of
+           | wnil ->
+               fn (h : Eq Bool (wcrossB b0 d0 (wcons x xs) wnil) true) (rP : Whole) (rQ : Whole)
+                  (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is
+                 boolDisjoint (Eq Whole (windex rP (wcons x xs)) (windex rQ wnil)) h end
+           | wcons y ys ->
+               fn (h : Eq Bool (wcrossB b0 d0 (wcons x xs) (wcons y ys)) true) (rP : Whole) (rQ : Whole)
+                  (hc : Eq Whole (cmul rP (succ d0)) (cmul rQ (succ b0))) is
+                 let hxy : Eq Whole (cmul x (succ d0)) (cmul y (succ b0)) =
+                   eqWSound (cmul x (succ d0)) (cmul y (succ b0))
+                     (andTrueL (eqW (cmul x (succ d0)) (cmul y (succ b0)))
+                               (wcrossB b0 d0 xs ys) h) in
+                 let hTail : Eq Bool (wcrossB b0 d0 xs ys) true =
+                   andTrueR (eqW (cmul x (succ d0)) (cmul y (succ b0)))
+                            (wcrossB b0 d0 xs ys) h in
+                 let hEqW : Eq Bool (eqW rP x) (eqW rQ y) =
+                   eqWCross b0 d0 rP rQ x y hc hxy in
+                 let ihTail : Eq Whole (windex rP xs) (windex rQ ys) =
+                   ih ys hTail rP rQ hc in
+                 cong2 (fn (sc : Bool) (t : Whole) is
+                          BoolElim (fn (w : Bool) is Whole end) zero (succ t) sc end)
+                   hEqW ihTail end
+           end
+         end
+       end)
+      sP
+  end
+end
+
+-- ============================================================================
+-- RUNG 3 — the per-step cross-equality is preserved through the long division.
+-- ============================================================================
+
+-- a=true and b=true give and a b = true (and true b ≡ b).
+
+andBoth : (a : Bool) -> (b : Bool) -> Eq Bool a true -> Eq Bool b true -> Eq Bool (and a b) true is
+  fn (a : Bool) (b : Bool) (ha : Eq Bool a true) (hb : Eq Bool b true) is
+    trans (cong (fn (z : Bool) is and z b end) ha) hb
+  end
+end
+
+-- Scaling the cross-equality by the radix 10:  remP·sd = remQ·sb  ⟹
+-- (remP·10)·sd = (remQ·10)·sb.  Reassociate so the shared 10 floats to the outside.
+
+mul10Cross : (b0 : Whole) -> (d0 : Whole) -> (remP : Whole) -> (remQ : Whole)
+    -> Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))
+    -> Eq Whole (cmul (cmul remP 10) (succ d0)) (cmul (cmul remQ 10) (succ b0)) is
+  fn (b0 : Whole) (d0 : Whole) (remP : Whole) (remQ : Whole)
+     (hr : Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))) is
+    trans (mulAssoc remP 10 (succ d0))
+      (trans (cong (fn (z : Whole) is cmul remP z end) (mulComm 10 (succ d0)))
+        (trans (sym (mulAssoc remP (succ d0) 10))
+          (trans (cong (fn (z : Whole) is cmul z 10 end) hr)
+            (trans (mulAssoc remQ (succ b0) 10)
+              (trans (cong (fn (z : Whole) is cmul remQ z end) (mulComm (succ b0) 10))
+                (sym (mulAssoc remQ 10 (succ b0))))))))
+  end
+end
+
+-- THE REMAINDER STAYS CROSS-EQUAL.  If a·sd = c·sb then the long-division remainders
+-- satisfy (a % sb)·sd = (c % sd)·sb.  qmod x m = x − (x//m)·m; distribute ·sd / ·sb
+-- over the monus (mulMonusDistR), equate the minuends by hypothesis and the quotient
+-- terms via floorUniqueGeneral (the floors agree) plus a commute of sb·sd.
+
+natModCrossStep : (b0 : Whole) -> (d0 : Whole) -> (a : Whole) -> (c : Whole)
+    -> Eq Whole (cmul a (succ d0)) (cmul c (succ b0))
+    -> Eq Whole (cmul (qmod a (succ b0)) (succ d0)) (cmul (qmod c (succ d0)) (succ b0)) is
+  fn (b0 : Whole) (d0 : Whole) (a : Whole) (c : Whole)
+     (hyp : Eq Whole (cmul a (succ d0)) (cmul c (succ b0))) is
+    let qa : Whole = qdiv a (succ b0) in
+    let qc : Whole = qdiv c (succ d0) in
+    let hq : Eq Whole qa qc = floorUniqueGeneral b0 d0 a c hyp in
+    let midEq : Eq Whole (cmul (cmul qa (succ b0)) (succ d0)) (cmul (cmul qc (succ d0)) (succ b0)) =
+      trans (mulAssoc qa (succ b0) (succ d0))
+        (trans (cong2 (fn (u : Whole) (v : Whole) is cmul u v end) hq (mulComm (succ b0) (succ d0)))
+               (sym (mulAssoc qc (succ d0) (succ b0)))) in
+    calc cmul (qmod a (succ b0)) (succ d0)
+      = cmul (monus a (cmul qa (succ b0))) (succ d0)
+          by refl (cmul (qmod a (succ b0)) (succ d0))
+      = monus (cmul a (succ d0)) (cmul (cmul qa (succ b0)) (succ d0))
+          by mulMonusDistR a (succ d0) (cmul qa (succ b0))
+      = monus (cmul c (succ b0)) (cmul (cmul qc (succ d0)) (succ b0))
+          by cong2 (fn (u : Whole) (v : Whole) is monus u v end) hyp midEq
+      = cmul (monus c (cmul qc (succ d0))) (succ b0)
+          by sym (mulMonusDistR c (succ b0) (cmul qc (succ d0)))
+      = cmul (qmod c (succ d0)) (succ b0)
+          by refl (cmul (qmod c (succ d0)) (succ b0))
+    end
+  end
+end
+
+-- APPENDING CROSS-EQUAL REMAINDERS PRESERVES THE CORRESPONDENCE.  wsnoc appends at the
+-- tail, so the induction walks both lists down to their (corresponding) ends and snocs
+-- the new cross-equal pair (eqWComplete on the scaled equality); andBoth re-knits.
+
+wcrossSnoc : (b0 : Whole) -> (d0 : Whole) -> (seenP : WList) -> (seenQ : WList)
+    -> (remP : Whole) -> (remQ : Whole)
+    -> Eq Bool (wcrossB b0 d0 seenP seenQ) true
+    -> Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))
+    -> Eq Bool (wcrossB b0 d0 (wsnoc seenP remP) (wsnoc seenQ remQ)) true is
+  fn (b0 : Whole) (d0 : Whole) (seenP : WList) is
+    WListElim
+      (fn (w : WList) is
+         (seenQ : WList) -> (remP : Whole) -> (remQ : Whole)
+           -> Eq Bool (wcrossB b0 d0 w seenQ) true
+           -> Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))
+           -> Eq Bool (wcrossB b0 d0 (wsnoc w remP) (wsnoc seenQ remQ)) true end)
+      (fn (seenQ : WList) is
+         case seenQ of
+         | wnil ->
+             fn (remP : Whole) (remQ : Whole)
+                (hw : Eq Bool (wcrossB b0 d0 wnil wnil) true)
+                (hr : Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))) is
+               cong (fn (z : Bool) is and z true end)
+                 (eqWComplete (cmul remP (succ d0)) (cmul remQ (succ b0)) hr) end
+         | wcons y ys ->
+             fn (remP : Whole) (remQ : Whole)
+                (hw : Eq Bool (wcrossB b0 d0 wnil (wcons y ys)) true)
+                (hr : Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))) is
+               boolDisjoint
+                 (Eq Bool (wcrossB b0 d0 (wsnoc wnil remP) (wsnoc (wcons y ys) remQ)) true) hw end
+         end
+       end)
+      (fn (x : Whole) (xs : WList)
+          (ih : (seenQ : WList) -> (remP : Whole) -> (remQ : Whole)
+                  -> Eq Bool (wcrossB b0 d0 xs seenQ) true
+                  -> Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))
+                  -> Eq Bool (wcrossB b0 d0 (wsnoc xs remP) (wsnoc seenQ remQ)) true) is
+         fn (seenQ : WList) is
+           case seenQ of
+           | wnil ->
+               fn (remP : Whole) (remQ : Whole)
+                  (hw : Eq Bool (wcrossB b0 d0 (wcons x xs) wnil) true)
+                  (hr : Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))) is
+                 boolDisjoint
+                   (Eq Bool (wcrossB b0 d0 (wsnoc (wcons x xs) remP) (wsnoc wnil remQ)) true) hw end
+           | wcons y ys ->
+               fn (remP : Whole) (remQ : Whole)
+                  (hw : Eq Bool (wcrossB b0 d0 (wcons x xs) (wcons y ys)) true)
+                  (hr : Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))) is
+                 andBoth (eqW (cmul x (succ d0)) (cmul y (succ b0)))
+                   (wcrossB b0 d0 (wsnoc xs remP) (wsnoc ys remQ))
+                   (andTrueL (eqW (cmul x (succ d0)) (cmul y (succ b0))) (wcrossB b0 d0 xs ys) hw)
+                   (ih ys remP remQ
+                      (andTrueR (eqW (cmul x (succ d0)) (cmul y (succ b0))) (wcrossB b0 d0 xs ys) hw)
+                      hr) end
+           end
+         end
+       end)
+      seenP
+  end
+end
+
+-- ============================================================================
+-- RUNG 3 — the lockstep:  equal fuel + cross-equal state ⟹ equal FBody.
+-- ============================================================================
+
+-- Ex falso for a successor equal to zero (succ-headed terms never equal zero).
+
+succNotZero : (C : U) -> (n : Whole) -> Eq Whole (succ n) zero -> C is
+  fn (C : U) (n : Whole) (h : Eq Whole (succ n) zero) is
+    subst Whole (succ n) zero h
+      (fn (z : Whole) is case z of | zero -> C | succ k -> Eq Whole zero zero end end)
+      (refl zero)
+  end
+end
+
+-- THE LOCKSTEP.  With the SAME fuel, two long divisions whose current remainders are
+-- cross-equal (remP·sd = remQ·sb) and whose seen-lists correspond (wcrossB) emit the
+-- SAME FBody.  Induction on fuel; the per-step case structure mirrors expand:
+--   * fuel 0           — both hit the floor fbody wnil 0 true (refl);
+--   * rem 0 / rem 0    — both terminate (refl); the mixed 0/succ corners are impossible
+--                        by succNotZero on the cross-equality;
+--   * succ / succ      — wmemberCross aligns the cycle test, windexCross the repetend
+--                        index (true branch), and on the false branch the digit agrees
+--                        (floorUniqueGeneral), the next remainder stays cross-equal
+--                        (natModCrossStep ∘ mul10Cross), the seen-lists stay corresponding
+--                        (wcrossSnoc), so the IH equates the recursive tails.
+
+expandCross : (b0 : Whole) -> (d0 : Whole) -> (fuel : Whole)
+    -> (remP : Whole) -> (remQ : Whole) -> (seenP : WList) -> (seenQ : WList)
+    -> Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))
+    -> Eq Bool (wcrossB b0 d0 seenP seenQ) true
+    -> Eq FBody (expand (succ b0) fuel remP seenP) (expand (succ d0) fuel remQ seenQ) is
+  fn (b0 : Whole) (d0 : Whole) is
+    WholeElim
+      (fn (f : Whole) is
+         (remP : Whole) -> (remQ : Whole) -> (seenP : WList) -> (seenQ : WList)
+           -> Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))
+           -> Eq Bool (wcrossB b0 d0 seenP seenQ) true
+           -> Eq FBody (expand (succ b0) f remP seenP) (expand (succ d0) f remQ seenQ) end)
+      (fn (remP : Whole) (remQ : Whole) (seenP : WList) (seenQ : WList)
+          (hcross : Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0)))
+          (hwcross : Eq Bool (wcrossB b0 d0 seenP seenQ) true) is
+         refl (fbody wnil zero true) end)
+      (fn (fl : Whole)
+          (ih : (remP : Whole) -> (remQ : Whole) -> (seenP : WList) -> (seenQ : WList)
+                  -> Eq Whole (cmul remP (succ d0)) (cmul remQ (succ b0))
+                  -> Eq Bool (wcrossB b0 d0 seenP seenQ) true
+                  -> Eq FBody (expand (succ b0) fl remP seenP) (expand (succ d0) fl remQ seenQ)) is
+         fn (remP : Whole) (remQ : Whole) (seenP : WList) (seenQ : WList) is
+           case remP of
+           | zero ->
+               case remQ of
+               | zero ->
+                   fn (hcross : Eq Whole (cmul zero (succ d0)) (cmul zero (succ b0)))
+                      (hwcross : Eq Bool (wcrossB b0 d0 seenP seenQ) true) is
+                     refl (fbody wnil zero true) end
+               | succ rq ->
+                   fn (hcross : Eq Whole (cmul zero (succ d0)) (cmul (succ rq) (succ b0)))
+                      (hwcross : Eq Bool (wcrossB b0 d0 seenP seenQ) true) is
+                     succNotZero
+                       (Eq FBody (expand (succ b0) (succ fl) zero seenP)
+                                 (expand (succ d0) (succ fl) (succ rq) seenQ))
+                       (addW b0 (cmul rq (succ b0))) (sym hcross) end
+               end
+           | succ rp ->
+               case remQ of
+               | zero ->
+                   fn (hcross : Eq Whole (cmul (succ rp) (succ d0)) (cmul zero (succ b0)))
+                      (hwcross : Eq Bool (wcrossB b0 d0 seenP seenQ) true) is
+                     succNotZero
+                       (Eq FBody (expand (succ b0) (succ fl) (succ rp) seenP)
+                                 (expand (succ d0) (succ fl) zero seenQ))
+                       (addW d0 (cmul rp (succ d0))) hcross end
+               | succ rq ->
+                   fn (hcross : Eq Whole (cmul (succ rp) (succ d0)) (cmul (succ rq) (succ b0)))
+                      (hwcross : Eq Bool (wcrossB b0 d0 seenP seenQ) true) is
+                     let hmem : Eq Bool (wmember (succ rp) seenP) (wmember (succ rq) seenQ) =
+                       wmemberCross b0 d0 seenP seenQ hwcross (succ rp) (succ rq) hcross in
+                     let hidx : Eq Whole (windex (succ rp) seenP) (windex (succ rq) seenQ) =
+                       windexCross b0 d0 seenP seenQ hwcross (succ rp) (succ rq) hcross in
+                     let htrue : Eq FBody (fbody wnil (windex (succ rp) seenP) false)
+                                          (fbody wnil (windex (succ rq) seenQ) false) =
+                       cong (fn (i : Whole) is fbody wnil i false end) hidx in
+                     let hr10 : Eq Whole (cmul (cmul (succ rp) 10) (succ d0))
+                                       (cmul (cmul (succ rq) 10) (succ b0)) =
+                       mul10Cross b0 d0 (succ rp) (succ rq) hcross in
+                     let hdigit : Eq Whole (qdiv (cmul (succ rp) 10) (succ b0))
+                                         (qdiv (cmul (succ rq) 10) (succ d0)) =
+                       floorUniqueGeneral b0 d0 (cmul (succ rp) 10) (cmul (succ rq) 10) hr10 in
+                     let hnext : Eq Whole (cmul (qmod (cmul (succ rp) 10) (succ b0)) (succ d0))
+                                        (cmul (qmod (cmul (succ rq) 10) (succ d0)) (succ b0)) =
+                       natModCrossStep b0 d0 (cmul (succ rp) 10) (cmul (succ rq) 10) hr10 in
+                     let hsnoc : Eq Bool
+                         (wcrossB b0 d0 (wsnoc seenP (succ rp)) (wsnoc seenQ (succ rq))) true =
+                       wcrossSnoc b0 d0 seenP seenQ (succ rp) (succ rq) hwcross hcross in
+                     let ihRest : Eq FBody
+                         (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp)))
+                         (expand (succ d0) fl (qmod (cmul (succ rq) 10) (succ d0)) (wsnoc seenQ (succ rq))) =
+                       ih (qmod (cmul (succ rp) 10) (succ b0)) (qmod (cmul (succ rq) 10) (succ d0))
+                          (wsnoc seenP (succ rp)) (wsnoc seenQ (succ rq)) hnext hsnoc in
+                     let arg1Eq : Eq WList
+                         (wcons (qdiv (cmul (succ rp) 10) (succ b0))
+                                (fbDigits (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp)))))
+                         (wcons (qdiv (cmul (succ rq) 10) (succ d0))
+                                (fbDigits (expand (succ d0) fl (qmod (cmul (succ rq) 10) (succ d0)) (wsnoc seenQ (succ rq))))) =
+                       cong2 (fn (d : Whole) (ds : WList) is wcons d ds end)
+                         hdigit (cong (fn (b : FBody) is fbDigits b end) ihRest) in
+                     let hfalse : Eq FBody
+                         (fbody (wcons (qdiv (cmul (succ rp) 10) (succ b0))
+                                       (fbDigits (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp)))))
+                                (fbRep (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp))))
+                                (fbTerm (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp)))))
+                         (fbody (wcons (qdiv (cmul (succ rq) 10) (succ d0))
+                                       (fbDigits (expand (succ d0) fl (qmod (cmul (succ rq) 10) (succ d0)) (wsnoc seenQ (succ rq)))))
+                                (fbRep (expand (succ d0) fl (qmod (cmul (succ rq) 10) (succ d0)) (wsnoc seenQ (succ rq))))
+                                (fbTerm (expand (succ d0) fl (qmod (cmul (succ rq) 10) (succ d0)) (wsnoc seenQ (succ rq))))) =
+                       trans
+                         (cong (fn (a : WList) is
+                                  fbody a
+                                    (fbRep (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp))))
+                                    (fbTerm (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp)))) end)
+                               arg1Eq)
+                         (cong2 (fn (r : Whole) (t : Bool) is
+                                   fbody (wcons (qdiv (cmul (succ rq) 10) (succ d0))
+                                                (fbDigits (expand (succ d0) fl (qmod (cmul (succ rq) 10) (succ d0)) (wsnoc seenQ (succ rq)))))
+                                         r t end)
+                            (cong (fn (b : FBody) is fbRep b end) ihRest)
+                            (cong (fn (b : FBody) is fbTerm b end) ihRest)) in
+                     trans
+                       (cong (fn (sc : Bool) is
+                                BoolElim (fn (w : Bool) is FBody end)
+                                  (fbody wnil (windex (succ rp) seenP) false)
+                                  (fbody (wcons (qdiv (cmul (succ rp) 10) (succ b0))
+                                                (fbDigits (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp)))))
+                                         (fbRep (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp))))
+                                         (fbTerm (expand (succ b0) fl (qmod (cmul (succ rp) 10) (succ b0)) (wsnoc seenP (succ rp)))))
+                                  sc end)
+                             hmem)
+                       (cong2 (fn (tb : FBody) (fb : FBody) is
+                                 BoolElim (fn (w : Bool) is FBody end) tb fb
+                                   (wmember (succ rq) seenQ) end)
+                          htrue hfalse) end
+               end
+           end
+         end
+       end)
+  end
+end
+
+-- ============================================================================
+-- RUNG 3 — fuel sufficiency (pigeonhole).  List infrastructure first.
+-- ============================================================================
+
+-- Boolean negation and its reflection.
+
+notB : Bool -> Bool is fn (b : Bool) is BoolElim (fn (x : Bool) is Bool end) false true b end end
+
+notTrueIsFalse : (b : Bool) -> Eq Bool (notB b) true -> Eq Bool b false is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is (Eq Bool (notB x) true -> Eq Bool x false) end)
+      (fn (h : Eq Bool (notB true) true) is boolDisjoint (Eq Bool true false) h end)
+      (fn (h : Eq Bool (notB false) true) is refl false end)
+      b
+  end
+end
+
+falseIsNotTrue : (b : Bool) -> Eq Bool b false -> Eq Bool (notB b) true is
+  fn (b : Bool) (h : Eq Bool b false) is
+    subst Bool false b (sym h) (fn (z : Bool) is Eq Bool (notB z) true end) (refl true)
+  end
+end
+
+-- Length, all-below-N, no-duplicates, and first-occurrence deletion on WList.
+
+wlen : WList -> Whole is
+  fn (xs : WList) is
+    WListElim (fn (w : WList) is Whole end) zero
+      (fn (h : Whole) (t : WList) (ih : Whole) is succ ih end) xs
+  end
+end
+
+allLt : Whole -> WList -> Bool is
+  fn (n : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is Bool end) true
+      (fn (h : Whole) (t : WList) (ih : Bool) is and (ltb h n) ih end) xs
+  end
+end
+
+noDupW : WList -> Bool is
+  fn (xs : WList) is
+    WListElim (fn (w : WList) is Bool end) true
+      (fn (h : Whole) (t : WList) (ih : Bool) is and (notB (wmember h t)) ih end) xs
+  end
+end
+
+wdelete : Whole -> WList -> WList is
+  fn (x : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is WList end) wnil
+      (fn (h : Whole) (t : WList) (ih : WList) is
+         case eqW x h of | true -> t | false -> wcons h ih end
+       end)
+      xs
+  end
+end
+
+-- eqW is symmetric (as a Bool equation): decode/recode each direction.
+
+eqWSym : (a : Whole) -> (b : Whole) -> Eq Bool (eqW a b) (eqW b a) is
+  fn (a : Whole) (b : Whole) is
+    boolTrueIff (eqW a b) (eqW b a)
+      (fn (e : Eq Bool (eqW a b) true) is eqWComplete b a (sym (eqWSound a b e)) end)
+      (fn (e : Eq Bool (eqW b a) true) is eqWComplete a b (sym (eqWSound b a e)) end)
+  end
+end
+
+-- leb n (succ n) and monotone weakening of the bound.
+
+lteSuccSelf : (n : Whole) -> Eq Bool (leb n (succ n)) true is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (leb x (succ x)) true end)
+      (refl true)
+      (fn (k : Whole) (ih : Eq Bool (leb k (succ k)) true) is ih end)
+      n
+  end
+end
+
+lteSuccR : (a : Whole) -> (b : Whole) -> Eq Bool (leb a b) true -> Eq Bool (leb a (succ b)) true is
+  fn (a : Whole) (b : Whole) (h : Eq Bool (leb a b) true) is
+    lteTrans a b (succ b) h (lteSuccSelf b)
+  end
+end
+
+-- x < succ d and x ≠ d ⟹ x < d.  Double induction; mismatched corners are absurd.
+
+ltSuccNe : (h : Whole) -> (d : Whole) -> Eq Bool (ltb h (succ d)) true -> Eq Bool (eqW h d) false
+    -> Eq Bool (ltb h d) true is
+  fn (h : Whole) is
+    WholeElim (fn (x : Whole) is
+        (d : Whole) -> Eq Bool (ltb x (succ d)) true -> Eq Bool (eqW x d) false
+          -> Eq Bool (ltb x d) true end)
+      (fn (d : Whole) is
+         case d of
+         | zero -> fn (hlt : Eq Bool (ltb zero (succ zero)) true) (hne : Eq Bool (eqW zero zero) false) is
+             boolDisjoint (Eq Bool (ltb zero zero) true) (trans (sym hne) (eqWRefl zero)) end
+         | succ d' -> fn (hlt : Eq Bool (ltb zero (succ (succ d'))) true) (hne : Eq Bool (eqW zero (succ d')) false) is
+             refl true end
+         end
+       end)
+      (fn (k : Whole) (ih : (d : Whole) -> Eq Bool (ltb k (succ d)) true -> Eq Bool (eqW k d) false
+                            -> Eq Bool (ltb k d) true) is
+         fn (d : Whole) is
+           case d of
+           | zero -> fn (hlt : Eq Bool (ltb (succ k) (succ zero)) true) (hne : Eq Bool (eqW (succ k) zero) false) is
+               boolDisjoint (Eq Bool (ltb (succ k) zero) true) (trans (sym (ltbZero k)) hlt) end
+           | succ d' -> fn (hlt : Eq Bool (ltb (succ k) (succ (succ d'))) true) (hne : Eq Bool (eqW (succ k) (succ d')) false) is
+               ih d' hlt hne end
+           end
+         end
+       end)
+      h
+  end
+end
+
+-- or-projections (wmember (wcons h t) ≡ or (eqW _ h) (wmember _ t)).
+
+orFalseL : (a : Bool) -> (b : Bool) -> Eq Bool (or a b) false -> Eq Bool a false is
+  fn (a : Bool) (b : Bool) (h : Eq Bool (or a b) false) is
+    BoolElim (fn (x : Bool) is (Eq Bool (or x b) false -> Eq Bool x false) end)
+      (fn (h1 : Eq Bool (or true b) false) is h1 end)
+      (fn (h0 : Eq Bool (or false b) false) is refl false end)
+      a h
+  end
+end
+
+orFalseR : (a : Bool) -> (b : Bool) -> Eq Bool (or a b) false -> Eq Bool b false is
+  fn (a : Bool) (b : Bool) (h : Eq Bool (or a b) false) is
+    BoolElim (fn (x : Bool) is (Eq Bool (or x b) false -> Eq Bool b false) end)
+      (fn (h1 : Eq Bool (or true b) false) is boolDisjoint (Eq Bool b false) (sym h1) end)
+      (fn (h0 : Eq Bool (or false b) false) is h0 end)
+      a h
+  end
+end
+
+orBothFalse : (a : Bool) -> (b : Bool) -> Eq Bool a false -> Eq Bool b false -> Eq Bool (or a b) false is
+  fn (a : Bool) (b : Bool) (ha : Eq Bool a false) (hb : Eq Bool b false) is
+    trans (cong (fn (z : Bool) is or z b end) ha) hb
+  end
+end
+
+orTrueR : (a : Bool) -> (b : Bool) -> Eq Bool (or a b) true -> Eq Bool a false -> Eq Bool b true is
+  fn (a : Bool) (b : Bool) (h : Eq Bool (or a b) true) (ha : Eq Bool a false) is
+    trans (sym (cong (fn (z : Bool) is or z b end) ha)) h
+  end
+end
+
+-- Deletion never introduces a member:  h ∉ t  ⟹  h ∉ wdelete x t.
+
+notMemberDelete : (hh : Whole) -> (x : Whole) -> (t : WList)
+    -> Eq Bool (wmember hh t) false -> Eq Bool (wmember hh (wdelete x t)) false is
+  fn (hh : Whole) (x : Whole) (t : WList) is
+    WListElim (fn (w : WList) is (Eq Bool (wmember hh w) false -> Eq Bool (wmember hh (wdelete x w)) false) end)
+      (fn (h0 : Eq Bool (wmember hh wnil) false) is refl false end)
+      (fn (e : Whole) (t' : WList)
+          (ih : Eq Bool (wmember hh t') false -> Eq Bool (wmember hh (wdelete x t')) false) is
+         fn (hm : Eq Bool (wmember hh (wcons e t')) false) is
+           BoolElim
+             (fn (z : Bool) is
+                Eq Bool (wmember hh (case z of | true -> t' | false -> wcons e (wdelete x t') end)) false end)
+             (orFalseR (eqW hh e) (wmember hh t') hm)
+             (orBothFalse (eqW hh e) (wmember hh (wdelete x t'))
+                (orFalseL (eqW hh e) (wmember hh t') hm)
+                (ih (orFalseR (eqW hh e) (wmember hh t') hm)))
+             (eqW x e)
+         end
+       end)
+      t
+  end
+end
+
+-- allLt weakening:  all entries < succ d and d absent  ⟹  all entries < d.
+
+allLtWeaken : (d : Whole) -> (xs : WList)
+    -> Eq Bool (allLt (succ d) xs) true -> Eq Bool (wmember d xs) false
+    -> Eq Bool (allLt d xs) true is
+  fn (d : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is
+        (Eq Bool (allLt (succ d) w) true -> Eq Bool (wmember d w) false -> Eq Bool (allLt d w) true) end)
+      (fn (hal : Eq Bool (allLt (succ d) wnil) true) (hm : Eq Bool (wmember d wnil) false) is refl true end)
+      (fn (h : Whole) (t : WList)
+          (ih : Eq Bool (allLt (succ d) t) true -> Eq Bool (wmember d t) false -> Eq Bool (allLt d t) true) is
+         fn (hal : Eq Bool (allLt (succ d) (wcons h t)) true) (hm : Eq Bool (wmember d (wcons h t)) false) is
+           andBoth (ltb h d) (allLt d t)
+             (ltSuccNe h d
+                (andTrueL (ltb h (succ d)) (allLt (succ d) t) hal)
+                (trans (eqWSym h d) (orFalseL (eqW d h) (wmember d t) hm)))
+             (ih (andTrueR (ltb h (succ d)) (allLt (succ d) t) hal)
+                 (orFalseR (eqW d h) (wmember d t) hm))
+         end
+       end)
+      xs
+  end
+end
+
+-- Deletion preserves the all-below-N bound (entries only removed).
+
+deleteAllLt : (n : Whole) -> (x : Whole) -> (xs : WList)
+    -> Eq Bool (allLt n xs) true -> Eq Bool (allLt n (wdelete x xs)) true is
+  fn (n : Whole) (x : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is (Eq Bool (allLt n w) true -> Eq Bool (allLt n (wdelete x w)) true) end)
+      (fn (h0 : Eq Bool (allLt n wnil) true) is refl true end)
+      (fn (h : Whole) (t : WList)
+          (ih : Eq Bool (allLt n t) true -> Eq Bool (allLt n (wdelete x t)) true) is
+         fn (hal : Eq Bool (allLt n (wcons h t)) true) is
+           BoolElim
+             (fn (z : Bool) is
+                Eq Bool (allLt n (case z of | true -> t | false -> wcons h (wdelete x t) end)) true end)
+             (andTrueR (ltb h n) (allLt n t) hal)
+             (andBoth (ltb h n) (allLt n (wdelete x t))
+                (andTrueL (ltb h n) (allLt n t) hal)
+                (ih (andTrueR (ltb h n) (allLt n t) hal)))
+             (eqW x h)
+         end
+       end)
+      xs
+  end
+end
+
+-- Deletion preserves no-duplicates.
+
+deleteNoDup : (x : Whole) -> (xs : WList)
+    -> Eq Bool (noDupW xs) true -> Eq Bool (noDupW (wdelete x xs)) true is
+  fn (x : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is (Eq Bool (noDupW w) true -> Eq Bool (noDupW (wdelete x w)) true) end)
+      (fn (h0 : Eq Bool (noDupW wnil) true) is refl true end)
+      (fn (h : Whole) (t : WList)
+          (ih : Eq Bool (noDupW t) true -> Eq Bool (noDupW (wdelete x t)) true) is
+         fn (hnd : Eq Bool (noDupW (wcons h t)) true) is
+           BoolElim
+             (fn (z : Bool) is
+                Eq Bool (noDupW (case z of | true -> t | false -> wcons h (wdelete x t) end)) true end)
+             (andTrueR (notB (wmember h t)) (noDupW t) hnd)
+             (andBoth (notB (wmember h (wdelete x t))) (noDupW (wdelete x t))
+                (falseIsNotTrue (wmember h (wdelete x t))
+                   (notMemberDelete h x t
+                      (notTrueIsFalse (wmember h t)
+                         (andTrueL (notB (wmember h t)) (noDupW t) hnd))))
+                (ih (andTrueR (notB (wmember h t)) (noDupW t) hnd)))
+             (eqW x h)
+         end
+       end)
+      xs
+  end
+end
+
+-- Deleting a member drops the length by one.
+
+wlenDeleteMember : (x : Whole) -> (xs : WList)
+    -> Eq Bool (wmember x xs) true -> Eq Whole (wlen xs) (succ (wlen (wdelete x xs))) is
+  fn (x : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is (Eq Bool (wmember x w) true -> Eq Whole (wlen w) (succ (wlen (wdelete x w)))) end)
+      (fn (h0 : Eq Bool (wmember x wnil) true) is boolDisjoint (Eq Whole (wlen wnil) (succ (wlen (wdelete x wnil)))) h0 end)
+      (fn (h : Whole) (t : WList)
+          (ih : Eq Bool (wmember x t) true -> Eq Whole (wlen t) (succ (wlen (wdelete x t)))) is
+         fn (hm : Eq Bool (wmember x (wcons h t)) true) is
+           BoolElim
+             (fn (z : Bool) is
+                (Eq Bool (eqW x h) z
+                   -> Eq Whole (wlen (wcons h t)) (succ (wlen (wdelete x (wcons h t))))) end)
+             (fn (ev : Eq Bool (eqW x h) true) is
+                subst Bool true (eqW x h) (sym ev)
+                  (fn (z : Bool) is
+                     Eq Whole (wlen (wcons h t))
+                       (succ (wlen (case z of | true -> t | false -> wcons h (wdelete x t) end))) end)
+                  (refl (succ (wlen t))) end)
+             (fn (ev : Eq Bool (eqW x h) false) is
+                subst Bool false (eqW x h) (sym ev)
+                  (fn (z : Bool) is
+                     Eq Whole (wlen (wcons h t))
+                       (succ (wlen (case z of | true -> t | false -> wcons h (wdelete x t) end))) end)
+                  (cong (fn (n : Whole) is succ n end)
+                     (ih (orTrueR (eqW x h) (wmember x t) hm ev))) end)
+             (eqW x h)
+             (refl (eqW x h))
+         end
+       end)
+      xs
+  end
+end
+
+-- Deleting the target leaves it absent (given no duplicates).
+
+deleteRemovesMember : (x : Whole) -> (xs : WList)
+    -> Eq Bool (noDupW xs) true -> Eq Bool (wmember x (wdelete x xs)) false is
+  fn (x : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is (Eq Bool (noDupW w) true -> Eq Bool (wmember x (wdelete x w)) false) end)
+      (fn (h0 : Eq Bool (noDupW wnil) true) is refl false end)
+      (fn (h : Whole) (t : WList)
+          (ih : Eq Bool (noDupW t) true -> Eq Bool (wmember x (wdelete x t)) false) is
+         fn (hnd : Eq Bool (noDupW (wcons h t)) true) is
+           BoolElim
+             (fn (z : Bool) is
+                (Eq Bool (eqW x h) z -> Eq Bool (wmember x (wdelete x (wcons h t))) false) end)
+             (fn (ev : Eq Bool (eqW x h) true) is
+                subst Bool true (eqW x h) (sym ev)
+                  (fn (z : Bool) is
+                     Eq Bool (wmember x (case z of | true -> t | false -> wcons h (wdelete x t) end)) false end)
+                  (subst Whole h x (sym (eqWSound x h ev))
+                     (fn (w : Whole) is Eq Bool (wmember w t) false end)
+                     (notTrueIsFalse (wmember h t)
+                        (andTrueL (notB (wmember h t)) (noDupW t) hnd))) end)
+             (fn (ev : Eq Bool (eqW x h) false) is
+                subst Bool false (eqW x h) (sym ev)
+                  (fn (z : Bool) is
+                     Eq Bool (wmember x (case z of | true -> t | false -> wcons h (wdelete x t) end)) false end)
+                  (orBothFalse (eqW x h) (wmember x (wdelete x t)) ev
+                     (ih (andTrueR (notB (wmember h t)) (noDupW t) hnd))) end)
+             (eqW x h)
+             (refl (eqW x h))
+         end
+       end)
+      xs
+  end
+end
+
+-- THE PIGEONHOLE.  A duplicate-free WList whose entries are all < den has length
+-- ≤ den.  Induction on den: at den = 0 nothing is < 0 so the list is empty; at
+-- succ d, either d is absent (weaken the bound and recurse) or present (delete it —
+-- length drops by one, no-dup/bound/absence are preserved — recurse at d).
+
+lenBound : (den : Whole) -> (xs : WList)
+    -> Eq Bool (noDupW xs) true -> Eq Bool (allLt den xs) true
+    -> Eq Bool (leb (wlen xs) den) true is
+  fn (den : Whole) is
+    WholeElim
+      (fn (n : Whole) is
+         (xs : WList) -> Eq Bool (noDupW xs) true -> Eq Bool (allLt n xs) true
+           -> Eq Bool (leb (wlen xs) n) true end)
+      (fn (xs : WList) is
+         case xs of
+         | wnil -> fn (hnd : Eq Bool (noDupW wnil) true) (hal : Eq Bool (allLt zero wnil) true) is
+             refl true end
+         | wcons h t -> fn (hnd : Eq Bool (noDupW (wcons h t)) true) (hal : Eq Bool (allLt zero (wcons h t)) true) is
+             boolDisjoint (Eq Bool (leb (wlen (wcons h t)) zero) true)
+               (trans (sym (ltbZero h)) (andTrueL (ltb h zero) (allLt zero t) hal)) end
+         end
+       end)
+      (fn (d : Whole)
+          (ih : (xs : WList) -> Eq Bool (noDupW xs) true -> Eq Bool (allLt d xs) true
+                  -> Eq Bool (leb (wlen xs) d) true) is
+         fn (xs : WList) (hnd : Eq Bool (noDupW xs) true) (hal : Eq Bool (allLt (succ d) xs) true) is
+           BoolElim
+             (fn (z : Bool) is
+                (Eq Bool (wmember d xs) z -> Eq Bool (leb (wlen xs) (succ d)) true) end)
+             (fn (ev : Eq Bool (wmember d xs) true) is
+                subst Whole (succ (wlen (wdelete d xs))) (wlen xs)
+                  (sym (wlenDeleteMember d xs ev))
+                  (fn (m : Whole) is Eq Bool (leb m (succ d)) true end)
+                  (ih (wdelete d xs)
+                     (deleteNoDup d xs hnd)
+                     (allLtWeaken d (wdelete d xs)
+                        (deleteAllLt (succ d) d xs hal)
+                        (deleteRemovesMember d xs hnd))) end)
+             (fn (ev : Eq Bool (wmember d xs) false) is
+                lteSuccR (wlen xs) d
+                  (ih xs hnd (allLtWeaken d xs hal ev)) end)
+             (wmember d xs)
+             (refl (wmember d xs))
+         end
+       end)
+      den
+  end
+end
+
+-- or laws + snoc algebra for threading the no-dup invariant through expand's wsnoc.
+
+orFalseRight : (b : Bool) -> Eq Bool (or b false) b is
+  fn (b : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (or x false) x end) (refl true) (refl false) b
+  end
+end
+
+orAssoc : (a : Bool) -> (b : Bool) -> (c : Bool) -> Eq Bool (or a (or b c)) (or (or a b) c) is
+  fn (a : Bool) (b : Bool) (c : Bool) is
+    BoolElim (fn (x : Bool) is Eq Bool (or x (or b c)) (or (or x b) c) end)
+      (refl true) (refl (or b c)) a
+  end
+end
+
+memberSnoc : (a : Whole) -> (y : Whole) -> (t : WList)
+    -> Eq Bool (wmember a (wsnoc t y)) (or (wmember a t) (eqW a y)) is
+  fn (a : Whole) (y : Whole) (t : WList) is
+    WListElim (fn (w : WList) is Eq Bool (wmember a (wsnoc w y)) (or (wmember a w) (eqW a y)) end)
+      (orFalseRight (eqW a y))
+      (fn (h : Whole) (t' : WList) (ih : Eq Bool (wmember a (wsnoc t' y)) (or (wmember a t') (eqW a y))) is
+         trans (cong (fn (z : Bool) is or (eqW a h) z end) ih)
+               (orAssoc (eqW a h) (wmember a t') (eqW a y)) end)
+      t
+  end
+end
+
+wlenSnoc : (y : Whole) -> (xs : WList) -> Eq Whole (wlen (wsnoc xs y)) (succ (wlen xs)) is
+  fn (y : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is Eq Whole (wlen (wsnoc w y)) (succ (wlen w)) end)
+      (refl (succ zero))
+      (fn (h : Whole) (t : WList) (ih : Eq Whole (wlen (wsnoc t y)) (succ (wlen t))) is
+         cong (fn (n : Whole) is succ n end) ih end)
+      xs
+  end
+end
+
+allLtSnoc : (n : Whole) -> (y : Whole) -> (xs : WList)
+    -> Eq Bool (allLt n xs) true -> Eq Bool (ltb y n) true -> Eq Bool (allLt n (wsnoc xs y)) true is
+  fn (n : Whole) (y : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is
+        (Eq Bool (allLt n w) true -> Eq Bool (ltb y n) true -> Eq Bool (allLt n (wsnoc w y)) true) end)
+      (fn (hal : Eq Bool (allLt n wnil) true) (hy : Eq Bool (ltb y n) true) is
+         andBoth (ltb y n) true hy (refl true) end)
+      (fn (h : Whole) (t : WList)
+          (ih : Eq Bool (allLt n t) true -> Eq Bool (ltb y n) true -> Eq Bool (allLt n (wsnoc t y)) true) is
+         fn (hal : Eq Bool (allLt n (wcons h t)) true) (hy : Eq Bool (ltb y n) true) is
+           andBoth (ltb h n) (allLt n (wsnoc t y))
+             (andTrueL (ltb h n) (allLt n t) hal)
+             (ih (andTrueR (ltb h n) (allLt n t) hal) hy) end
+         end)
+      xs
+  end
+end
+
+noDupSnoc : (y : Whole) -> (xs : WList)
+    -> Eq Bool (noDupW xs) true -> Eq Bool (wmember y xs) false -> Eq Bool (noDupW (wsnoc xs y)) true is
+  fn (y : Whole) (xs : WList) is
+    WListElim (fn (w : WList) is
+        (Eq Bool (noDupW w) true -> Eq Bool (wmember y w) false -> Eq Bool (noDupW (wsnoc w y)) true) end)
+      (fn (hnd : Eq Bool (noDupW wnil) true) (hm : Eq Bool (wmember y wnil) false) is
+         andBoth (notB (wmember y wnil)) (noDupW wnil)
+           (falseIsNotTrue (wmember y wnil) (refl false)) (refl true) end)
+      (fn (h : Whole) (t : WList)
+          (ih : Eq Bool (noDupW t) true -> Eq Bool (wmember y t) false -> Eq Bool (noDupW (wsnoc t y)) true) is
+         fn (hnd : Eq Bool (noDupW (wcons h t)) true) (hm : Eq Bool (wmember y (wcons h t)) false) is
+           andBoth (notB (wmember h (wsnoc t y))) (noDupW (wsnoc t y))
+             (falseIsNotTrue (wmember h (wsnoc t y))
+                (trans (memberSnoc h y t)
+                   (orBothFalse (wmember h t) (eqW h y)
+                      (notTrueIsFalse (wmember h t)
+                         (andTrueL (notB (wmember h t)) (noDupW t) hnd))
+                      (trans (eqWSym h y) (orFalseL (eqW y h) (wmember y t) hm)))))
+             (ih (andTrueR (notB (wmember h t)) (noDupW t) hnd)
+                 (orFalseR (eqW y h) (wmember y t) hm)) end
+         end)
+      xs
+  end
+end
+
+lteSuccSelfFalse : (n : Whole) -> Eq Bool (leb (succ n) n) false is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (leb (succ x) x) false end)
+      (refl false)
+      (fn (k : Whole) (ih : Eq Bool (leb (succ k) k) false) is ih end)
+      n
+  end
+end
+
+-- FUEL SUFFICIENCY.  Two same-denominator long divisions with DIFFERENT fuels agree,
+-- provided both fuels cover the remaining capacity (cap = den − |seen|).  Induction on
+-- cap, threading the seen-list invariants (no-dup, all < den, exact capacity, rem in
+-- range).  At cap 0 the seen-list is full: any unseen nonzero rem would make
+-- (wcons rem seen) a distinct list of length den+1 bounded by den — impossible by
+-- lenBound — so wmember fires and both terminate identically; otherwise the floor is
+-- never reached.  At cap > 0 the cycle test aligns the two (same scrutinee), the digit
+-- is identical, and the IH (one less capacity, one less fuel each) closes the tails.
+
+expandFuelStable : (b0 : Whole) -> (cap : Whole) -> (rem : Whole) -> (seen : WList) -> (F : Whole) -> (G : Whole)
+    -> Eq Bool (noDupW seen) true
+    -> Eq Bool (allLt (succ b0) seen) true
+    -> Eq Whole (addW (wlen seen) cap) (succ b0)
+    -> Eq Bool (ltb rem (succ b0)) true
+    -> Eq Bool (leb (succ cap) F) true
+    -> Eq Bool (leb (succ cap) G) true
+    -> Eq FBody (expand (succ b0) F rem seen) (expand (succ b0) G rem seen) is
+  fn (b0 : Whole) (cap : Whole) is
+    WholeElim
+      (fn (c : Whole) is
+         (rem : Whole) -> (seen : WList) -> (F : Whole) -> (G : Whole)
+           -> Eq Bool (noDupW seen) true
+           -> Eq Bool (allLt (succ b0) seen) true
+           -> Eq Whole (addW (wlen seen) c) (succ b0)
+           -> Eq Bool (ltb rem (succ b0)) true
+           -> Eq Bool (leb (succ c) F) true
+           -> Eq Bool (leb (succ c) G) true
+           -> Eq FBody (expand (succ b0) F rem seen) (expand (succ b0) G rem seen) end)
+      (fn (rem : Whole) (seen : WList) (F : Whole) (G : Whole)
+          (hnd : Eq Bool (noDupW seen) true) (hal : Eq Bool (allLt (succ b0) seen) true)
+          (hcap : Eq Whole (addW (wlen seen) zero) (succ b0)) (hrem : Eq Bool (ltb rem (succ b0)) true) is
+         case F of
+         | zero -> fn (hF : Eq Bool (leb (succ zero) zero) true) (hG : Eq Bool (leb (succ zero) G) true) is
+             boolDisjoint (Eq FBody (expand (succ b0) zero rem seen) (expand (succ b0) G rem seen)) hF end
+         | succ F' ->
+             case G of
+             | zero -> fn (hF : Eq Bool (leb (succ zero) (succ F')) true) (hG : Eq Bool (leb (succ zero) zero) true) is
+                 boolDisjoint (Eq FBody (expand (succ b0) (succ F') rem seen) (expand (succ b0) zero rem seen)) hG end
+             | succ G' -> fn (hF : Eq Bool (leb (succ zero) (succ F')) true) (hG : Eq Bool (leb (succ zero) (succ G')) true) is
+                 WholeElim (fn (rv : Whole) is (Eq Bool (ltb rv (succ b0)) true
+                            -> Eq FBody (expand (succ b0) (succ F') rv seen) (expand (succ b0) (succ G') rv seen)) end)
+                   (fn (hrem0 : Eq Bool (ltb zero (succ b0)) true) is refl (fbody wnil zero true) end)
+                   (fn (rp : Whole) (ihr : Eq Bool (ltb rp (succ b0)) true
+                          -> Eq FBody (expand (succ b0) (succ F') rp seen) (expand (succ b0) (succ G') rp seen))
+                       (hrem1 : Eq Bool (ltb (succ rp) (succ b0)) true) is
+                     let hlen : Eq Whole (wlen seen) (succ b0) = trans (sym (addZeroR (wlen seen))) hcap in
+                     let dec : Whole = qdiv (cmul (succ rp) 10) (succ b0) in
+                     let nxt : Whole = qmod (cmul (succ rp) 10) (succ b0) in
+                     let snc : WList = wsnoc seen (succ rp) in
+                     let hfull : Eq Bool (wmember (succ rp) seen) true =
+                       BoolElim (fn (z : Bool) is (Eq Bool (wmember (succ rp) seen) z -> Eq Bool (wmember (succ rp) seen) true) end)
+                         (fn (ev : Eq Bool (wmember (succ rp) seen) true) is ev end)
+                         (fn (ev : Eq Bool (wmember (succ rp) seen) false) is
+                            boolDisjoint (Eq Bool (wmember (succ rp) seen) true)
+                              (trans (sym (lteSuccSelfFalse (succ b0)))
+                                 (subst Whole (wlen seen) (succ b0) hlen
+                                    (fn (m : Whole) is Eq Bool (leb (succ m) (succ b0)) true end)
+                                    (lenBound (succ b0) (wcons (succ rp) seen)
+                                       (andBoth (notB (wmember (succ rp) seen)) (noDupW seen)
+                                          (falseIsNotTrue (wmember (succ rp) seen) ev) hnd)
+                                       (andBoth (ltb (succ rp) (succ b0)) (allLt (succ b0) seen) hrem1 hal)))) end)
+                         (wmember (succ rp) seen) (refl (wmember (succ rp) seen)) in
+                     trans
+                       (cong (fn (sc : Bool) is BoolElim (fn (w : Bool) is FBody end)
+                                (fbody wnil (windex (succ rp) seen) false)
+                                (fbody (wcons dec (fbDigits (expand (succ b0) F' nxt snc)))
+                                       (fbRep (expand (succ b0) F' nxt snc)) (fbTerm (expand (succ b0) F' nxt snc)))
+                                sc end) hfull)
+                       (sym (cong (fn (sc : Bool) is BoolElim (fn (w : Bool) is FBody end)
+                                (fbody wnil (windex (succ rp) seen) false)
+                                (fbody (wcons dec (fbDigits (expand (succ b0) G' nxt snc)))
+                                       (fbRep (expand (succ b0) G' nxt snc)) (fbTerm (expand (succ b0) G' nxt snc)))
+                                sc end) hfull)) end)
+                   rem hrem end
+             end
+         end
+       end)
+      (fn (cap0 : Whole)
+          (ih : (rem : Whole) -> (seen : WList) -> (F : Whole) -> (G : Whole)
+                  -> Eq Bool (noDupW seen) true -> Eq Bool (allLt (succ b0) seen) true
+                  -> Eq Whole (addW (wlen seen) cap0) (succ b0) -> Eq Bool (ltb rem (succ b0)) true
+                  -> Eq Bool (leb (succ cap0) F) true -> Eq Bool (leb (succ cap0) G) true
+                  -> Eq FBody (expand (succ b0) F rem seen) (expand (succ b0) G rem seen)) is
+         fn (rem : Whole) (seen : WList) (F : Whole) (G : Whole)
+            (hnd : Eq Bool (noDupW seen) true) (hal : Eq Bool (allLt (succ b0) seen) true)
+            (hcap : Eq Whole (addW (wlen seen) (succ cap0)) (succ b0)) (hrem : Eq Bool (ltb rem (succ b0)) true) is
+           case F of
+           | zero -> fn (hF : Eq Bool (leb (succ (succ cap0)) zero) true) (hG : Eq Bool (leb (succ (succ cap0)) G) true) is
+               boolDisjoint (Eq FBody (expand (succ b0) zero rem seen) (expand (succ b0) G rem seen)) hF end
+           | succ F' ->
+               case G of
+               | zero -> fn (hF : Eq Bool (leb (succ (succ cap0)) (succ F')) true) (hG : Eq Bool (leb (succ (succ cap0)) zero) true) is
+                   boolDisjoint (Eq FBody (expand (succ b0) (succ F') rem seen) (expand (succ b0) zero rem seen)) hG end
+               | succ G' -> fn (hF : Eq Bool (leb (succ (succ cap0)) (succ F')) true) (hG : Eq Bool (leb (succ (succ cap0)) (succ G')) true) is
+                   WholeElim (fn (rv : Whole) is (Eq Bool (ltb rv (succ b0)) true
+                              -> Eq FBody (expand (succ b0) (succ F') rv seen) (expand (succ b0) (succ G') rv seen)) end)
+                     (fn (hrem0 : Eq Bool (ltb zero (succ b0)) true) is refl (fbody wnil zero true) end)
+                     (fn (rp : Whole) (ihr : Eq Bool (ltb rp (succ b0)) true
+                            -> Eq FBody (expand (succ b0) (succ F') rp seen) (expand (succ b0) (succ G') rp seen))
+                         (hrem1 : Eq Bool (ltb (succ rp) (succ b0)) true) is
+                       let dec : Whole = qdiv (cmul (succ rp) 10) (succ b0) in
+                       let nxt : Whole = qmod (cmul (succ rp) 10) (succ b0) in
+                       let snc : WList = wsnoc seen (succ rp) in
+                       BoolElim (fn (z : Bool) is (Eq Bool (wmember (succ rp) seen) z -> Eq FBody (expand (succ b0) (succ F') (succ rp) seen) (expand (succ b0) (succ G') (succ rp) seen)) end)
+                         (fn (ev : Eq Bool (wmember (succ rp) seen) true) is
+                            trans
+                              (cong (fn (sc : Bool) is BoolElim (fn (w : Bool) is FBody end)
+                                       (fbody wnil (windex (succ rp) seen) false)
+                                       (fbody (wcons dec (fbDigits (expand (succ b0) F' nxt snc)))
+                                              (fbRep (expand (succ b0) F' nxt snc)) (fbTerm (expand (succ b0) F' nxt snc)))
+                                       sc end) ev)
+                              (sym (cong (fn (sc : Bool) is BoolElim (fn (w : Bool) is FBody end)
+                                       (fbody wnil (windex (succ rp) seen) false)
+                                       (fbody (wcons dec (fbDigits (expand (succ b0) G' nxt snc)))
+                                              (fbRep (expand (succ b0) G' nxt snc)) (fbTerm (expand (succ b0) G' nxt snc)))
+                                       sc end) ev)) end)
+                         (fn (ev : Eq Bool (wmember (succ rp) seen) false) is
+                            let ihres : Eq FBody (expand (succ b0) F' nxt snc) (expand (succ b0) G' nxt snc) =
+                              ih nxt snc F' G'
+                                (noDupSnoc (succ rp) seen hnd ev)
+                                (allLtSnoc (succ b0) (succ rp) seen hal hrem1)
+                                (trans (cong (fn (m : Whole) is addW m cap0 end) (wlenSnoc (succ rp) seen))
+                                   (trans (sym (addSuccR (wlen seen) cap0)) hcap))
+                                (remBound (cmul (succ rp) 10) b0)
+                                hF hG in
+                            cong (fn (fb : FBody) is BoolElim (fn (w : Bool) is FBody end)
+                                     (fbody wnil (windex (succ rp) seen) false) fb (wmember (succ rp) seen) end)
+                              (trans
+                                 (cong (fn (a : WList) is
+                                          fbody (wcons dec a)
+                                            (fbRep (expand (succ b0) F' nxt snc)) (fbTerm (expand (succ b0) F' nxt snc)) end)
+                                       (cong (fn (bb : FBody) is fbDigits bb end) ihres))
+                                 (cong2 (fn (r : Whole) (tb : Bool) is
+                                           fbody (wcons dec (fbDigits (expand (succ b0) G' nxt snc))) r tb end)
+                                    (cong (fn (bb : FBody) is fbRep bb end) ihres)
+                                    (cong (fn (bb : FBody) is fbTerm bb end) ihres))) end)
+                         (wmember (succ rp) seen) (refl (wmember (succ rp) seen)) end)
+                     rem hrem end
+               end
+           end
+         end
+       end)
+      cap
+  end
+end
+
+-- ============================================================================
+-- RUNG 3 assembled + THE QLIFT.  toRadixRep respects QRel; lift it onto Q.
+-- ============================================================================
+
+lteAddR : (a : Whole) -> (b : Whole) -> Eq Bool (leb a (addW a b)) true is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (leb x (addW x b)) true end)
+      (refl true)
+      (fn (k : Whole) (ih : Eq Bool (leb k (addW k b)) true) is ih end)
+      a
+  end
+end
+
+lteAddL : (a : Whole) -> (b : Whole) -> Eq Bool (leb b (addW a b)) true is
+  fn (a : Whole) (b : Whole) is
+    subst Whole (addW b a) (addW a b) (addComm b a)
+      (fn (z : Whole) is Eq Bool (leb b z) true end) (lteAddR b a)
+  end
+end
+
+-- MAGNITUDE CROSS-PRODUCT.  QRel-related QPairs satisfy |num p|·den q = |num q|·den p
+-- (the non-negative-factor bridge applied to both sides of the ℤ cross-multiplication).
+
+magCross : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Whole (cmul (qmagNum p) (qmagDen q)) (cmul (qmagNum q) (qmagDen p)) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    trans (sym (natAbsMulZfrom (qnum p) (succ (qdpred q))))
+      (trans (cong imag h)
+             (natAbsMulZfrom (qnum q) (succ (qdpred p))))
+  end
+end
+
+-- FRACTIONAL EXPANSION RESPECTS QRel (rung 3, assembled).  Align both representatives'
+-- own fuels to a common large fuel (expandFuelStable, both sufficient), then equate the
+-- two expansions at that fuel (expandCross); the initial remainders are cross-equal by
+-- natModCrossStep on magCross.
+
+bodyResp : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq FBody
+         (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil)
+         (expand (qmagDen q) (succ (qmagDen q)) (qmod (qmagNum q) (qmagDen q)) wnil) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    let remP : Whole = qmod (qmagNum p) (qmagDen p) in
+    let remQ : Whole = qmod (qmagNum q) (qmagDen q) in
+    let big : Whole = addW (succ (succ (qdpred p))) (succ (succ (qdpred q))) in
+    let crossEq : Eq Whole (cmul remP (succ (qdpred q))) (cmul remQ (succ (qdpred p))) =
+      natModCrossStep (qdpred p) (qdpred q) (qmagNum p) (qmagNum q) (magCross p q h) in
+    trans
+      (expandFuelStable (qdpred p) (succ (qdpred p)) remP wnil (succ (succ (qdpred p))) big
+         (refl true) (refl true) (refl (succ (qdpred p))) (remBound (qmagNum p) (qdpred p))
+         (lteRefl (succ (succ (qdpred p))))
+         (lteAddR (succ (succ (qdpred p))) (succ (succ (qdpred q)))))
+      (trans
+         (expandCross (qdpred p) (qdpred q) big remP remQ wnil wnil crossEq (refl true))
+         (sym
+            (expandFuelStable (qdpred q) (succ (qdpred q)) remQ wnil (succ (succ (qdpred q))) big
+               (refl true) (refl true) (refl (succ (qdpred q))) (remBound (qmagNum q) (qdpred q))
+               (lteRefl (succ (succ (qdpred q))))
+               (lteAddL (succ (succ (qdpred p))) (succ (succ (qdpred q)))))))
+  end
+end
+
+-- THE WELL-DEFINEDNESS: toRadixRep is constant on each QRel class — equal sign
+-- (signResp), equal integer part (intPartResp), equal fractional body (bodyResp).
+
+toRadixRespects : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq RDec (toRadixRep p) (toRadixRep q) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    trans (cong (fn (s : Bool) is
+                  rdec s (qdiv (qmagNum p) (qmagDen p))
+                    (fbDigits (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil))
+                    (fbRep (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil))
+                    (fbTerm (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil)) end)
+                (signResp p q h))
+      (trans (cong (fn (i : Whole) is
+                     rdec (qsign q) i
+                       (fbDigits (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil))
+                       (fbRep (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil))
+                       (fbTerm (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil)) end)
+                   (intPartResp p q h))
+        (trans (cong (fn (d : WList) is
+                       rdec (qsign q) (qdiv (qmagNum q) (qmagDen q)) d
+                         (fbRep (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil))
+                         (fbTerm (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil)) end)
+                     (cong (fn (bb : FBody) is fbDigits bb end) (bodyResp p q h)))
+          (trans (cong (fn (r : Whole) is
+                         rdec (qsign q) (qdiv (qmagNum q) (qmagDen q))
+                           (fbDigits (expand (qmagDen q) (succ (qmagDen q)) (qmod (qmagNum q) (qmagDen q)) wnil))
+                           r
+                           (fbTerm (expand (qmagDen p) (succ (qmagDen p)) (qmod (qmagNum p) (qmagDen p)) wnil)) end)
+                       (cong (fn (bb : FBody) is fbRep bb end) (bodyResp p q h)))
+            (cong (fn (t : Bool) is
+                    rdec (qsign q) (qdiv (qmagNum q) (qmagDen q))
+                      (fbDigits (expand (qmagDen q) (succ (qmagDen q)) (qmod (qmagNum q) (qmagDen q)) wnil))
+                      (fbRep (expand (qmagDen q) (succ (qmagDen q)) (qmod (qmagNum q) (qmagDen q)) wnil))
+                      t end)
+                  (cong (fn (bb : FBody) is fbTerm bb end) (bodyResp p q h))))))
+  end
+end
+
+-- THE DECIMAL OF A RATIONAL, on Q itself — the qlift of toRadixRep through QRel.
+
+nzNat : Whole -> Bool is
+  fn (t : Whole) is case t of | zero -> false | succ k -> true end end
+end
+
+-- does the denominator NOT divide the numerator (is there a nonzero remainder)?
+
+nzMod : Whole -> Whole -> Bool is
+  fn (a : Whole) (b : Whole) is nzNat (qmod a b) end
+end
+
+-- assemble the signed floor from (sign, magnitude floor, has-remainder):
+--   non-negative          -> +q
+--   negative, divides      -> -q          (exact: floor is the negation)
+--   negative, has rem      -> -(q+1)      (round toward -infinity)
+
+mkFloor : Bool -> Whole -> Bool -> Int is
+  fn (s : Bool) (q : Whole) (nz : Bool) is
+    case s of
+    | false -> intOf q
+    | true ->
+        case nz of
+        | false -> ineg (intOf q)
+        | true  -> ineg (intOf (succ q))
+        end
+    end
+  end
+end
+
+-- the floor of a QPair representative.
+
+floorRep : QPair -> Int is
+  fn (p : QPair) is
+    mkFloor (qsign p) (qdiv (qmagNum p) (qmagDen p)) (nzMod (qmagNum p) (qmagDen p))
+  end
+end
+
+-- the magnitude cross-product the respect proofs share: QRel (cross-mult in Int),
+-- |.|'d through natAbsMulZfrom, becomes the Whole cross-product on |num| and den.
+-- (Same bridge intPartResp/signResp use; named here for reuse by modIndResp.)
+
+modIndResp : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Bool (nzMod (qmagNum p) (qmagDen p)) (nzMod (qmagNum q) (qmagDen q)) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    trans (sym (nzMulSucc (qmod (qmagNum p) (qmagDen p)) (qdpred q)))
+      (trans (cong nzNat
+                (natModCrossStep (qdpred p) (qdpred q) (qmagNum p) (qmagNum q) (magCross p q h)))
+             (nzMulSucc (qmod (qmagNum q) (qmagDen q)) (qdpred p)))
+  end
+end
+
+-- FLOOR IS WELL-DEFINED ON THE QUOTIENT: QRel-related representatives have the
+-- SAME floor.  floorRep factors through mkFloor in three slots, each respecting
+-- QRel, so three substitutions (sign, magnitude floor, has-remainder) rewrite
+-- the representative p into q.  This is ch13's floorUnique on the canonical Q.
+
+floorUnique : (p : QPair) -> (q : QPair) -> QRel p q
+    -> Eq Int (floorRep p) (floorRep q) is
+  fn (p : QPair) (q : QPair) (h : QRel p q) is
+    subst Bool (qsign p) (qsign q) (signResp p q h)
+      (fn (s : Bool) is
+         Eq Int (floorRep p)
+              (mkFloor s (qdiv (qmagNum q) (qmagDen q)) (nzMod (qmagNum q) (qmagDen q))) end)
+      (subst Whole (qdiv (qmagNum p) (qmagDen p)) (qdiv (qmagNum q) (qmagDen q)) (intPartResp p q h)
+        (fn (n : Whole) is
+           Eq Int (floorRep p) (mkFloor (qsign p) n (nzMod (qmagNum q) (qmagDen q))) end)
+        (subst Bool (nzMod (qmagNum p) (qmagDen p)) (nzMod (qmagNum q) (qmagDen q)) (modIndResp p q h)
+          (fn (b : Bool) is
+             Eq Int (floorRep p) (mkFloor (qsign p) (qdiv (qmagNum p) (qmagDen p)) b) end)
+          (refl (floorRep p))))
+  end
+end
+
+-- THE FLOOR ON Q: the lift of floorRep along floorUnique.  floorQ (qin p) computes
+-- to floorRep p, and floorUnique is the proof obligation qlift demands.
+
+-- ============================================================================
+-- THE DECIMAL OF A RATIONAL, on Frac itself — the qlift of toRadixRep through
+-- QRel (well-definedness = toRadixRespects: the expansion is class-invariant).
+-- ============================================================================
+to_radix : Frac -> RDec is
+  qlift QPair QRel RDec toRadixRep toRadixRespects
+end
+
+-- THE FLOOR ON Frac: the qlift of floorRep along floorUnique (round toward -inf).
+floorQ : Frac -> Int is qlift QPair QRel Int floorRep floorUnique end
+
+-- ----------------------------------------------------------------------------
+-- SIGNIFICANT-FIGURE ROUNDING, re-lifted as PURE POST-FUNCTIONS of the already-
+-- lifted to_radix output.  A pure function of a lifted observer respects QRel for
+-- free — no second respect proof.  The RDec digit stream is read repetend-aware.
+-- ----------------------------------------------------------------------------
+
+-- the i-th element of a WList (0-indexed), 0 past the end.
+wnth : WList -> Whole -> Whole is
+  fn (xs : WList) is
+    case xs of
+    | wnil -> fn (i : Whole) is 0 end
+    | wcons h t with ih -> fn (i : Whole) is
+        case i of | zero -> h | succ j -> ih j end
+      end
+    end
+  end
+end
+
+-- the i-th fractional digit of an RDec, expanding the repetend for a repeating
+-- decimal and reading 0 past the end of a terminating one.
+digitAt : RDec -> Whole -> Whole is
+  fn (d : RDec) (i : Whole) is
+    case d of
+    | rdec s ip ds rep term ->
+        case leb (wlen ds) i of
+        | false -> wnth ds i
+        | true  ->
+            case term of
+            | true  -> 0
+            | false -> wnth ds (addW rep ((subW i rep) % (subW (wlen ds) rep)))
+            end
+        end
+    end
+  end
+end
+
+-- the integer formed by the first n fractional digits (d0..d(n-1)), MSB first.
+firstND : RDec -> Whole -> Whole is
+  fn (d : RDec) (n : Whole) is
+    WholeElim (fn (k : Whole) is Whole end)
+      0
+      (fn (k : Whole) (ih : Whole) is addW (mulW ih 10) (digitAt d k) end)
+      n
+  end
+end
+
+-- round the exact decimal of f to n places (round half up), as a terminating RDec:
+-- m = |int|·10^n + firstNDigits + carry; formatted exactly as the old longDiv path.
+to_radix_sigplace : Whole -> Frac -> RDec is
+  fn (n : Whole) (f : Frac) is
+    let d : RDec = to_radix f in
+    case d of
+    | rdec s ip ds rep term ->
+        let firstn : Whole = firstND d n in
+        let bump   : Whole = case leb 5 (digitAt d n) of | true -> 1 | false -> 0 end in
+        let m      : Whole = addW (mulW ip (powTen n)) (addW firstn bump) in
+        rdec s (m // powTen n) (digitsOf n (m % powTen n)) 0 true
+    end
+  end
+end
+
+-- leading zeros of the fractional part (for |f| < 1 significant-figure counting).
+leadZ : WList -> Whole is
+  fn (ds : WList) is
+    case ds of
+    | wnil -> 0
+    | wcons h t with ih -> case h of | zero -> succ ih | succ k -> 0 end
+    end
+  end
+end
+
+-- decimal places for s SIGNIFICANT FIGURES, read off the lifted decimal: for
+-- |f| >= 1, s - (integer digits); for |f| < 1, s + (leading zeros after the point).
+sigPlacesR : Whole -> RDec -> Whole is
+  fn (s : Whole) (d : RDec) is
+    case d of
+    | rdec sg ip ds rep term ->
+        case leb 1 ip of
+        | true  -> subW s (numDigits 64 ip)
+        | false -> addW s (leadZ ds)
+        end
+    end
+  end
+end
+
+to_radix_sigfig : Whole -> Frac -> RDec is
+  fn (s : Whole) (f : Frac) is to_radix_sigplace (sigPlacesR s (to_radix f)) f end
+end
+
+-- ============================================================================
+-- DEMOTION, checked — REBUILT on the LIFTED observers.  Climbing the tower is
+-- implicit; coming back DOWN is a deliberate, checked descent.  A Frac is integral
+-- iff its exact decimal has NO fractional digits (empty digit list); its integer
+-- value is then floorQ (exact for an integral value).  toWhole/toNat additionally
+-- reject a negative (and toNat a zero).  Error strings/values are UNCHANGED: each
+-- err carries the original Frac, which the printer gcd-reduces for display.
+-- ============================================================================
+
+-- the fractional digits of a Frac's exact decimal.
+rdecDigits : RDec -> WList is fn (d : RDec) is case d of | rdec s ip ds rep term -> ds end end end
+
+-- a Frac is integral iff its exact decimal terminates immediately (no digits).
+isIntegralF : Frac -> Bool is
+  fn (f : Frac) is
+    case rdecDigits (to_radix f) of
+    | wnil       -> true
+    | wcons h t  -> false
+    end
+  end
+end
+
+toInt : Frac -> Result Int ArithErr is
+  fn (f : Frac) is
+    case isIntegralF f of
+    | false -> err Int ArithErr (notIntegral f)
+    | true  -> ok Int ArithErr (floorQ f)
+    end
+  end
+end
+
+toWhole : Frac -> Result Whole ArithErr is
+  fn (f : Frac) is
+    case isIntegralF f of
+    | false -> err Whole ArithErr (notIntegral f)
+    | true  ->
+        case floorQ f of
+        | nonneg n  -> ok Whole ArithErr n
+        | negsucc k -> err Whole ArithErr (negative f)
+        end
+    end
+  end
+end
+
+toNat : Frac -> Result Nat ArithErr is
+  fn (f : Frac) is
+    case isIntegralF f of
+    | false -> err Nat ArithErr (notIntegral f)
+    | true  ->
+        case floorQ f of
+        | nonneg n ->
+            case n of
+            | zero   -> err Nat ArithErr (notCounting f)
+            | succ k -> ok Nat ArithErr
+                (Pair Whole (fn (m : Whole) is Eq Bool (isPos m) true end) (succ k) (refl true))
+            end
+        | negsucc k -> err Nat ArithErr (negative f)
+        end
+    end
+  end
+end
 
 -- ====================================================================
 -- Packed binary strings + total numeric parsing (D1 + B4 + the goal).
