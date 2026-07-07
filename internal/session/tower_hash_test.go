@@ -105,6 +105,22 @@ func TestLadderBridgesPresent(t *testing.T) {
 	}
 }
 
+// TestMonusLibraryPresent pins the monus/order library + wsubEq keystone
+// (Task 2 of the Int ring-laws campaign): the completeness of leb, the monus
+// cancellation lemma, left cancellation of addW, and wsubEq (wsub respects
+// cross-equal differences). These carry the Int ring laws proved downstream.
+func TestMonusLibraryPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"lebComplete", "subWAddCancel", "addWCancelL", "wsubEq"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestTowerGraphLemmasPresent pins the tower conversion graph (Task 5): the
 // ratOfInt injection, the intOf homomorphism certificates over iadd/imul
 // (now direct refl lemmas under junk-free Int, no normalization lemma

@@ -1254,6 +1254,348 @@ abGroupLawsOfRing : (A : U) -> (r : Ring A) -> RingLaws A r -> AbGroupLaws A (gr
 end
 
 -- ====================================================================
+-- THE MONUS / ORDER LIBRARY + wsubEq (Int ring-laws campaign, Task 2).
+-- The keystone `wsubEq` proves that `wsub` (the Whole-difference into Int)
+-- respects cross-equal differences: a + d = c + b implies a - b = c - d as
+-- signed integers. It is the transport lemma the Int ring laws stand on.
+-- Everything here is machine-checked by WholeElim induction over the raw
+-- kernels (leb recurses on its first arg, subW on its second, addW on its
+-- first), with the shipped subst/symEq/transEq/congW plumbing.
+-- ====================================================================
+
+-- succ is injective: cancel a successor by congruence on `pred`
+-- (pred (succ a) = a definitionally, so the congW result IS Eq Whole a b).
+succInj : (a : Whole) -> (b : Whole) -> Eq Whole (succ a) (succ b) -> Eq Whole a b is
+  fn (a : Whole) (b : Whole) (p : Eq Whole (succ a) (succ b)) is
+    congW pred (succ a) (succ b) p
+  end
+end
+
+-- EX-FALSO from a Bool absurdity (the idiom later tasks reuse). Given a proof
+-- that `true = false`, ANY goal G follows: subst along the discriminant with a
+-- Bool-CASE motive whose true-arm is trivially inhabited (Eq Bool true true,
+-- by refl) and whose false-arm is G. `subst … (refl true)` transports the
+-- true-arm witness to the false-arm, i.e. to G. This discharges impossible
+-- case branches WITHOUT an Empty type.
+boolDiscTF : (G : U) -> Eq Bool true false -> G is
+  fn (G : U) (h : Eq Bool true false) is
+    subst Bool true false h
+      (fn (z : Bool) is
+         case z of
+         | true -> Eq Bool true true
+         | false -> G
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- Case on a Bool while RETAINING the discriminant equation. Ordinary BoolElim
+-- forgets that the bound tag equals the scrutinee; here the motive is
+-- `Eq Bool g x -> P x`, so applying the eliminated result to `refl g` hands
+-- each arm a proof that the guard equals its tag. The order-transfer proofs
+-- below need those equations to reduce `wsub` and to invoke `subWAddCancel`.
+boolCaseEq : (g : Bool) -> (P : Bool -> U)
+  -> (Eq Bool g true -> P true) -> (Eq Bool g false -> P false) -> P g is
+  fn (g : Bool) (P : Bool -> U)
+     (ht : Eq Bool g true -> P true) (hf : Eq Bool g false -> P false) is
+    BoolElim (fn (x : Bool) is Eq Bool g x -> P x end) ht hf g (refl g)
+  end
+end
+
+-- Congruence from Whole into Int through the two Int constructors (there is no
+-- ambient cong across types; these lift a Whole equality onto nonneg/negsucc).
+congNonneg : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Int (nonneg x) (nonneg y) is
+  fn (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Int (nonneg x) (nonneg z) end) (refl (nonneg x))
+  end
+end
+congNegsucc : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Int (negsucc x) (negsucc y) is
+  fn (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Int (negsucc x) (negsucc z) end) (refl (negsucc x))
+  end
+end
+
+-- COMPLETENESS of the decidable order: leb is total, so `leb a b = false`
+-- forces `leb b a = true`. Double induction (leb recurses on the first arg);
+-- the zero-vs-zero corner is impossible and discharged by boolDiscTF.
+lebComplete : (a : Whole) -> (b : Whole) -> Eq Bool (leb a b) false -> Eq Bool (leb b a) true is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is (b : Whole) -> Eq Bool (leb x b) false -> Eq Bool (leb b x) true end)
+      (fn (b : Whole) (h : Eq Bool (leb zero b) false) is
+         boolDiscTF (Eq Bool (leb b zero) true) h end)
+      (fn (k : Whole) (ih : (b : Whole) -> Eq Bool (leb k b) false -> Eq Bool (leb b k) true) is
+         fn (b : Whole) is
+           WholeElim (fn (y : Whole) is Eq Bool (leb (succ k) y) false -> Eq Bool (leb y (succ k)) true end)
+             (fn (h : Eq Bool (leb (succ k) zero) false) is refl true end)
+             (fn (j : Whole) (ihb : Eq Bool (leb (succ k) j) false -> Eq Bool (leb j (succ k)) true) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) false) is ih j h end end)
+             b
+         end end)
+      a
+  end
+end
+
+-- The monus cancellation lemma: when `b <= a`, adding `b` back to `a - b`
+-- recovers `a`. Induction on the recursed variable `b` (subW steps on it,
+-- addW steps on it); the a=zero-under-succ corner is impossible (b <= 0 with
+-- b a successor) and is discharged by boolDiscTF. subWSucc peels the matched
+-- successors so the induction hypothesis applies.
+subWAddCancel : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) true -> Eq Whole (addW b (subW a b)) a is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is (m : Whole) -> Eq Bool (leb x m) true -> Eq Whole (addW x (subW m x)) m end)
+      (fn (m : Whole) (h : Eq Bool (leb zero m) true) is refl m end)
+      (fn (k : Whole) (ih : (m : Whole) -> Eq Bool (leb k m) true -> Eq Whole (addW k (subW m k)) m) is
+         fn (m : Whole) is
+           WholeElim (fn (y : Whole) is Eq Bool (leb (succ k) y) true -> Eq Whole (addW (succ k) (subW y (succ k))) y end)
+             (fn (h : Eq Bool (leb (succ k) zero) true) is
+                boolDiscTF (Eq Whole (addW (succ k) (subW zero (succ k))) zero)
+                  (symEq Bool (leb (succ k) zero) true h) end)
+             (fn (j : Whole) (ihb : Eq Bool (leb (succ k) j) true -> Eq Whole (addW (succ k) (subW j (succ k))) j) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) true) is
+                  congW (fn (t : Whole) is succ t end) (addW k (subW (succ j) (succ k))) j
+                    (transEq Whole (addW k (subW (succ j) (succ k))) (addW k (subW j k)) j
+                       (congW (fn (t : Whole) is addW k t end) (subW (succ j) (succ k)) (subW j k) (subWSucc j k))
+                       (ih j h))
+                end end)
+             m
+         end end)
+      b
+      a
+  end
+end
+
+-- LEFT cancellation of addW: `k + a = k + b` implies `a = b`. Induction on the
+-- prefix `k` (addW recurses on its first arg); each step strips one successor
+-- with succInj and defers to the hypothesis.
+addWCancelL : (k : Whole) -> (a : Whole) -> (b : Whole) -> Eq Whole (addW k a) (addW k b) -> Eq Whole a b is
+  fn (k : Whole) (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x a) (addW x b) -> Eq Whole a b end)
+      (fn (h : Eq Whole (addW zero a) (addW zero b)) is h end)
+      (fn (n : Whole) (ih : Eq Whole (addW n a) (addW n b) -> Eq Whole a b) is
+         fn (h : Eq Whole (addW (succ n) a) (addW (succ n) b)) is
+           ih (succInj (addW n a) (addW n b) h)
+         end end)
+      k
+  end
+end
+
+-- Order reflexivity through addition: m <= m + n, always. Induction on m (both
+-- leb and addW recurse on their first arg, so the successor case reduces the
+-- goal straight onto the hypothesis).
+lebSelfAddR : (m : Whole) -> (n : Whole) -> Eq Bool (leb m (addW m n)) true is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (leb x (addW x n)) true end)
+      (refl true)
+      (fn (k : Whole) (ih : Eq Bool (leb k (addW k n)) true) is ih end)
+      m
+  end
+end
+
+-- STRICT completeness: `leb b a = false` (i.e. a < b) gives `leb (succ a) b`
+-- = true (a + 1 <= b). Double induction mirroring lebComplete; the recursive
+-- call sits in exactly one arm, the corners are refl / boolDiscTF.
+lebComplStrict : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) false -> Eq Bool (leb (succ a) b) true is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (y : Whole) is (w : Whole) -> Eq Bool (leb y w) false -> Eq Bool (leb (succ w) y) true end)
+      (fn (w : Whole) (h : Eq Bool (leb zero w) false) is
+         boolDiscTF (Eq Bool (leb (succ w) zero) true) h end)
+      (fn (j : Whole) (ih : (w : Whole) -> Eq Bool (leb j w) false -> Eq Bool (leb (succ w) j) true) is
+         fn (w : Whole) is
+           WholeElim (fn (x : Whole) is Eq Bool (leb (succ j) x) false -> Eq Bool (leb (succ x) (succ j)) true end)
+             (fn (h : Eq Bool (leb (succ j) zero) false) is refl true end)
+             (fn (i : Whole) (ihx : Eq Bool (leb (succ j) i) false -> Eq Bool (leb (succ i) (succ j)) true) is
+                fn (h : Eq Bool (leb (succ j) (succ i)) false) is ih i h end end)
+             w
+         end end)
+      b
+      a
+  end
+end
+
+-- ORDER TRANSFER (the mixed-branch discharger): from the cross-equality
+-- a + d = c + b and `b <= a`, derive `d <= c`. Substituting a = b + (a - b)
+-- and cancelling b turns the cross-equality into (a - b) + d = c, and
+-- lebSelfAddR reads off d <= d + (a - b) = c.
+orderTransfer : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b) -> Eq Bool (leb b a) true -> Eq Bool (leb d c) true is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b)) (e1 : Eq Bool (leb b a) true) is
+    let ba : Eq Whole (addW b (subW a b)) a = subWAddCancel a b e1 in
+    let Hsub : Eq Whole (addW (addW b (subW a b)) d) (addW c b) =
+      subst Whole a (addW b (subW a b)) (symEq Whole (addW b (subW a b)) a ba)
+        (fn (z : Whole) is Eq Whole (addW z d) (addW c b) end) H in
+    let step : Eq Whole (addW b (addW (subW a b) d)) (addW b c) =
+      transEq Whole (addW b (addW (subW a b) d)) (addW (addW b (subW a b)) d) (addW b c)
+        (symEq Whole (addW (addW b (subW a b)) d) (addW b (addW (subW a b) d)) (addWAssoc b (subW a b) d))
+        (transEq Whole (addW (addW b (subW a b)) d) (addW c b) (addW b c) Hsub (addWComm c b)) in
+    let rdc : Eq Whole (addW (subW a b) d) c = addWCancelL b (addW (subW a b) d) c step in
+    let drc : Eq Whole (addW d (subW a b)) c =
+      transEq Whole (addW d (subW a b)) (addW (subW a b) d) c (addWComm d (subW a b)) rdc in
+    subst Whole (addW d (subW a b)) c drc (fn (z : Whole) is Eq Bool (leb d z) true end) (lebSelfAddR d (subW a b))
+  end
+end
+
+-- The SAME-BRANCH compatibility cores. Both same-sign branches of wsubEq reduce
+-- to a Whole equality of the two truncated differences; these package the addW
+-- shuffle + subWAddCancel + addWCancelL argument once each.
+
+-- Nonneg branch: b <= a and d <= c give (a - b) = (c - d).
+subWCrossTrue : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b)
+  -> Eq Bool (leb b a) true -> Eq Bool (leb d c) true
+  -> Eq Whole (subW a b) (subW c d) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b))
+     (e1 : Eq Bool (leb b a) true) (e2 : Eq Bool (leb d c) true) is
+    let sac1 : Eq Whole (addW b (subW a b)) a = subWAddCancel a b e1 in
+    let sac2 : Eq Whole (addW d (subW c d)) c = subWAddCancel c d e2 in
+    let L1 : Eq Whole (addW (addW b d) (subW a b)) (addW a d) =
+      transEq Whole (addW (addW b d) (subW a b)) (addW (addW b (subW a b)) d) (addW a d)
+        (symEq Whole (addW (addW b (subW a b)) d) (addW (addW b d) (subW a b))
+           (addWSwapR b (subW a b) d))
+        (congW (fn (t : Whole) is addW t d end) (addW b (subW a b)) a sac1) in
+    let R1 : Eq Whole (addW (addW b d) (subW c d)) (addW c b) =
+      transEq Whole (addW (addW b d) (subW c d)) (addW (addW d b) (subW c d)) (addW c b)
+        (congW (fn (t : Whole) is addW t (subW c d) end) (addW b d) (addW d b) (addWComm b d))
+        (transEq Whole (addW (addW d b) (subW c d)) (addW (addW d (subW c d)) b) (addW c b)
+           (symEq Whole (addW (addW d (subW c d)) b) (addW (addW d b) (subW c d))
+              (addWSwapR d (subW c d) b))
+           (congW (fn (t : Whole) is addW t b end) (addW d (subW c d)) c sac2)) in
+    let E : Eq Whole (addW (addW b d) (subW a b)) (addW (addW b d) (subW c d)) =
+      transEq Whole (addW (addW b d) (subW a b)) (addW a d) (addW (addW b d) (subW c d))
+        L1
+        (transEq Whole (addW a d) (addW c b) (addW (addW b d) (subW c d))
+           H
+           (symEq Whole (addW (addW b d) (subW c d)) (addW c b) R1)) in
+    addWCancelL (addW b d) (subW a b) (subW c d) E
+  end
+end
+
+-- Negsucc branch: leb b a = false and leb d c = false give
+-- (b - succ a) = (d - succ c). subWAddCancel now fires at the shifted bound
+-- (succ a <= b via lebComplStrict); one succInj strips the shared successor.
+subWCrossFalse : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b)
+  -> Eq Bool (leb b a) false -> Eq Bool (leb d c) false
+  -> Eq Whole (subW b (succ a)) (subW d (succ c)) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b))
+     (e1 : Eq Bool (leb b a) false) (e2 : Eq Bool (leb d c) false) is
+    let sac1 : Eq Whole (addW (succ a) (subW b (succ a))) b =
+      subWAddCancel b (succ a) (lebComplStrict a b e1) in
+    let sac2 : Eq Whole (addW (succ c) (subW d (succ c))) d =
+      subWAddCancel d (succ c) (lebComplStrict c d e2) in
+    let H1 : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c b) =
+      subst Whole d (addW (succ c) (subW d (succ c)))
+        (symEq Whole (addW (succ c) (subW d (succ c))) d sac2)
+        (fn (z : Whole) is Eq Whole (addW a z) (addW c b) end) H in
+    let Hb : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c (addW (succ a) (subW b (succ a)))) =
+      subst Whole b (addW (succ a) (subW b (succ a)))
+        (symEq Whole (addW (succ a) (subW b (succ a))) b sac1)
+        (fn (z : Whole) is Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c z) end) H1 in
+    let Llhs : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW d (succ c)))) =
+      transEq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW a (addW c (subW d (succ c))))) (succ (addW (addW a c) (subW d (succ c))))
+        (addWSuccR a (addW c (subW d (succ c))))
+        (congW (fn (t : Whole) is succ t end) (addW a (addW c (subW d (succ c)))) (addW (addW a c) (subW d (succ c)))
+           (symEq Whole (addW (addW a c) (subW d (succ c))) (addW a (addW c (subW d (succ c))))
+              (addWAssoc a c (subW d (succ c))))) in
+    let Rrhs : Eq Whole (addW c (addW (succ a) (subW b (succ a)))) (succ (addW (addW a c) (subW b (succ a)))) =
+      transEq Whole (addW c (addW (succ a) (subW b (succ a)))) (succ (addW c (addW a (subW b (succ a))))) (succ (addW (addW a c) (subW b (succ a))))
+        (addWSuccR c (addW a (subW b (succ a))))
+        (congW (fn (t : Whole) is succ t end) (addW c (addW a (subW b (succ a)))) (addW (addW a c) (subW b (succ a)))
+           (transEq Whole (addW c (addW a (subW b (succ a)))) (addW (addW c a) (subW b (succ a))) (addW (addW a c) (subW b (succ a)))
+              (symEq Whole (addW (addW c a) (subW b (succ a))) (addW c (addW a (subW b (succ a))))
+                 (addWAssoc c a (subW b (succ a))))
+              (congW (fn (t : Whole) is addW t (subW b (succ a)) end) (addW c a) (addW a c) (addWComm c a)))) in
+    let succEq : Eq Whole (succ (addW (addW a c) (subW d (succ c)))) (succ (addW (addW a c) (subW b (succ a)))) =
+      transEq Whole (succ (addW (addW a c) (subW d (succ c)))) (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW b (succ a))))
+        (symEq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW d (succ c)))) Llhs)
+        (transEq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c (addW (succ a) (subW b (succ a)))) (succ (addW (addW a c) (subW b (succ a))))
+           Hb Rrhs) in
+    symEq Whole (subW d (succ c)) (subW b (succ a))
+      (addWCancelL (addW a c) (subW d (succ c)) (subW b (succ a))
+         (succInj (addW (addW a c) (subW d (succ c))) (addW (addW a c) (subW b (succ a))) succEq))
+  end
+end
+
+-- The guard-explicit form of wsub (its body with the discriminant abstracted),
+-- so a proof can rewrite the guard by subst. `wsubG (leb b a) a b` is wsub a b
+-- definitionally; feeding `true`/`false` collapses to the two branch values.
+wsubG : Bool -> Whole -> Whole -> Int is
+  fn (g : Bool) (a : Whole) (b : Whole) is
+    case g of
+    | true -> nonneg (subW a b)
+    | false -> negsucc (subW b (succ a))
+    end
+  end
+end
+-- Branch-reduction lemmas: knowing the guard, wsub collapses to one arm.
+wsubTrue : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) true -> Eq Int (wsub a b) (nonneg (subW a b)) is
+  fn (a : Whole) (b : Whole) (e : Eq Bool (leb b a) true) is
+    subst Bool true (leb b a) (symEq Bool (leb b a) true e)
+      (fn (g : Bool) is Eq Int (wsubG g a b) (nonneg (subW a b)) end)
+      (refl (nonneg (subW a b)))
+  end
+end
+wsubFalse : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) false -> Eq Int (wsub a b) (negsucc (subW b (succ a))) is
+  fn (a : Whole) (b : Whole) (e : Eq Bool (leb b a) false) is
+    subst Bool false (leb b a) (symEq Bool (leb b a) false e)
+      (fn (g : Bool) is Eq Int (wsubG g a b) (negsucc (subW b (succ a))) end)
+      (refl (negsucc (subW b (succ a))))
+  end
+end
+
+-- THE KEYSTONE. wsub respects cross-equal differences: a + d = c + b implies
+-- wsub a b = wsub c d. Case-split (with the guard equations retained, via
+-- boolCaseEq) on `leb b a` and `leb d c`. The two SAME-sign branches reduce to
+-- a Whole equality via subWCrossTrue / subWCrossFalse and lift it onto the Int
+-- constructor. The two MIXED branches are IMPOSSIBLE: orderTransfer moves one
+-- branch's leb fact to the other side, collides with its assumption to make
+-- `Eq Bool true false`, and boolDiscTF discharges the goal ex falso.
+wsubEq : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b) -> Eq Int (wsub a b) (wsub c d) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole) (H : Eq Whole (addW a d) (addW c b)) is
+    boolCaseEq (leb b a)
+      (fn (g1 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+      (fn (e1 : Eq Bool (leb b a) true) is
+         boolCaseEq (leb d c)
+           (fn (g2 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+           (fn (e2 : Eq Bool (leb d c) true) is
+              transEq Int (wsub a b) (nonneg (subW a b)) (wsub c d)
+                (wsubTrue a b e1)
+                (transEq Int (nonneg (subW a b)) (nonneg (subW c d)) (wsub c d)
+                   (congNonneg (subW a b) (subW c d) (subWCrossTrue a b c d H e1 e2))
+                   (symEq Int (wsub c d) (nonneg (subW c d)) (wsubTrue c d e2)))
+            end)
+           (fn (e2 : Eq Bool (leb d c) false) is
+              boolDiscTF (Eq Int (wsub a b) (wsub c d))
+                (transEq Bool true (leb d c) false
+                   (symEq Bool (leb d c) true (orderTransfer a b c d H e1)) e2)
+            end)
+       end)
+      (fn (e1 : Eq Bool (leb b a) false) is
+         boolCaseEq (leb d c)
+           (fn (g2 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+           (fn (e2 : Eq Bool (leb d c) true) is
+              boolDiscTF (Eq Int (wsub a b) (wsub c d))
+                (transEq Bool true (leb b a) false
+                   (symEq Bool (leb b a) true
+                      (orderTransfer c d a b (symEq Whole (addW a d) (addW c b) H) e2))
+                   e1)
+            end)
+           (fn (e2 : Eq Bool (leb d c) false) is
+              transEq Int (wsub a b) (negsucc (subW b (succ a))) (wsub c d)
+                (wsubFalse a b e1)
+                (transEq Int (negsucc (subW b (succ a))) (negsucc (subW d (succ c))) (wsub c d)
+                   (congNegsucc (subW b (succ a)) (subW d (succ c)) (subWCrossFalse a b c d H e1 e2))
+                   (symEq Int (wsub c d) (negsucc (subW d (succ c))) (wsubFalse c d e2)))
+            end)
+       end)
+  end
+end
+
+-- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
 -- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),
 -- intOf (Whole -> Int), fracOf (Whole -> Frac), ratOfInt (Int -> Frac).
