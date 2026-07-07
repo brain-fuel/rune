@@ -1028,6 +1028,47 @@ end
 commLawsWhole : CommLaws Whole semiringWhole is mulWComm end
 
 -- ====================================================================
+-- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
+-- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),
+-- intOf (Whole -> Int), fracOf (Whole -> Frac), ratOfInt (Int -> Frac).
+-- The intOf edge preserves + * 1 (proven below via the mkInt normalization
+-- lemma); the Frac edges' homomorphisms need gcd/reduce theory and ship
+-- with the Frac laws campaign. The triangle ratOfInt . intOf = fracOf is
+-- DEFINITIONAL (both sides are frac false n 1).
+-- ====================================================================
+ratOfInt : Int -> Frac is
+  fn (i : Int) is frac (isign i) (imag i) 1 end
+end
+
+-- mkInt on an explicit false sign is the bare constructor, whatever the
+-- magnitude (mkInt only normalizes -0; +0 is already normal).
+mkIntFalse : (m : Whole) -> Eq Int (mkInt false m) (int false m) is
+  fn (m : Whole) is
+    case m of
+    | zero -> refl (int false zero)
+    | succ k -> refl (int false (succ k))
+    end
+  end
+end
+
+-- iadd on two non-negative ints computes to mkInt false (addW a b): the
+-- sign xor is false, so the like-signs arm fires; mkIntFalse finishes.
+intOfAdd : (a : Whole) -> (b : Whole) -> Eq Int (iadd (intOf a) (intOf b)) (intOf (addW a b)) is
+  fn (a : Whole) (b : Whole) is mkIntFalse (addW a b) end
+end
+intOfMul : (a : Whole) -> (b : Whole) -> Eq Int (imul (intOf a) (intOf b)) (intOf (mulW a b)) is
+  fn (a : Whole) (b : Whole) is mkIntFalse (mulW a b) end
+end
+intOfOne : Eq Int (intOf (succ zero)) (int false (succ zero)) is
+  refl (int false (succ zero))
+end
+
+-- The commuting triangle, by refl: ratOfInt (intOf n) = frac false n 1 = fracOf n.
+ratOfIntOf : (n : Whole) -> Eq Frac (ratOfInt (intOf n)) (fracOf n) is
+  fn (n : Whole) is refl (frac false n 1) end
+end
+
+-- ====================================================================
 -- PROVABLY-WHOLE subtraction.  When `b <= a` is in hand, a − b stays a Whole, no
 -- promotion: the proof is part of the TYPE. `monus` is the unconditional truncating
 -- whole subtraction (floors at 0) for when underflow is acceptable.

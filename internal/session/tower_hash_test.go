@@ -59,3 +59,19 @@ func TestLawRecordTypesPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestTowerGraphLemmasPresent pins the tower conversion graph (Task 5): the
+// ratOfInt injection, the mkInt normalization lemma, the intOf homomorphism
+// certificates over iadd/imul, and the definitional coherence triangle
+// ratOfInt . intOf = fracOf.
+func TestTowerGraphLemmasPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"ratOfInt", "mkIntFalse", "intOfAdd", "intOfMul", "ratOfIntOf"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
