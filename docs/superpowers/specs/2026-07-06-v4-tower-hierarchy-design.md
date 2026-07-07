@@ -36,6 +36,10 @@ with its book chapter.
 
 ## Decision 2: minimal 3-rung ops ladder (controller-recommended, author AFK)
 
+SUPERSEDED 2026-07-06 by author directive: the full Magma-to-Field ladder
+ships via 2026-07-06-v4-full-ladder-design.md (the 3 rungs remain as its
+upper ops shapes).
+
 ```
 Semiring A = { add : A -> A -> A, zero : A, mul : A -> A -> A, one : A }
 Ring     A = { semiring : Semiring A, neg : A -> A }
