@@ -44,6 +44,10 @@ ecosystem read as mature:
 
 ## Status
 
-v4 scoping in discussion (controller proposals pending author reaction);
-v5/v6 not yet decomposed. Each bump gets its own spec -> plan(s) ->
-implementation cycles when its turn comes.
+v4 sub-project 1 (tower graph + lawful hierarchy) implemented on
+feat/v4-tower-hierarchy: Semiring/Ring/DivRing + law records, Whole laws
+proven, Num deleted, intOf homomorphisms + coherence triangle, chapters
+ch569/ch570. Next v4 sub-specs: Int/Frac law campaigns, new types,
+literals, REPL compiled-eval, perf gate. v5/v6 not yet decomposed. Each
+bump gets its own spec -> plan(s) -> implementation cycles when its turn
+comes.
