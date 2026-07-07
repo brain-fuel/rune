@@ -637,3 +637,14 @@ by the C port. Not fixed here because fixing it changes the pass's annotation sh
 byte-identity constraint, frozen WASM emission with it -- out of scope for a memory-only backend task.
 Park (no consumer forcing the fix now; revisit as a pass-level item alongside Plan B, since LLVM will
 inherit the same residual when it mirrors this conversion).
+
+## Prelude proof-load cost: Int law campaign adds ~26s per prelude load (2026-07-07, Int ring-laws final review)
+
+The Int ring-law values (wsubEq + transport specs + the fourteen law lemmas in
+internal/prelude/prelude.rune) elaborate and check at EVERY prelude load, which
+grew the internal/repl suite from ~37.6s to ~63.6s (+26s). Inherent to proving
+in-prelude with fully explicit proof terms (no tactic engine); the available
+levers are cross-session proof caching keyed on the certificate table, or
+moving law values out of the always-loaded prelude. Revisit BEFORE the Frac
+campaign lands its (larger) proof corpus - a comparable addition crosses the
+session-startup pain threshold.
