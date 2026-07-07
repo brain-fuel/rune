@@ -974,6 +974,60 @@ semiringLawsWhole : SemiringLaws Whole semiringWhole is
 end
 
 -- ====================================================================
+-- RING / DIVRING / COMM LAWS (v4, next rung). RingLaws layers additive
+-- inverses onto SemiringLaws; DivRingLaws layers multiplicative inverses
+-- (guarded by a nonzero PREDICATE, since the prelude has no ambient
+-- negation type to state "nonzero" uniformly). Commutativity is its OWN
+-- record: a commutative ring is Ring + RingLaws + CommLaws; a field is
+-- DivRing + DivRingLaws + CommLaws; a Quaternion (later) is a DivRing
+-- withOUT CommLaws. Whole's CommLaws instance is free from mulWComm.
+-- ====================================================================
+NegInvLT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> U is
+  fn (A : U) (add : A -> A -> A) (neg : A -> A) (z : A) is (a : A) -> Eq A (add (neg a) a) z end
+end
+NegInvRT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> U is
+  fn (A : U) (add : A -> A -> A) (neg : A -> A) (z : A) is (a : A) -> Eq A (add a (neg a)) z end
+end
+RecipInvLT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> (A -> U) -> U is
+  fn (A : U) (mul : A -> A -> A) (rc : A -> A) (o : A) (nz : A -> U) is
+    (x : A) -> nz x -> Eq A (mul (rc x) x) o
+  end
+end
+RecipInvRT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> (A -> U) -> U is
+  fn (A : U) (mul : A -> A -> A) (rc : A -> A) (o : A) (nz : A -> U) is
+    (x : A) -> nz x -> Eq A (mul x (rc x)) o
+  end
+end
+
+-- Ring laws = semiring laws over the embedded semiring + additive inverses.
+RingLaws : (A : U) -> Ring A -> U is
+  fn (A : U) (r : Ring A) is
+    And (SemiringLaws A (r.1))
+    (And (NegInvLT A (r.1.1) (r.2) (r.1.2.1))
+         (NegInvRT A (r.1.1) (r.2) (r.1.2.1)))
+  end
+end
+
+-- DivRing laws take a nonzero PREDICATE nz (each carrier states nonzeroness
+-- its own way; the prelude has no ambient negation type). recip zero is junk
+-- by convention, so the inverse laws are guarded by nz.
+DivRingLaws : (A : U) -> DivRing A -> (A -> U) -> U is
+  fn (A : U) (d : DivRing A) (nz : A -> U) is
+    And (RingLaws A (d.1))
+    (And (RecipInvLT A (d.1.1.2.2.1) (d.2) (d.1.1.2.2.2) nz)
+         (RecipInvRT A (d.1.1.2.2.1) (d.2) (d.1.1.2.2.2) nz))
+  end
+end
+
+-- Commutativity is its own record: a commutative ring is Ring + RingLaws +
+-- CommLaws; a field is DivRing + DivRingLaws + CommLaws; Quaternion (later)
+-- is a DivRing withOUT CommLaws. Whole's instance is free from mulWComm.
+CommLaws : (A : U) -> Semiring A -> U is
+  fn (A : U) (s : Semiring A) is CommT A (s.2.2.1) end
+end
+commLawsWhole : CommLaws Whole semiringWhole is mulWComm end
+
+-- ====================================================================
 -- PROVABLY-WHOLE subtraction.  When `b <= a` is in hand, a − b stays a Whole, no
 -- promotion: the proof is part of the TYPE. `monus` is the unconditional truncating
 -- whole subtraction (floors at 0) for when underflow is acceptable.

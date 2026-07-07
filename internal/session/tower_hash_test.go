@@ -44,3 +44,18 @@ func TestWholeSemiringLawsPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestLawRecordTypesPresent pins that the prelude carries the next rung of
+// the v4 law hierarchy: the RingLaws/DivRingLaws/CommLaws record formers and
+// Whole's commutativity instance (mulWComm packaged as CommLaws).
+func TestLawRecordTypesPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"RingLaws", "DivRingLaws", "CommLaws", "commLawsWhole"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
