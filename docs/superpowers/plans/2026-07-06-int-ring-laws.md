@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Spec: `docs/superpowers/specs/2026-07-06-int-ring-laws-design.md` (binding).
-- KERNEL FROZEN: only internal/prelude/prelude.rune, listings/, internal/session/tower_hash_test.go, internal/repl/repl_test.go may change.
+- KERNEL FROZEN means core/, store/, elaborate/ untouched. AMENDED (Task 1 discovery): the pretty-printer folds Int constructor applications to signed numerals via surface.DecConfig (surface/pretty.go) resolved by name in internal/session/session.go decConfig - those two DISPLAY-FOLDING sites may change to fold nonneg/negsucc (nonneg n -> n, negsucc k -> -(k+1)); parse-pretty harness properties must stay green. Otherwise only internal/prelude/prelude.rune, listings/, internal/session/tower_hash_test.go, internal/repl/repl_test.go may change.
 - Public op names unchanged: intOf, ineg, iadd, isub, imul, wsub, divIF, isign, imag; instance names unchanged: semiringInt, ringInt, negWhole/negInt/negFrac, subWhole/subInt/subFrac, divInt. `mkInt` is DELETED (Rule 5).
 - REPL pins unchanged as strings: `2 - 5` -> `-3 : Int`; `-3 + 1` -> `-2 : Int`; `-3 * 2` -> `-6 : Int`; `-1/3` : Frac; `(2 - 5) + 1` composes. Existing TestREPLIntTower / TestREPLNegationPromotes / TestREPLTowerArithmetic / TestREPLDecimalLiterals must stay green.
 - Established layouts: Semiring s.1 add / s.2.1 zero / s.2.2.1 mul / s.2.2.2 one; Ring r.1 semiring / r.2 neg; RingLaws = And (SemiringLaws A r.1) (And negInvL negInvR); SemiringLaws 11-slot order addAssoc, addComm, addZeroL, addZeroR, mulAssoc, mulOneL, mulOneR, distribL, distribR, annihL, annihR; NegInvLT/RT param order (A, op, inv, e).
