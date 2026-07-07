@@ -1,0 +1,478 @@
+-- Chapter 571: THE FULL MAGMA-TO-FIELD LADDER (v4 prelude, law rungs).
+--
+-- THE STRUCTURAL FACT. Every "has laws" rung in the v4 algebra hierarchy is
+-- built from TWO ingredients: an OPS SHAPE (a Sigma-record carrying only
+-- operations, no proofs) and a LAW RECORD (a proposition stating the axioms
+-- that shape's operations are asked to satisfy). Two ladders of ops shapes
+-- run in parallel -- the append family and the arithmetic family -- and each
+-- rung of each ladder pairs with exactly one law record:
+--
+--   ops shapes:   Magma -> Monoid -> Group        Semiring -> Ring -> DivRing
+--   law rungs:    Semigroup   CommMonoid  AbGroup    CommRing      Field
+--                 (each rung = the shape at its left + the named law record)
+--   edges:        addMonoidOfSemiring / mulMonoidOfSemiring / groupOfRing,
+--                 each a PROVEN LAW TRANSPORT: a ring's additive part IS an
+--                 abelian group, its multiplicative part IS a monoid -- the
+--                 classical containments, not asserted but reassembled from
+--                 the source record's own proofs.
+--
+-- Semigroup = Magma + AssocT (associativity, no identity). CommMonoid =
+-- Monoid + CommT (a monoid whose op commutes). AbGroup = Group + CommT.
+-- CommRing = Ring + CommT (over the ring's embedded multiplication). Field =
+-- DivRing + CommT. So the "law rungs" row is not a new family of shapes --
+-- it is the ops-shape row plus one extra proposition apiece.
+--
+-- THIS CHAPTER'S SCOPE. Every shape former and every law-record former on
+-- the ladder above is restated below (bare vocabulary, zero proof cost --
+-- each is a Sigma type or an And-chain, not a theorem). So are all FIVE
+-- ladder-edge bridges (magmaOfMonoid/monoidOfGroup/addMonoidOfSemiring/
+-- mulMonoidOfSemiring/groupOfRing) and all FOUR law transports
+-- (addCommMonoidLawsOfSemiring/mulMonoidLawsOfSemiring/groupLawsOfRing/
+-- abGroupLawsOfRing) -- these are generic, fully proven functions, cheap
+-- because they are pure And-chain reassembly (projection in, mkAnd out),
+-- not fresh induction. What this chapter does NOT build is a concrete
+-- Semiring/Ring Whole instance or its eleven-lemma SemiringLaws witness
+-- (ch569's full semiringLawsWhole, which needs the whole mulW proof
+-- family: mulWZeroR/distribWR/mulWSuccR/mulWComm/mulWAssoc/mulWOneL/
+-- mulWOneR/distribWL) -- pulling that in here would double this chapter's
+-- length re-proving facts ch569 already owns. So the four transports above
+-- are demonstrated GENERICALLY (their types and bodies are real, checked
+-- code) but never APPLIED to a concrete Whole Ring/Semiring in this file.
+-- The one rung this chapter proves CONCRETELY is CommMonoid, at Whole's
+-- addition: commMonoidLawsWholeAdd assembles from four small induction
+-- lemmas (addWAssoc/addWZeroL/addWZeroR/addWComm, the last needing
+-- addWSuccR), proven here by WholeElim, mirroring ch569's semiring proofs
+-- one rung down the ladder. The runnable witness at the end dispatches
+-- through that concrete CommMonoid's own operation, not through any
+-- transport.
+--
+-- Self-contained (the ch107/ch569 pattern): restates the Whole kernel, the
+-- ops-ladder formers, the law-record formers, and the Whole lemmas it uses;
+-- does not load the prelude, registers no accelerated builtins.
+
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+-- The Whole-level addition kernel (named so `+` elsewhere can dispatch on
+-- it by typeclass; this chapter has no dispatch, so the kernel stands
+-- alone under its own name).
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+-- ====================================================================
+-- THE APPEND LADDER'S OPS SHAPES. A Magma is a bare binary operation; a
+-- Monoid adds an identity; a Group adds an inverse. Each nests the one
+-- before it (Monoid's `.1` is its Magma, Group's `.1` is its Monoid), the
+-- same superclass-by-projection discipline as Semiring/Ring/DivRing below.
+-- ====================================================================
+Magma : U -> U is fn (A : U) is A -> A -> A end end
+Monoid    : U -> U is fn (A : U) is Sig (A -> A -> A) (fn (_p : A -> A -> A) is A end) end end
+mkMonoid : (A : U) -> (A -> A -> A) -> A -> Monoid A is
+  fn (A : U) (a : A -> A -> A) (e : A) is
+    Pair (A -> A -> A) (fn (_p : A -> A -> A) is A end) a e
+  end
+end
+
+Group : U -> U is
+  fn (A : U) is Sig (Monoid A) (fn (_m : Monoid A) is A -> A end) end
+end
+mkGroup : (A : U) -> Monoid A -> (A -> A) -> Group A is
+  fn (A : U) (m : Monoid A) (i : A -> A) is
+    Pair (Monoid A) (fn (_m : Monoid A) is A -> A end) m i
+  end
+end
+
+-- ====================================================================
+-- THE ARITHMETIC LADDER'S OPS SHAPES. Three Sigma-record classes carrying
+-- OPERATIONS ONLY: Semiring {add, zero, mul, one} -> Ring {+neg} ->
+-- DivRing {+recip}. Laws live in SEPARATE records (below), so a carrier
+-- that can compute but not prove (IEEE754, elsewhere) still gets an ops
+-- instance. Superclass access is projection: a Ring contains its Semiring
+-- as `.1`, a DivRing its Ring as `.1`.
+-- ====================================================================
+Semiring : U -> U is
+  fn (A : U) is
+    Sig (A -> A -> A) (fn (_add : A -> A -> A) is
+      Sig A (fn (_zero : A) is
+        Sig (A -> A -> A) (fn (_mul : A -> A -> A) is A end)
+      end)
+    end)
+  end
+end
+mkSemiring : (A : U) -> (A -> A -> A) -> A -> (A -> A -> A) -> A -> Semiring A is
+  fn (A : U) (a : A -> A -> A) (z : A) (m : A -> A -> A) (o : A) is
+    Pair (A -> A -> A) (fn (_add : A -> A -> A) is
+        Sig A (fn (_zero : A) is
+          Sig (A -> A -> A) (fn (_mul : A -> A -> A) is A end)
+        end)
+      end)
+      a
+      (Pair A (fn (_zero : A) is
+          Sig (A -> A -> A) (fn (_mul : A -> A -> A) is A end)
+        end)
+        z
+        (Pair (A -> A -> A) (fn (_mul : A -> A -> A) is A end) m o))
+  end
+end
+
+Ring : U -> U is
+  fn (A : U) is Sig (Semiring A) (fn (_s : Semiring A) is A -> A end) end
+end
+mkRing : (A : U) -> Semiring A -> (A -> A) -> Ring A is
+  fn (A : U) (s : Semiring A) (n : A -> A) is
+    Pair (Semiring A) (fn (_s : Semiring A) is A -> A end) s n
+  end
+end
+
+DivRing : U -> U is
+  fn (A : U) is Sig (Ring A) (fn (_r : Ring A) is A -> A end) end
+end
+mkDivRing : (A : U) -> Ring A -> (A -> A) -> DivRing A is
+  fn (A : U) (r : Ring A) (rc : A -> A) is
+    Pair (Ring A) (fn (_r : Ring A) is A -> A end) r rc
+  end
+end
+
+-- ====================================================================
+-- LAW STATEMENTS. Reusable propositions over raw operations; the law
+-- RECORDS below chain them with a non-dependent And. Laws are SEPARATE
+-- from the ops classes above so proof-free carriers still get ops.
+-- ====================================================================
+And : U -> U -> U is fn (P : U) (Q : U) is Sig P (fn (_p : P) is Q end) end end
+mkAnd : (P : U) -> (Q : U) -> P -> Q -> And P Q is
+  fn (P : U) (Q : U) (p : P) (q : Q) is Pair P (fn (_p : P) is Q end) p q end
+end
+
+AssocT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> (c : A) -> Eq A (f (f a b) c) (f a (f b c)) end
+end
+CommT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> Eq A (f a b) (f b a) end
+end
+IdLT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f e a) a end
+end
+IdRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f a e) a end
+end
+DistribLT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul a (add b c)) (add (mul a b) (mul a c))
+  end
+end
+DistribRT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul (add a b) c) (add (mul a c) (mul b c))
+  end
+end
+AnnihLT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul z a) z end
+end
+AnnihRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul a z) z end
+end
+NegInvLT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> U is
+  fn (A : U) (add : A -> A -> A) (neg : A -> A) (z : A) is (a : A) -> Eq A (add (neg a) a) z end
+end
+NegInvRT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> U is
+  fn (A : U) (add : A -> A -> A) (neg : A -> A) (z : A) is (a : A) -> Eq A (add a (neg a)) z end
+end
+RecipInvLT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> (A -> U) -> U is
+  fn (A : U) (mul : A -> A -> A) (rc : A -> A) (o : A) (nz : A -> U) is
+    (x : A) -> nz x -> Eq A (mul (rc x) x) o
+  end
+end
+RecipInvRT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> (A -> U) -> U is
+  fn (A : U) (mul : A -> A -> A) (rc : A -> A) (o : A) (nz : A -> U) is
+    (x : A) -> nz x -> Eq A (mul x (rc x)) o
+  end
+end
+
+-- The semiring laws over an ops instance: additive commutative monoid,
+-- multiplicative monoid, distributivity both sides, zero annihilates.
+-- (Restated for its TYPE alone -- the transports below take a witness of
+-- this record as a hypothesis; this chapter builds no concrete one.)
+SemiringLaws : (A : U) -> Semiring A -> U is
+  fn (A : U) (s : Semiring A) is
+    And (AssocT A (s.1))
+    (And (CommT A (s.1))
+    (And (IdLT A (s.1) (s.2.1))
+    (And (IdRT A (s.1) (s.2.1))
+    (And (AssocT A (s.2.2.1))
+    (And (IdLT A (s.2.2.1) (s.2.2.2))
+    (And (IdRT A (s.2.2.1) (s.2.2.2))
+    (And (DistribLT A (s.1) (s.2.2.1))
+    (And (DistribRT A (s.1) (s.2.2.1))
+    (And (AnnihLT A (s.2.2.1) (s.2.1))
+         (AnnihRT A (s.2.2.1) (s.2.1)))))))))))
+  end
+end
+
+-- Ring laws = semiring laws over the embedded semiring + additive inverses.
+RingLaws : (A : U) -> Ring A -> U is
+  fn (A : U) (r : Ring A) is
+    And (SemiringLaws A (r.1))
+    (And (NegInvLT A (r.1.1) (r.2) (r.1.2.1))
+         (NegInvRT A (r.1.1) (r.2) (r.1.2.1)))
+  end
+end
+
+-- DivRing laws take a nonzero PREDICATE nz (each carrier states nonzeroness
+-- its own way; recip zero is junk by convention, so the inverse laws are
+-- guarded by nz).
+DivRingLaws : (A : U) -> DivRing A -> (A -> U) -> U is
+  fn (A : U) (d : DivRing A) (nz : A -> U) is
+    And (RingLaws A (d.1))
+    (And (RecipInvLT A (d.1.1.2.2.1) (d.2) (d.1.1.2.2.2) nz)
+         (RecipInvRT A (d.1.1.2.2.1) (d.2) (d.1.1.2.2.2) nz))
+  end
+end
+
+-- Commutativity is its own record: a commutative ring is Ring + RingLaws +
+-- CommLaws (over the embedded multiplication); a field is DivRing +
+-- DivRingLaws + CommLaws; a noncommutative DivRing (a quaternion-like
+-- carrier) is a DivRing withOUT CommLaws.
+CommLaws : (A : U) -> Semiring A -> U is
+  fn (A : U) (s : Semiring A) is CommT A (s.2.2.1) end
+end
+
+-- ====================================================================
+-- THE WHOLE LEMMAS THIS CHAPTER PROVES CONCRETELY. addW is associative,
+-- has zero as a two-sided identity, and commutes -- by WholeElim induction,
+-- mirroring ch569's semiring proofs one rung down the ladder (the shared
+-- addWSuccR/addWComm dependency closure, verbatim).
+-- ====================================================================
+
+-- addW is associative (induction on the first argument).
+addWAssoc : AssocT Whole addW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW (addW x b) c) (addW x (addW b c)) end)
+      (refl (addW b c))
+      (fn (k : Whole) (ih : Eq Whole (addW (addW k b) c) (addW k (addW b c))) is
+         subst Whole (addW (addW k b) c) (addW k (addW b c)) ih
+           (fn (z : Whole) is Eq Whole (succ (addW (addW k b) c)) (succ z) end)
+           (refl (succ (addW (addW k b) c)))
+       end)
+      a
+  end
+end
+
+-- addW zero a = a definitionally (addW recurses on its first argument).
+addWZeroL : IdLT Whole addW zero is fn (a : Whole) is refl a end end
+
+-- addW a zero = a (induction on a; the recursion is stuck on a neutral first arg).
+addWZeroR : IdRT Whole addW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x zero) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW k zero) k) is
+         subst Whole (addW k zero) k ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) zero) (succ z) end)
+           (refl (addW (succ k) zero))
+       end)
+      a
+  end
+end
+
+-- Pushing a successor out of the second argument (mirrors ch107's addSuccR).
+addWSuccR : (m : Whole) -> (n : Whole) -> Eq Whole (addW m (succ n)) (succ (addW m n)) is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x (succ n)) (succ (addW x n)) end)
+      (refl (succ n))
+      (fn (k : Whole) (ih : Eq Whole (addW k (succ n)) (succ (addW k n))) is
+         subst Whole (addW k (succ n)) (succ (addW k n)) ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) (succ n)) (succ z) end)
+           (refl (addW (succ k) (succ n)))
+       end)
+      m
+  end
+end
+
+-- addW is commutative (induction on the first argument; needs addWZeroR + addWSuccR).
+addWComm : CommT Whole addW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x b) (addW b x) end)
+      (subst Whole (addW b zero) b (addWZeroR b)
+         (fn (z : Whole) is Eq Whole z (addW b zero) end)
+         (refl (addW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (addW k b) (addW b k)) is
+         subst Whole (succ (addW b k)) (addW b (succ k))
+           (subst Whole (addW b (succ k)) (succ (addW b k)) (addWSuccR b k)
+              (fn (z : Whole) is Eq Whole z (addW b (succ k)) end)
+              (refl (addW b (succ k))))
+           (fn (z : Whole) is Eq Whole (succ (addW k b)) z end)
+           (subst Whole (addW k b) (addW b k) ih
+              (fn (z : Whole) is Eq Whole (succ (addW k b)) (succ z) end)
+              (refl (succ (addW k b))))
+       end)
+      a
+  end
+end
+
+-- ====================================================================
+-- THE APPEND LADDER'S LAW RECORDS. A semigroup is a magma with
+-- associativity, a monoid adds the identity laws, a commutative monoid
+-- adds commutativity. These are plain type-level defs, not instance-table
+-- entries: registering Magma Whole would make `++` mean addition (the
+-- Raku lesson: keep `+` arithmetic, `++` append; this chapter has no `++`).
+-- ====================================================================
+SemigroupLaws : (A : U) -> Magma A -> U is
+  fn (A : U) (m : Magma A) is AssocT A m end
+end
+MonoidLaws : (A : U) -> Monoid A -> U is
+  fn (A : U) (d : Monoid A) is
+    And (AssocT A (d.1)) (And (IdLT A (d.1) (d.2)) (IdRT A (d.1) (d.2)))
+  end
+end
+CommMonoidLaws : (A : U) -> Monoid A -> U is
+  fn (A : U) (d : Monoid A) is And (MonoidLaws A d) (CommT A (d.1)) end
+end
+
+-- Whole sits on the CommMonoid rung under addition, with every law already
+-- proven above: this is the ONE concrete law-rung witness this chapter
+-- builds (the transports further down stay generic, per the scoping note
+-- in the chapter banner).
+monoidWholeAdd : Monoid Whole is mkMonoid Whole addW zero end
+
+commMonoidLawsWholeAdd : CommMonoidLaws Whole monoidWholeAdd is
+  mkAnd (MonoidLaws Whole monoidWholeAdd) (CommT Whole addW)
+    (mkAnd (AssocT Whole addW)
+      (And (IdLT Whole addW zero) (IdRT Whole addW zero))
+      addWAssoc
+      (mkAnd (IdLT Whole addW zero) (IdRT Whole addW zero) addWZeroL addWZeroR))
+    addWComm
+end
+
+-- ====================================================================
+-- THE UPPER RUNGS, as law-record formers only (no Whole instance is built
+-- for these: Group/Ring/DivRing at Whole need negation, which lives one
+-- rung up the tower at Int, out of this chapter's Whole-only scope).
+-- GroupLaws layers the two inverse laws onto MonoidLaws; AbGroupLaws adds
+-- commutativity. CommRingLaws/FieldLaws are the classical top rungs as
+-- law bundles over the shipped ops shapes: a commutative ring is
+-- Ring + RingLaws + CommLaws, a field is DivRing + DivRingLaws + CommLaws.
+-- ====================================================================
+GroupLaws : (A : U) -> Group A -> U is
+  fn (A : U) (g : Group A) is
+    And (MonoidLaws A (g.1))
+    (And (NegInvLT A (g.1.1) (g.2) (g.1.2))
+         (NegInvRT A (g.1.1) (g.2) (g.1.2)))
+  end
+end
+AbGroupLaws : (A : U) -> Group A -> U is
+  fn (A : U) (g : Group A) is And (GroupLaws A g) (CommT A (g.1.1)) end
+end
+
+CommRingLaws : (A : U) -> Ring A -> U is
+  fn (A : U) (r : Ring A) is And (RingLaws A r) (CommLaws A (r.1)) end
+end
+FieldLaws : (A : U) -> DivRing A -> (A -> U) -> U is
+  fn (A : U) (d : DivRing A) (nz : A -> U) is
+    And (DivRingLaws A d nz) (CommLaws A (d.1.1))
+  end
+end
+
+-- ====================================================================
+-- THE LADDER'S EDGES. Every classical containment is a FUNCTION: a ring's
+-- additive part IS a monoid (in fact an abelian group once RingLaws are
+-- in hand), its multiplicative part IS a monoid too, and a Ring's ops
+-- alone already give a Group shape via the additive monoid + negation.
+-- ====================================================================
+magmaOfMonoid : (A : U) -> Monoid A -> Magma A is
+  fn (A : U) (d : Monoid A) is d.1 end
+end
+monoidOfGroup : (A : U) -> Group A -> Monoid A is
+  fn (A : U) (g : Group A) is g.1 end
+end
+addMonoidOfSemiring : (A : U) -> Semiring A -> Monoid A is
+  fn (A : U) (s : Semiring A) is mkMonoid A (s.1) (s.2.1) end
+end
+mulMonoidOfSemiring : (A : U) -> Semiring A -> Monoid A is
+  fn (A : U) (s : Semiring A) is mkMonoid A (s.2.2.1) (s.2.2.2) end
+end
+groupOfRing : (A : U) -> Ring A -> Group A is
+  fn (A : U) (r : Ring A) is mkGroup A (addMonoidOfSemiring A (r.1)) (r.2) end
+end
+
+-- Named slot extractors for the SemiringLaws And-chain (nicer than raw
+-- .2.2... trails at every use site; the chain order is documented at the
+-- record above). Only the slots the transports below need are named.
+srlAddAssoc : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> AssocT A (s.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.1 end
+end
+srlAddComm : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> CommT A (s.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.1 end
+end
+srlAddZeroL : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdLT A (s.1) (s.2.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.1 end
+end
+srlAddZeroR : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdRT A (s.1) (s.2.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.1 end
+end
+srlMulAssoc : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> AssocT A (s.2.2.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.2.1 end
+end
+srlMulOneL : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdLT A (s.2.2.1) (s.2.2.2) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.2.2.1 end
+end
+srlMulOneR : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdRT A (s.2.2.1) (s.2.2.2) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.2.2.2.1 end
+end
+
+-- THE FOUR LAW TRANSPORTS. Each is pure reassembly: project the law out of
+-- the source And-chain, rebuild the target chain around the bridged ops
+-- shape from the edges above. These are GENERIC (any A, any witness l) and
+-- fully proven here -- but this chapter never applies one to a concrete
+-- Whole Semiring/Ring, since building that witness needs the eleven-lemma
+-- SemiringLaws set (ch569 owns it) or Int's negation (out of scope here).
+addCommMonoidLawsOfSemiring : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> CommMonoidLaws A (addMonoidOfSemiring A s) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is
+    mkAnd (MonoidLaws A (addMonoidOfSemiring A s)) (CommT A (s.1))
+      (mkAnd (AssocT A (s.1))
+        (And (IdLT A (s.1) (s.2.1)) (IdRT A (s.1) (s.2.1)))
+        (srlAddAssoc A s l)
+        (mkAnd (IdLT A (s.1) (s.2.1)) (IdRT A (s.1) (s.2.1)) (srlAddZeroL A s l) (srlAddZeroR A s l)))
+      (srlAddComm A s l)
+  end
+end
+mulMonoidLawsOfSemiring : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> MonoidLaws A (mulMonoidOfSemiring A s) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is
+    mkAnd (AssocT A (s.2.2.1))
+      (And (IdLT A (s.2.2.1) (s.2.2.2)) (IdRT A (s.2.2.1) (s.2.2.2)))
+      (srlMulAssoc A s l)
+      (mkAnd (IdLT A (s.2.2.1) (s.2.2.2)) (IdRT A (s.2.2.1) (s.2.2.2)) (srlMulOneL A s l) (srlMulOneR A s l))
+  end
+end
+groupLawsOfRing : (A : U) -> (r : Ring A) -> RingLaws A r -> GroupLaws A (groupOfRing A r) is
+  fn (A : U) (r : Ring A) (l : RingLaws A r) is
+    mkAnd (MonoidLaws A (addMonoidOfSemiring A (r.1)))
+      (And (NegInvLT A (r.1.1) (r.2) (r.1.2.1)) (NegInvRT A (r.1.1) (r.2) (r.1.2.1)))
+      (mkAnd (AssocT A (r.1.1))
+        (And (IdLT A (r.1.1) (r.1.2.1)) (IdRT A (r.1.1) (r.1.2.1)))
+        (srlAddAssoc A (r.1) (l.1))
+        (mkAnd (IdLT A (r.1.1) (r.1.2.1)) (IdRT A (r.1.1) (r.1.2.1)) (srlAddZeroL A (r.1) (l.1)) (srlAddZeroR A (r.1) (l.1))))
+      (mkAnd (NegInvLT A (r.1.1) (r.2) (r.1.2.1)) (NegInvRT A (r.1.1) (r.2) (r.1.2.1)) (l.2.1) (l.2.2))
+  end
+end
+abGroupLawsOfRing : (A : U) -> (r : Ring A) -> RingLaws A r -> AbGroupLaws A (groupOfRing A r) is
+  fn (A : U) (r : Ring A) (l : RingLaws A r) is
+    mkAnd (GroupLaws A (groupOfRing A r)) (CommT A (r.1.1))
+      (groupLawsOfRing A r l)
+      (srlAddComm A (r.1) (l.1))
+  end
+end
+
+-- A runnable witness: dispatched through Whole's CommMonoid-under-addition
+-- structure, the ONE concrete rung this chapter proves. monoidWholeAdd.1
+-- is addW, projected out of the Monoid record; 2 + 2 = 4.
+main : Whole is (monoidWholeAdd.1) 2 2 end
