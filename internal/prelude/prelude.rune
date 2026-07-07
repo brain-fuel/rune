@@ -1118,6 +1118,92 @@ FieldLaws : (A : U) -> DivRing A -> (A -> U) -> U is
 end
 
 -- ====================================================================
+-- THE LADDER'S EDGES. Every classical containment is a FUNCTION with a
+-- proven law transport: a ring IS an abelian group under addition and a
+-- monoid under multiplication. Transports are pure reassembly - project
+-- the law out of the source And-chain, rebuild the target chain. When
+-- Int's RingLaws land (deferred campaign), groupLawsOfRing instantly
+-- yields Int's AbGroup; the bridges are written once, here.
+-- ====================================================================
+magmaOfMonoid : (A : U) -> Monoid A -> Magma A is
+  fn (A : U) (d : Monoid A) is d.1 end
+end
+monoidOfGroup : (A : U) -> Group A -> Monoid A is
+  fn (A : U) (g : Group A) is g.1 end
+end
+addMonoidOfSemiring : (A : U) -> Semiring A -> Monoid A is
+  fn (A : U) (s : Semiring A) is mkMonoid A (s.1) (s.2.1) end
+end
+mulMonoidOfSemiring : (A : U) -> Semiring A -> Monoid A is
+  fn (A : U) (s : Semiring A) is mkMonoid A (s.2.2.1) (s.2.2.2) end
+end
+groupOfRing : (A : U) -> Ring A -> Group A is
+  fn (A : U) (r : Ring A) is mkGroup A (addMonoidOfSemiring A (r.1)) (r.2) end
+end
+
+-- Named slot extractors for the SemiringLaws And-chain (nicer than raw
+-- .2.2... trails at every use site; the chain order is documented at the
+-- record). Only the slots the transports need are named.
+srlAddAssoc : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> AssocT A (s.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.1 end
+end
+srlAddComm : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> CommT A (s.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.1 end
+end
+srlAddZeroL : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdLT A (s.1) (s.2.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.1 end
+end
+srlAddZeroR : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdRT A (s.1) (s.2.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.1 end
+end
+srlMulAssoc : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> AssocT A (s.2.2.1) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.2.1 end
+end
+srlMulOneL : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdLT A (s.2.2.1) (s.2.2.2) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.2.2.1 end
+end
+srlMulOneR : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> IdRT A (s.2.2.1) (s.2.2.2) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is l.2.2.2.2.2.2.1 end
+end
+
+addCommMonoidLawsOfSemiring : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> CommMonoidLaws A (addMonoidOfSemiring A s) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is
+    mkAnd (MonoidLaws A (addMonoidOfSemiring A s)) (CommT A (s.1))
+      (mkAnd (AssocT A (s.1))
+        (And (IdLT A (s.1) (s.2.1)) (IdRT A (s.1) (s.2.1)))
+        (srlAddAssoc A s l)
+        (mkAnd (IdLT A (s.1) (s.2.1)) (IdRT A (s.1) (s.2.1)) (srlAddZeroL A s l) (srlAddZeroR A s l)))
+      (srlAddComm A s l)
+  end
+end
+mulMonoidLawsOfSemiring : (A : U) -> (s : Semiring A) -> SemiringLaws A s -> MonoidLaws A (mulMonoidOfSemiring A s) is
+  fn (A : U) (s : Semiring A) (l : SemiringLaws A s) is
+    mkAnd (AssocT A (s.2.2.1))
+      (And (IdLT A (s.2.2.1) (s.2.2.2)) (IdRT A (s.2.2.1) (s.2.2.2)))
+      (srlMulAssoc A s l)
+      (mkAnd (IdLT A (s.2.2.1) (s.2.2.2)) (IdRT A (s.2.2.1) (s.2.2.2)) (srlMulOneL A s l) (srlMulOneR A s l))
+  end
+end
+groupLawsOfRing : (A : U) -> (r : Ring A) -> RingLaws A r -> GroupLaws A (groupOfRing A r) is
+  fn (A : U) (r : Ring A) (l : RingLaws A r) is
+    mkAnd (MonoidLaws A (addMonoidOfSemiring A (r.1)))
+      (And (NegInvLT A (r.1.1) (r.2) (r.1.2.1)) (NegInvRT A (r.1.1) (r.2) (r.1.2.1)))
+      (mkAnd (AssocT A (r.1.1))
+        (And (IdLT A (r.1.1) (r.1.2.1)) (IdRT A (r.1.1) (r.1.2.1)))
+        (srlAddAssoc A (r.1) (l.1))
+        (mkAnd (IdLT A (r.1.1) (r.1.2.1)) (IdRT A (r.1.1) (r.1.2.1)) (srlAddZeroL A (r.1) (l.1)) (srlAddZeroR A (r.1) (l.1))))
+      (mkAnd (NegInvLT A (r.1.1) (r.2) (r.1.2.1)) (NegInvRT A (r.1.1) (r.2) (r.1.2.1)) (l.2.1) (l.2.2))
+  end
+end
+abGroupLawsOfRing : (A : U) -> (r : Ring A) -> RingLaws A r -> AbGroupLaws A (groupOfRing A r) is
+  fn (A : U) (r : Ring A) (l : RingLaws A r) is
+    mkAnd (GroupLaws A (groupOfRing A r)) (CommT A (r.1.1))
+      (groupLawsOfRing A r l)
+      (srlAddComm A (r.1) (l.1))
+  end
+end
+
+-- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
 -- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),
 -- intOf (Whole -> Int), fracOf (Whole -> Frac), ratOfInt (Int -> Frac).

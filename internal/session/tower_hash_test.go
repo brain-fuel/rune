@@ -89,6 +89,22 @@ func TestUpperLadderPresent(t *testing.T) {
 	}
 }
 
+// TestLadderBridgesPresent pins the ladder's edges (Task 4): the bridge
+// functions between rungs, the SemiringLaws slot extractors, and the
+// proven law transports (a ring IS an abelian group under addition and a
+// monoid under multiplication; a semiring carries two monoids).
+func TestLadderBridgesPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"groupOfRing", "addMonoidOfSemiring", "addCommMonoidLawsOfSemiring", "mulMonoidLawsOfSemiring", "groupLawsOfRing", "abGroupLawsOfRing"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestTowerGraphLemmasPresent pins the tower conversion graph (Task 5): the
 // ratOfInt injection, the mkInt normalization lemma, the intOf homomorphism
 // certificates over iadd/imul, and the definitional coherence triangle
