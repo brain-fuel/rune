@@ -175,6 +175,19 @@ end
 end
 mempty : {A : U} -> {d : Monoid A} -> A is fn {A : U} {d : Monoid A} is d.2 end end
 
+-- Group: a monoid with an inverse operation. Nests Monoid the way Ring
+-- nests Semiring (projection g.1 monoid, g.2 inv); structurally distinct
+-- from Ring because the first component differs (Monoid A vs Semiring A).
+-- Abelian-ness is a LAW (AbGroupLaws below), never ops-side.
+Group : U -> U is
+  fn (A : U) is Sig (Monoid A) (fn (_m : Monoid A) is A -> A end) end
+end
+mkGroup : (A : U) -> Monoid A -> (A -> A) -> Group A is
+  fn (A : U) (m : Monoid A) (i : A -> A) is
+    Pair (Monoid A) (fn (_m : Monoid A) is A -> A end) m i
+  end
+end
+
 -- leb m n decides m <= n; recursion on m produces the comparison FUNCTION,
 -- so the induction hypothesis is "compare against k" awaiting its argument.
 leb : Whole -> Whole -> Bool is
@@ -1068,6 +1081,40 @@ commMonoidLawsWholeMul : CommMonoidLaws Whole monoidWholeMul is
       mulWAssoc
       (mkAnd (IdLT Whole mulW (succ zero)) (IdRT Whole mulW (succ zero)) mulWOneL mulWOneR))
     mulWComm
+end
+
+-- ====================================================================
+-- THE UPPER LADDER (v4 full ladder). Group laws layer the two inverse
+-- laws onto MonoidLaws; AbGroupLaws adds commutativity. The classical
+-- top rungs are law bundles over the shipped ops shapes: a commutative
+-- ring is Ring + RingLaws + CommLaws (over the embedded semiring), a
+-- field is DivRing + DivRingLaws + CommLaws. These are plain defs, not
+-- instance-table entries: this task ships no Group value.
+-- ====================================================================
+
+-- Group laws = monoid laws + the two inverse laws. NegInvLT/RT are
+-- already generic in (op, inv, e), so they serve groups verbatim.
+GroupLaws : (A : U) -> Group A -> U is
+  fn (A : U) (g : Group A) is
+    And (MonoidLaws A (g.1))
+    (And (NegInvLT A (g.1.1) (g.2) (g.1.2))
+         (NegInvRT A (g.1.1) (g.2) (g.1.2)))
+  end
+end
+AbGroupLaws : (A : U) -> Group A -> U is
+  fn (A : U) (g : Group A) is And (GroupLaws A g) (CommT A (g.1.1)) end
+end
+
+-- The classical top rungs as law bundles over the shipped ops shapes:
+-- a commutative ring is a Ring whose multiplication commutes; a field is
+-- a DivRing whose multiplication commutes.
+CommRingLaws : (A : U) -> Ring A -> U is
+  fn (A : U) (r : Ring A) is And (RingLaws A r) (CommLaws A (r.1)) end
+end
+FieldLaws : (A : U) -> DivRing A -> (A -> U) -> U is
+  fn (A : U) (d : DivRing A) (nz : A -> U) is
+    And (DivRingLaws A d nz) (CommLaws A (d.1.1))
+  end
 end
 
 -- ====================================================================

@@ -15,7 +15,7 @@ func TestTowerClassHashesDistinct(t *testing.T) {
 	if _, err := s.LoadSource(prelude.Source()); err != nil {
 		t.Fatalf("loading prelude: %v", err)
 	}
-	names := []string{"Semiring", "Ring", "DivRing", "Magma", "Monoid", "Div", "NegR", "SubR", "Binary", "Show"}
+	names := []string{"Semiring", "Ring", "DivRing", "Magma", "Monoid", "Group", "Div", "NegR", "SubR", "Binary", "Show"}
 	seen := map[string]string{}
 	for _, n := range names {
 		h, ok := s.Lookup(n)
@@ -69,6 +69,20 @@ func TestLowerLadderPresent(t *testing.T) {
 		t.Fatalf("loading prelude: %v", err)
 	}
 	for _, n := range []string{"SemigroupLaws", "MonoidLaws", "CommMonoidLaws", "monoidWholeAdd", "monoidWholeMul", "commMonoidLawsWholeAdd", "commMonoidLawsWholeMul"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
+// TestUpperLadderPresent pins the upper law records (Task 3): the Group ops
+// shape and the Group/AbGroup/CommRing/Field law-record formers.
+func TestUpperLadderPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"Group", "GroupLaws", "AbGroupLaws", "CommRingLaws", "FieldLaws"} {
 		if _, ok := s.Lookup(n); !ok {
 			t.Fatalf("%s not found in prelude", n)
 		}
