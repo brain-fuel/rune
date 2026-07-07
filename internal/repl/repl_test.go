@@ -881,8 +881,8 @@ func TestREPLBinaryRoundTrip(t *testing.T) {
 	}
 }
 
-// TestREPLStringConcat is the acceptance test for the overloaded `++` (Semigroup
-// append) on packed-Bytes strings: concatenation COMPUTES in the REPL and folds back to
+// TestREPLStringConcat is the acceptance test for the overloaded `++` (Magma
+// dispatch) on packed-Bytes strings: concatenation COMPUTES in the REPL and folds back to
 // a string literal, byte length is right, and `strEq` decides equality. The whole point
 // of the user's `"hello"++"world"`.
 func TestREPLStringConcat(t *testing.T) {
