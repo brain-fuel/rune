@@ -771,7 +771,7 @@ func TestREPLParseFromString(t *testing.T) {
 		`parseWhole "42"`, // ok 42
 		`parseInt "-5"`,   // ok -5 (signed)
 		`parseInt "7"`,    // ok 7
-		`parseWhole "4x"`, // err (notNumber) — total, not a crash
+		`parseWhole "4x"`, // err (notNumber) - total, not a crash
 		`parseWhole ""`,   // err (emptyStr)
 		":quit",
 	}

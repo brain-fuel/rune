@@ -3120,7 +3120,7 @@ end
 -- ============================================================
 -- -- ====================================================================
 -- -- DEMOTION, checked.  Climbing the tower (− promotes, / climbs to ℚ) is implicit;
--- -- coming back DOWN is not — `3/1` is `3 : Frac`, a rational that happens to be
+-- -- coming back DOWN is not - `3/1` is `3 : Frac`, a rational that happens to be
 -- -- whole. `toInt`/`toWhole` are the deliberate, checked descents: a fraction lands
 -- -- in Int (resp. Whole) only when it is integral (denominator 1 in lowest terms),
 -- -- and `toWhole` additionally only when it is non-negative; otherwise `err`. (Lisp
@@ -3285,7 +3285,7 @@ end
 -- family with unchanged output strings.
 -- ============================================================
 -- -- Leading zeros after the point for |f| < 1: smallest z with num*10^(z+1) >= den
--- -- (multiplication and comparison only — no division).
+-- -- (multiplication and comparison only - no division).
 -- leadingZeros : Whole -> Frac -> Whole is
 --   fn (cap : Whole) (f : Frac) is
 --     (case cap of
