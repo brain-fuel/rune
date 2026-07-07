@@ -51,6 +51,11 @@ ch569/ch570. Next v4 sub-specs: Int/Frac law campaigns, new types,
 literals, REPL compiled-eval, perf gate. Sub-project 1b (full
 Magma-to-Field ladder: Magma rename, lower law records, Group/AbGroup,
 CommRing/Field bundles, bridges + transports, Whole commutative monoids,
-ch571) implemented. v5/v6 not yet decomposed. Each
+ch571) implemented. Int law campaign DONE (junk-free Int re-foundation
++ monus library + difference-pair transport + RingLaws/CommLaws/
+CommRingLaws + AbGroup via the bridge, ch572; display folding moved to
+nonneg/negsucc). Next: Frac campaign (design open: canonical-form vs
+quotient route; prelude proof-load headroom question queued). v5/v6 not
+yet decomposed. Each
 bump gets its own spec -> plan(s) -> implementation cycles when its turn
 comes.

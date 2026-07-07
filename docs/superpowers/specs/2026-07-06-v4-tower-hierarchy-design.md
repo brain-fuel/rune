@@ -109,7 +109,8 @@ CommLaws A (s : Semiring A) = { mulComm }
 
 - Whole: Semiring + SemiringLaws PROVEN (re-derived over addW/mulW by
   WholeElim, ch107-shaped inductions).
-- Int: Ring ops instance now; RingLaws + CommLaws instances deferred
+- Int: Ring ops instance now; RingLaws + CommLaws instances CLOSED by
+  2026-07-06-int-ring-laws-design.md (junk-free re-foundation + transport)
   (follow-up sub-spec; ch107 proves the ring axioms over a quotient
   representation, not the prelude's sign-magnitude Int, so the proofs do
   not port directly).
