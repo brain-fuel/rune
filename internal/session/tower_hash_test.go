@@ -138,6 +138,23 @@ func TestIntSpecLemmasPresent(t *testing.T) {
 	}
 }
 
+// TestIntLawsPresent pins the summit of the Int ring-laws campaign (Task 4):
+// the assembled RingLaws/CommLaws/CommRingLaws records over ringInt and the
+// AbGroupLaws value cashed through the 1b bridge (abGroupLawsOfRing), plus a
+// representative of the thirteen underlying lemmas (additive associativity,
+// multiplicative commutativity, left distributivity).
+func TestIntLawsPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"ringLawsInt", "commLawsInt", "commRingLawsInt", "abGroupLawsInt", "iaddAssoc", "imulComm", "idistribL"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestTowerGraphLemmasPresent pins the tower conversion graph (Task 5): the
 // ratOfInt injection, the intOf homomorphism certificates over iadd/imul
 // (now direct refl lemmas under junk-free Int, no normalization lemma
