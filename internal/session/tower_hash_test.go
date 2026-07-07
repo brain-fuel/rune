@@ -60,6 +60,21 @@ func TestLawRecordTypesPresent(t *testing.T) {
 	}
 }
 
+// TestLowerLadderPresent pins the lower law records (Task 2): SemigroupLaws/
+// MonoidLaws/CommMonoidLaws formers and Whole's two commutative-monoid
+// positions (under addition and under multiplication).
+func TestLowerLadderPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"SemigroupLaws", "MonoidLaws", "CommMonoidLaws", "monoidWholeAdd", "monoidWholeMul", "commMonoidLawsWholeAdd", "commMonoidLawsWholeMul"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestTowerGraphLemmasPresent pins the tower conversion graph (Task 5): the
 // ratOfInt injection, the mkInt normalization lemma, the intOf homomorphism
 // certificates over iadd/imul, and the definitional coherence triangle

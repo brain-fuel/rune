@@ -1030,6 +1030,47 @@ end
 commLawsWhole : CommLaws Whole semiringWhole is mulWComm end
 
 -- ====================================================================
+-- THE LOWER LADDER (v4 full ladder). Laws for the append-family ops
+-- shapes: a semigroup is a magma with associativity, a monoid adds the
+-- identity laws, a commutative monoid adds commutativity. Whole sits on
+-- the CommMonoid rung twice - under addition and under multiplication -
+-- with every law already proven above. These are plain defs, not
+-- instance-table entries: registering Magma Whole would make `++` mean
+-- addition (the Raku lesson: keep `+` arithmetic, `++` append).
+-- ====================================================================
+SemigroupLaws : (A : U) -> Magma A -> U is
+  fn (A : U) (m : Magma A) is AssocT A m end
+end
+MonoidLaws : (A : U) -> Monoid A -> U is
+  fn (A : U) (d : Monoid A) is
+    And (AssocT A (d.1)) (And (IdLT A (d.1) (d.2)) (IdRT A (d.1) (d.2)))
+  end
+end
+CommMonoidLaws : (A : U) -> Monoid A -> U is
+  fn (A : U) (d : Monoid A) is And (MonoidLaws A d) (CommT A (d.1)) end
+end
+
+monoidWholeAdd : Monoid Whole is mkMonoid Whole addW zero end
+monoidWholeMul : Monoid Whole is mkMonoid Whole mulW (succ zero) end
+
+commMonoidLawsWholeAdd : CommMonoidLaws Whole monoidWholeAdd is
+  mkAnd (MonoidLaws Whole monoidWholeAdd) (CommT Whole addW)
+    (mkAnd (AssocT Whole addW)
+      (And (IdLT Whole addW zero) (IdRT Whole addW zero))
+      addWAssoc
+      (mkAnd (IdLT Whole addW zero) (IdRT Whole addW zero) addWZeroL addWZeroR))
+    addWComm
+end
+commMonoidLawsWholeMul : CommMonoidLaws Whole monoidWholeMul is
+  mkAnd (MonoidLaws Whole monoidWholeMul) (CommT Whole mulW)
+    (mkAnd (AssocT Whole mulW)
+      (And (IdLT Whole mulW (succ zero)) (IdRT Whole mulW (succ zero)))
+      mulWAssoc
+      (mkAnd (IdLT Whole mulW (succ zero)) (IdRT Whole mulW (succ zero)) mulWOneL mulWOneR))
+    mulWComm
+end
+
+-- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
 -- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),
 -- intOf (Whole -> Int), fracOf (Whole -> Frac), ratOfInt (Int -> Frac).
