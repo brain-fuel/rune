@@ -1,0 +1,593 @@
+-- Chapter 569: THE ALGEBRA HIERARCHY, ops split from laws (v4 prelude).
+--
+-- WHY OPS ARE SEPARATE FROM LAWS (the IEEE754 argument). A Semiring/Ring/
+-- DivRing instance carries OPERATIONS ONLY: `add`, `zero`, `mul`, `one`
+-- (Ring adds `neg`; DivRing adds `recip`). It does NOT carry proofs that
+-- those operations associate, commute, or distribute. This matters because
+-- some carriers can COMPUTE an operation but never PROVE its laws: IEEE754
+-- floating point has `+` and `*`, but `(a + b) + c = a + (b + c)` is FALSE
+-- for some floats (rounding breaks associativity). If the ops record forced
+-- the laws to come along for the ride, no type without provable laws could
+-- ever get an ops instance, and float arithmetic could not be dispatched
+-- through the same `+`/`*` as the exact tower. So the ops ladder
+-- (Semiring -> Ring -> DivRing) and the laws records (SemiringLaws and
+-- friends, below) are TWO SEPARATE type families over the same carrier A:
+-- a carrier registers an ops instance unconditionally, and SEPARATELY may
+-- or may not carry a laws witness. The "guarded tier" for a lawless carrier
+-- is simply the absence of a laws record for it; nothing else marks it.
+--
+-- THE POSITIONAL-HASH DISCIPLINE (the Num lesson, learned the hard way on
+-- an earlier attempt at one Num class covering the whole tower). A class in
+-- this scheme is a Sigma type, and a Sigma's identity is its STRUCTURE (its
+-- hash), never a name someone typed. Two classes built from the same
+-- sequence of field types are the SAME class, hash-identical, even if a
+-- human called one "Semiring" and the other "Frobnicator". So each rung
+-- here is built to have a structure no other rung can collide with:
+--   Semiring A = Sig (A->A->A) (Sig A (Sig (A->A->A) A))
+--   Ring A     = Sig (Semiring A) (A -> A)
+--   DivRing A  = Sig (Ring A) (A -> A)
+-- Ring wraps the WHOLE Semiring as its first component (not the four raw
+-- fields again), so Ring's shape can never be mistaken for a bigger flat
+-- Semiring; DivRing does the same one rung up. Projections chain: a
+-- DivRing's underlying Semiring is `.1.1`, its `mul` is `.1.2.2.1`, etc.
+--
+-- THE RECIP-TOTAL JUNK CONVENTION. `recip` in a DivRing is a TOTAL function
+-- A -> A, defined even at the carrier's zero, where no genuine inverse
+-- exists mathematically. The convention (Mathlib's move) is `recip zero =
+-- zero`: a JUNK value that keeps `recip` total (so it type-checks as a
+-- plain function, no Option, no side proof obligation to apply it) while
+-- staying honest about where it lied. The TRUE inverse law (`recip x * x =
+-- one`) is stated only under a nonzero hypothesis, in the laws record
+-- (DivRingLaws, guarded by a caller-supplied nonzero predicate) -- never
+-- claimed unconditionally.
+--
+-- This chapter is SELF-CONTAINED (it restates every definition it uses, the
+-- ch107 pattern; it does not load the prelude): the Whole kernels, the ops
+-- ladder, the Whole dispatch instance and a GENERIC `square` over any
+-- Semiring, the law formers (And/mkAnd + eight reusable statement shapes +
+-- SemiringLaws), Whole's eleven semiring-law proofs assembled into
+-- `semiringLawsWhole`, and the next rung up (RingLaws/DivRingLaws/CommLaws)
+-- with Whole's free commutativity witness `commLawsWhole`. It ends with a
+-- runnable witness: `square` applied at Whole computes 6*6 = 36 through the
+-- SAME dictionary-dispatched `*` the laws are proven about.
+
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+-- The Whole-level arithmetic kernels. Named (addW/mulW) so the operators
+-- `+`/`*` below can be overloaded across a tower by typeclass dispatch.
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+mulW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> addW ih n
+    end
+  end
+end
+
+-- ====================================================================
+-- THE ALGEBRAIC OPS LADDER. Three Sigma-record classes carrying OPERATIONS
+-- ONLY: Semiring {add, zero, mul, one} -> Ring {+neg} -> DivRing {+recip}.
+-- Laws live in SEPARATE records (SemiringLaws and friends, below), so a
+-- type that can compute but not prove (IEEE754, above) still gets ops
+-- instances. Superclass access is projection: a Ring contains its Semiring
+-- as `.1`. Positional discipline (above): a class is identified by its
+-- STRUCTURE, so two classes with identical field-type sequences collide.
+-- Shapes here: Semiring A = Sig (A->A->A) (Sig A (Sig (A->A->A) A));
+-- Ring A = Sig (Semiring A) (A->A); DivRing A = Sig (Ring A) (A->A) --
+-- all pairwise distinct. `recip` is TOTAL with the junk value recip zero =
+-- zero; the true inverse law is guarded by a nonzero hypothesis laws-side.
+-- ====================================================================
+Semiring : U -> U is
+  fn (A : U) is
+    Sig (A -> A -> A) (fn (_add : A -> A -> A) is
+      Sig A (fn (_zero : A) is
+        Sig (A -> A -> A) (fn (_mul : A -> A -> A) is A end)
+      end)
+    end)
+  end
+end
+mkSemiring : (A : U) -> (A -> A -> A) -> A -> (A -> A -> A) -> A -> Semiring A is
+  fn (A : U) (a : A -> A -> A) (z : A) (m : A -> A -> A) (o : A) is
+    Pair (A -> A -> A) (fn (_add : A -> A -> A) is
+        Sig A (fn (_zero : A) is
+          Sig (A -> A -> A) (fn (_mul : A -> A -> A) is A end)
+        end)
+      end)
+      a
+      (Pair A (fn (_zero : A) is
+          Sig (A -> A -> A) (fn (_mul : A -> A -> A) is A end)
+        end)
+        z
+        (Pair (A -> A -> A) (fn (_mul : A -> A -> A) is A end) m o))
+  end
+end
+
+Ring : U -> U is
+  fn (A : U) is Sig (Semiring A) (fn (_s : Semiring A) is A -> A end) end
+end
+mkRing : (A : U) -> Semiring A -> (A -> A) -> Ring A is
+  fn (A : U) (s : Semiring A) (n : A -> A) is
+    Pair (Semiring A) (fn (_s : Semiring A) is A -> A end) s n
+  end
+end
+
+DivRing : U -> U is
+  fn (A : U) is Sig (Ring A) (fn (_r : Ring A) is A -> A end) end
+end
+mkDivRing : (A : U) -> Ring A -> (A -> A) -> DivRing A is
+  fn (A : U) (r : Ring A) (rc : A -> A) is
+    Pair (Ring A) (fn (_r : Ring A) is A -> A end) r rc
+  end
+end
+
+-- ====================================================================
+-- ARITHMETIC DISPATCH. `+` and `*` are Semiring-constrained: the elaborator
+-- resolves the dictionary from the argument TYPE (class = type family,
+-- instance = registered value). Whole registers a Semiring instance here.
+-- ====================================================================
+instance semiringWhole : Semiring Whole is mkSemiring Whole addW zero mulW (succ zero) end
+
++ : {A : U} -> {d : Semiring A} -> A -> A -> A is
+  fn {A : U} {d : Semiring A} (x : A) (y : A) is (d.1) x y end
+end
+* : {A : U} -> {d : Semiring A} -> A -> A -> A is
+  fn {A : U} {d : Semiring A} (x : A) (y : A) is (d.2.2.1) x y end
+end
+
+-- A first use: dispatched addition at Whole.
+four : Whole is 2 + 2 end
+
+-- A GENERIC demo: `square` works over ANY Semiring, not just Whole -- it is
+-- parametric in the carrier A and the dictionary s, calling s's own `mul`
+-- (projection `.2.2.1`) rather than the dispatched `*` (so it needs no
+-- ambient instance search of its own; the caller supplies the dictionary).
+square : (A : U) -> Semiring A -> A -> A is
+  fn (A : U) (s : Semiring A) (x : A) is (s.2.2.1) x x end
+end
+
+-- ====================================================================
+-- LAW STATEMENTS. Reusable propositions over raw operations; the law
+-- RECORDS chain them with a non-dependent And. Laws are SEPARATE from the
+-- ops classes so proof-free carriers (IEEE754, above) still get ops.
+-- ====================================================================
+And : U -> U -> U is fn (P : U) (Q : U) is Sig P (fn (_p : P) is Q end) end end
+mkAnd : (P : U) -> (Q : U) -> P -> Q -> And P Q is
+  fn (P : U) (Q : U) (p : P) (q : Q) is Pair P (fn (_p : P) is Q end) p q end
+end
+
+AssocT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> (c : A) -> Eq A (f (f a b) c) (f a (f b c)) end
+end
+CommT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> Eq A (f a b) (f b a) end
+end
+IdLT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f e a) a end
+end
+IdRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f a e) a end
+end
+DistribLT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul a (add b c)) (add (mul a b) (mul a c))
+  end
+end
+DistribRT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul (add a b) c) (add (mul a c) (mul b c))
+  end
+end
+AnnihLT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul z a) z end
+end
+AnnihRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul a z) z end
+end
+
+-- The semiring laws over an ops instance: additive commutative monoid,
+-- multiplicative monoid, distributivity both sides, zero annihilates.
+SemiringLaws : (A : U) -> Semiring A -> U is
+  fn (A : U) (s : Semiring A) is
+    And (AssocT A (s.1))
+    (And (CommT A (s.1))
+    (And (IdLT A (s.1) (s.2.1))
+    (And (IdRT A (s.1) (s.2.1))
+    (And (AssocT A (s.2.2.1))
+    (And (IdLT A (s.2.2.1) (s.2.2.2))
+    (And (IdRT A (s.2.2.1) (s.2.2.2))
+    (And (DistribLT A (s.1) (s.2.2.1))
+    (And (DistribRT A (s.1) (s.2.2.1))
+    (And (AnnihLT A (s.2.2.1) (s.2.1))
+         (AnnihRT A (s.2.2.1) (s.2.1)))))))))))
+  end
+end
+
+-- ====================================================================
+-- WHOLE'S SEMIRING LAWS, machine-checked. Proven over the raw kernels
+-- addW/mulW (which semiringWhole's projections compute to definitionally),
+-- by WholeElim induction with subst/symEq/transEq plumbing.
+-- ====================================================================
+
+-- Equality plumbing built from `subst` (the sole Leibniz primitive).
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- Local congruence (there is no ambient cong): rewrite under a Whole context.
+congW : (f : Whole -> Whole) -> (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Whole (f x) (f y) is
+  fn (f : Whole -> Whole) (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Whole (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- addW is associative (induction on the first argument).
+addWAssoc : AssocT Whole addW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW (addW x b) c) (addW x (addW b c)) end)
+      (refl (addW b c))
+      (fn (k : Whole) (ih : Eq Whole (addW (addW k b) c) (addW k (addW b c))) is
+         subst Whole (addW (addW k b) c) (addW k (addW b c)) ih
+           (fn (z : Whole) is Eq Whole (succ (addW (addW k b) c)) (succ z) end)
+           (refl (succ (addW (addW k b) c)))
+       end)
+      a
+  end
+end
+
+-- addW zero a = a definitionally (addW recurses on its first argument).
+addWZeroL : IdLT Whole addW zero is fn (a : Whole) is refl a end end
+
+-- addW a zero = a (induction on a; the recursion is stuck on a neutral first arg).
+addWZeroR : IdRT Whole addW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x zero) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW k zero) k) is
+         subst Whole (addW k zero) k ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) zero) (succ z) end)
+           (refl (addW (succ k) zero))
+       end)
+      a
+  end
+end
+
+-- Pushing a successor out of the second argument.
+addWSuccR : (m : Whole) -> (n : Whole) -> Eq Whole (addW m (succ n)) (succ (addW m n)) is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x (succ n)) (succ (addW x n)) end)
+      (refl (succ n))
+      (fn (k : Whole) (ih : Eq Whole (addW k (succ n)) (succ (addW k n))) is
+         subst Whole (addW k (succ n)) (succ (addW k n)) ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) (succ n)) (succ z) end)
+           (refl (addW (succ k) (succ n)))
+       end)
+      m
+  end
+end
+
+-- addW is commutative (induction on the first argument; needs addWZeroR + addWSuccR).
+addWComm : CommT Whole addW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x b) (addW b x) end)
+      (subst Whole (addW b zero) b (addWZeroR b)
+         (fn (z : Whole) is Eq Whole z (addW b zero) end)
+         (refl (addW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (addW k b) (addW b k)) is
+         subst Whole (succ (addW b k)) (addW b (succ k))
+           (subst Whole (addW b (succ k)) (succ (addW b k)) (addWSuccR b k)
+              (fn (z : Whole) is Eq Whole z (addW b (succ k)) end)
+              (refl (addW b (succ k))))
+           (fn (z : Whole) is Eq Whole (succ (addW k b)) z end)
+           (subst Whole (addW k b) (addW b k) ih
+              (fn (z : Whole) is Eq Whole (succ (addW k b)) (succ z) end)
+              (refl (succ (addW k b))))
+       end)
+      a
+  end
+end
+
+-- A rearrangement workhorse: (x + y) + w = (x + w) + y (from assoc + comm).
+addWSwapR : (x : Whole) -> (y : Whole) -> (w : Whole) -> Eq Whole (addW (addW x y) w) (addW (addW x w) y) is
+  fn (x : Whole) (y : Whole) (w : Whole) is
+    transEq Whole (addW (addW x y) w) (addW x (addW y w)) (addW (addW x w) y)
+      (addWAssoc x y w)
+      (transEq Whole (addW x (addW y w)) (addW x (addW w y)) (addW (addW x w) y)
+         (congW (fn (t : Whole) is addW x t end) (addW y w) (addW w y) (addWComm y w))
+         (symEq Whole (addW (addW x w) y) (addW x (addW w y)) (addWAssoc x w y)))
+  end
+end
+
+-- (a + x) + succ y = (a + y) + succ x (assoc + succ-shift + comm); feeds mulWSuccR.
+addWShiftSucc : (a : Whole) -> (x : Whole) -> (y : Whole)
+  -> Eq Whole (addW (addW a x) (succ y)) (addW (addW a y) (succ x)) is
+  fn (a : Whole) (x : Whole) (y : Whole) is
+    transEq Whole (addW (addW a x) (succ y)) (addW a (addW x (succ y))) (addW (addW a y) (succ x))
+      (addWAssoc a x (succ y))
+      (transEq Whole (addW a (addW x (succ y))) (addW a (succ (addW y x))) (addW (addW a y) (succ x))
+         (congW (fn (t : Whole) is addW a t end) (addW x (succ y)) (succ (addW y x))
+            (transEq Whole (addW x (succ y)) (succ (addW x y)) (succ (addW y x))
+               (addWSuccR x y)
+               (congW (fn (t : Whole) is succ t end) (addW x y) (addW y x) (addWComm x y))))
+         (transEq Whole (addW a (succ (addW y x))) (addW a (addW y (succ x))) (addW (addW a y) (succ x))
+            (congW (fn (t : Whole) is addW a t end) (succ (addW y x)) (addW y (succ x))
+               (symEq Whole (addW y (succ x)) (succ (addW y x)) (addWSuccR y x)))
+            (symEq Whole (addW (addW a y) (succ x)) (addW a (addW y (succ x))) (addWAssoc a y (succ x)))))
+  end
+end
+
+-- mul zero a = 0 definitionally (mulW's zero case returns 0).
+mulWZeroL : AnnihLT Whole mulW zero is fn (a : Whole) is refl zero end end
+
+-- mul a zero = 0 (induction on a; addWZeroR mops up the stuck `addW _ zero`).
+mulWZeroR : AnnihRT Whole mulW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x zero) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k zero) zero) is
+         transEq Whole (mulW (succ k) zero) (mulW k zero) zero
+           (addWZeroR (mulW k zero))
+           ih
+       end)
+      a
+  end
+end
+
+-- RIGHT distributivity: (a + b) * c = a*c + b*c (induction on a).
+distribWR : DistribRT Whole addW mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW (addW x b) c) (addW (mulW x c) (mulW b c)) end)
+      (refl (mulW b c))
+      (fn (k : Whole) (ih : Eq Whole (mulW (addW k b) c) (addW (mulW k c) (mulW b c))) is
+         transEq Whole
+           (addW (mulW (addW k b) c) c)
+           (addW (addW (mulW k c) (mulW b c)) c)
+           (addW (addW (mulW k c) c) (mulW b c))
+           (congW (fn (t : Whole) is addW t c end) (mulW (addW k b) c) (addW (mulW k c) (mulW b c)) ih)
+           (addWSwapR (mulW k c) (mulW b c) c)
+       end)
+      a
+  end
+end
+
+-- Multiplicative successor-shift: mul n (succ m) = mul n m + n (induction on n).
+mulWSuccR : (n : Whole) -> (m : Whole) -> Eq Whole (mulW n (succ m)) (addW (mulW n m) n) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x (succ m)) (addW (mulW x m) x) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k (succ m)) (addW (mulW k m) k)) is
+         transEq Whole
+           (addW (mulW k (succ m)) (succ m))
+           (addW (addW (mulW k m) k) (succ m))
+           (addW (addW (mulW k m) m) (succ k))
+           (congW (fn (t : Whole) is addW t (succ m) end) (mulW k (succ m)) (addW (mulW k m) k) ih)
+           (addWShiftSucc (mulW k m) k m)
+       end)
+      n
+  end
+end
+
+-- mul is commutative (induction on the first argument; needs mulWZeroR + mulWSuccR).
+mulWComm : CommT Whole mulW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x b) (mulW b x) end)
+      (subst Whole (mulW b zero) zero (mulWZeroR b)
+         (fn (z : Whole) is Eq Whole z (mulW b zero) end)
+         (refl (mulW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (mulW k b) (mulW b k)) is
+         transEq Whole (mulW (succ k) b) (addW (mulW b k) b) (mulW b (succ k))
+           (congW (fn (t : Whole) is addW t b end) (mulW k b) (mulW b k) ih)
+           (symEq Whole (mulW b (succ k)) (addW (mulW b k) b) (mulWSuccR b k))
+       end)
+      a
+  end
+end
+
+-- mul is associative (induction on a; the step turns on distribWR + congruence).
+mulWAssoc : AssocT Whole mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW (mulW x b) c) (mulW x (mulW b c)) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW (mulW k b) c) (mulW k (mulW b c))) is
+         transEq Whole
+           (mulW (mulW (succ k) b) c)
+           (addW (mulW (mulW k b) c) (mulW b c))
+           (mulW (succ k) (mulW b c))
+           (distribWR (mulW k b) b c)
+           (congW (fn (t : Whole) is addW t (mulW b c) end) (mulW (mulW k b) c) (mulW k (mulW b c)) ih)
+       end)
+      a
+  end
+end
+
+-- mul (succ zero) a = a definitionally: mul (succ zero) a = addW 0 a = a.
+mulWOneL : IdLT Whole mulW (succ zero) is fn (a : Whole) is refl a end end
+
+-- mul a (succ zero) = a (from mulWSuccR + mulWZeroR, no induction here).
+mulWOneR : IdRT Whole mulW (succ zero) is
+  fn (a : Whole) is
+    transEq Whole (mulW a (succ zero)) (addW (mulW a zero) a) a
+      (mulWSuccR a zero)
+      (congW (fn (t : Whole) is addW t a end) (mulW a zero) zero (mulWZeroR a))
+  end
+end
+
+-- LEFT distributivity: a * (b + c) = a*b + a*c (from mulWComm + distribWR).
+distribWL : DistribLT Whole addW mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    transEq Whole
+      (mulW a (addW b c))
+      (mulW (addW b c) a)
+      (addW (mulW a b) (mulW a c))
+      (mulWComm a (addW b c))
+      (transEq Whole
+         (mulW (addW b c) a)
+         (addW (mulW b a) (mulW c a))
+         (addW (mulW a b) (mulW a c))
+         (distribWR b c a)
+         (transEq Whole
+            (addW (mulW b a) (mulW c a))
+            (addW (mulW a b) (mulW c a))
+            (addW (mulW a b) (mulW a c))
+            (congW (fn (t : Whole) is addW t (mulW c a) end) (mulW b a) (mulW a b) (mulWComm b a))
+            (congW (fn (t : Whole) is addW (mulW a b) t end) (mulW c a) (mulW a c) (mulWComm c a))))
+  end
+end
+
+-- The assembled record. Stated over semiringWhole, whose projections compute to
+-- addW/zero/mulW/(succ zero), so the raw-kernel lemmas check on the nose.
+semiringLawsWhole : SemiringLaws Whole semiringWhole is
+  mkAnd (AssocT Whole addW)
+        (And (CommT Whole addW)
+        (And (IdLT Whole addW zero)
+        (And (IdRT Whole addW zero)
+        (And (AssocT Whole mulW)
+        (And (IdLT Whole mulW (succ zero))
+        (And (IdRT Whole mulW (succ zero))
+        (And (DistribLT Whole addW mulW)
+        (And (DistribRT Whole addW mulW)
+        (And (AnnihLT Whole mulW zero)
+             (AnnihRT Whole mulW zero))))))))))
+    addWAssoc
+    (mkAnd (CommT Whole addW)
+          (And (IdLT Whole addW zero)
+          (And (IdRT Whole addW zero)
+          (And (AssocT Whole mulW)
+          (And (IdLT Whole mulW (succ zero))
+          (And (IdRT Whole mulW (succ zero))
+          (And (DistribLT Whole addW mulW)
+          (And (DistribRT Whole addW mulW)
+          (And (AnnihLT Whole mulW zero)
+               (AnnihRT Whole mulW zero)))))))))
+      addWComm
+      (mkAnd (IdLT Whole addW zero)
+            (And (IdRT Whole addW zero)
+            (And (AssocT Whole mulW)
+            (And (IdLT Whole mulW (succ zero))
+            (And (IdRT Whole mulW (succ zero))
+            (And (DistribLT Whole addW mulW)
+            (And (DistribRT Whole addW mulW)
+            (And (AnnihLT Whole mulW zero)
+                 (AnnihRT Whole mulW zero))))))))
+        addWZeroL
+        (mkAnd (IdRT Whole addW zero)
+              (And (AssocT Whole mulW)
+              (And (IdLT Whole mulW (succ zero))
+              (And (IdRT Whole mulW (succ zero))
+              (And (DistribLT Whole addW mulW)
+              (And (DistribRT Whole addW mulW)
+              (And (AnnihLT Whole mulW zero)
+                   (AnnihRT Whole mulW zero)))))))
+          addWZeroR
+          (mkAnd (AssocT Whole mulW)
+                (And (IdLT Whole mulW (succ zero))
+                (And (IdRT Whole mulW (succ zero))
+                (And (DistribLT Whole addW mulW)
+                (And (DistribRT Whole addW mulW)
+                (And (AnnihLT Whole mulW zero)
+                     (AnnihRT Whole mulW zero))))))
+            mulWAssoc
+            (mkAnd (IdLT Whole mulW (succ zero))
+                  (And (IdRT Whole mulW (succ zero))
+                  (And (DistribLT Whole addW mulW)
+                  (And (DistribRT Whole addW mulW)
+                  (And (AnnihLT Whole mulW zero)
+                       (AnnihRT Whole mulW zero)))))
+              mulWOneL
+              (mkAnd (IdRT Whole mulW (succ zero))
+                    (And (DistribLT Whole addW mulW)
+                    (And (DistribRT Whole addW mulW)
+                    (And (AnnihLT Whole mulW zero)
+                         (AnnihRT Whole mulW zero))))
+                mulWOneR
+                (mkAnd (DistribLT Whole addW mulW)
+                      (And (DistribRT Whole addW mulW)
+                      (And (AnnihLT Whole mulW zero)
+                           (AnnihRT Whole mulW zero)))
+                  distribWL
+                  (mkAnd (DistribRT Whole addW mulW)
+                        (And (AnnihLT Whole mulW zero)
+                             (AnnihRT Whole mulW zero))
+                    distribWR
+                    (mkAnd (AnnihLT Whole mulW zero)
+                           (AnnihRT Whole mulW zero)
+                      mulWZeroL
+                      mulWZeroR)))))))))
+end
+
+-- ====================================================================
+-- RING / DIVRING / COMM LAWS, the next rung. RingLaws layers additive
+-- inverses onto SemiringLaws; DivRingLaws layers multiplicative inverses
+-- (guarded by a nonzero PREDICATE -- the recip-total junk convention above
+-- means there is no ambient "nonzero" type to state it uniformly).
+-- Commutativity is its OWN record: a commutative ring is Ring + RingLaws +
+-- CommLaws; a field is DivRing + DivRingLaws + CommLaws; a noncommutative
+-- DivRing (a quaternion-like carrier) is a DivRing withOUT CommLaws.
+-- Whole's CommLaws instance is free from mulWComm, already proven above.
+-- ====================================================================
+NegInvLT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> U is
+  fn (A : U) (add : A -> A -> A) (neg : A -> A) (z : A) is (a : A) -> Eq A (add (neg a) a) z end
+end
+NegInvRT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> U is
+  fn (A : U) (add : A -> A -> A) (neg : A -> A) (z : A) is (a : A) -> Eq A (add a (neg a)) z end
+end
+RecipInvLT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> (A -> U) -> U is
+  fn (A : U) (mul : A -> A -> A) (rc : A -> A) (o : A) (nz : A -> U) is
+    (x : A) -> nz x -> Eq A (mul (rc x) x) o
+  end
+end
+RecipInvRT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> (A -> U) -> U is
+  fn (A : U) (mul : A -> A -> A) (rc : A -> A) (o : A) (nz : A -> U) is
+    (x : A) -> nz x -> Eq A (mul x (rc x)) o
+  end
+end
+
+-- Ring laws = semiring laws over the embedded semiring + additive inverses.
+RingLaws : (A : U) -> Ring A -> U is
+  fn (A : U) (r : Ring A) is
+    And (SemiringLaws A (r.1))
+    (And (NegInvLT A (r.1.1) (r.2) (r.1.2.1))
+         (NegInvRT A (r.1.1) (r.2) (r.1.2.1)))
+  end
+end
+
+-- DivRing laws take a nonzero PREDICATE nz (each carrier states nonzeroness
+-- its own way). recip zero is junk by convention (above), so the inverse
+-- laws are guarded by nz.
+DivRingLaws : (A : U) -> DivRing A -> (A -> U) -> U is
+  fn (A : U) (d : DivRing A) (nz : A -> U) is
+    And (RingLaws A (d.1))
+    (And (RecipInvLT A (d.1.1.2.2.1) (d.2) (d.1.1.2.2.2) nz)
+         (RecipInvRT A (d.1.1.2.2.1) (d.2) (d.1.1.2.2.2) nz))
+  end
+end
+
+-- Commutativity is its own record (see the banner above).
+CommLaws : (A : U) -> Semiring A -> U is
+  fn (A : U) (s : Semiring A) is CommT A (s.2.2.1) end
+end
+commLawsWhole : CommLaws Whole semiringWhole is mulWComm end
+
+-- A runnable witness: `square` dispatched through the SAME Semiring
+-- dictionary the laws above are proven about, at Whole. 6 * 6 = 36.
+main : Whole is square Whole semiringWhole 6 end

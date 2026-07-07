@@ -1,0 +1,226 @@
+-- Chapter 570: THE TOWER GRAPH -- named injections up the numeric tower,
+-- with computation certificates.
+--
+--        Nat --wholeOf--> Whole --intOf--> Int
+--                           \               |
+--                          fracOf        ratOfInt
+--                             \             |
+--                              v            v
+--                               Frac  (triangle commutes: ratOfIntOf)
+--
+-- Nat (the counting numbers {1,2,3,...}) sits inside Whole ({0,1,2,...}) as
+-- the POSITIVE subset; `wholeOf` is the forgetful projection out of that
+-- subset Sigma. `intOf` injects a Whole as a non-negative Int. `fracOf`
+-- injects a Whole as the whole-valued fraction n/1. `ratOfInt` injects an
+-- Int as the integer-valued fraction n/1 (same sign, denominator 1). The
+-- diagram's TRIANGLE -- go Whole -> Int -> Frac, or go Whole -> Frac
+-- directly -- commutes: `ratOfInt (intOf n)` and `fracOf n` are the SAME
+-- fraction, by `ratOfIntOf`. That equality is DEFINITIONAL (both sides
+-- reduce to `frac false n 1`), so the proof is `refl`.
+--
+-- The other two lemmas here (`intOfAdd`/`intOfMul`) show `intOf` is a
+-- SEMIRING HOMOMORPHISM on its image: injecting two Wholes and adding
+-- (multiplying) them as Ints agrees with adding (multiplying) them as
+-- Wholes first and then injecting. `intOfOne` pins the unit case.
+-- `mkIntFalse` is the small normalization fact both proofs lean on: the
+-- Int smart constructor `mkInt` does nothing to an explicitly non-negative
+-- sign, whatever the magnitude, so it is transparent to `intOfAdd`/`Mul`'s
+-- case split.
+--
+-- Self-contained (the ch107 pattern; this chapter does not load the
+-- prelude): the Whole kernels, Nat as the positive Whole subset + wholeOf,
+-- the Int rung (intOf/mkInt/iadd/imul), the Frac rung (fracOf), ratOfInt,
+-- then the five graph lemmas. Ends with a runnable witness.
+
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+-- The Whole-level arithmetic kernels (addW/mulW), named so `+`/`*` overload
+-- across the tower elsewhere; here they are the raw operations the graph's
+-- homomorphism lemmas are stated over.
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+mulW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> addW ih n
+    end
+  end
+end
+
+pred : Whole -> Whole is
+  fn (n : Whole) is
+    case n of
+    | zero -> 0
+    | succ k -> k
+    end
+  end
+end
+
+-- Truncated subtraction: m - n stops at zero. Feeds `iadd`'s magnitude step.
+subW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case n of
+    | zero -> m
+    | succ k with ih -> pred ih
+    end
+  end
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+not  : Bool -> Bool is fn (b : Bool) is case b of | true -> false | false -> true end end end
+xorB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> not b | false -> b end end end
+
+-- leb m n decides m <= n; feeds `iadd`'s magnitude comparison.
+leb : Whole -> Whole -> Bool is
+  fn (m : Whole) is
+    case m of
+    | zero -> fn (n : Whole) is true end
+    | succ k with ih -> fn (n : Whole) is
+        case n of
+        | zero -> false
+        | succ j -> ih j
+        end
+      end
+    end
+  end
+end
+
+-- isPos decides nonzero-ness: false on zero, true on every successor. It is
+-- the predicate that carves the counting numbers out of the wholes.
+isPos : Whole -> Bool is
+  fn (n : Whole) is
+    case n of
+    | zero -> false
+    | succ k -> true
+    end
+  end
+end
+
+-- Nat: the counting numbers {1,2,3,...} as the POSITIVE wholes -- a whole
+-- paired with a proof it is nonzero. `zero` cannot inhabit it (that would
+-- need `Eq Bool false true`, uninhabited), so Nat is zeroless by
+-- construction. `wholeOf` is the injection Nat -> Whole (= .1).
+Nat : U is
+  Sig Whole (fn (n : Whole) is Eq Bool (isPos n) true end)
+end
+
+-- one = 1, the least counting number; the proof is refl since isPos (succ
+-- zero) computes to true.
+one : Nat is
+  Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ zero) (refl true)
+end
+
+-- nsucc steps a counting number up; the successor of anything is positive,
+-- so the nonzero proof is refl regardless of the predecessor.
+nsucc : Nat -> Nat is
+  fn (k : Nat) is
+    Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ (k.1)) (refl true)
+  end
+end
+
+-- The injection up the tower: a counting number IS its underlying whole.
+-- Nat is literally a subset of Whole, so wholeOf is the first projection;
+-- its image is exactly the positives {1,2,3,...}.
+wholeOf : Nat -> Whole is
+  fn (k : Nat) is k.1 end
+end
+
+-- ====================================================================
+-- THE INT RUNG. Whole is not closed under subtraction, so signed integers
+-- sit one rung up. Int is sign+magnitude (a Bool sign, a Whole magnitude),
+-- normalised so zero is unsigned. `intOf` injects a whole as a
+-- non-negative Int.
+-- ====================================================================
+data Int : U is int : Bool -> Whole -> Int end
+isign : Int -> Bool  is fn (i : Int) is case i of | int s m -> s end end end
+imag  : Int -> Whole is fn (i : Int) is case i of | int s m -> m end end end
+mkInt : Bool -> Whole -> Int is
+  fn (s : Bool) (m : Whole) is case m of | zero -> int false zero | succ k -> int s m end end
+end
+intOf : Whole -> Int is fn (n : Whole) is int false n end end
+
+-- signed addition: like signs add magnitudes; unlike signs subtract the
+-- smaller from the larger and take the larger's sign.
+iadd : Int -> Int -> Int is
+  fn (x : Int) (y : Int) is
+    case xorB (isign x) (isign y) of
+    | false -> mkInt (isign x) (addW (imag x) (imag y))
+    | true ->
+        case leb (imag y) (imag x) of
+        | true  -> mkInt (isign x) (subW (imag x) (imag y))
+        | false -> mkInt (isign y) (subW (imag y) (imag x))
+        end
+    end
+  end
+end
+imul : Int -> Int -> Int is
+  fn (x : Int) (y : Int) is mkInt (xorB (isign x) (isign y)) (mulW (imag x) (imag y)) end
+end
+
+-- ====================================================================
+-- THE FRAC RUNG. A SIGNED fraction: (sign, |num|, |den|). `fracOf` injects
+-- a whole as the whole-valued fraction n/1.
+-- ====================================================================
+data Frac : U is frac : Bool -> Whole -> Whole -> Frac end
+fracOf : Whole -> Frac is fn (n : Whole) is frac false n 1 end end
+
+-- `ratOfInt` injects an Int as the integer-valued fraction n/1 (same sign,
+-- denominator 1) -- the other leg of the diagram's triangle into Frac.
+ratOfInt : Int -> Frac is
+  fn (i : Int) is frac (isign i) (imag i) 1 end
+end
+
+-- ====================================================================
+-- THE FIVE GRAPH LEMMAS. mkIntFalse is the normalization fact intOfAdd/Mul
+-- lean on; intOfAdd/intOfMul/intOfOne show `intOf` is a semiring
+-- homomorphism on its image; ratOfIntOf is the triangle's commutativity,
+-- BY REFL (both sides compute to `frac false n 1`).
+-- ====================================================================
+
+-- mkInt on an explicit false sign is the bare constructor, whatever the
+-- magnitude (mkInt only normalizes -0; +0 is already normal).
+mkIntFalse : (m : Whole) -> Eq Int (mkInt false m) (int false m) is
+  fn (m : Whole) is
+    case m of
+    | zero -> refl (int false zero)
+    | succ k -> refl (int false (succ k))
+    end
+  end
+end
+
+-- iadd on two non-negative ints computes to mkInt false (addW a b): the
+-- sign xor is false, so the like-signs arm fires; mkIntFalse finishes.
+intOfAdd : (a : Whole) -> (b : Whole) -> Eq Int (iadd (intOf a) (intOf b)) (intOf (addW a b)) is
+  fn (a : Whole) (b : Whole) is mkIntFalse (addW a b) end
+end
+intOfMul : (a : Whole) -> (b : Whole) -> Eq Int (imul (intOf a) (intOf b)) (intOf (mulW a b)) is
+  fn (a : Whole) (b : Whole) is mkIntFalse (mulW a b) end
+end
+intOfOne : Eq Int (intOf (succ zero)) (int false (succ zero)) is
+  refl (int false (succ zero))
+end
+
+-- The commuting triangle, by refl: ratOfInt (intOf n) = frac false n 1 = fracOf n.
+ratOfIntOf : (n : Whole) -> Eq Frac (ratOfInt (intOf n)) (fracOf n) is
+  fn (n : Whole) is refl (frac false n 1) end
+end
+
+-- A runnable witness: inject 3 : Whole up to Int, then across to Frac.
+main : Frac is ratOfInt (intOf 3) end
