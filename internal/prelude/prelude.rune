@@ -1051,6 +1051,9 @@ commLawsWhole : CommLaws Whole semiringWhole is mulWComm end
 -- instance-table entries: registering Magma Whole would make `++` mean
 -- addition (the Raku lesson: keep `+` arithmetic, `++` append).
 -- ====================================================================
+-- (No witness or consumer yet: this is the lawful level the Magma rename
+-- freed the name for; String's associativity candidate lives in the
+-- listings over the rune-list view, not the packed carrier.)
 SemigroupLaws : (A : U) -> Magma A -> U is
   fn (A : U) (m : Magma A) is AssocT A m end
 end
@@ -1621,8 +1624,9 @@ strEq : Bytes -> Bytes -> Bool is
 end
 
 -- String is a Magma and a Monoid under concatenation (identity = the empty string,
--- packed code 1). So `++` works on string literals; the associativity law (the
--- semigroup proof) is proven in the listings.
+-- packed code 1). So `++` works on string literals. Associativity is proven in the
+-- listings over the rune-list view (ch438 sappAssoc), not yet as a SemigroupLaws
+-- value over this packed Bytes instance.
 instance magmaBytes : Magma Bytes is strApp end
 instance monoidBytes    : Monoid Bytes is mkMonoid Bytes strApp (bytes 1) end
 
