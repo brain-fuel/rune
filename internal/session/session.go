@@ -878,7 +878,8 @@ func (s *Session) decConfig() surface.DecConfig {
 	// not gate `On` on them (a session may have fractions but no Int rung).
 	return surface.DecConfig{
 		Frac: frac, RDec: rdec, Wcons: wcons, Wnil: wnil, True: tru,
-		Int: s.refs["int"], Ok: s.refs["ok"], Err: s.refs["err"],
+		Nonneg: s.refs["nonneg"], Negsucc: s.refs["negsucc"],
+		Ok: s.refs["ok"], Err: s.refs["err"],
 		DivByZero:   s.refs["divByZero"],
 		NotIntegral: s.refs["notIntegral"],
 		Negative:    s.refs["negative"],

@@ -83,7 +83,9 @@ type printer struct {
 // unless every hash resolved (e.g. a bare `--no-prelude` session).
 type DecConfig struct {
 	Frac, RDec, Wcons, Wnil, True core.Hash
-	Int, Ok, Err                  core.Hash
+	// Nonneg/Negsucc are the junk-free Int constructors (`nonneg n` = n,
+	// `negsucc k` = -(k+1)); Ok/Err are the Result constructors.
+	Nonneg, Negsucc, Ok, Err core.Hash
 	// ArithErr variant hashes: the Result error payload is folded to a message.
 	DivByZero, NotIntegral, Negative, NotCounting core.Hash
 	// Bytes is the prelude's packed-String constructor (`bytes : Whole -> Bytes`):
@@ -183,19 +185,20 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 		return ok && r.Hash == p.dec.True
 	}
 	switch {
-	case ref.Hash == p.dec.Int && len(args) == 2:
-		// int sign mag : a signed integer; magnitude 0 is unsigned.
-		a, ok := p.wholeVal(args[1])
+	case ref.Hash == p.dec.Nonneg && len(args) == 1:
+		// nonneg n : a non-negative signed integer, denoting n.
+		a, ok := p.wholeVal(args[0])
 		if !ok {
 			return "", false
 		}
-		if a == 0 {
-			return "0", true
-		}
-		if isNeg(args[0]) {
-			return "-" + strconv.Itoa(a), true
-		}
 		return strconv.Itoa(a), true
+	case ref.Hash == p.dec.Negsucc && len(args) == 1:
+		// negsucc k : a negative signed integer, denoting -(k+1).
+		k, ok := p.wholeVal(args[0])
+		if !ok {
+			return "", false
+		}
+		return "-" + strconv.Itoa(k+1), true
 	case ref.Hash == p.dec.Ok && len(args) == 3:
 		// ok A E v : a successful Result — show the payload (the A E type args are
 		// the first two explicit arguments). Fall through if the payload is not a
