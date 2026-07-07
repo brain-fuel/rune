@@ -153,7 +153,7 @@ end
 end
 
 -- ====================================================================
--- MAGMA / MONOID — the overloaded append `++` (and `mempty`), built on the SAME
+-- MAGMA / MONOID - the overloaded append `++` (and `mempty`), built on the SAME
 -- Σ-record-class + instance-search pattern as `Semiring`/`+`. `++` is DISTINCT from the
 -- numeric `+` (Raku's lesson: keep `+` arithmetic) and resolves to whatever instance
 -- the argument type carries: String (packed `Bytes`, below) and List (in the listings).
