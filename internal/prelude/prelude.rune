@@ -154,7 +154,7 @@ end
 
 -- ====================================================================
 -- SEMIGROUP / MONOID — the overloaded append `++` (and `mempty`), built on the SAME
--- Σ-record-class + instance-search pattern as `Num`/`+`. `++` is DISTINCT from the
+-- Σ-record-class + instance-search pattern as `Semiring`/`+`. `++` is DISTINCT from the
 -- numeric `+` (Raku's lesson: keep `+` arithmetic) and resolves to whatever instance
 -- the argument type carries: String (packed `Bytes`, below) and List (in the listings).
 -- A Semigroup is just an associative append; a Monoid adds an identity (`mempty`).
@@ -1744,7 +1744,7 @@ runeLen : Bytes -> Whole is fn (s : Bytes) is runeLenGo strFuel 0 s end end
 -- SHOW: render any value to a string, the basis of string interpolation `"{e}"`
 -- (which desugars to `++` over `show`). For the numeric tower it reuses the Binary
 -- encoders; a string shows as itself; a Bool shows as its word. Same Σ-record-class +
--- instance-search pattern as Num/Semigroup.
+-- instance-search pattern as Semiring/Semigroup.
 -- ====================================================================
 Show : U -> U is fn (A : U) is A -> Bytes end end
 show : {A : U} -> {d : Show A} -> A -> Bytes is fn {A : U} {d : Show A} (x : A) is d x end end

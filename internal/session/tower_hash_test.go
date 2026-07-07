@@ -15,7 +15,7 @@ func TestTowerClassHashesDistinct(t *testing.T) {
 	if _, err := s.LoadSource(prelude.Source()); err != nil {
 		t.Fatalf("loading prelude: %v", err)
 	}
-	names := []string{"Semiring", "Ring", "DivRing", "Monoid", "Div", "NegR", "SubR", "Binary", "Show"}
+	names := []string{"Semiring", "Ring", "DivRing", "Semigroup", "Monoid", "Div", "NegR", "SubR", "Binary", "Show"}
 	seen := map[string]string{}
 	for _, n := range names {
 		h, ok := s.Lookup(n)
