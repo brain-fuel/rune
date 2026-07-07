@@ -667,7 +667,7 @@ end
 -- (which semiringWhole's projections compute to definitionally), by WholeElim
 -- induction with subst/symEq/transEq plumbing, mirroring the subWZeroL/subWSucc
 -- proofs above and ch107's Nat semiring. addW recurses on its FIRST argument;
--- mulW steps by `addW ih n` (ih FIRST — the operand order differs from ch107's
+-- mulW steps by `addW ih n` (ih FIRST; the operand order differs from ch107's
 -- `add n ih`, so the mul proofs are adapted, not transcribed).
 -- ====================================================================
 
