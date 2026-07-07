@@ -763,18 +763,16 @@ func TestREPLContinuationThenEOF(t *testing.T) {
 // REPL. Parsing is TOTAL — a bad token or a 0 denominator is an `err` value, never
 // a crash (D1) — and rationals come back reduced.
 func TestREPLParseFromString(t *testing.T) {
+	// parseFrac is REMOVED with the Binary-Frac layer by the quotient
+	// re-foundation (Plan B revisits Frac serialization via to_radix); the
+	// Whole/Int parsers and their total error paths are unaffected.
 	script := []string{
-		`strHead "abc"`,    // first byte of a packed string: 'a' = 97
-		`parseWhole "42"`,  // ok 42
-		`parseInt "-5"`,    // ok -5 (signed)
-		`parseInt "7"`,     // ok 7
-		`parseFrac "3/4"`,  // ok 3/4
-		`parseFrac "-7/2"`, // ok -7/2
-		`parseFrac "6/4"`,  // reduced to 3/2
-		`parseFrac "10"`,   // a bare integer reads as 10/1
-		`parseWhole "4x"`,  // err (notNumber) — total, not a crash
-		`parseFrac "1/0"`,  // err (badDenom) — total, not a crash
-		`parseWhole ""`,    // err (emptyStr)
+		`strHead "abc"`,   // first byte of a packed string: 'a' = 97
+		`parseWhole "42"`, // ok 42
+		`parseInt "-5"`,   // ok -5 (signed)
+		`parseInt "7"`,    // ok 7
+		`parseWhole "4x"`, // err (notNumber) — total, not a crash
+		`parseWhole ""`,   // err (emptyStr)
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -788,12 +786,7 @@ func TestREPLParseFromString(t *testing.T) {
 		"ok 42 : Result Whole ParseErr",
 		"ok -5 : Result Int ParseErr",
 		"ok 7 : Result Int ParseErr",
-		"ok 3/4 : Result Frac ParseErr",
-		"ok -7/2 : Result Frac ParseErr",
-		"ok 3/2 : Result Frac ParseErr", // 6/4 reduced
-		"ok 10 : Result Frac ParseErr",  // "10" as 10/1
-		"err : Result Whole ParseErr",   // "4x" and "" both
-		"err : Result Frac ParseErr",    // "1/0"
+		"err : Result Whole ParseErr", // "4x" and "" both
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {
@@ -851,12 +844,14 @@ func TestREPLStringDisplay(t *testing.T) {
 // instance; the prelude's rt* lemmas additionally PROVE the round-trip (refl) at
 // load, so reaching this test at all means they held.
 func TestREPLBinaryRoundTrip(t *testing.T) {
+	// Binary Frac is REMOVED by the quotient re-foundation (a string rendering
+	// out of Quot QPair QRel needs a lowest-terms-uniqueness respect proof, the
+	// number theory the route forbids); Plan B revisits Frac serialization via
+	// the to_radix route. Whole/Int round-trips are unaffected.
 	script := []string{
-		`encode 42`,             // dispatch Binary Whole -> packed "42"
-		`encode (3/4)`,          // dispatch Binary Frac  -> packed "3/4"
-		`roundWhole 42`,         // parse (encode 42) = ok 42
-		`roundInt (2 - 5)`,      // ok -3 (signed round-trip)
-		`roundFrac (1/3 - 2/3)`, // ok -1/3 (reduced, signed)
+		`encode 42`,        // dispatch Binary Whole -> packed "42"
+		`roundWhole 42`,    // parse (encode 42) = ok 42
+		`roundInt (2 - 5)`, // ok -3 (signed round-trip)
 		":quit",
 	}
 	in := strings.NewReader(strings.Join(script, "\n") + "\n")
@@ -866,10 +861,9 @@ func TestREPLBinaryRoundTrip(t *testing.T) {
 	}
 	got := out.String()
 	wants := []string{
-		`"42" : Bytes`,                   // encode 42 (packed "42", folded to its literal)
-		"ok 42 : Result Whole ParseErr",  // roundWhole 42
-		"ok -3 : Result Int ParseErr",    // roundInt (2-5)
-		"ok -1/3 : Result Frac ParseErr", // roundFrac (1/3-2/3)
+		`"42" : Bytes`,                  // encode 42 (packed "42", folded to its literal)
+		"ok 42 : Result Whole ParseErr", // roundWhole 42
+		"ok -3 : Result Int ParseErr",   // roundInt (2-5)
 	}
 	for _, w := range wants {
 		if !strings.Contains(got, w) {

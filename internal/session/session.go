@@ -869,7 +869,11 @@ func (s *Session) Pretty(t core.Tm) string {
 // printer can fold them to positional notation (1/3, 0.{3}). It is On only when
 // every name resolves — a bare or non-prelude session leaves folding off.
 func (s *Session) decConfig() surface.DecConfig {
-	frac, ok1 := s.refs["frac"]
+	// qin is the quotient builtin's injection head (registered in every session);
+	// qpair is the prelude's raw rational-pair constructor. A saturated
+	// `qin _ _ (qpair i d)` folds to the gcd-reduced canonical fraction.
+	qin, ok1 := s.refs["qin"]
+	qpair, ok6 := s.refs["qpair"]
 	rdec, ok2 := s.refs["rdec"]
 	wcons, ok3 := s.refs["wcons"]
 	wnil, ok4 := s.refs["wnil"]
@@ -877,7 +881,7 @@ func (s *Session) decConfig() surface.DecConfig {
 	// Int / Result folding is optional extra polish: resolve when present, but do
 	// not gate `On` on them (a session may have fractions but no Int rung).
 	return surface.DecConfig{
-		Frac: frac, RDec: rdec, Wcons: wcons, Wnil: wnil, True: tru,
+		Qin: qin, Qpair: qpair, RDec: rdec, Wcons: wcons, Wnil: wnil, True: tru,
 		Nonneg: s.refs["nonneg"], Negsucc: s.refs["negsucc"],
 		Ok: s.refs["ok"], Err: s.refs["err"],
 		DivByZero:   s.refs["divByZero"],
@@ -885,7 +889,7 @@ func (s *Session) decConfig() surface.DecConfig {
 		Negative:    s.refs["negative"],
 		NotCounting: s.refs["notCounting"],
 		Bytes:       s.refs["bytes"],
-		On:          ok1 && ok2 && ok3 && ok4 && ok5,
+		On:          ok1 && ok2 && ok3 && ok4 && ok5 && ok6,
 	}
 }
 

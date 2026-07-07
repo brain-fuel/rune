@@ -411,124 +411,11 @@ wholeOf : Nat -> Whole is
 end
 
 -- ====================================================================
--- Fractions and the decimal escape hatch, at the prompt. `|>` pipes a fraction
--- into a radix conversion; the result is an exact (possibly repeating) or rounded
--- positional decimal, which the REPL prints with a radix point:
---   1/3                          -- 1/3
---   -1/3                         -- -1/3      (fractions are SIGNED; prefix - negates)
---   -1/3 |> to_radix             -- -0.{3}
---   3/4 |> to_radix              -- 0.75
---   1/3 |> to_radix              -- 0.{3}        (exact; the repetend is bracketed)
---   1/7 |> to_radix              -- 0.{142857}
---   1/6 |> to_radix              -- 0.1{6}       (a non-repeating head, then a cycle)
---   7/4 |> to_radix_sigplace 1   -- 1.8          (round to 1 decimal place)
---   7/4 |> to_radix_sigfig 2     -- 1.8          (round to 2 significant figures)
--- Every division below is LONG division (each step divides a small number), so
--- nothing hits the calculator //'s fuel wall — `1/3 |> to_radix` is exact, never
--- a blown expansion.
+-- THE FRAC RUNG lives BELOW the Int ring-law corpus now: Frac is a
+-- QUOTIENT of Int-numerator pairs (Quot QPair QRel) and its qlift
+-- respect proofs spend the ringLawsInt lemmas, so the whole rung is
+-- defined after them (search "THE FRAC RUNG").
 -- ====================================================================
-
--- A SIGNED fraction: (sign, |num|, |den|). The sign makes the whole tower handle
--- negatives — `Whole` has none, so an unsigned fraction would floor -1/3 to 0/3.
-data Frac : U is frac : Bool -> Whole -> Whole -> Frac end
-fneg : Frac -> Bool  is fn (f : Frac) is case f of | frac s a b -> s end end end
-fnum : Frac -> Whole is fn (f : Frac) is case f of | frac s a b -> a end end end
-fden : Frac -> Whole is fn (f : Frac) is case f of | frac s a b -> b end end end
-
-not  : Bool -> Bool is fn (b : Bool) is case b of | true -> false | false -> true end end end
-xorB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> not b | false -> b end end end
-
--- A bare numeral at Frac is the positive whole-valued fraction n/1.
-fracOf : Whole -> Frac is fn (n : Whole) is frac false n 1 end end
-builtin rat Frac fracOf
-
--- Put a fraction in lowest terms (divide numerator and denominator by their gcd),
--- so EVERY fraction at the prompt reads back canonically: 2/4 is 1/2, 1/3 - 2/3 is
--- -1/3 not -3/9, a whole-valued result like 3/3 is 1. (gcd 0 d = d, so a zero
--- numerator lands at 0/1, which displays as 0.)
-reduce : Frac -> Frac is
-  fn (f : Frac) is
-    let g : Whole = gcd (fnum f) (fden f) in
-    frac (fneg f) (fnum f // g) (fden f // g)
-  end
-end
-
--- Division at Frac: (sa,a/b)/(sb,c/d) = (sa xor sb, a*d/b*c), reduced.
-divF : Frac -> Frac -> Frac is
-  fn (x : Frac) (y : Frac) is
-    reduce (frac (xorB (fneg x) (fneg y)) (fnum x * fden y) (fden x * fnum y))
-  end
-end
--- Division of two wholes PROMOTES to ℚ (ℕ is not closed under division), exactly as
--- subtraction promotes to ℤ: `a / b` is the fraction a/b in lowest terms. This is why
--- `16/5` works whether the operands are bare numerals OR bound Whole values (`$3/5`).
-divWF : Whole -> Whole -> Frac is
-  fn (a : Whole) (b : Whole) is reduce (frac false a b) end
-end
-
--- DIVISION, with PROMOTION.  `Div A` is the class "an A divides (by an A) to a Frac";
--- its dictionary is the operation `A -> A -> Frac`. The result is ALWAYS Frac, so —
--- unlike SubR — it is keyed by the single operand type A with the codomain fixed, a
--- DISTINCT structure from `SubR R A` (which is `A -> A -> R`), so the instances do
--- not collide. Whole / Whole and Frac / Frac both land at Frac; a bound Whole result
--- divides just like a numeral literal does (`$3 / 5` = `16/5`).
-Div : U -> U is fn (A : U) is A -> A -> Frac end end
-instance divWhole : Div Whole is divWF end
-instance divFrac  : Div Frac  is divF end
-/ : {A : U} -> {d : Div A} -> A -> A -> Frac is
-  fn {A : U} {d : Div A} (x : A) (y : A) is d x y end
-end
-
--- Negation at Frac flips the sign. 0 stays unsigned in display. This is the Frac
--- instance of the promoting `negate` (defined after the Int rung, below).
-fnegate : Frac -> Frac is fn (f : Frac) is frac (not (fneg f)) (fnum f) (fden f) end end
-
--- Fraction arithmetic — the Frac instances of the tower's `* + -`. Multiplication
--- is componentwise with sign xor; addition puts the operands over the common
--- denominator b·d and, since fractions are SIGNED, either adds the magnitudes
--- (like signs) or subtracts the smaller from the larger and takes the larger's
--- sign (unlike signs); subtraction is addition of the negation. Every result is
--- reduced to lowest terms (`reduce`, defined with `/` above).
-mulF : Frac -> Frac -> Frac is
-  fn (x : Frac) (y : Frac) is
-    reduce (frac (xorB (fneg x) (fneg y)) (mulW (fnum x) (fnum y)) (mulW (fden x) (fden y)))
-  end
-end
-addF : Frac -> Frac -> Frac is
-  fn (x : Frac) (y : Frac) is
-    let ad : Whole = mulW (fnum x) (fden y) in
-    let cb : Whole = mulW (fnum y) (fden x) in
-    let bd : Whole = mulW (fden x) (fden y) in
-    reduce (case xorB (fneg x) (fneg y) of
-    | false -> frac (fneg x) (addW ad cb) bd
-    | true ->
-        case leb cb ad of
-        | true  -> frac (fneg x) (subW ad cb) bd
-        | false -> frac (fneg y) (subW cb ad) bd
-        end
-    end)
-  end
-end
-subF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is addF x (fnegate y) end end
-
--- Frac's full rung is a DivRing: reciprocal swaps numerator and denominator
--- (keeping the sign); recip of zero is the junk value zero itself (0/1),
--- per the ops-ladder convention. A reduced fraction swaps to a reduced
--- fraction, so no re-reduce is needed.
-recipF : Frac -> Frac is
-  fn (f : Frac) is
-    case fnum f of
-    | zero -> f
-    | succ k -> frac (fneg f) (fden f) (fnum f)
-    end
-  end
-end
-divRingFrac : DivRing Frac is
-  mkDivRing Frac
-    (mkRing Frac (mkSemiring Frac addF (frac false zero (succ zero)) mulF (frac false (succ zero) (succ zero))) fnegate)
-    recipF
-end
-instance semiringFrac : Semiring Frac is divRingFrac.1.1 end
 
 -- ====================================================================
 -- THE INT RUNG (ℤ).  Whole is not closed under subtraction, so `-` PROMOTES into
@@ -613,12 +500,8 @@ ringInt : Ring Int is
 end
 instance semiringInt : Semiring Int is ringInt.1 end
 
--- Int / Int climbs to ℚ, exactly as Whole / Whole does (ℤ is not closed under
--- division). So `-1` (an Int from prefix `-`) divides: `-1/3` is the Frac -1/3.
-divIF : Int -> Int -> Frac is
-  fn (x : Int) (y : Int) is reduce (frac (xorB (isign x) (isign y)) (imag x) (imag y)) end
-end
-instance divInt : Div Int is divIF end
+-- Int / Int division (divIF) climbs to Q; it is defined with the Frac
+-- rung below.
 
 -- Build a signed Int from a Bool sign + Whole magnitude, normalizing away
 -- negative zero: for sites below that hold a sign and a magnitude apart
@@ -644,7 +527,6 @@ NegR : U -> U -> U is fn (R : U) (A : U) is A -> R end end
 wneg : Whole -> Int is fn (n : Whole) is ineg (nonneg n) end end
 instance negWhole : NegR Int  Whole is wneg end
 instance negInt   : NegR Int  Int   is ineg end
-instance negFrac  : NegR Frac Frac  is fnegate end
 negate : {R : U} -> {A : U} -> {d : NegR R A} -> A -> R is
   fn {R : U} {A : U} {d : NegR R A} (x : A) is d x end
 end
@@ -662,7 +544,6 @@ end
 SubR : U -> U -> U is fn (R : U) (A : U) is A -> A -> R end end
 instance subWhole : SubR Int  Whole is wsub end
 instance subInt   : SubR Int  Int   is isub end
-instance subFrac  : SubR Frac Frac  is subF end
 - : {R : U} -> {A : U} -> {d : SubR R A} -> A -> A -> R is
   fn {R : U} {A : U} {d : SubR R A} (x : A) (y : A) is d x y end
 end
@@ -2481,6 +2362,675 @@ abGroupLawsInt : AbGroupLaws Int (groupOfRing Int ringInt) is
 end
 
 -- ====================================================================
+-- THE FRAC RUNG (Q), RE-FOUNDED AS A QUOTIENT (v4 Frac field laws, Plan A).
+-- A rational is an UNREDUCED pair: the numerator a signed Int, the
+-- denominator succ-encoded so it is positive BY CONSTRUCTION (qpair i d
+-- denotes i / (d+1); no zero-denominator state exists). Frac is the
+-- quotient of these pairs by cross-multiplication over Int, and the ops
+-- act on representatives UNREDUCED, lifted by qlift with respect proofs
+-- whose content is pure Int ring algebra (the corpus above); no gcd fact
+-- is ever proven. Canonical display is COMPUTATIONAL, not propositional:
+-- the REPL's Go fold reduces num/den by gcd at print time, and reduceQ
+-- below is its rune-side mirror, a plain function that is never the
+-- subject of a proof. Show/Binary instances for Frac are REMOVED in
+-- Plan A: any string rendering out of the quotient needs a respect proof
+-- that IS lowest-terms uniqueness, exactly the number theory the
+-- quotient route exists to avoid (Plan B revisits via to_radix).
+-- ====================================================================
+data QPair : U is qpair : Int -> Whole -> QPair end
+qnum   : QPair -> Int   is fn (p : QPair) is case p of | qpair i d -> i end end end
+qdpred : QPair -> Whole is fn (p : QPair) is case p of | qpair i d -> d end end end
+
+-- The denominator as a positive Int: qden (qpair i d) = d+1.
+qden : QPair -> Int is fn (p : QPair) is nonneg (succ (qdpred p)) end end
+
+-- Cross-multiplication: (i1 / sd1) ~ (i2 / sd2) iff i1*sd2 = i2*sd1 in
+-- Int. Eq Int lands in Prop, so QRel is Prop-valued (the relation sort
+-- the Quot builtin takes).
+QRel : QPair -> QPair -> Prop is
+  fn (p : QPair) (q : QPair) is
+    Eq Int (imul (qnum p) (qden q)) (imul (qnum q) (qden p))
+  end
+end
+Frac : U is Quot QPair QRel end
+
+-- A bare numeral at Frac is the whole-valued fraction n/1.
+fracOf : Whole -> Frac is fn (n : Whole) is qin QPair QRel (qpair (nonneg n) zero) end end
+builtin rat Frac fracOf
+
+-- The product-denominator INDEX: succ (dmul d1 d2) = (d1+1)*(d2+1). The
+-- formula addW (mulW d1 (succ d2)) d2 puts the correspondence one
+-- addWSuccR away (dmulSucc), because mulW (succ d1) (succ d2) computes
+-- to addW (mulW d1 (succ d2)) (succ d2) on the nose.
+dmul : Whole -> Whole -> Whole is
+  fn (a : Whole) (b : Whole) is addW (mulW a (succ b)) b end
+end
+dmulSucc : (a : Whole) -> (b : Whole) -> Eq Whole (mulW (succ a) (succ b)) (succ (dmul a b)) is
+  fn (a : Whole) (b : Whole) is addWSuccR (mulW a (succ b)) b end
+end
+
+-- Raw ops on representatives, UNREDUCED. rawAdd cross-multiplies onto
+-- the product denominator, rawMul is componentwise, rawNeg negates the
+-- numerator, rawRecip swaps numerator and denominator (the sign stays on
+-- the numerator; recip of a zero numerator is the junk value 0/1, the
+-- ops-ladder convention).
+rawMul : QPair -> QPair -> QPair is
+  fn (p : QPair) (q : QPair) is
+    qpair (imul (qnum p) (qnum q)) (dmul (qdpred p) (qdpred q))
+  end
+end
+rawAdd : QPair -> QPair -> QPair is
+  fn (p : QPair) (q : QPair) is
+    qpair (iadd (imul (qnum p) (qden q)) (imul (qnum q) (qden p))) (dmul (qdpred p) (qdpred q))
+  end
+end
+rawNeg : QPair -> QPair is
+  fn (p : QPair) is qpair (ineg (qnum p)) (qdpred p) end
+end
+-- rawRecip factors through a numerator-explicit worker so the respect
+-- proof can eliminate on the numerator with the goal computing.
+rawRecipOn : Int -> Whole -> QPair is
+  fn (i : Int) (d : Whole) is
+    case i of
+    | nonneg n ->
+        case n of
+        | zero -> qpair (nonneg zero) zero
+        | succ k -> qpair (nonneg (succ d)) k
+        end
+    | negsucc k -> qpair (negsucc d) k
+    end
+  end
+end
+rawRecip : QPair -> QPair is fn (p : QPair) is rawRecipOn (qnum p) (qdpred p) end end
+
+-- General congruence across types (subst under any function; congW and
+-- the congIadd/congImul family above are its monomorphic instances).
+congE : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) (refl (f x))
+  end
+end
+congIadd2 : (x1 : Int) -> (y1 : Int) -> (x2 : Int) -> (y2 : Int)
+  -> Eq Int x1 y1 -> Eq Int x2 y2 -> Eq Int (iadd x1 x2) (iadd y1 y2) is
+  fn (x1 : Int) (y1 : Int) (x2 : Int) (y2 : Int) (p : Eq Int x1 y1) (q : Eq Int x2 y2) is
+    transEq Int (iadd x1 x2) (iadd y1 x2) (iadd y1 y2)
+      (congIaddL x1 y1 x2 p)
+      (congIaddR y1 x2 y2 q)
+  end
+end
+
+-- The commutative-ring 4-factor regrouping (a*b)*(c*d) = (a*c)*(b*d),
+-- the workhorse of every cross-multiplication respect proof (ch116's
+-- zmulInterchange one rung down; our Int is canonical data).
+imulInterchange : (a : Int) -> (b : Int) -> (c : Int) -> (d : Int)
+  -> Eq Int (imul (imul a b) (imul c d)) (imul (imul a c) (imul b d)) is
+  fn (a : Int) (b : Int) (c : Int) (d : Int) is
+    transEq Int (imul (imul a b) (imul c d)) (imul a (imul b (imul c d))) (imul (imul a c) (imul b d))
+      (imulAssoc a b (imul c d))
+      (transEq Int (imul a (imul b (imul c d))) (imul a (imul (imul b c) d)) (imul (imul a c) (imul b d))
+         (congImulR a (imul b (imul c d)) (imul (imul b c) d)
+            (symEq Int (imul (imul b c) d) (imul b (imul c d)) (imulAssoc b c d)))
+         (transEq Int (imul a (imul (imul b c) d)) (imul a (imul (imul c b) d)) (imul (imul a c) (imul b d))
+            (congImulR a (imul (imul b c) d) (imul (imul c b) d)
+               (congImulL (imul b c) (imul c b) d (imulComm b c)))
+            (transEq Int (imul a (imul (imul c b) d)) (imul a (imul c (imul b d))) (imul (imul a c) (imul b d))
+               (congImulR a (imul (imul c b) d) (imul c (imul b d)) (imulAssoc c b d))
+               (symEq Int (imul (imul a c) (imul b d)) (imul a (imul c (imul b d))) (imulAssoc a c (imul b d))))))
+  end
+end
+
+-- The denominator homomorphism: qden (rawMul p q) = qden p * qden q.
+-- rawAdd shares the same denominator index, so this one lemma serves the
+-- addition respect proofs too (the types are definitionally equal).
+qdenMul : (p : QPair) -> (q : QPair) -> Eq Int (qden (rawMul p q)) (imul (qden p) (qden q)) is
+  fn (p : QPair) (q : QPair) is
+    symEq Int (imul (qden p) (qden q)) (qden (rawMul p q))
+      (congNonneg (mulW (succ (qdpred p)) (succ (qdpred q))) (succ (dmul (qdpred p) (qdpred q)))
+         (dmulSucc (qdpred p) (qdpred q)))
+  end
+end
+
+-- WELL-DEFINEDNESS of rawMul: cross-multiplication regrouping via
+-- imulInterchange, the hypothesis applied in the aligned factor (the
+-- ch116 qmulRespL/R shapes over canonical Int).
+mulRespR : (p : QPair) -> (q : QPair) -> (q' : QPair) -> QRel q q' -> QRel (rawMul p q) (rawMul p q') is
+  fn (p : QPair) (q : QPair) (q' : QPair) (h : QRel q q') is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let nq' : Int = qnum q' in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let dq' : Int = qden q' in
+    transEq Int
+      (imul (imul np nq) (qden (rawMul p q')))
+      (imul (imul np nq) (imul dp dq'))
+      (imul (imul np nq') (qden (rawMul p q)))
+      (congImulR (imul np nq) (qden (rawMul p q')) (imul dp dq') (qdenMul p q'))
+      (transEq Int
+         (imul (imul np nq) (imul dp dq'))
+         (imul (imul np dp) (imul nq dq'))
+         (imul (imul np nq') (qden (rawMul p q)))
+         (imulInterchange np nq dp dq')
+         (transEq Int
+            (imul (imul np dp) (imul nq dq'))
+            (imul (imul np dp) (imul nq' dq))
+            (imul (imul np nq') (qden (rawMul p q)))
+            (congImulR (imul np dp) (imul nq dq') (imul nq' dq) h)
+            (transEq Int
+               (imul (imul np dp) (imul nq' dq))
+               (imul (imul np nq') (imul dp dq))
+               (imul (imul np nq') (qden (rawMul p q)))
+               (symEq Int (imul (imul np nq') (imul dp dq)) (imul (imul np dp) (imul nq' dq)) (imulInterchange np nq' dp dq))
+               (congImulR (imul np nq') (imul dp dq) (qden (rawMul p q)) (symEq Int (qden (rawMul p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+mulRespL : (p : QPair) -> (p' : QPair) -> (q : QPair) -> QRel p p' -> QRel (rawMul p q) (rawMul p' q) is
+  fn (p : QPair) (p' : QPair) (q : QPair) (h : QRel p p') is
+    let np : Int = qnum p in
+    let np' : Int = qnum p' in
+    let nq : Int = qnum q in
+    let dp : Int = qden p in
+    let dp' : Int = qden p' in
+    let dq : Int = qden q in
+    transEq Int
+      (imul (imul np nq) (qden (rawMul p' q)))
+      (imul (imul np nq) (imul dp' dq))
+      (imul (imul np' nq) (qden (rawMul p q)))
+      (congImulR (imul np nq) (qden (rawMul p' q)) (imul dp' dq) (qdenMul p' q))
+      (transEq Int
+         (imul (imul np nq) (imul dp' dq))
+         (imul (imul np dp') (imul nq dq))
+         (imul (imul np' nq) (qden (rawMul p q)))
+         (imulInterchange np nq dp' dq)
+         (transEq Int
+            (imul (imul np dp') (imul nq dq))
+            (imul (imul np' dp) (imul nq dq))
+            (imul (imul np' nq) (qden (rawMul p q)))
+            (congImulL (imul np dp') (imul np' dp) (imul nq dq) h)
+            (transEq Int
+               (imul (imul np' dp) (imul nq dq))
+               (imul (imul np' nq) (imul dp dq))
+               (imul (imul np' nq) (qden (rawMul p q)))
+               (symEq Int (imul (imul np' nq) (imul dp dq)) (imul (imul np' dp) (imul nq dq)) (imulInterchange np' nq dp dq))
+               (congImulR (imul np' nq) (imul dp dq) (qden (rawMul p q)) (symEq Int (qden (rawMul p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+
+-- Lift rawMul through QRel, twice (the ch113/ch108 double-qlift pattern;
+-- Eq at a function type funext-reduces to the pointwise Pi, so the outer
+-- respect witness is a function into a qind).
+mulFR : QPair -> Frac -> Frac is
+  fn (p : QPair) is
+    qlift QPair QRel Frac
+      (fn (q : QPair) is qin QPair QRel (rawMul p q) end)
+      (fn (q : QPair) (q' : QPair) (r : QRel q q') is
+        qsound QPair QRel (rawMul p q) (rawMul p q') (mulRespR p q q' r)
+      end)
+  end
+end
+mulF : Frac -> Frac -> Frac is
+  qlift QPair QRel (Frac -> Frac) mulFR
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      fn (z : Frac) is
+        qind QPair QRel (fn (w : Frac) is Eq Frac (mulFR p w) (mulFR p' w) end)
+          (fn (q : QPair) is
+            qsound QPair QRel (rawMul p q) (rawMul p' q) (mulRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- WELL-DEFINEDNESS of rawAdd: distribute the sum numerator over the
+-- product denominator (idistribR), fix each summand by interchange (the
+-- hypothesis lands in the aligned factor), and reassemble.
+addRespR : (p : QPair) -> (q : QPair) -> (q' : QPair) -> QRel q q' -> QRel (rawAdd p q) (rawAdd p q') is
+  fn (p : QPair) (q : QPair) (q' : QPair) (h : QRel q q') is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let nq' : Int = qnum q' in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let dq' : Int = qden q' in
+    let n1 : Int = iadd (imul np dq) (imul nq dp) in
+    let n2 : Int = iadd (imul np dq') (imul nq' dp) in
+    let term1 : Eq Int (imul (imul np dq) (imul dp dq')) (imul (imul np dq') (imul dp dq)) =
+      transEq Int (imul (imul np dq) (imul dp dq')) (imul (imul np dp) (imul dq dq')) (imul (imul np dq') (imul dp dq))
+        (imulInterchange np dq dp dq')
+        (transEq Int (imul (imul np dp) (imul dq dq')) (imul (imul np dp) (imul dq' dq)) (imul (imul np dq') (imul dp dq))
+           (congImulR (imul np dp) (imul dq dq') (imul dq' dq) (imulComm dq dq'))
+           (symEq Int (imul (imul np dq') (imul dp dq)) (imul (imul np dp) (imul dq' dq)) (imulInterchange np dq' dp dq))) in
+    let term2 : Eq Int (imul (imul nq dp) (imul dp dq')) (imul (imul nq' dp) (imul dp dq)) =
+      transEq Int (imul (imul nq dp) (imul dp dq')) (imul (imul nq dp) (imul dq' dp)) (imul (imul nq' dp) (imul dp dq))
+        (congImulR (imul nq dp) (imul dp dq') (imul dq' dp) (imulComm dp dq'))
+        (transEq Int (imul (imul nq dp) (imul dq' dp)) (imul (imul nq dq') (imul dp dp)) (imul (imul nq' dp) (imul dp dq))
+           (imulInterchange nq dp dq' dp)
+           (transEq Int (imul (imul nq dq') (imul dp dp)) (imul (imul nq' dq) (imul dp dp)) (imul (imul nq' dp) (imul dp dq))
+              (congImulL (imul nq dq') (imul nq' dq) (imul dp dp) h)
+              (transEq Int (imul (imul nq' dq) (imul dp dp)) (imul (imul nq' dp) (imul dq dp)) (imul (imul nq' dp) (imul dp dq))
+                 (symEq Int (imul (imul nq' dp) (imul dq dp)) (imul (imul nq' dq) (imul dp dp)) (imulInterchange nq' dp dq dp))
+                 (congImulR (imul nq' dp) (imul dq dp) (imul dp dq) (imulComm dq dp))))) in
+    transEq Int
+      (imul n1 (qden (rawAdd p q')))
+      (imul n1 (imul dp dq'))
+      (imul n2 (qden (rawAdd p q)))
+      (congImulR n1 (qden (rawAdd p q')) (imul dp dq') (qdenMul p q'))
+      (transEq Int
+         (imul n1 (imul dp dq'))
+         (iadd (imul (imul np dq) (imul dp dq')) (imul (imul nq dp) (imul dp dq')))
+         (imul n2 (qden (rawAdd p q)))
+         (idistribR (imul np dq) (imul nq dp) (imul dp dq'))
+         (transEq Int
+            (iadd (imul (imul np dq) (imul dp dq')) (imul (imul nq dp) (imul dp dq')))
+            (iadd (imul (imul np dq') (imul dp dq)) (imul (imul nq' dp) (imul dp dq)))
+            (imul n2 (qden (rawAdd p q)))
+            (congIadd2
+               (imul (imul np dq) (imul dp dq')) (imul (imul np dq') (imul dp dq))
+               (imul (imul nq dp) (imul dp dq')) (imul (imul nq' dp) (imul dp dq))
+               term1 term2)
+            (transEq Int
+               (iadd (imul (imul np dq') (imul dp dq)) (imul (imul nq' dp) (imul dp dq)))
+               (imul n2 (imul dp dq))
+               (imul n2 (qden (rawAdd p q)))
+               (symEq Int (imul n2 (imul dp dq)) (iadd (imul (imul np dq') (imul dp dq)) (imul (imul nq' dp) (imul dp dq)))
+                  (idistribR (imul np dq') (imul nq' dp) (imul dp dq)))
+               (congImulR n2 (imul dp dq) (qden (rawAdd p q)) (symEq Int (qden (rawAdd p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+addRespL : (p : QPair) -> (p' : QPair) -> (q : QPair) -> QRel p p' -> QRel (rawAdd p q) (rawAdd p' q) is
+  fn (p : QPair) (p' : QPair) (q : QPair) (h : QRel p p') is
+    let np : Int = qnum p in
+    let np' : Int = qnum p' in
+    let nq : Int = qnum q in
+    let dp : Int = qden p in
+    let dp' : Int = qden p' in
+    let dq : Int = qden q in
+    let n1 : Int = iadd (imul np dq) (imul nq dp) in
+    let n2 : Int = iadd (imul np' dq) (imul nq dp') in
+    let term1 : Eq Int (imul (imul np dq) (imul dp' dq)) (imul (imul np' dq) (imul dp dq)) =
+      transEq Int (imul (imul np dq) (imul dp' dq)) (imul (imul np dp') (imul dq dq)) (imul (imul np' dq) (imul dp dq))
+        (imulInterchange np dq dp' dq)
+        (transEq Int (imul (imul np dp') (imul dq dq)) (imul (imul np' dp) (imul dq dq)) (imul (imul np' dq) (imul dp dq))
+           (congImulL (imul np dp') (imul np' dp) (imul dq dq) h)
+           (symEq Int (imul (imul np' dq) (imul dp dq)) (imul (imul np' dp) (imul dq dq)) (imulInterchange np' dq dp dq))) in
+    transEq Int
+      (imul n1 (qden (rawAdd p' q)))
+      (imul n1 (imul dp' dq))
+      (imul n2 (qden (rawAdd p q)))
+      (congImulR n1 (qden (rawAdd p' q)) (imul dp' dq) (qdenMul p' q))
+      (transEq Int
+         (imul n1 (imul dp' dq))
+         (iadd (imul (imul np dq) (imul dp' dq)) (imul (imul nq dp) (imul dp' dq)))
+         (imul n2 (qden (rawAdd p q)))
+         (idistribR (imul np dq) (imul nq dp) (imul dp' dq))
+         (transEq Int
+            (iadd (imul (imul np dq) (imul dp' dq)) (imul (imul nq dp) (imul dp' dq)))
+            (iadd (imul (imul np' dq) (imul dp dq)) (imul (imul nq dp') (imul dp dq)))
+            (imul n2 (qden (rawAdd p q)))
+            (congIadd2
+               (imul (imul np dq) (imul dp' dq)) (imul (imul np' dq) (imul dp dq))
+               (imul (imul nq dp) (imul dp' dq)) (imul (imul nq dp') (imul dp dq))
+               term1
+               (imulInterchange nq dp dp' dq))
+            (transEq Int
+               (iadd (imul (imul np' dq) (imul dp dq)) (imul (imul nq dp') (imul dp dq)))
+               (imul n2 (imul dp dq))
+               (imul n2 (qden (rawAdd p q)))
+               (symEq Int (imul n2 (imul dp dq)) (iadd (imul (imul np' dq) (imul dp dq)) (imul (imul nq dp') (imul dp dq)))
+                  (idistribR (imul np' dq) (imul nq dp') (imul dp dq)))
+               (congImulR n2 (imul dp dq) (qden (rawAdd p q)) (symEq Int (qden (rawAdd p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+addFR : QPair -> Frac -> Frac is
+  fn (p : QPair) is
+    qlift QPair QRel Frac
+      (fn (q : QPair) is qin QPair QRel (rawAdd p q) end)
+      (fn (q : QPair) (q' : QPair) (r : QRel q q') is
+        qsound QPair QRel (rawAdd p q) (rawAdd p q') (addRespR p q q' r)
+      end)
+  end
+end
+addF : Frac -> Frac -> Frac is
+  qlift QPair QRel (Frac -> Frac) addFR
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      fn (z : Frac) is
+        qind QPair QRel (fn (w : Frac) is Eq Frac (addFR p w) (addFR p' w) end)
+          (fn (q : QPair) is
+            qsound QPair QRel (rawAdd p q) (rawAdd p' q) (addRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+-- NEGATION respects QRel because ineg pulls out of imul (inegImul, a
+-- direct constructor-case fact on junk-free Int: four arms are refl, two
+-- fold a double negation via inegInvol).
+inegInvol : (x : Int) -> Eq Int (ineg (ineg x)) x is
+  fn (x : Int) is
+    IntElim (fn (w : Int) is Eq Int (ineg (ineg w)) w end)
+      (fn (n : Whole) is
+        WholeElim (fn (m : Whole) is Eq Int (ineg (ineg (nonneg m))) (nonneg m) end)
+          (refl (nonneg zero))
+          (fn (k : Whole) (ih : Eq Int (ineg (ineg (nonneg k))) (nonneg k)) is refl (nonneg (succ k)) end)
+          n
+      end)
+      (fn (k : Whole) is refl (negsucc k) end)
+      x
+  end
+end
+inegImul : (a : Int) -> (b : Int) -> Eq Int (imul (ineg a) b) (ineg (imul a b)) is
+  fn (a : Int) (b : Int) is
+    IntElim (fn (w : Int) is Eq Int (imul (ineg w) b) (ineg (imul w b)) end)
+      (fn (n : Whole) is
+        WholeElim (fn (m : Whole) is Eq Int (imul (ineg (nonneg m)) b) (ineg (imul (nonneg m) b)) end)
+          (IntElim (fn (w2 : Int) is Eq Int (imul (ineg (nonneg zero)) w2) (ineg (imul (nonneg zero) w2)) end)
+             (fn (c : Whole) is refl (nonneg zero) end)
+             (fn (d : Whole) is refl (nonneg zero) end)
+             b)
+          (fn (k : Whole) (ih : Eq Int (imul (ineg (nonneg k)) b) (ineg (imul (nonneg k) b))) is
+             IntElim (fn (w2 : Int) is Eq Int (imul (ineg (nonneg (succ k))) w2) (ineg (imul (nonneg (succ k)) w2)) end)
+               (fn (c : Whole) is refl (ineg (nonneg (mulW (succ k) c))) end)
+               (fn (d : Whole) is
+                  symEq Int (ineg (ineg (nonneg (mulW (succ k) (succ d))))) (nonneg (mulW (succ k) (succ d)))
+                    (inegInvol (nonneg (mulW (succ k) (succ d))))
+                end)
+               b
+           end)
+          n
+      end)
+      (fn (k : Whole) is
+        IntElim (fn (w2 : Int) is Eq Int (imul (ineg (negsucc k)) w2) (ineg (imul (negsucc k) w2)) end)
+          (fn (c : Whole) is
+             symEq Int (ineg (ineg (nonneg (mulW (succ k) c)))) (nonneg (mulW (succ k) c))
+               (inegInvol (nonneg (mulW (succ k) c)))
+           end)
+          (fn (d : Whole) is refl (ineg (nonneg (mulW (succ k) (succ d)))) end)
+          b
+      end)
+      a
+  end
+end
+negResp : (p : QPair) -> (p' : QPair) -> QRel p p' -> QRel (rawNeg p) (rawNeg p') is
+  fn (p : QPair) (p' : QPair) (h : QRel p p') is
+    transEq Int (imul (ineg (qnum p)) (qden p')) (ineg (imul (qnum p) (qden p'))) (imul (ineg (qnum p')) (qden p))
+      (inegImul (qnum p) (qden p'))
+      (transEq Int (ineg (imul (qnum p) (qden p'))) (ineg (imul (qnum p') (qden p))) (imul (ineg (qnum p')) (qden p))
+         (congE Int Int ineg (imul (qnum p) (qden p')) (imul (qnum p') (qden p)) h)
+         (symEq Int (imul (ineg (qnum p')) (qden p)) (ineg (imul (qnum p') (qden p))) (inegImul (qnum p') (qden p))))
+  end
+end
+fnegate : Frac -> Frac is
+  qlift QPair QRel Frac
+    (fn (p : QPair) is qin QPair QRel (rawNeg p) end)
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      qsound QPair QRel (rawNeg p) (rawNeg p') (negResp p p' r)
+    end)
+end
+
+-- RECIPROCAL respects QRel. The correlated case split: equal cross
+-- products force the two numerators to share sign and zeroness, so the
+-- four mixed arms are impossible (discharged by transporting isign or
+-- the zero test along the hypothesis into boolDiscTF) and the two live
+-- arms are one imulComm swap (positive) or one dmul rewrite (negative).
+mulSuccPos : (a : Whole) -> (b : Whole) -> Eq Bool (isZero (mulW (succ a) (succ b))) false is
+  fn (a : Whole) (b : Whole) is
+    congE Whole Bool isZero (mulW (succ a) (succ b)) (succ (dmul a b)) (dmulSucc a b)
+  end
+end
+negMulSS : (a : Whole) -> (b : Whole) -> Eq Int (imul (negsucc a) (nonneg (succ b))) (negsucc (dmul a b)) is
+  fn (a : Whole) (b : Whole) is
+    congE Whole Int (fn (w : Whole) is ineg (nonneg w) end) (mulW (succ a) (succ b)) (succ (dmul a b)) (dmulSucc a b)
+  end
+end
+recipRespOn : (d : Whole) -> (d' : Whole) -> (i : Int) -> (i' : Int)
+  -> Eq Int (imul i (nonneg (succ d'))) (imul i' (nonneg (succ d)))
+  -> QRel (rawRecipOn i d) (rawRecipOn i' d') is
+  fn (d : Whole) (d' : Whole) (i : Int) is
+    IntElim (fn (w : Int) is
+        (i' : Int) -> Eq Int (imul w (nonneg (succ d'))) (imul i' (nonneg (succ d)))
+        -> QRel (rawRecipOn w d) (rawRecipOn i' d') end)
+      (fn (n : Whole) is
+        WholeElim (fn (m : Whole) is
+            (i' : Int) -> Eq Int (imul (nonneg m) (nonneg (succ d'))) (imul i' (nonneg (succ d)))
+            -> QRel (rawRecipOn (nonneg m) d) (rawRecipOn i' d') end)
+          (fn (i' : Int) is
+            IntElim (fn (w' : Int) is
+                Eq Int (imul (nonneg zero) (nonneg (succ d'))) (imul w' (nonneg (succ d)))
+                -> QRel (qpair (nonneg zero) zero) (rawRecipOn w' d') end)
+              (fn (m' : Whole) is
+                WholeElim (fn (mm : Whole) is
+                    Eq Int (imul (nonneg zero) (nonneg (succ d'))) (imul (nonneg mm) (nonneg (succ d)))
+                    -> QRel (qpair (nonneg zero) zero) (rawRecipOn (nonneg mm) d') end)
+                  (fn (h2 : Eq Int (imul (nonneg zero) (nonneg (succ d'))) (imul (nonneg zero) (nonneg (succ d)))) is
+                     refl (nonneg zero)
+                   end)
+                  (fn (j : Whole) (ihj : Eq Int (imul (nonneg zero) (nonneg (succ d'))) (imul (nonneg j) (nonneg (succ d))) -> QRel (qpair (nonneg zero) zero) (rawRecipOn (nonneg j) d')) is
+                     fn (h2 : Eq Int (imul (nonneg zero) (nonneg (succ d'))) (imul (nonneg (succ j)) (nonneg (succ d)))) is
+                       boolDiscTF (QRel (qpair (nonneg zero) zero) (rawRecipOn (nonneg (succ j)) d'))
+                         (transEq Bool true (isZero (mulW (succ j) (succ d))) false
+                            (congE Int Bool (fn (z : Int) is isZero (imag z) end)
+                               (imul (nonneg zero) (nonneg (succ d'))) (imul (nonneg (succ j)) (nonneg (succ d))) h2)
+                            (mulSuccPos j d))
+                     end
+                   end)
+                  m'
+               end)
+              (fn (k' : Whole) is
+                fn (h2 : Eq Int (imul (nonneg zero) (nonneg (succ d'))) (imul (negsucc k') (nonneg (succ d)))) is
+                  boolDiscTF (QRel (qpair (nonneg zero) zero) (rawRecipOn (negsucc k') d'))
+                    (symEq Bool false true
+                       (congE Int Bool isign
+                          (imul (nonneg zero) (nonneg (succ d'))) (negsucc (dmul k' d))
+                          (transEq Int (imul (nonneg zero) (nonneg (succ d'))) (imul (negsucc k') (nonneg (succ d))) (negsucc (dmul k' d))
+                             h2 (negMulSS k' d))))
+                end
+               end)
+              i'
+           end)
+          (fn (k : Whole) (ihk : (i' : Int) -> Eq Int (imul (nonneg k) (nonneg (succ d'))) (imul i' (nonneg (succ d))) -> QRel (rawRecipOn (nonneg k) d) (rawRecipOn i' d')) is
+            fn (i' : Int) is
+              IntElim (fn (w' : Int) is
+                  Eq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul w' (nonneg (succ d)))
+                  -> QRel (qpair (nonneg (succ d)) k) (rawRecipOn w' d') end)
+                (fn (m' : Whole) is
+                  WholeElim (fn (mm : Whole) is
+                      Eq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (nonneg mm) (nonneg (succ d)))
+                      -> QRel (qpair (nonneg (succ d)) k) (rawRecipOn (nonneg mm) d') end)
+                    (fn (h2 : Eq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (nonneg zero) (nonneg (succ d)))) is
+                       boolDiscTF (QRel (qpair (nonneg (succ d)) k) (rawRecipOn (nonneg zero) d'))
+                         (transEq Bool true (isZero (mulW (succ k) (succ d'))) false
+                            (symEq Bool (isZero (mulW (succ k) (succ d'))) true
+                               (congE Int Bool (fn (z : Int) is isZero (imag z) end)
+                                  (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (nonneg zero) (nonneg (succ d))) h2))
+                            (mulSuccPos k d'))
+                     end)
+                    (fn (j : Whole) (ihj : Eq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (nonneg j) (nonneg (succ d))) -> QRel (qpair (nonneg (succ d)) k) (rawRecipOn (nonneg j) d')) is
+                       fn (h2 : Eq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (nonneg (succ j)) (nonneg (succ d)))) is
+                         transEq Int (imul (nonneg (succ d)) (nonneg (succ j))) (imul (nonneg (succ j)) (nonneg (succ d))) (imul (nonneg (succ d')) (nonneg (succ k)))
+                           (imulComm (nonneg (succ d)) (nonneg (succ j)))
+                           (transEq Int (imul (nonneg (succ j)) (nonneg (succ d))) (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (nonneg (succ d')) (nonneg (succ k)))
+                              (symEq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (nonneg (succ j)) (nonneg (succ d))) h2)
+                              (imulComm (nonneg (succ k)) (nonneg (succ d'))))
+                       end
+                     end)
+                    m'
+                 end)
+                (fn (k' : Whole) is
+                  fn (h2 : Eq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (negsucc k') (nonneg (succ d)))) is
+                    boolDiscTF (QRel (qpair (nonneg (succ d)) k) (rawRecipOn (negsucc k') d'))
+                      (symEq Bool false true
+                         (congE Int Bool isign
+                            (imul (nonneg (succ k)) (nonneg (succ d'))) (negsucc (dmul k' d))
+                            (transEq Int (imul (nonneg (succ k)) (nonneg (succ d'))) (imul (negsucc k') (nonneg (succ d))) (negsucc (dmul k' d))
+                               h2 (negMulSS k' d))))
+                  end
+                 end)
+                i'
+            end
+           end)
+          n
+       end)
+      (fn (k : Whole) is
+        fn (i' : Int) is
+          IntElim (fn (w' : Int) is
+              Eq Int (imul (negsucc k) (nonneg (succ d'))) (imul w' (nonneg (succ d)))
+              -> QRel (qpair (negsucc d) k) (rawRecipOn w' d') end)
+            (fn (m' : Whole) is
+              WholeElim (fn (mm : Whole) is
+                  Eq Int (imul (negsucc k) (nonneg (succ d'))) (imul (nonneg mm) (nonneg (succ d)))
+                  -> QRel (qpair (negsucc d) k) (rawRecipOn (nonneg mm) d') end)
+                (fn (h2 : Eq Int (imul (negsucc k) (nonneg (succ d'))) (imul (nonneg zero) (nonneg (succ d)))) is
+                   boolDiscTF (QRel (qpair (negsucc d) k) (rawRecipOn (nonneg zero) d'))
+                     (congE Int Bool isign (negsucc (dmul k d')) (imul (nonneg zero) (nonneg (succ d)))
+                        (transEq Int (negsucc (dmul k d')) (imul (negsucc k) (nonneg (succ d'))) (imul (nonneg zero) (nonneg (succ d)))
+                           (symEq Int (imul (negsucc k) (nonneg (succ d'))) (negsucc (dmul k d')) (negMulSS k d'))
+                           h2))
+                 end)
+                (fn (j : Whole) (ihj : Eq Int (imul (negsucc k) (nonneg (succ d'))) (imul (nonneg j) (nonneg (succ d))) -> QRel (qpair (negsucc d) k) (rawRecipOn (nonneg j) d')) is
+                   fn (h2 : Eq Int (imul (negsucc k) (nonneg (succ d'))) (imul (nonneg (succ j)) (nonneg (succ d)))) is
+                     boolDiscTF (QRel (qpair (negsucc d) k) (rawRecipOn (nonneg (succ j)) d'))
+                       (congE Int Bool isign (negsucc (dmul k d')) (imul (nonneg (succ j)) (nonneg (succ d)))
+                          (transEq Int (negsucc (dmul k d')) (imul (negsucc k) (nonneg (succ d'))) (imul (nonneg (succ j)) (nonneg (succ d)))
+                             (symEq Int (imul (negsucc k) (nonneg (succ d'))) (negsucc (dmul k d')) (negMulSS k d'))
+                             h2))
+                   end
+                 end)
+                m'
+             end)
+            (fn (k' : Whole) is
+              fn (h2 : Eq Int (imul (negsucc k) (nonneg (succ d'))) (imul (negsucc k') (nonneg (succ d)))) is
+                let hA : Eq Int (negsucc (dmul k d')) (negsucc (dmul k' d)) =
+                  transEq Int (negsucc (dmul k d')) (imul (negsucc k) (nonneg (succ d'))) (negsucc (dmul k' d))
+                    (symEq Int (imul (negsucc k) (nonneg (succ d'))) (negsucc (dmul k d')) (negMulSS k d'))
+                    (transEq Int (imul (negsucc k) (nonneg (succ d'))) (imul (negsucc k') (nonneg (succ d))) (negsucc (dmul k' d))
+                       h2 (negMulSS k' d)) in
+                let hW : Eq Whole (succ (dmul k d')) (succ (dmul k' d)) =
+                  congE Int Whole imag (negsucc (dmul k d')) (negsucc (dmul k' d)) hA in
+                let hM : Eq Whole (mulW (succ k) (succ d')) (mulW (succ k') (succ d)) =
+                  transEq Whole (mulW (succ k) (succ d')) (succ (dmul k d')) (mulW (succ k') (succ d))
+                    (dmulSucc k d')
+                    (transEq Whole (succ (dmul k d')) (succ (dmul k' d)) (mulW (succ k') (succ d))
+                       hW
+                       (symEq Whole (mulW (succ k') (succ d)) (succ (dmul k' d)) (dmulSucc k' d))) in
+                let hswap : Eq Whole (mulW (succ d) (succ k')) (mulW (succ d') (succ k)) =
+                  transEq Whole (mulW (succ d) (succ k')) (mulW (succ k') (succ d)) (mulW (succ d') (succ k))
+                    (mulWComm (succ d) (succ k'))
+                    (transEq Whole (mulW (succ k') (succ d)) (mulW (succ k) (succ d')) (mulW (succ d') (succ k))
+                       (symEq Whole (mulW (succ k) (succ d')) (mulW (succ k') (succ d)) hM)
+                       (mulWComm (succ k) (succ d'))) in
+                congE Whole Int (fn (w : Whole) is ineg (nonneg w) end)
+                  (mulW (succ d) (succ k')) (mulW (succ d') (succ k)) hswap
+              end
+             end)
+            i'
+        end
+       end)
+      i
+  end
+end
+recipResp : (p : QPair) -> (p' : QPair) -> QRel p p' -> QRel (rawRecip p) (rawRecip p') is
+  fn (p : QPair) (p' : QPair) (h : QRel p p') is
+    recipRespOn (qdpred p) (qdpred p') (qnum p) (qnum p') h
+  end
+end
+recipF : Frac -> Frac is
+  qlift QPair QRel Frac
+    (fn (p : QPair) is qin QPair QRel (rawRecip p) end)
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      qsound QPair QRel (rawRecip p) (rawRecip p') (recipResp p p' r)
+    end)
+end
+
+-- The derived family: subtraction is addition of the negation, division
+-- is multiplication by the reciprocal.
+subF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is addF x (fnegate y) end end
+divF : Frac -> Frac -> Frac is fn (x : Frac) (y : Frac) is mulF x (recipF y) end end
+
+-- Division of two wholes PROMOTES to Q, exactly as subtraction promotes
+-- to Z; a zero divisor yields the junk value 0/1 (denominators are
+-- positive by construction, so no n/0 state exists to display).
+divWF : Whole -> Whole -> Frac is
+  fn (a : Whole) (b : Whole) is
+    case b of
+    | zero -> fracOf zero
+    | succ k -> qin QPair QRel (qpair (nonneg a) k)
+    end
+  end
+end
+-- Int / Int climbs to Q the same way: a negative divisor moves its sign
+-- onto the numerator (x / -(k+1) = -x / (k+1)).
+divIF : Int -> Int -> Frac is
+  fn (x : Int) (y : Int) is
+    case y of
+    | nonneg m ->
+        case m of
+        | zero -> fracOf zero
+        | succ k -> qin QPair QRel (qpair x k)
+        end
+    | negsucc k -> qin QPair QRel (qpair (ineg x) k)
+    end
+  end
+end
+
+-- reduceQ: the COMPUTATIONAL lowest-terms reduction on representatives
+-- (gcd used as a plain function). It is the rune-side mirror of the Go
+-- display fold and is never the subject of a proof; the fallback arms
+-- are unreachable (g divides both parts and the denominator is
+-- positive) but keep it total without any divisibility fact.
+reduceQ : QPair -> QPair is
+  fn (p : QPair) is
+    case qnum p of
+    | nonneg n ->
+        let den : Whole = succ (qdpred p) in
+        let g : Whole = gcd n den in
+        case den // g of
+        | zero -> p
+        | succ d2 -> qpair (nonneg (n // g)) d2
+        end
+    | negsucc k ->
+        let den : Whole = succ (qdpred p) in
+        let g : Whole = gcd (succ k) den in
+        case den // g of
+        | zero -> p
+        | succ d2 ->
+            case (succ k) // g of
+            | zero -> p
+            | succ m2 -> qpair (negsucc m2) d2
+            end
+        end
+    end
+  end
+end
+
+-- DIVISION, with PROMOTION. `Div A` is the class "an A divides (by an A)
+-- to a Frac"; its dictionary is the operation `A -> A -> Frac`. The
+-- result is ALWAYS Frac, so it is keyed by the single operand type A, a
+-- DISTINCT structure from `SubR R A`. Whole / Whole, Int / Int, and
+-- Frac / Frac all land at Frac; a bound Whole result divides just like a
+-- numeral literal does (`$3 / 5` = `16/5`).
+Div : U -> U is fn (A : U) is A -> A -> Frac end end
+instance divWhole : Div Whole is divWF end
+instance divFrac  : Div Frac  is divF end
+instance divInt   : Div Int   is divIF end
+/ : {A : U} -> {d : Div A} -> A -> A -> Frac is
+  fn {A : U} {d : Div A} (x : A) (y : A) is d x y end
+end
+
+-- The Frac instances of the promoting negate / subtract (the NegR / SubR
+-- classes above).
+instance negFrac : NegR Frac Frac is fnegate end
+instance subFrac : SubR Frac Frac is subF end
+
+-- Frac's full rung is a DivRing over the lifted ops.
+divRingFrac : DivRing Frac is
+  mkDivRing Frac
+    (mkRing Frac (mkSemiring Frac addF (fracOf zero) mulF (fracOf (succ zero))) fnegate)
+    recipF
+end
+instance semiringFrac : Semiring Frac is divRingFrac.1.1 end
+
+-- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
 -- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),
 -- intOf (Whole -> Int), fracOf (Whole -> Frac), ratOfInt (Int -> Frac).
@@ -2496,7 +3046,7 @@ end
 -- (both sides are frac false n 1).
 -- ====================================================================
 ratOfInt : Int -> Frac is
-  fn (i : Int) is frac (isign i) (imag i) 1 end
+  fn (i : Int) is qin QPair QRel (qpair i zero) end
 end
 
 intOfAdd : (a : Whole) -> (b : Whole) -> Eq Int (iadd (intOf a) (intOf b)) (intOf (addW a b)) is
@@ -2507,9 +3057,9 @@ intOfMul : (a : Whole) -> (b : Whole) -> Eq Int (imul (intOf a) (intOf b)) (intO
 end
 intOfOne : Eq Int (intOf (succ zero)) (nonneg (succ zero)) is refl (nonneg (succ zero)) end
 
--- The commuting triangle, by refl: ratOfInt (intOf n) = frac false n 1 = fracOf n.
+-- The commuting triangle, by refl: both sides compute to qin (qpair (nonneg n) zero).
 ratOfIntOf : (n : Whole) -> Eq Frac (ratOfInt (intOf n)) (fracOf n) is
-  fn (n : Whole) is refl (frac false n 1) end
+  fn (n : Whole) is refl (fracOf n) end
 end
 
 -- ====================================================================
@@ -2552,80 +3102,91 @@ divChecked : Whole -> Whole -> Result Frac ArithErr is
   fn (a : Whole) (b : Whole) is
     case b of
     | zero   -> err Frac ArithErr (divByZero a b)
-    | succ k -> ok Frac ArithErr (reduce (frac false a b))
+    | succ k -> ok Frac ArithErr (qin QPair QRel (qpair (nonneg a) k))
     end
   end
 end
 
--- ====================================================================
--- DEMOTION, checked.  Climbing the tower (− promotes, / climbs to ℚ) is implicit;
--- coming back DOWN is not — `3/1` is `3 : Frac`, a rational that happens to be
--- whole. `toInt`/`toWhole` are the deliberate, checked descents: a fraction lands
--- in Int (resp. Whole) only when it is integral (denominator 1 in lowest terms),
--- and `toWhole` additionally only when it is non-negative; otherwise `err`. (Lisp
--- demotes implicitly because it is dynamically typed; here, where the type is a
--- static commitment, the divisibility check is made explicit and returns a Result.)
--- ====================================================================
-toInt : Frac -> Result Int ArithErr is
-  fn (f : Frac) is
-    let r : Frac = reduce f in
-    case fden r of
-    | zero   -> err Int ArithErr (notIntegral f)
-    | succ k ->
-        case k of
-        | succ j -> err Int ArithErr (notIntegral f)         -- denominator >= 2: not integral
-        | zero   -> ok Int ArithErr (signOfMag (fneg r) (fnum r)) -- denominator 1: the integer
-        end
-    end
-  end
-end
-toWhole : Frac -> Result Whole ArithErr is
-  fn (f : Frac) is
-    let r : Frac = reduce f in
-    case fden r of
-    | zero   -> err Whole ArithErr (notIntegral f)
-    | succ k ->
-        case k of
-        | succ j -> err Whole ArithErr (notIntegral f)   -- denominator >= 2: not integral
-        | zero   ->
-            case fnum r of
-            | zero   -> ok Whole ArithErr 0              -- zero is whole (any sign)
-            | succ n ->
-                case fneg r of
-                | false -> ok Whole ArithErr (fnum r)    -- positive integer
-                | true  -> err Whole ArithErr (negative f) -- negative: no whole answer
-                end
-            end
-        end
-    end
-  end
-end
--- toNat descends to the COUNTING numbers {1,2,3,…} (the positive-whole Σ, Nat): it
--- additionally rejects zero, since zero is not a counting number. The ok payload is
--- built from the pattern variable `succ n` (not `fnum r`), so `isPos (succ n)`
--- computes to `true` and the nonzero proof is `refl true`.
-toNat : Frac -> Result Nat ArithErr is
-  fn (f : Frac) is
-    let r : Frac = reduce f in
-    case fden r of
-    | zero   -> err Nat ArithErr (notIntegral f)
-    | succ k ->
-        case k of
-        | succ j -> err Nat ArithErr (notIntegral f)   -- denominator >= 2: not integral
-        | zero   ->
-            case fnum r of
-            | zero   -> err Nat ArithErr (notCounting f) -- zero: integral, but not a counting number
-            | succ n ->
-                case fneg r of
-                | true  -> err Nat ArithErr (negative f) -- negative: no counting answer
-                | false -> ok Nat ArithErr
-                    (Pair Whole (fn (m : Whole) is Eq Bool (isPos m) true end) (succ n) (refl true))
-                end
-            end
-        end
-    end
-  end
-end
+-- ============================================================
+-- TASK 2 REWIRES: the checked demotion trio (toInt / toWhole /
+-- toNat) is TEMPORARILY GATED OUT by the Frac quotient
+-- re-foundation (a Frac observation needs a qlift respect proof;
+-- the naive one is lowest-terms uniqueness, which is forbidden).
+-- Task 2 rebuilds the trio on the ported class-invariant
+-- observers: integrality read off the to_radix RDec expansion,
+-- the integer part via floorQ (ch203 floorRep / floorUnique /
+-- floorQ port alongside toRadixRespects). Semantics and REPL pin
+-- strings are UNCHANGED when it returns.
+-- ============================================================
+-- -- ====================================================================
+-- -- DEMOTION, checked.  Climbing the tower (− promotes, / climbs to ℚ) is implicit;
+-- -- coming back DOWN is not — `3/1` is `3 : Frac`, a rational that happens to be
+-- -- whole. `toInt`/`toWhole` are the deliberate, checked descents: a fraction lands
+-- -- in Int (resp. Whole) only when it is integral (denominator 1 in lowest terms),
+-- -- and `toWhole` additionally only when it is non-negative; otherwise `err`. (Lisp
+-- -- demotes implicitly because it is dynamically typed; here, where the type is a
+-- -- static commitment, the divisibility check is made explicit and returns a Result.)
+-- -- ====================================================================
+-- toInt : Frac -> Result Int ArithErr is
+--   fn (f : Frac) is
+--     let r : Frac = reduce f in
+--     case fden r of
+--     | zero   -> err Int ArithErr (notIntegral f)
+--     | succ k ->
+--         case k of
+--         | succ j -> err Int ArithErr (notIntegral f)         -- denominator >= 2: not integral
+--         | zero   -> ok Int ArithErr (signOfMag (fneg r) (fnum r)) -- denominator 1: the integer
+--         end
+--     end
+--   end
+-- end
+-- toWhole : Frac -> Result Whole ArithErr is
+--   fn (f : Frac) is
+--     let r : Frac = reduce f in
+--     case fden r of
+--     | zero   -> err Whole ArithErr (notIntegral f)
+--     | succ k ->
+--         case k of
+--         | succ j -> err Whole ArithErr (notIntegral f)   -- denominator >= 2: not integral
+--         | zero   ->
+--             case fnum r of
+--             | zero   -> ok Whole ArithErr 0              -- zero is whole (any sign)
+--             | succ n ->
+--                 case fneg r of
+--                 | false -> ok Whole ArithErr (fnum r)    -- positive integer
+--                 | true  -> err Whole ArithErr (negative f) -- negative: no whole answer
+--                 end
+--             end
+--         end
+--     end
+--   end
+-- end
+-- -- toNat descends to the COUNTING numbers {1,2,3,…} (the positive-whole Σ, Nat): it
+-- -- additionally rejects zero, since zero is not a counting number. The ok payload is
+-- -- built from the pattern variable `succ n` (not `fnum r`), so `isPos (succ n)`
+-- -- computes to `true` and the nonzero proof is `refl true`.
+-- toNat : Frac -> Result Nat ArithErr is
+--   fn (f : Frac) is
+--     let r : Frac = reduce f in
+--     case fden r of
+--     | zero   -> err Nat ArithErr (notIntegral f)
+--     | succ k ->
+--         case k of
+--         | succ j -> err Nat ArithErr (notIntegral f)   -- denominator >= 2: not integral
+--         | zero   ->
+--             case fnum r of
+--             | zero   -> err Nat ArithErr (notCounting f) -- zero: integral, but not a counting number
+--             | succ n ->
+--                 case fneg r of
+--                 | true  -> err Nat ArithErr (negative f) -- negative: no counting answer
+--                 | false -> ok Nat ArithErr
+--                     (Pair Whole (fn (m : Whole) is Eq Bool (isPos m) true end) (succ n) (refl true))
+--                 end
+--             end
+--         end
+--     end
+--   end
+-- end
 
 powTen : Whole -> Whole is
   fn (n : Whole) is case n of | zero -> 1 | succ k with ih -> 10 * ih end end
@@ -2678,20 +3239,32 @@ end
 -- 0.75; `rdec true 0 [3] 0 false` is -0.{3}; `rdec false 0 [1,6] 1 false` is 0.1{6}.
 data RDec : U is rdec : Bool -> Whole -> WList -> Whole -> Bool -> RDec end
 
--- Round a fraction to n decimal PLACES (round half up), as a terminating RDec:
--- n long-division digits of the magnitude, plus a carry if the next digit is >= 5,
--- carrying the fraction's sign.
-roundTo : Whole -> Frac -> RDec is
-  fn (n : Whole) (f : Frac) is
-    let body  : P2    = longDiv (fden f) n (fnum f % fden f) in
-    let nextd : Whole = (p2r body * 10) // fden f in
-    let bump  : Whole = case leb 5 nextd of | true -> 1 | false -> 0 end in
-    let m     : Whole = (fnum f // fden f) * powTen n + p2m body + bump in
-    rdec (fneg f) (m // powTen n) (digitsOf n (m % powTen n)) 0 true
-  end
-end
+-- ============================================================
+-- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
+-- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
+-- ch203's toRadixQ (qlift + toRadixRespects) and restores the
+-- family with unchanged output strings.
+-- ============================================================
+-- -- Round a fraction to n decimal PLACES (round half up), as a terminating RDec:
+-- -- n long-division digits of the magnitude, plus a carry if the next digit is >= 5,
+-- -- carrying the fraction's sign.
+-- roundTo : Whole -> Frac -> RDec is
+--   fn (n : Whole) (f : Frac) is
+--     let body  : P2    = longDiv (fden f) n (fnum f % fden f) in
+--     let nextd : Whole = (p2r body * 10) // fden f in
+--     let bump  : Whole = case leb 5 nextd of | true -> 1 | false -> 0 end in
+--     let m     : Whole = (fnum f // fden f) * powTen n + p2m body + bump in
+--     rdec (fneg f) (m // powTen n) (digitsOf n (m % powTen n)) 0 true
+--   end
+-- end
 
-to_radix_sigplace : Whole -> Frac -> RDec is fn (n : Whole) (f : Frac) is roundTo n f end end
+-- ============================================================
+-- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
+-- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
+-- ch203's toRadixQ (qlift + toRadixRespects) and restores the
+-- family with unchanged output strings.
+-- ============================================================
+-- to_radix_sigplace : Whole -> Frac -> RDec is fn (n : Whole) (f : Frac) is roundTo n f end end
 
 -- Number of decimal digits of a whole (q < 10 has 1).
 numDigits : Whole -> Whole -> Whole is
@@ -2705,36 +3278,54 @@ numDigits : Whole -> Whole -> Whole is
   end
 end
 
--- Leading zeros after the point for |f| < 1: smallest z with num*10^(z+1) >= den
--- (multiplication and comparison only — no division).
-leadingZeros : Whole -> Frac -> Whole is
-  fn (cap : Whole) (f : Frac) is
-    (case cap of
-     | zero -> fn (z : Whole) is z end
-     | succ c with ih -> fn (z : Whole) is
-         case leb (fden f) (fnum f * powTen (succ z)) of
-         | true  -> z
-         | false -> ih (succ z)
-         end
-       end
-     end : Whole -> Whole) 0
-  end
-end
+-- ============================================================
+-- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
+-- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
+-- ch203's toRadixQ (qlift + toRadixRespects) and restores the
+-- family with unchanged output strings.
+-- ============================================================
+-- -- Leading zeros after the point for |f| < 1: smallest z with num*10^(z+1) >= den
+-- -- (multiplication and comparison only — no division).
+-- leadingZeros : Whole -> Frac -> Whole is
+--   fn (cap : Whole) (f : Frac) is
+--     (case cap of
+--      | zero -> fn (z : Whole) is z end
+--      | succ c with ih -> fn (z : Whole) is
+--          case leb (fden f) (fnum f * powTen (succ z)) of
+--          | true  -> z
+--          | false -> ih (succ z)
+--          end
+--        end
+--      end : Whole -> Whole) 0
+--   end
+-- end
 
--- Decimal places for s SIGNIFICANT FIGURES: for |f| >= 1, s - (integer digits);
--- for |f| < 1, s + (leading zeros after the point).
-sigPlaces : Whole -> Frac -> Whole is
-  fn (s : Whole) (f : Frac) is
-    case leb 1 (fnum f // fden f) of
-    | true  -> subW s (numDigits 64 (fnum f // fden f))
-    | false -> s + leadingZeros 64 f
-    end
-  end
-end
+-- ============================================================
+-- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
+-- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
+-- ch203's toRadixQ (qlift + toRadixRespects) and restores the
+-- family with unchanged output strings.
+-- ============================================================
+-- -- Decimal places for s SIGNIFICANT FIGURES: for |f| >= 1, s - (integer digits);
+-- -- for |f| < 1, s + (leading zeros after the point).
+-- sigPlaces : Whole -> Frac -> Whole is
+--   fn (s : Whole) (f : Frac) is
+--     case leb 1 (fnum f // fden f) of
+--     | true  -> subW s (numDigits 64 (fnum f // fden f))
+--     | false -> s + leadingZeros 64 f
+--     end
+--   end
+-- end
 
-to_radix_sigfig : Whole -> Frac -> RDec is
-  fn (s : Whole) (f : Frac) is roundTo (sigPlaces s f) f end
-end
+-- ============================================================
+-- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
+-- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
+-- ch203's toRadixQ (qlift + toRadixRespects) and restores the
+-- family with unchanged output strings.
+-- ============================================================
+-- to_radix_sigfig : Whole -> Frac -> RDec is
+--   fn (s : Whole) (f : Frac) is roundTo (sigPlaces s f) f end
+-- end
 
 -- The fractional expansion produced by cycle-detecting long division: the digits,
 -- where the repetend begins, and whether it terminates (no repetend).
@@ -2793,13 +3384,19 @@ expand : Whole -> Whole -> Whole -> WList -> FBody is
   end
 end
 
--- The exact decimal of a fraction, sign and repetend and all.
-to_radix : Frac -> RDec is
-  fn (f : Frac) is
-    let body : FBody = expand (fden f) (succ (fden f)) (fnum f % fden f) wnil in
-    rdec (fneg f) (fnum f // fden f) (fbDigits body) (fbRep body) (fbTerm body)
-  end
-end
+-- ============================================================
+-- TASK 2 REWIRES: gated out by the Frac quotient re-foundation
+-- (reads fnum/fden/fneg of the deleted data Frac). Task 2 ports
+-- ch203's toRadixQ (qlift + toRadixRespects) and restores the
+-- family with unchanged output strings.
+-- ============================================================
+-- -- The exact decimal of a fraction, sign and repetend and all.
+-- to_radix : Frac -> RDec is
+--   fn (f : Frac) is
+--     let body : FBody = expand (fden f) (succ (fden f)) (fnum f % fden f) wnil in
+--     rdec (fneg f) (fnum f // fden f) (fbDigits body) (fbRep body) (fbTerm body)
+--   end
+-- end
 
 -- ====================================================================
 -- Packed binary strings + total numeric parsing (D1 + B4 + the goal).
@@ -2968,65 +3565,7 @@ parseInt : String -> Result Int ParseErr is
   end
 end
 
--- a Rational: [-] digits [ '/' (byte 47) digits ]. ONE pass, a state machine over
--- (sign, numerator, denominator, seen-slash, rest) recursing into a function type.
--- A bare integer "n" reads as n/1; a 0 denominator is `badDenom` (no crash).
-fracGo : Whole -> Bool -> Whole -> Whole -> Bool -> Bytes -> Result Frac ParseErr is
-  fn (fuel : Whole) is
-    WholeElim (fn (k : Whole) is Bool -> Whole -> Whole -> Bool -> Bytes -> Result Frac ParseErr end)
-      (fn (sg : Bool) (num : Whole) (den : Whole) (aft : Bool) (s : Bytes) is err Frac ParseErr tooLong end)
-      (fn (f : Whole) (ih : Bool -> Whole -> Whole -> Bool -> Bytes -> Result Frac ParseErr) is
-        fn (sg : Bool) (num : Whole) (den : Whole) (aft : Bool) (s : Bytes) is
-          case strNull s of
-          | true ->
-              case aft of
-              | false -> ok Frac ParseErr (reduce (frac sg num 1))
-              | true  ->
-                  case eqW den 0 of
-                  | true  -> err Frac ParseErr badDenom
-                  | false -> ok Frac ParseErr (reduce (frac sg num den))
-                  end
-              end
-          | false ->
-              case isDigitB (strHead s) of
-              | true  ->
-                  case aft of
-                  | false -> ih sg (addW (mulW num 10) (subW (strHead s) 48)) den false (strTail s)
-                  | true  -> ih sg num (addW (mulW den 10) (subW (strHead s) 48)) true (strTail s)
-                  end
-              | false ->
-                  case eqW (strHead s) 47 of
-                  | true  ->
-                      case aft of
-                      | true  -> err Frac ParseErr notNumber
-                      | false -> ih sg num den true (strTail s)
-                      end
-                  | false -> err Frac ParseErr notNumber
-                  end
-              end
-          end
-        end
-      end)
-      fuel
-  end
-end
 
-parseFrac : String -> Result Frac ParseErr is
-  fn (s : String) is
-    case strNull s of
-    | true  -> err Frac ParseErr emptyStr
-    | false ->
-        case eqW (strHead s) 45 of
-        | true  ->
-            case strNull (strTail s) of
-            | true  -> err Frac ParseErr notNumber
-            | false -> fracGo 256 true 0 0 false (strTail s)
-            end
-        | false -> fracGo 256 false 0 0 false s
-        end
-    end
-  end
-end
 
 -- ====================================================================
 -- Binary: encode/decode between a value and its packed-Bytes rendering — the
@@ -3097,16 +3636,6 @@ encodeInt : Int -> Bytes is
   end
 end
 
--- render a Frac: a bare integer when the denominator is 1, else "num/den".
-encodeFrac : Frac -> Bytes is
-  fn (f : Frac) is
-    case eqW (fden f) 1 of
-    | true  -> encodeInt (signOfMag (fneg f) (fnum f))
-    | false -> strApp (encodeInt (signOfMag (fneg f) (fnum f)))
-                      (strApp (strCons 47 (bytes 1)) (encodeWhole (fden f)))
-    end
-  end
-end
 
 -- the Binary class (a Σ-record: an encoder + a TOTAL decoder), one instance per
 -- tower rung. `encode`/`decode` dispatch on the resolved instance.
@@ -3120,7 +3649,6 @@ mkBinary : (A : U) -> (A -> Bytes) -> (Bytes -> Result A ParseErr) -> Binary A i
 end
 instance binWhole : Binary Whole is mkBinary Whole encodeWhole parseWhole end
 instance binInt   : Binary Int   is mkBinary Int   encodeInt   parseInt   end
-instance binFrac  : Binary Frac  is mkBinary Frac  encodeFrac  parseFrac  end
 
 encode : {A : U} -> {d : Binary A} -> A -> Bytes is
   fn {A : U} {d : Binary A} (x : A) is (d.1) x end
@@ -3133,7 +3661,6 @@ end
 -- COMPUTING on concrete values (the encoders/parsers reduce, so these are refl).
 roundWhole : Whole -> Result Whole ParseErr is fn (n : Whole) is parseWhole (encodeWhole n) end end
 roundInt   : Int   -> Result Int   ParseErr is fn (i : Int)   is parseInt   (encodeInt   i) end end
-roundFrac  : Frac  -> Result Frac  ParseErr is fn (f : Frac)  is parseFrac  (encodeFrac  f) end end
 
 -- Proof-carrying round-trips: decode-after-encode is the identity, MACHINE-CHECKED
 -- by refl (it computes) — the "only better than a partial read" guarantee, on
@@ -3144,9 +3671,6 @@ rtWhole : Eq (Result Whole ParseErr) (roundWhole 42) (ok Whole ParseErr 42) is
 end
 rtInt : Eq (Result Int ParseErr) (roundInt (negsucc 4)) (ok Int ParseErr (negsucc 4)) is
   refl (ok Int ParseErr (negsucc 4))
-end
-rtFrac : Eq (Result Frac ParseErr) (roundFrac (frac false 3 4)) (ok Frac ParseErr (frac false 3 4)) is
-  refl (ok Frac ParseErr (frac false 3 4))
 end
 rtBad : Eq (Result Whole ParseErr) (parseWhole "9z") (err Whole ParseErr notNumber) is
   refl (err Whole ParseErr notNumber)
@@ -3197,7 +3721,6 @@ show : {A : U} -> {d : Show A} -> A -> Bytes is fn {A : U} {d : Show A} (x : A) 
 
 instance showWhole : Show Whole is encodeWhole end
 instance showInt   : Show Int   is encodeInt end
-instance showFrac  : Show Frac  is encodeFrac end
 instance showBytes : Show Bytes is fn (s : Bytes) is s end end
 instance showBool  : Show Bool  is fn (b : Bool) is case b of | true -> "true" | false -> "false" end end end
 

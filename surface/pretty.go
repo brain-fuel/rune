@@ -73,8 +73,9 @@ type printer struct {
 	natZero, natSucc core.Hash
 	foldNat          bool
 	// dec, when On, folds the REPL prelude's fraction/decimal results to their
-	// positional notation: a `frac a b` prints `a/b`, and a `rdec` prints a
-	// radix-point number with the repetend bracketed (1/3 -> 0.{3}). Display only.
+	// positional notation: a quotient rational `qin _ _ (qpair i d)` prints as the
+	// gcd-reduced `n/d`, and a `rdec` prints a radix-point number with the repetend
+	// bracketed (1/3 -> 0.{3}). Display only.
 	dec DecConfig
 }
 
@@ -82,7 +83,11 @@ type printer struct {
 // printer can fold them to positional notation. On is false (and folding is off)
 // unless every hash resolved (e.g. a bare `--no-prelude` session).
 type DecConfig struct {
-	Frac, RDec, Wcons, Wnil, True core.Hash
+	// Qin is the quotient builtin's injection head and Qpair the prelude's raw
+	// rational pair constructor: a saturated `qin _ _ (qpair i d)` (numerator a
+	// folded Int, denominator d+1) folds to the canonical reduced fraction.
+	Qin, Qpair              core.Hash
+	RDec, Wcons, Wnil, True core.Hash
 	// Nonneg/Negsucc are the junk-free Int constructors (`nonneg n` = n,
 	// `negsucc k` = -(k+1)); Ok/Err are the Result constructors.
 	Nonneg, Negsucc, Ok, Err core.Hash
@@ -137,6 +142,38 @@ func (p *printer) wholeVal(t core.Tm) (int, bool) {
 		return p.wholeVal(pr.A)
 	}
 	return 0, false
+}
+
+// intVal reads a folded prelude Int (`nonneg n` = n, `negsucc k` = -(k+1)) as a
+// sign + magnitude. Bails (ok=false) on anything else, including bignums, exactly
+// as wholeVal does.
+func (p *printer) intVal(t core.Tm) (neg bool, mag int, ok bool) {
+	head, args := spineExpl(t)
+	ref, isRef := head.(core.Ref)
+	if !isRef || len(args) != 1 {
+		return false, 0, false
+	}
+	switch ref.Hash {
+	case p.dec.Nonneg:
+		n, ok := p.wholeVal(args[0])
+		return false, n, ok
+	case p.dec.Negsucc:
+		k, ok := p.wholeVal(args[0])
+		return true, k + 1, ok
+	}
+	return false, 0, false
+}
+
+// gcdInt is Euclid on machine ints for the display-side reduction of a quotient
+// rational's representative. gcdInt(0, b) = b, so a zero numerator lands at 0/1.
+func gcdInt(a, b int) int {
+	for b != 0 {
+		a, b = b, a%b
+	}
+	if a == 0 {
+		return 1
+	}
+	return a
 }
 
 // wlistVals reads a prelude WList (wcons/wnil over Whole) into its digit values.
@@ -217,16 +254,30 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 			return "err: " + msg, true
 		}
 		return "err", true
-	case ref.Hash == p.dec.Frac && len(args) == 3:
-		neg := isNeg(args[0])
-		a, ok1 := p.wholeVal(args[1])
-		b, ok2 := p.wholeVal(args[2])
-		if !ok1 || !ok2 {
+	case ref.Hash == p.dec.Qin && len(args) == 3:
+		// qin QPair QRel (qpair i d) : the quotient rational i/(d+1), held as an
+		// UNREDUCED representative. Reduce by gcd here (display is computational,
+		// never propositional) and render with the canonical rules: zero unsigned,
+		// denominator 1 as a signed whole, else a signed n/d.
+		ihead, iargs := spineExpl(args[2])
+		iref, ok := ihead.(core.Ref)
+		if !ok || iref.Hash != p.dec.Qpair || len(iargs) != 2 {
 			return "", false
 		}
+		neg, a, ok := p.intVal(iargs[0])
+		if !ok {
+			return "", false
+		}
+		d, ok := p.wholeVal(iargs[1])
+		if !ok {
+			return "", false
+		}
+		b := d + 1
 		if a == 0 {
 			return "0", true // zero is unsigned
 		}
+		g := gcdInt(a, b)
+		a, b = a/g, b/g
 		sign := ""
 		if neg {
 			sign = "-"

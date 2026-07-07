@@ -170,3 +170,19 @@ func TestTowerGraphLemmasPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestFracQuotientPresent pins the Frac quotient re-foundation (Frac field-laws
+// campaign, Plan A / Task 1): Frac is Quot QPair QRel with unreduced qlift ops
+// (respect proofs closed by Int ring algebra), the derived sub/div family, and
+// the computational reduceQ (the Go display fold's rune-side mirror).
+func TestFracQuotientPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"QPair", "QRel", "Frac", "fracOf", "addF", "mulF", "recipF", "divF", "reduceQ"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
