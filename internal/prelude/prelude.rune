@@ -606,6 +606,374 @@ instance subFrac  : SubR Frac Frac  is subF end
 end
 
 -- ====================================================================
+-- LAW STATEMENTS (v4). Reusable propositions over raw operations; the law
+-- RECORDS chain them with a non-dependent And. Laws are SEPARATE from the
+-- ops classes so proof-free carriers (IEEE754, later) still get ops.
+-- ====================================================================
+And : U -> U -> U is fn (P : U) (Q : U) is Sig P (fn (_p : P) is Q end) end end
+mkAnd : (P : U) -> (Q : U) -> P -> Q -> And P Q is
+  fn (P : U) (Q : U) (p : P) (q : Q) is Pair P (fn (_p : P) is Q end) p q end
+end
+
+AssocT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> (c : A) -> Eq A (f (f a b) c) (f a (f b c)) end
+end
+CommT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> Eq A (f a b) (f b a) end
+end
+IdLT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f e a) a end
+end
+IdRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f a e) a end
+end
+DistribLT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul a (add b c)) (add (mul a b) (mul a c))
+  end
+end
+DistribRT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul (add a b) c) (add (mul a c) (mul b c))
+  end
+end
+AnnihLT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul z a) z end
+end
+AnnihRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul a z) z end
+end
+
+-- The semiring laws over an ops instance: additive commutative monoid,
+-- multiplicative monoid, distributivity both sides, zero annihilates.
+SemiringLaws : (A : U) -> Semiring A -> U is
+  fn (A : U) (s : Semiring A) is
+    And (AssocT A (s.1))
+    (And (CommT A (s.1))
+    (And (IdLT A (s.1) (s.2.1))
+    (And (IdRT A (s.1) (s.2.1))
+    (And (AssocT A (s.2.2.1))
+    (And (IdLT A (s.2.2.1) (s.2.2.2))
+    (And (IdRT A (s.2.2.1) (s.2.2.2))
+    (And (DistribLT A (s.1) (s.2.2.1))
+    (And (DistribRT A (s.1) (s.2.2.1))
+    (And (AnnihLT A (s.2.2.1) (s.2.1))
+         (AnnihRT A (s.2.2.1) (s.2.1)))))))))))
+  end
+end
+
+-- ====================================================================
+-- WHOLE'S SEMIRING LAWS, machine-checked. Proven over the raw kernels addW/mulW
+-- (which semiringWhole's projections compute to definitionally), by WholeElim
+-- induction with subst/symEq/transEq plumbing, mirroring the subWZeroL/subWSucc
+-- proofs above and ch107's Nat semiring. addW recurses on its FIRST argument;
+-- mulW steps by `addW ih n` (ih FIRST — the operand order differs from ch107's
+-- `add n ih`, so the mul proofs are adapted, not transcribed).
+-- ====================================================================
+
+-- Local congruence (there is no ambient cong): rewrite under a Whole context.
+congW : (f : Whole -> Whole) -> (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Whole (f x) (f y) is
+  fn (f : Whole -> Whole) (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Whole (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- addW is associative (induction on the first argument).
+addWAssoc : AssocT Whole addW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW (addW x b) c) (addW x (addW b c)) end)
+      (refl (addW b c))
+      (fn (k : Whole) (ih : Eq Whole (addW (addW k b) c) (addW k (addW b c))) is
+         subst Whole (addW (addW k b) c) (addW k (addW b c)) ih
+           (fn (z : Whole) is Eq Whole (succ (addW (addW k b) c)) (succ z) end)
+           (refl (succ (addW (addW k b) c)))
+       end)
+      a
+  end
+end
+
+-- addW zero a = a definitionally (addW recurses on its first argument).
+addWZeroL : IdLT Whole addW zero is fn (a : Whole) is refl a end end
+
+-- addW a zero = a (induction on a; the recursion is stuck on a neutral first arg).
+addWZeroR : IdRT Whole addW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x zero) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW k zero) k) is
+         subst Whole (addW k zero) k ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) zero) (succ z) end)
+           (refl (addW (succ k) zero))
+       end)
+      a
+  end
+end
+
+-- Pushing a successor out of the second argument (mirrors ch107's addSuccR).
+addWSuccR : (m : Whole) -> (n : Whole) -> Eq Whole (addW m (succ n)) (succ (addW m n)) is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x (succ n)) (succ (addW x n)) end)
+      (refl (succ n))
+      (fn (k : Whole) (ih : Eq Whole (addW k (succ n)) (succ (addW k n))) is
+         subst Whole (addW k (succ n)) (succ (addW k n)) ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) (succ n)) (succ z) end)
+           (refl (addW (succ k) (succ n)))
+       end)
+      m
+  end
+end
+
+-- addW is commutative (induction on the first argument; needs addWZeroR + addWSuccR).
+addWComm : CommT Whole addW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x b) (addW b x) end)
+      (subst Whole (addW b zero) b (addWZeroR b)
+         (fn (z : Whole) is Eq Whole z (addW b zero) end)
+         (refl (addW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (addW k b) (addW b k)) is
+         subst Whole (succ (addW b k)) (addW b (succ k))
+           (subst Whole (addW b (succ k)) (succ (addW b k)) (addWSuccR b k)
+              (fn (z : Whole) is Eq Whole z (addW b (succ k)) end)
+              (refl (addW b (succ k))))
+           (fn (z : Whole) is Eq Whole (succ (addW k b)) z end)
+           (subst Whole (addW k b) (addW b k) ih
+              (fn (z : Whole) is Eq Whole (succ (addW k b)) (succ z) end)
+              (refl (succ (addW k b))))
+       end)
+      a
+  end
+end
+
+-- A rearrangement workhorse: (x + y) + w = (x + w) + y (from assoc + comm).
+addWSwapR : (x : Whole) -> (y : Whole) -> (w : Whole) -> Eq Whole (addW (addW x y) w) (addW (addW x w) y) is
+  fn (x : Whole) (y : Whole) (w : Whole) is
+    transEq Whole (addW (addW x y) w) (addW x (addW y w)) (addW (addW x w) y)
+      (addWAssoc x y w)
+      (transEq Whole (addW x (addW y w)) (addW x (addW w y)) (addW (addW x w) y)
+         (congW (fn (t : Whole) is addW x t end) (addW y w) (addW w y) (addWComm y w))
+         (symEq Whole (addW (addW x w) y) (addW x (addW w y)) (addWAssoc x w y)))
+  end
+end
+
+-- (a + x) + succ y = (a + y) + succ x (assoc + succ-shift + comm); feeds mulWSuccR.
+addWShiftSucc : (a : Whole) -> (x : Whole) -> (y : Whole)
+  -> Eq Whole (addW (addW a x) (succ y)) (addW (addW a y) (succ x)) is
+  fn (a : Whole) (x : Whole) (y : Whole) is
+    transEq Whole (addW (addW a x) (succ y)) (addW a (addW x (succ y))) (addW (addW a y) (succ x))
+      (addWAssoc a x (succ y))
+      (transEq Whole (addW a (addW x (succ y))) (addW a (succ (addW y x))) (addW (addW a y) (succ x))
+         (congW (fn (t : Whole) is addW a t end) (addW x (succ y)) (succ (addW y x))
+            (transEq Whole (addW x (succ y)) (succ (addW x y)) (succ (addW y x))
+               (addWSuccR x y)
+               (congW (fn (t : Whole) is succ t end) (addW x y) (addW y x) (addWComm x y))))
+         (transEq Whole (addW a (succ (addW y x))) (addW a (addW y (succ x))) (addW (addW a y) (succ x))
+            (congW (fn (t : Whole) is addW a t end) (succ (addW y x)) (addW y (succ x))
+               (symEq Whole (addW y (succ x)) (succ (addW y x)) (addWSuccR y x)))
+            (symEq Whole (addW (addW a y) (succ x)) (addW a (addW y (succ x))) (addWAssoc a y (succ x)))))
+  end
+end
+
+-- mul zero a = 0 definitionally (mulW's zero case returns 0).
+mulWZeroL : AnnihLT Whole mulW zero is fn (a : Whole) is refl zero end end
+
+-- mul a zero = 0 (induction on a; addWZeroR mops up the stuck `addW _ zero`).
+mulWZeroR : AnnihRT Whole mulW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x zero) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k zero) zero) is
+         transEq Whole (mulW (succ k) zero) (mulW k zero) zero
+           (addWZeroR (mulW k zero))
+           ih
+       end)
+      a
+  end
+end
+
+-- RIGHT distributivity: (a + b) * c = a*c + b*c (induction on a).
+distribWR : DistribRT Whole addW mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW (addW x b) c) (addW (mulW x c) (mulW b c)) end)
+      (refl (mulW b c))
+      (fn (k : Whole) (ih : Eq Whole (mulW (addW k b) c) (addW (mulW k c) (mulW b c))) is
+         transEq Whole
+           (addW (mulW (addW k b) c) c)
+           (addW (addW (mulW k c) (mulW b c)) c)
+           (addW (addW (mulW k c) c) (mulW b c))
+           (congW (fn (t : Whole) is addW t c end) (mulW (addW k b) c) (addW (mulW k c) (mulW b c)) ih)
+           (addWSwapR (mulW k c) (mulW b c) c)
+       end)
+      a
+  end
+end
+
+-- Multiplicative successor-shift: mul n (succ m) = mul n m + n (induction on n).
+mulWSuccR : (n : Whole) -> (m : Whole) -> Eq Whole (mulW n (succ m)) (addW (mulW n m) n) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x (succ m)) (addW (mulW x m) x) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k (succ m)) (addW (mulW k m) k)) is
+         transEq Whole
+           (addW (mulW k (succ m)) (succ m))
+           (addW (addW (mulW k m) k) (succ m))
+           (addW (addW (mulW k m) m) (succ k))
+           (congW (fn (t : Whole) is addW t (succ m) end) (mulW k (succ m)) (addW (mulW k m) k) ih)
+           (addWShiftSucc (mulW k m) k m)
+       end)
+      n
+  end
+end
+
+-- mul is commutative (induction on the first argument; needs mulWZeroR + mulWSuccR).
+-- Named for Task 4 (commLawsWhole) even though SemiringLaws omits it.
+mulWComm : CommT Whole mulW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x b) (mulW b x) end)
+      (subst Whole (mulW b zero) zero (mulWZeroR b)
+         (fn (z : Whole) is Eq Whole z (mulW b zero) end)
+         (refl (mulW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (mulW k b) (mulW b k)) is
+         transEq Whole (mulW (succ k) b) (addW (mulW b k) b) (mulW b (succ k))
+           (congW (fn (t : Whole) is addW t b end) (mulW k b) (mulW b k) ih)
+           (symEq Whole (mulW b (succ k)) (addW (mulW b k) b) (mulWSuccR b k))
+       end)
+      a
+  end
+end
+
+-- mul is associative (induction on a; the step turns on distribWR + congruence).
+mulWAssoc : AssocT Whole mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW (mulW x b) c) (mulW x (mulW b c)) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW (mulW k b) c) (mulW k (mulW b c))) is
+         transEq Whole
+           (mulW (mulW (succ k) b) c)
+           (addW (mulW (mulW k b) c) (mulW b c))
+           (mulW (succ k) (mulW b c))
+           (distribWR (mulW k b) b c)
+           (congW (fn (t : Whole) is addW t (mulW b c) end) (mulW (mulW k b) c) (mulW k (mulW b c)) ih)
+       end)
+      a
+  end
+end
+
+-- mul (succ zero) a = a definitionally: mul (succ zero) a = addW 0 a = a.
+mulWOneL : IdLT Whole mulW (succ zero) is fn (a : Whole) is refl a end end
+
+-- mul a (succ zero) = a (from mulWSuccR + mulWZeroR, no induction here).
+mulWOneR : IdRT Whole mulW (succ zero) is
+  fn (a : Whole) is
+    transEq Whole (mulW a (succ zero)) (addW (mulW a zero) a) a
+      (mulWSuccR a zero)
+      (congW (fn (t : Whole) is addW t a end) (mulW a zero) zero (mulWZeroR a))
+  end
+end
+
+-- LEFT distributivity: a * (b + c) = a*b + a*c (from mulWComm + distribWR).
+distribWL : DistribLT Whole addW mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    transEq Whole
+      (mulW a (addW b c))
+      (mulW (addW b c) a)
+      (addW (mulW a b) (mulW a c))
+      (mulWComm a (addW b c))
+      (transEq Whole
+         (mulW (addW b c) a)
+         (addW (mulW b a) (mulW c a))
+         (addW (mulW a b) (mulW a c))
+         (distribWR b c a)
+         (transEq Whole
+            (addW (mulW b a) (mulW c a))
+            (addW (mulW a b) (mulW c a))
+            (addW (mulW a b) (mulW a c))
+            (congW (fn (t : Whole) is addW t (mulW c a) end) (mulW b a) (mulW a b) (mulWComm b a))
+            (congW (fn (t : Whole) is addW (mulW a b) t end) (mulW c a) (mulW a c) (mulWComm c a))))
+  end
+end
+
+-- The assembled record. Stated over semiringWhole, whose projections compute to
+-- addW/zero/mulW/(succ zero), so the raw-kernel lemmas check on the nose.
+semiringLawsWhole : SemiringLaws Whole semiringWhole is
+  mkAnd (AssocT Whole addW)
+        (And (CommT Whole addW)
+        (And (IdLT Whole addW zero)
+        (And (IdRT Whole addW zero)
+        (And (AssocT Whole mulW)
+        (And (IdLT Whole mulW (succ zero))
+        (And (IdRT Whole mulW (succ zero))
+        (And (DistribLT Whole addW mulW)
+        (And (DistribRT Whole addW mulW)
+        (And (AnnihLT Whole mulW zero)
+             (AnnihRT Whole mulW zero))))))))))
+    addWAssoc
+    (mkAnd (CommT Whole addW)
+          (And (IdLT Whole addW zero)
+          (And (IdRT Whole addW zero)
+          (And (AssocT Whole mulW)
+          (And (IdLT Whole mulW (succ zero))
+          (And (IdRT Whole mulW (succ zero))
+          (And (DistribLT Whole addW mulW)
+          (And (DistribRT Whole addW mulW)
+          (And (AnnihLT Whole mulW zero)
+               (AnnihRT Whole mulW zero)))))))))
+      addWComm
+      (mkAnd (IdLT Whole addW zero)
+            (And (IdRT Whole addW zero)
+            (And (AssocT Whole mulW)
+            (And (IdLT Whole mulW (succ zero))
+            (And (IdRT Whole mulW (succ zero))
+            (And (DistribLT Whole addW mulW)
+            (And (DistribRT Whole addW mulW)
+            (And (AnnihLT Whole mulW zero)
+                 (AnnihRT Whole mulW zero))))))))
+        addWZeroL
+        (mkAnd (IdRT Whole addW zero)
+              (And (AssocT Whole mulW)
+              (And (IdLT Whole mulW (succ zero))
+              (And (IdRT Whole mulW (succ zero))
+              (And (DistribLT Whole addW mulW)
+              (And (DistribRT Whole addW mulW)
+              (And (AnnihLT Whole mulW zero)
+                   (AnnihRT Whole mulW zero)))))))
+          addWZeroR
+          (mkAnd (AssocT Whole mulW)
+                (And (IdLT Whole mulW (succ zero))
+                (And (IdRT Whole mulW (succ zero))
+                (And (DistribLT Whole addW mulW)
+                (And (DistribRT Whole addW mulW)
+                (And (AnnihLT Whole mulW zero)
+                     (AnnihRT Whole mulW zero))))))
+            mulWAssoc
+            (mkAnd (IdLT Whole mulW (succ zero))
+                  (And (IdRT Whole mulW (succ zero))
+                  (And (DistribLT Whole addW mulW)
+                  (And (DistribRT Whole addW mulW)
+                  (And (AnnihLT Whole mulW zero)
+                       (AnnihRT Whole mulW zero)))))
+              mulWOneL
+              (mkAnd (IdRT Whole mulW (succ zero))
+                    (And (DistribLT Whole addW mulW)
+                    (And (DistribRT Whole addW mulW)
+                    (And (AnnihLT Whole mulW zero)
+                         (AnnihRT Whole mulW zero))))
+                mulWOneR
+                (mkAnd (DistribLT Whole addW mulW)
+                      (And (DistribRT Whole addW mulW)
+                      (And (AnnihLT Whole mulW zero)
+                           (AnnihRT Whole mulW zero)))
+                  distribWL
+                  (mkAnd (DistribRT Whole addW mulW)
+                        (And (AnnihLT Whole mulW zero)
+                             (AnnihRT Whole mulW zero))
+                    distribWR
+                    (mkAnd (AnnihLT Whole mulW zero)
+                           (AnnihRT Whole mulW zero)
+                      mulWZeroL
+                      mulWZeroR)))))))))
+end
+
+-- ====================================================================
 -- PROVABLY-WHOLE subtraction.  When `b <= a` is in hand, a − b stays a Whole, no
 -- promotion: the proof is part of the TYPE. `monus` is the unconditional truncating
 -- whole subtraction (floors at 0) for when underflow is acceptable.

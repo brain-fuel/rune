@@ -29,3 +29,18 @@ func TestTowerClassHashesDistinct(t *testing.T) {
 		seen[key] = n
 	}
 }
+
+// TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
+// semiring laws (the proven tier of the v4 hierarchy): the laws value
+// must exist and elaborate against the laws record over semiringWhole.
+func TestWholeSemiringLawsPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"SemiringLaws", "semiringLawsWhole", "addWAssoc", "addWComm", "mulWAssoc", "distribWL"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
