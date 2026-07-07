@@ -121,6 +121,23 @@ func TestMonusLibraryPresent(t *testing.T) {
 	}
 }
 
+// TestIntSpecLemmasPresent pins the difference-pair transport spec lemmas
+// (Task 3 of the Int ring-laws campaign): every Int op rewritten as a wsub of
+// Whole polynomials. wsubRep represents an Int as wsub of its parts;
+// wsubPosNeg is the cross-equality bridge; iadd/imul/inegSpec transport the
+// ops; iaddWsub/imulWsub push a wsub through the ops (the ring-law engine).
+func TestIntSpecLemmasPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"wsubRep", "wsubPosNeg", "iaddSpec", "imulSpec", "inegSpec", "iaddWsub", "imulWsub"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestTowerGraphLemmasPresent pins the tower conversion graph (Task 5): the
 // ratOfInt injection, the intOf homomorphism certificates over iadd/imul
 // (now direct refl lemmas under junk-free Int, no normalization lemma
