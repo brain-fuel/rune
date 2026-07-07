@@ -21,16 +21,22 @@
 -- The other two lemmas here (`intOfAdd`/`intOfMul`) show `intOf` is a
 -- SEMIRING HOMOMORPHISM on its image: injecting two Wholes and adding
 -- (multiplying) them as Ints agrees with adding (multiplying) them as
--- Wholes first and then injecting. `intOfOne` pins the unit case.
--- `mkIntFalse` is the small normalization fact both proofs lean on: the
--- Int smart constructor `mkInt` does nothing to an explicitly non-negative
--- sign, whatever the magnitude, so it is transparent to `intOfAdd`/`Mul`'s
--- case split.
+-- Wholes first and then injecting. `intOfOne` pins the unit case. All
+-- three are now DIRECTLY BY REFL: Int is JUNK-FREE (`nonneg n` denotes n
+-- and `negsucc k` denotes -(k+1), so every constructor application is a
+-- distinct integer), and iadd/imul on two `nonneg` values compute straight
+-- to `nonneg` of the Whole result, no normalizing step in between. An
+-- earlier edition of this chapter carried a fifth lemma, `mkIntFalse`,
+-- certifying that the old sign+magnitude Int's smart constructor was
+-- transparent on a non-negative sign; the junk-free representation made
+-- that normalization vacuous, so the lemma has nothing left to state and
+-- is gone.
 --
 -- Self-contained (the ch107 pattern; this chapter does not load the
 -- prelude): the Whole kernels, Nat as the positive Whole subset + wholeOf,
--- the Int rung (intOf/mkInt/iadd/imul), the Frac rung (fracOf), ratOfInt,
--- then the five graph lemmas. Ends with a runnable witness.
+-- the Int rung (nonneg/negsucc, intOf, iadd/imul and their helpers), the
+-- Frac rung (fracOf), ratOfInt, then the four graph lemmas. Ends with a
+-- runnable witness.
 
 data Whole : U is
   zero : Whole
@@ -69,7 +75,7 @@ pred : Whole -> Whole is
   end
 end
 
--- Truncated subtraction: m - n stops at zero. Feeds `iadd`'s magnitude step.
+-- Truncated subtraction: m - n stops at zero. Feeds `wsub`'s magnitude step.
 subW : Whole -> Whole -> Whole is
   fn (m : Whole) (n : Whole) is
     case n of
@@ -84,10 +90,7 @@ data Bool : U is
 | false : Bool
 end
 
-not  : Bool -> Bool is fn (b : Bool) is case b of | true -> false | false -> true end end end
-xorB : Bool -> Bool -> Bool is fn (a : Bool) (b : Bool) is case a of | true -> not b | false -> b end end end
-
--- leb m n decides m <= n; feeds `iadd`'s magnitude comparison.
+-- leb m n decides m <= n; feeds `wsub`'s branch comparison.
 leb : Whole -> Whole -> Bool is
   fn (m : Whole) is
     case m of
@@ -144,34 +147,72 @@ end
 
 -- ====================================================================
 -- THE INT RUNG. Whole is not closed under subtraction, so signed integers
--- sit one rung up. Int is sign+magnitude (a Bool sign, a Whole magnitude),
--- normalised so zero is unsigned. `intOf` injects a whole as a
+-- sit one rung up. Int is JUNK-FREE: `nonneg n` denotes n and `negsucc k`
+-- denotes -(k+1), so every constructor application is a distinct integer
+-- and there is no representation outside the normalized image (no smart
+-- constructor, no negative zero). `intOf` injects a whole as a
 -- non-negative Int.
 -- ====================================================================
-data Int : U is int : Bool -> Whole -> Int end
-isign : Int -> Bool  is fn (i : Int) is case i of | int s m -> s end end end
-imag  : Int -> Whole is fn (i : Int) is case i of | int s m -> m end end end
-mkInt : Bool -> Whole -> Int is
-  fn (s : Bool) (m : Whole) is case m of | zero -> int false zero | succ k -> int s m end end
+data Int : U is
+  nonneg  : Whole -> Int
+| negsucc : Whole -> Int
 end
-intOf : Whole -> Int is fn (n : Whole) is int false n end end
-
--- signed addition: like signs add magnitudes; unlike signs subtract the
--- smaller from the larger and take the larger's sign.
+intOf : Whole -> Int is fn (n : Whole) is nonneg n end end
+isign : Int -> Bool is
+  fn (i : Int) is case i of | nonneg n -> false | negsucc k -> true end end
+end
+imag : Int -> Whole is
+  fn (i : Int) is case i of | nonneg n -> n | negsucc k -> succ k end end
+end
+ineg : Int -> Int is
+  fn (i : Int) is
+    case i of
+    | nonneg n -> case n of | zero -> nonneg zero | succ k -> negsucc k end
+    | negsucc k -> nonneg (succ k)
+    end
+  end
+end
+-- THE PROMOTION: whole minus whole, as a signed integer.
+wsub : Whole -> Whole -> Int is
+  fn (a : Whole) (b : Whole) is
+    case leb b a of
+    | true -> nonneg (subW a b)
+    | false -> negsucc (subW b (succ a))
+    end
+  end
+end
 iadd : Int -> Int -> Int is
   fn (x : Int) (y : Int) is
-    case xorB (isign x) (isign y) of
-    | false -> mkInt (isign x) (addW (imag x) (imag y))
-    | true ->
-        case leb (imag y) (imag x) of
-        | true  -> mkInt (isign x) (subW (imag x) (imag y))
-        | false -> mkInt (isign y) (subW (imag y) (imag x))
+    case x of
+    | nonneg a ->
+        case y of
+        | nonneg c -> nonneg (addW a c)
+        | negsucc d -> wsub a (succ d)
+        end
+    | negsucc b ->
+        case y of
+        | nonneg c -> wsub c (succ b)
+        | negsucc d -> negsucc (succ (addW b d))
         end
     end
   end
 end
+isub : Int -> Int -> Int is fn (x : Int) (y : Int) is iadd x (ineg y) end end
 imul : Int -> Int -> Int is
-  fn (x : Int) (y : Int) is mkInt (xorB (isign x) (isign y)) (mulW (imag x) (imag y)) end
+  fn (x : Int) (y : Int) is
+    case x of
+    | nonneg a ->
+        case y of
+        | nonneg c -> nonneg (mulW a c)
+        | negsucc d -> ineg (nonneg (mulW a (succ d)))
+        end
+    | negsucc b ->
+        case y of
+        | nonneg c -> ineg (nonneg (mulW (succ b) c))
+        | negsucc d -> nonneg (mulW (succ b) (succ d))
+        end
+    end
+  end
 end
 
 -- ====================================================================
@@ -188,34 +229,22 @@ ratOfInt : Int -> Frac is
 end
 
 -- ====================================================================
--- THE FIVE GRAPH LEMMAS. mkIntFalse is the normalization fact intOfAdd/Mul
--- lean on; intOfAdd/intOfMul/intOfOne show `intOf` is a semiring
--- homomorphism on its image; ratOfIntOf is the triangle's commutativity,
--- BY REFL (both sides compute to `frac false n 1`).
+-- THE FOUR GRAPH LEMMAS. intOfAdd/intOfMul/intOfOne show `intOf` is a
+-- semiring homomorphism on its image; ratOfIntOf is the triangle's
+-- commutativity. Every one is BY REFL: iadd/imul on two `nonneg` values
+-- compute to `nonneg` of the Whole result on the nose (junk-free Int has
+-- no normalizing constructor for a proof to see through -- the old
+-- edition's `mkIntFalse` normalization lemma died with the negative zero
+-- it normalized).
 -- ====================================================================
 
--- mkInt on an explicit false sign is the bare constructor, whatever the
--- magnitude (mkInt only normalizes -0; +0 is already normal).
-mkIntFalse : (m : Whole) -> Eq Int (mkInt false m) (int false m) is
-  fn (m : Whole) is
-    case m of
-    | zero -> refl (int false zero)
-    | succ k -> refl (int false (succ k))
-    end
-  end
-end
-
--- iadd on two non-negative ints computes to mkInt false (addW a b): the
--- sign xor is false, so the like-signs arm fires; mkIntFalse finishes.
 intOfAdd : (a : Whole) -> (b : Whole) -> Eq Int (iadd (intOf a) (intOf b)) (intOf (addW a b)) is
-  fn (a : Whole) (b : Whole) is mkIntFalse (addW a b) end
+  fn (a : Whole) (b : Whole) is refl (nonneg (addW a b)) end
 end
 intOfMul : (a : Whole) -> (b : Whole) -> Eq Int (imul (intOf a) (intOf b)) (intOf (mulW a b)) is
-  fn (a : Whole) (b : Whole) is mkIntFalse (mulW a b) end
+  fn (a : Whole) (b : Whole) is refl (nonneg (mulW a b)) end
 end
-intOfOne : Eq Int (intOf (succ zero)) (int false (succ zero)) is
-  refl (int false (succ zero))
-end
+intOfOne : Eq Int (intOf (succ zero)) (nonneg (succ zero)) is refl (nonneg (succ zero)) end
 
 -- The commuting triangle, by refl: ratOfInt (intOf n) = frac false n 1 = fracOf n.
 ratOfIntOf : (n : Whole) -> Eq Frac (ratOfInt (intOf n)) (fracOf n) is

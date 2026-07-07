@@ -1,0 +1,1116 @@
+-- Chapter 572: THE INT RING LAWS -- how a junk value blocked a ring, and
+-- how a change of representation plus one transport lemma unblocked it.
+--
+-- THE JUNK-VALUE ARGUMENT. The tower's first Int was sign+magnitude: a
+-- Bool sign paired with a Whole magnitude, with a smart constructor that
+-- normalized the minus sign away on a zero magnitude. That representation
+-- computes fine -- but it has JUNK: `int true zero` and `int false zero`
+-- are TWO values denoting the same integer zero, and the negative one sits
+-- outside the smart constructor's image. Junk poisons LAW TRANSPORT. Every
+-- ring law is an equation between Int values, and the natural proof method
+-- is a case split on the representation; with two zeros, every case split
+-- picks up an extra obligation identifying them, and a lemma proven about
+-- the normalized image says nothing about the stray value a raw
+-- constructor application can still produce. The associativity of `iadd`
+-- alone fans out into dozens of sign/magnitude/comparison branches, each
+-- dragging the negative-zero side condition along. The campaign never
+-- proved a single law over that Int; it deleted the representation instead.
+--
+-- THE JUNK-FREE INT. `data Int is nonneg : Whole -> Int | negsucc : Whole
+-- -> Int`: `nonneg n` denotes n and `negsucc k` denotes -(k+1). Every
+-- constructor application is a DISTINCT integer -- the denotation map is a
+-- bijection, so there is nothing to normalize and no smart constructor to
+-- see through. The price is that the operations pick up the offset
+-- bookkeeping (`negsucc` carries the predecessor of the magnitude); the
+-- payoff is that a case split IS a complete analysis.
+--
+-- THE ZW DIFFERENCE MODEL. Even junk-free, a direct case-split proof of a
+-- law like associativity is a wall of branches. The classical construction
+-- of the integers points the way out: Z is the quotient of Whole pairs
+-- (p, n) -- "p minus n" -- under cross-equality (p1, n1) ~ (p2, n2) iff
+-- p1 + n2 = p2 + n1. This chapter does not build the quotient; it uses the
+-- DIFFERENCE MODEL as a proof technique. `wsub : Whole -> Whole -> Int`
+-- realizes a pair as the integer it denotes, `posP`/`negP` split an Int
+-- back into a canonical pair (nonneg n is n - 0, negsucc k is 0 - (k+1)),
+-- and every Int operation is rewritten as ONE `wsub` of Whole polynomials.
+-- A ring law then reduces to Whole arithmetic -- proven long ago by
+-- ordinary induction (addWAssoc, addWComm, mulWComm, ...) -- transported
+-- through the keystone:
+--
+--   wsubEq : a + d = c + b  implies  wsub a b = wsub c d
+--
+-- "wsub respects cross-equal differences", exactly the quotient's soundness
+-- law, proven ONCE. Under it sits the MONUS / ORDER LIBRARY: `wsub`
+-- branches on `leb b a` and computes with truncated subtraction, so the
+-- keystone needs the decidable order's completeness (lebComplStrict: not
+-- b <= a forces a+1 <= b), the monus cancellation subWAddCancel (b <= a
+-- gives b + (a - b) = a), additive cancellation addWCancelL, and the
+-- mixed-branch discharger orderTransfer, whose impossible cases fall to
+-- the Bool discriminator boolDiscTF (ex falso from `true = false`, no
+-- Empty type needed). boolCaseEq cases on a Bool while RETAINING the
+-- discriminant equation, so each branch knows which arm of `wsub` it is in.
+--
+-- THE SPEC-LEMMA PIPELINE. On top of wsubEq, each operation gets a SPEC
+-- rewriting it as a wsub of polynomials in the operands' difference pairs:
+--   iaddSpec : iadd x y = wsub (posP x + posP y) (negP x + negP y)
+--   imulSpec : imul x y = wsub (pp+nn) (pn+np)      (the signed product)
+--   inegSpec : ineg x   = wsub (negP x) (posP x)    (swap the pair)
+-- and the PUSH lemmas iaddWsub / iaddWsubR collapse an op applied to an
+-- explicit wsub into one wsub (chaining the spec with wsubEq through the
+-- cross-equality bridge wsubPosNeg, regrouped by addWInterchange). A law
+-- proof is then a pipeline: spec the operands, push the wsubs together,
+-- close with the matching Whole law under wsubEq or congWsub2.
+--
+-- THIS CHAPTER'S SCOPE, honestly. The prelude proves ALL fourteen law
+-- lemmas this way (iaddAssoc/iaddComm/iaddZeroL/iaddZeroR/imulAssoc/
+-- imulOneL/imulOneR/idistribL/idistribR/imulZeroL/imulZeroR/inegInvL/
+-- inegInvR + imulComm) and assembles semiringLawsInt -> ringLawsInt ->
+-- commLawsInt -> commRingLawsInt. This chapter proves a REPRESENTATIVE
+-- subset IN FULL -- one law per flavor, prelude bodies mirrored verbatim
+-- with their whole dependency closure:
+--   iaddAssoc : the pipeline at full stretch (spec both nestings, push
+--               left and right, close with addWAssoc componentwise);
+--   imulComm  : the eight-product column swap (mulWComm + addWComm under
+--               congWsub2, no push lemmas needed);
+--   inegInvL  : the additive inverse (inegSpec + iaddWsub, closing with
+--               wsubEq at the pair (negP a + posP a, posP a + negP a) ~
+--               (0, 0) -- the cross-equality IS commutativity).
+-- The remaining eleven laws and the assembled SemiringLaws/RingLaws
+-- records live in the prelude, same method, no new machinery. The bridge
+-- payoff cashes there in ONE line -- the ch571 ladder edge
+-- abGroupLawsOfRing applied to ringLawsInt:
+--
+--   abGroupLawsInt : AbGroupLaws Int (groupOfRing Int ringInt) is
+--     abGroupLawsOfRing Int ringInt ringLawsInt
+--   end
+--
+-- (Z, +, 0, negate) is an abelian group, not asserted but reassembled from
+-- the ring laws' own proofs. This chapter carries the three laws and a
+-- small And-chain bundling them (the same mkAnd discipline the prelude's
+-- full records use), not the full RingLaws assembly.
+--
+-- Self-contained (the ch107/ch569 pattern): restates the Whole kernels,
+-- the equality plumbing, the law-statement formers, the Whole lemmas the
+-- closure needs, the junk-free Int block, the monus library, the specs,
+-- and the three laws; does not load the prelude, registers no accelerated
+-- builtins. Ends with a runnable witness: (-3) + 5 computes to 2.
+
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+-- The Whole-level arithmetic kernels: addW recurses on its FIRST argument,
+-- mulW steps by `addW ih n`, subW (truncated subtraction, the monus)
+-- recurses on its SECOND. Every law below bottoms out in these.
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+mulW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> addW ih n
+    end
+  end
+end
+
+pred : Whole -> Whole is
+  fn (n : Whole) is
+    case n of
+    | zero -> 0
+    | succ k -> k
+    end
+  end
+end
+
+subW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case n of
+    | zero -> m
+    | succ k with ih -> pred ih
+    end
+  end
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+-- leb m n decides m <= n; it is the guard `wsub` branches on, so the whole
+-- law campaign runs on facts about it.
+leb : Whole -> Whole -> Bool is
+  fn (m : Whole) is
+    case m of
+    | zero -> fn (n : Whole) is true end
+    | succ k with ih -> fn (n : Whole) is
+        case n of
+        | zero -> false
+        | succ j -> ih j
+        end
+      end
+    end
+  end
+end
+
+-- Equality plumbing built from `subst` (the sole Leibniz primitive).
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- Local congruence (there is no ambient cong): rewrite under a Whole context.
+congW : (f : Whole -> Whole) -> (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Whole (f x) (f y) is
+  fn (f : Whole -> Whole) (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Whole (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- subWSucc: cancelling one from both sides leaves the subtraction unchanged
+-- (subW recurses on its second argument; feeds subWAddCancel's peel).
+subWSucc : (a : Whole) -> (b : Whole) -> Eq Whole (subW (succ a) (succ b)) (subW a b) is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (subW (succ a) (succ x)) (subW a x) end)
+      (refl a)
+      (fn (k : Whole) (ih : Eq Whole (subW (succ a) (succ k)) (subW a k)) is
+         subst Whole (subW (succ a) (succ k)) (subW a k) ih
+           (fn (z : Whole) is Eq Whole (subW (succ a) (succ (succ k))) (pred z) end)
+           (refl (subW (succ a) (succ (succ k))))
+       end)
+      b
+  end
+end
+
+-- ====================================================================
+-- LAW STATEMENTS (the ch569 formers, restated). Reusable propositions over
+-- raw operations, chained by a non-dependent And.
+-- ====================================================================
+And : U -> U -> U is fn (P : U) (Q : U) is Sig P (fn (_p : P) is Q end) end end
+mkAnd : (P : U) -> (Q : U) -> P -> Q -> And P Q is
+  fn (P : U) (Q : U) (p : P) (q : Q) is Pair P (fn (_p : P) is Q end) p q end
+end
+
+AssocT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> (c : A) -> Eq A (f (f a b) c) (f a (f b c)) end
+end
+CommT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> Eq A (f a b) (f b a) end
+end
+IdRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f a e) a end
+end
+AnnihRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul a z) z end
+end
+NegInvLT : (A : U) -> (A -> A -> A) -> (A -> A) -> A -> U is
+  fn (A : U) (add : A -> A -> A) (neg : A -> A) (z : A) is (a : A) -> Eq A (add (neg a) a) z end
+end
+
+-- ====================================================================
+-- THE WHOLE ARITHMETIC LEMMAS the closure needs (ch569's proofs, restated).
+-- Everything the Int laws transport down to is here: the additive
+-- commutative-monoid laws, the rearrangement workhorses, and the three
+-- mulW facts imulComm's column swap spends.
+-- ====================================================================
+
+-- addW is associative (induction on the first argument).
+addWAssoc : AssocT Whole addW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW (addW x b) c) (addW x (addW b c)) end)
+      (refl (addW b c))
+      (fn (k : Whole) (ih : Eq Whole (addW (addW k b) c) (addW k (addW b c))) is
+         subst Whole (addW (addW k b) c) (addW k (addW b c)) ih
+           (fn (z : Whole) is Eq Whole (succ (addW (addW k b) c)) (succ z) end)
+           (refl (succ (addW (addW k b) c)))
+       end)
+      a
+  end
+end
+
+-- addW a zero = a (induction on a; the recursion is stuck on a neutral first arg).
+addWZeroR : IdRT Whole addW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x zero) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW k zero) k) is
+         subst Whole (addW k zero) k ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) zero) (succ z) end)
+           (refl (addW (succ k) zero))
+       end)
+      a
+  end
+end
+
+-- Pushing a successor out of the second argument.
+addWSuccR : (m : Whole) -> (n : Whole) -> Eq Whole (addW m (succ n)) (succ (addW m n)) is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x (succ n)) (succ (addW x n)) end)
+      (refl (succ n))
+      (fn (k : Whole) (ih : Eq Whole (addW k (succ n)) (succ (addW k n))) is
+         subst Whole (addW k (succ n)) (succ (addW k n)) ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) (succ n)) (succ z) end)
+           (refl (addW (succ k) (succ n)))
+       end)
+      m
+  end
+end
+
+-- addW is commutative (induction on the first argument; needs addWZeroR + addWSuccR).
+addWComm : CommT Whole addW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x b) (addW b x) end)
+      (subst Whole (addW b zero) b (addWZeroR b)
+         (fn (z : Whole) is Eq Whole z (addW b zero) end)
+         (refl (addW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (addW k b) (addW b k)) is
+         subst Whole (succ (addW b k)) (addW b (succ k))
+           (subst Whole (addW b (succ k)) (succ (addW b k)) (addWSuccR b k)
+              (fn (z : Whole) is Eq Whole z (addW b (succ k)) end)
+              (refl (addW b (succ k))))
+           (fn (z : Whole) is Eq Whole (succ (addW k b)) z end)
+           (subst Whole (addW k b) (addW b k) ih
+              (fn (z : Whole) is Eq Whole (succ (addW k b)) (succ z) end)
+              (refl (succ (addW k b))))
+       end)
+      a
+  end
+end
+
+-- A rearrangement workhorse: (x + y) + w = (x + w) + y (from assoc + comm).
+addWSwapR : (x : Whole) -> (y : Whole) -> (w : Whole) -> Eq Whole (addW (addW x y) w) (addW (addW x w) y) is
+  fn (x : Whole) (y : Whole) (w : Whole) is
+    transEq Whole (addW (addW x y) w) (addW x (addW y w)) (addW (addW x w) y)
+      (addWAssoc x y w)
+      (transEq Whole (addW x (addW y w)) (addW x (addW w y)) (addW (addW x w) y)
+         (congW (fn (t : Whole) is addW x t end) (addW y w) (addW w y) (addWComm y w))
+         (symEq Whole (addW (addW x w) y) (addW x (addW w y)) (addWAssoc x w y)))
+  end
+end
+
+-- (a + x) + succ y = (a + y) + succ x (assoc + succ-shift + comm); feeds mulWSuccR.
+addWShiftSucc : (a : Whole) -> (x : Whole) -> (y : Whole)
+  -> Eq Whole (addW (addW a x) (succ y)) (addW (addW a y) (succ x)) is
+  fn (a : Whole) (x : Whole) (y : Whole) is
+    transEq Whole (addW (addW a x) (succ y)) (addW a (addW x (succ y))) (addW (addW a y) (succ x))
+      (addWAssoc a x (succ y))
+      (transEq Whole (addW a (addW x (succ y))) (addW a (succ (addW y x))) (addW (addW a y) (succ x))
+         (congW (fn (t : Whole) is addW a t end) (addW x (succ y)) (succ (addW y x))
+            (transEq Whole (addW x (succ y)) (succ (addW x y)) (succ (addW y x))
+               (addWSuccR x y)
+               (congW (fn (t : Whole) is succ t end) (addW x y) (addW y x) (addWComm x y))))
+         (transEq Whole (addW a (succ (addW y x))) (addW a (addW y (succ x))) (addW (addW a y) (succ x))
+            (congW (fn (t : Whole) is addW a t end) (succ (addW y x)) (addW y (succ x))
+               (symEq Whole (addW y (succ x)) (succ (addW y x)) (addWSuccR y x)))
+            (symEq Whole (addW (addW a y) (succ x)) (addW a (addW y (succ x))) (addWAssoc a y (succ x)))))
+  end
+end
+
+-- mul a zero = 0 (induction on a; addWZeroR mops up the stuck `addW _ zero`).
+mulWZeroR : AnnihRT Whole mulW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x zero) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k zero) zero) is
+         transEq Whole (mulW (succ k) zero) (mulW k zero) zero
+           (addWZeroR (mulW k zero))
+           ih
+       end)
+      a
+  end
+end
+
+-- Multiplicative successor-shift: mul n (succ m) = mul n m + n (induction on n).
+mulWSuccR : (n : Whole) -> (m : Whole) -> Eq Whole (mulW n (succ m)) (addW (mulW n m) n) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x (succ m)) (addW (mulW x m) x) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k (succ m)) (addW (mulW k m) k)) is
+         transEq Whole
+           (addW (mulW k (succ m)) (succ m))
+           (addW (addW (mulW k m) k) (succ m))
+           (addW (addW (mulW k m) m) (succ k))
+           (congW (fn (t : Whole) is addW t (succ m) end) (mulW k (succ m)) (addW (mulW k m) k) ih)
+           (addWShiftSucc (mulW k m) k m)
+       end)
+      n
+  end
+end
+
+-- mul is commutative (induction on the first argument; needs mulWZeroR + mulWSuccR).
+mulWComm : CommT Whole mulW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x b) (mulW b x) end)
+      (subst Whole (mulW b zero) zero (mulWZeroR b)
+         (fn (z : Whole) is Eq Whole z (mulW b zero) end)
+         (refl (mulW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (mulW k b) (mulW b k)) is
+         transEq Whole (mulW (succ k) b) (addW (mulW b k) b) (mulW b (succ k))
+           (congW (fn (t : Whole) is addW t b end) (mulW k b) (mulW b k) ih)
+           (symEq Whole (mulW b (succ k)) (addW (mulW b k) b) (mulWSuccR b k))
+       end)
+      a
+  end
+end
+
+-- ====================================================================
+-- THE JUNK-FREE INT (the prelude's block, mirrored). `nonneg n` denotes n,
+-- `negsucc k` denotes -(k+1): a bijection with Z, so a case split is a
+-- complete analysis and no lemma ever mentions a second zero. `wsub` is
+-- the promotion (whole minus whole, signed); iadd/imul carry the offset
+-- bookkeeping in their negsucc arms.
+-- ====================================================================
+data Int : U is
+  nonneg  : Whole -> Int
+| negsucc : Whole -> Int
+end
+intOf : Whole -> Int is fn (n : Whole) is nonneg n end end
+isign : Int -> Bool is
+  fn (i : Int) is case i of | nonneg n -> false | negsucc k -> true end end
+end
+imag : Int -> Whole is
+  fn (i : Int) is case i of | nonneg n -> n | negsucc k -> succ k end end
+end
+ineg : Int -> Int is
+  fn (i : Int) is
+    case i of
+    | nonneg n -> case n of | zero -> nonneg zero | succ k -> negsucc k end
+    | negsucc k -> nonneg (succ k)
+    end
+  end
+end
+wsub : Whole -> Whole -> Int is
+  fn (a : Whole) (b : Whole) is
+    case leb b a of
+    | true -> nonneg (subW a b)
+    | false -> negsucc (subW b (succ a))
+    end
+  end
+end
+iadd : Int -> Int -> Int is
+  fn (x : Int) (y : Int) is
+    case x of
+    | nonneg a ->
+        case y of
+        | nonneg c -> nonneg (addW a c)
+        | negsucc d -> wsub a (succ d)
+        end
+    | negsucc b ->
+        case y of
+        | nonneg c -> wsub c (succ b)
+        | negsucc d -> negsucc (succ (addW b d))
+        end
+    end
+  end
+end
+isub : Int -> Int -> Int is fn (x : Int) (y : Int) is iadd x (ineg y) end end
+imul : Int -> Int -> Int is
+  fn (x : Int) (y : Int) is
+    case x of
+    | nonneg a ->
+        case y of
+        | nonneg c -> nonneg (mulW a c)
+        | negsucc d -> ineg (nonneg (mulW a (succ d)))
+        end
+    | negsucc b ->
+        case y of
+        | nonneg c -> ineg (nonneg (mulW (succ b) c))
+        | negsucc d -> nonneg (mulW (succ b) (succ d))
+        end
+    end
+  end
+end
+
+-- ====================================================================
+-- THE MONUS / ORDER LIBRARY + wsubEq (the keystone). `wsub` respects
+-- cross-equal differences: a + d = c + b implies a - b = c - d as signed
+-- integers -- the quotient's soundness law, proven once, transported
+-- everywhere. Machine-checked by WholeElim induction over the raw kernels
+-- (leb recurses on its first arg, subW on its second, addW on its first).
+-- ====================================================================
+
+-- succ is injective: cancel a successor by congruence on `pred`
+-- (pred (succ a) = a definitionally, so the congW result IS Eq Whole a b).
+succInj : (a : Whole) -> (b : Whole) -> Eq Whole (succ a) (succ b) -> Eq Whole a b is
+  fn (a : Whole) (b : Whole) (p : Eq Whole (succ a) (succ b)) is
+    congW pred (succ a) (succ b) p
+  end
+end
+
+-- EX-FALSO from a Bool absurdity. Given a proof that `true = false`, ANY
+-- goal G follows: subst along the discriminant with a Bool-CASE motive
+-- whose true-arm is trivially inhabited and whose false-arm is G. This
+-- discharges impossible case branches WITHOUT an Empty type.
+boolDiscTF : (G : U) -> Eq Bool true false -> G is
+  fn (G : U) (h : Eq Bool true false) is
+    subst Bool true false h
+      (fn (z : Bool) is
+         case z of
+         | true -> Eq Bool true true
+         | false -> G
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- Case on a Bool while RETAINING the discriminant equation. Ordinary
+-- BoolElim forgets that the bound tag equals the scrutinee; here the
+-- motive is `Eq Bool g x -> P x`, so applying the eliminated result to
+-- `refl g` hands each arm a proof that the guard equals its tag.
+boolCaseEq : (g : Bool) -> (P : Bool -> U)
+  -> (Eq Bool g true -> P true) -> (Eq Bool g false -> P false) -> P g is
+  fn (g : Bool) (P : Bool -> U)
+     (ht : Eq Bool g true -> P true) (hf : Eq Bool g false -> P false) is
+    BoolElim (fn (x : Bool) is Eq Bool g x -> P x end) ht hf g (refl g)
+  end
+end
+
+-- Congruence from Whole into Int through the two Int constructors (there is
+-- no ambient cong across types; these lift a Whole equality onto nonneg/negsucc).
+congNonneg : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Int (nonneg x) (nonneg y) is
+  fn (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Int (nonneg x) (nonneg z) end) (refl (nonneg x))
+  end
+end
+congNegsucc : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Int (negsucc x) (negsucc y) is
+  fn (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Int (negsucc x) (negsucc z) end) (refl (negsucc x))
+  end
+end
+
+-- The monus cancellation lemma: when `b <= a`, adding `b` back to `a - b`
+-- recovers `a`. Induction on the recursed variable `b`; the impossible
+-- corner (a successor below zero) falls to boolDiscTF, and subWSucc peels
+-- the matched successors so the induction hypothesis applies.
+subWAddCancel : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) true -> Eq Whole (addW b (subW a b)) a is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is (m : Whole) -> Eq Bool (leb x m) true -> Eq Whole (addW x (subW m x)) m end)
+      (fn (m : Whole) (h : Eq Bool (leb zero m) true) is refl m end)
+      (fn (k : Whole) (ih : (m : Whole) -> Eq Bool (leb k m) true -> Eq Whole (addW k (subW m k)) m) is
+         fn (m : Whole) is
+           WholeElim (fn (y : Whole) is Eq Bool (leb (succ k) y) true -> Eq Whole (addW (succ k) (subW y (succ k))) y end)
+             (fn (h : Eq Bool (leb (succ k) zero) true) is
+                boolDiscTF (Eq Whole (addW (succ k) (subW zero (succ k))) zero)
+                  (symEq Bool (leb (succ k) zero) true h) end)
+             (fn (j : Whole) (ihb : Eq Bool (leb (succ k) j) true -> Eq Whole (addW (succ k) (subW j (succ k))) j) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) true) is
+                  congW (fn (t : Whole) is succ t end) (addW k (subW (succ j) (succ k))) j
+                    (transEq Whole (addW k (subW (succ j) (succ k))) (addW k (subW j k)) j
+                       (congW (fn (t : Whole) is addW k t end) (subW (succ j) (succ k)) (subW j k) (subWSucc j k))
+                       (ih j h))
+                end end)
+             m
+         end end)
+      b
+      a
+  end
+end
+
+-- LEFT cancellation of addW: `k + a = k + b` implies `a = b`. Induction on
+-- the prefix `k`; each step strips one successor with succInj.
+addWCancelL : (k : Whole) -> (a : Whole) -> (b : Whole) -> Eq Whole (addW k a) (addW k b) -> Eq Whole a b is
+  fn (k : Whole) (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x a) (addW x b) -> Eq Whole a b end)
+      (fn (h : Eq Whole (addW zero a) (addW zero b)) is h end)
+      (fn (n : Whole) (ih : Eq Whole (addW n a) (addW n b) -> Eq Whole a b) is
+         fn (h : Eq Whole (addW (succ n) a) (addW (succ n) b)) is
+           ih (succInj (addW n a) (addW n b) h)
+         end end)
+      k
+  end
+end
+
+-- Order reflexivity through addition: m <= m + n, always.
+lebSelfAddR : (m : Whole) -> (n : Whole) -> Eq Bool (leb m (addW m n)) true is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (leb x (addW x n)) true end)
+      (refl true)
+      (fn (k : Whole) (ih : Eq Bool (leb k (addW k n)) true) is ih end)
+      m
+  end
+end
+
+-- STRICT completeness: `leb b a = false` (i.e. a < b) gives `leb (succ a) b`
+-- = true (a + 1 <= b). Double induction; the recursive call sits in exactly
+-- one arm, the corners are refl / boolDiscTF.
+lebComplStrict : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) false -> Eq Bool (leb (succ a) b) true is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (y : Whole) is (w : Whole) -> Eq Bool (leb y w) false -> Eq Bool (leb (succ w) y) true end)
+      (fn (w : Whole) (h : Eq Bool (leb zero w) false) is
+         boolDiscTF (Eq Bool (leb (succ w) zero) true) h end)
+      (fn (j : Whole) (ih : (w : Whole) -> Eq Bool (leb j w) false -> Eq Bool (leb (succ w) j) true) is
+         fn (w : Whole) is
+           WholeElim (fn (x : Whole) is Eq Bool (leb (succ j) x) false -> Eq Bool (leb (succ x) (succ j)) true end)
+             (fn (h : Eq Bool (leb (succ j) zero) false) is refl true end)
+             (fn (i : Whole) (ihx : Eq Bool (leb (succ j) i) false -> Eq Bool (leb (succ i) (succ j)) true) is
+                fn (h : Eq Bool (leb (succ j) (succ i)) false) is ih i h end end)
+             w
+         end end)
+      b
+      a
+  end
+end
+
+-- ORDER TRANSFER (the mixed-branch discharger): from the cross-equality
+-- a + d = c + b and `b <= a`, derive `d <= c`. Substituting a = b + (a - b)
+-- and cancelling b turns the cross-equality into (a - b) + d = c, and
+-- lebSelfAddR reads off d <= d + (a - b) = c.
+orderTransfer : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b) -> Eq Bool (leb b a) true -> Eq Bool (leb d c) true is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b)) (e1 : Eq Bool (leb b a) true) is
+    let ba : Eq Whole (addW b (subW a b)) a = subWAddCancel a b e1 in
+    let Hsub : Eq Whole (addW (addW b (subW a b)) d) (addW c b) =
+      subst Whole a (addW b (subW a b)) (symEq Whole (addW b (subW a b)) a ba)
+        (fn (z : Whole) is Eq Whole (addW z d) (addW c b) end) H in
+    let step : Eq Whole (addW b (addW (subW a b) d)) (addW b c) =
+      transEq Whole (addW b (addW (subW a b) d)) (addW (addW b (subW a b)) d) (addW b c)
+        (symEq Whole (addW (addW b (subW a b)) d) (addW b (addW (subW a b) d)) (addWAssoc b (subW a b) d))
+        (transEq Whole (addW (addW b (subW a b)) d) (addW c b) (addW b c) Hsub (addWComm c b)) in
+    let rdc : Eq Whole (addW (subW a b) d) c = addWCancelL b (addW (subW a b) d) c step in
+    let drc : Eq Whole (addW d (subW a b)) c =
+      transEq Whole (addW d (subW a b)) (addW (subW a b) d) c (addWComm d (subW a b)) rdc in
+    subst Whole (addW d (subW a b)) c drc (fn (z : Whole) is Eq Bool (leb d z) true end) (lebSelfAddR d (subW a b))
+  end
+end
+
+-- The SAME-BRANCH compatibility cores. Both same-sign branches of wsubEq
+-- reduce to a Whole equality of the two truncated differences; these
+-- package the addW shuffle + subWAddCancel + addWCancelL argument once each.
+
+-- Nonneg branch: b <= a and d <= c give (a - b) = (c - d).
+subWCrossTrue : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b)
+  -> Eq Bool (leb b a) true -> Eq Bool (leb d c) true
+  -> Eq Whole (subW a b) (subW c d) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b))
+     (e1 : Eq Bool (leb b a) true) (e2 : Eq Bool (leb d c) true) is
+    let sac1 : Eq Whole (addW b (subW a b)) a = subWAddCancel a b e1 in
+    let sac2 : Eq Whole (addW d (subW c d)) c = subWAddCancel c d e2 in
+    let L1 : Eq Whole (addW (addW b d) (subW a b)) (addW a d) =
+      transEq Whole (addW (addW b d) (subW a b)) (addW (addW b (subW a b)) d) (addW a d)
+        (symEq Whole (addW (addW b (subW a b)) d) (addW (addW b d) (subW a b))
+           (addWSwapR b (subW a b) d))
+        (congW (fn (t : Whole) is addW t d end) (addW b (subW a b)) a sac1) in
+    let R1 : Eq Whole (addW (addW b d) (subW c d)) (addW c b) =
+      transEq Whole (addW (addW b d) (subW c d)) (addW (addW d b) (subW c d)) (addW c b)
+        (congW (fn (t : Whole) is addW t (subW c d) end) (addW b d) (addW d b) (addWComm b d))
+        (transEq Whole (addW (addW d b) (subW c d)) (addW (addW d (subW c d)) b) (addW c b)
+           (symEq Whole (addW (addW d (subW c d)) b) (addW (addW d b) (subW c d))
+              (addWSwapR d (subW c d) b))
+           (congW (fn (t : Whole) is addW t b end) (addW d (subW c d)) c sac2)) in
+    let E : Eq Whole (addW (addW b d) (subW a b)) (addW (addW b d) (subW c d)) =
+      transEq Whole (addW (addW b d) (subW a b)) (addW a d) (addW (addW b d) (subW c d))
+        L1
+        (transEq Whole (addW a d) (addW c b) (addW (addW b d) (subW c d))
+           H
+           (symEq Whole (addW (addW b d) (subW c d)) (addW c b) R1)) in
+    addWCancelL (addW b d) (subW a b) (subW c d) E
+  end
+end
+
+-- Negsucc branch: leb b a = false and leb d c = false give
+-- (b - succ a) = (d - succ c). subWAddCancel now fires at the shifted bound
+-- (succ a <= b via lebComplStrict); one succInj strips the shared successor.
+subWCrossFalse : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b)
+  -> Eq Bool (leb b a) false -> Eq Bool (leb d c) false
+  -> Eq Whole (subW b (succ a)) (subW d (succ c)) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b))
+     (e1 : Eq Bool (leb b a) false) (e2 : Eq Bool (leb d c) false) is
+    let sac1 : Eq Whole (addW (succ a) (subW b (succ a))) b =
+      subWAddCancel b (succ a) (lebComplStrict a b e1) in
+    let sac2 : Eq Whole (addW (succ c) (subW d (succ c))) d =
+      subWAddCancel d (succ c) (lebComplStrict c d e2) in
+    let H1 : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c b) =
+      subst Whole d (addW (succ c) (subW d (succ c)))
+        (symEq Whole (addW (succ c) (subW d (succ c))) d sac2)
+        (fn (z : Whole) is Eq Whole (addW a z) (addW c b) end) H in
+    let Hb : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c (addW (succ a) (subW b (succ a)))) =
+      subst Whole b (addW (succ a) (subW b (succ a)))
+        (symEq Whole (addW (succ a) (subW b (succ a))) b sac1)
+        (fn (z : Whole) is Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c z) end) H1 in
+    let Llhs : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW d (succ c)))) =
+      transEq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW a (addW c (subW d (succ c))))) (succ (addW (addW a c) (subW d (succ c))))
+        (addWSuccR a (addW c (subW d (succ c))))
+        (congW (fn (t : Whole) is succ t end) (addW a (addW c (subW d (succ c)))) (addW (addW a c) (subW d (succ c)))
+           (symEq Whole (addW (addW a c) (subW d (succ c))) (addW a (addW c (subW d (succ c))))
+              (addWAssoc a c (subW d (succ c))))) in
+    let Rrhs : Eq Whole (addW c (addW (succ a) (subW b (succ a)))) (succ (addW (addW a c) (subW b (succ a)))) =
+      transEq Whole (addW c (addW (succ a) (subW b (succ a)))) (succ (addW c (addW a (subW b (succ a))))) (succ (addW (addW a c) (subW b (succ a))))
+        (addWSuccR c (addW a (subW b (succ a))))
+        (congW (fn (t : Whole) is succ t end) (addW c (addW a (subW b (succ a)))) (addW (addW a c) (subW b (succ a)))
+           (transEq Whole (addW c (addW a (subW b (succ a)))) (addW (addW c a) (subW b (succ a))) (addW (addW a c) (subW b (succ a)))
+              (symEq Whole (addW (addW c a) (subW b (succ a))) (addW c (addW a (subW b (succ a))))
+                 (addWAssoc c a (subW b (succ a))))
+              (congW (fn (t : Whole) is addW t (subW b (succ a)) end) (addW c a) (addW a c) (addWComm c a)))) in
+    let succEq : Eq Whole (succ (addW (addW a c) (subW d (succ c)))) (succ (addW (addW a c) (subW b (succ a)))) =
+      transEq Whole (succ (addW (addW a c) (subW d (succ c)))) (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW b (succ a))))
+        (symEq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW d (succ c)))) Llhs)
+        (transEq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c (addW (succ a) (subW b (succ a)))) (succ (addW (addW a c) (subW b (succ a))))
+           Hb Rrhs) in
+    symEq Whole (subW d (succ c)) (subW b (succ a))
+      (addWCancelL (addW a c) (subW d (succ c)) (subW b (succ a))
+         (succInj (addW (addW a c) (subW d (succ c))) (addW (addW a c) (subW b (succ a))) succEq))
+  end
+end
+
+-- The guard-explicit form of wsub (its body with the discriminant
+-- abstracted), so a proof can rewrite the guard by subst. `wsubG (leb b a)
+-- a b` is wsub a b definitionally.
+wsubG : Bool -> Whole -> Whole -> Int is
+  fn (g : Bool) (a : Whole) (b : Whole) is
+    case g of
+    | true -> nonneg (subW a b)
+    | false -> negsucc (subW b (succ a))
+    end
+  end
+end
+-- Branch-reduction lemmas: knowing the guard, wsub collapses to one arm.
+wsubTrue : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) true -> Eq Int (wsub a b) (nonneg (subW a b)) is
+  fn (a : Whole) (b : Whole) (e : Eq Bool (leb b a) true) is
+    subst Bool true (leb b a) (symEq Bool (leb b a) true e)
+      (fn (g : Bool) is Eq Int (wsubG g a b) (nonneg (subW a b)) end)
+      (refl (nonneg (subW a b)))
+  end
+end
+wsubFalse : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) false -> Eq Int (wsub a b) (negsucc (subW b (succ a))) is
+  fn (a : Whole) (b : Whole) (e : Eq Bool (leb b a) false) is
+    subst Bool false (leb b a) (symEq Bool (leb b a) false e)
+      (fn (g : Bool) is Eq Int (wsubG g a b) (negsucc (subW b (succ a))) end)
+      (refl (negsucc (subW b (succ a))))
+  end
+end
+
+-- THE KEYSTONE. wsub respects cross-equal differences: a + d = c + b
+-- implies wsub a b = wsub c d. Case-split (with the guard equations
+-- retained, via boolCaseEq) on `leb b a` and `leb d c`. The two SAME-sign
+-- branches reduce to a Whole equality via subWCrossTrue / subWCrossFalse
+-- and lift it onto the Int constructor. The two MIXED branches are
+-- IMPOSSIBLE: orderTransfer moves one branch's leb fact to the other side,
+-- collides with its assumption to make `Eq Bool true false`, and
+-- boolDiscTF discharges the goal ex falso.
+wsubEq : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b) -> Eq Int (wsub a b) (wsub c d) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole) (H : Eq Whole (addW a d) (addW c b)) is
+    boolCaseEq (leb b a)
+      (fn (g1 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+      (fn (e1 : Eq Bool (leb b a) true) is
+         boolCaseEq (leb d c)
+           (fn (g2 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+           (fn (e2 : Eq Bool (leb d c) true) is
+              transEq Int (wsub a b) (nonneg (subW a b)) (wsub c d)
+                (wsubTrue a b e1)
+                (transEq Int (nonneg (subW a b)) (nonneg (subW c d)) (wsub c d)
+                   (congNonneg (subW a b) (subW c d) (subWCrossTrue a b c d H e1 e2))
+                   (symEq Int (wsub c d) (nonneg (subW c d)) (wsubTrue c d e2)))
+            end)
+           (fn (e2 : Eq Bool (leb d c) false) is
+              boolDiscTF (Eq Int (wsub a b) (wsub c d))
+                (transEq Bool true (leb d c) false
+                   (symEq Bool (leb d c) true (orderTransfer a b c d H e1)) e2)
+            end)
+       end)
+      (fn (e1 : Eq Bool (leb b a) false) is
+         boolCaseEq (leb d c)
+           (fn (g2 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+           (fn (e2 : Eq Bool (leb d c) true) is
+              boolDiscTF (Eq Int (wsub a b) (wsub c d))
+                (transEq Bool true (leb b a) false
+                   (symEq Bool (leb b a) true
+                      (orderTransfer c d a b (symEq Whole (addW a d) (addW c b) H) e2))
+                   e1)
+            end)
+           (fn (e2 : Eq Bool (leb d c) false) is
+              transEq Int (wsub a b) (negsucc (subW b (succ a))) (wsub c d)
+                (wsubFalse a b e1)
+                (transEq Int (negsucc (subW b (succ a))) (negsucc (subW d (succ c))) (wsub c d)
+                   (congNegsucc (subW b (succ a)) (subW d (succ c)) (subWCrossFalse a b c d H e1 e2))
+                   (symEq Int (wsub c d) (negsucc (subW d (succ c))) (wsubFalse c d e2)))
+            end)
+       end)
+  end
+end
+
+-- ====================================================================
+-- THE DIFFERENCE-PAIR TRANSPORT SPECS. `posP`/`negP` split an Int into the
+-- difference pair it denotes; the *Spec lemmas rewrite each op as ONE wsub
+-- of Whole polynomials; iaddWsub/iaddWsubR push a wsub through iadd
+-- (chaining the spec with wsubEq through the cross-equality bridge
+-- wsubPosNeg, regrouped by addWInterchange).
+-- ====================================================================
+
+-- The difference pair a junk-free Int denotes: nonneg n is n - 0, negsucc k
+-- is 0 - (k+1). `posP` reads the nonneg part, `negP` the neg part.
+posP : Int -> Whole is
+  fn (x : Int) is case x of | nonneg n -> n | negsucc k -> zero end end
+end
+negP : Int -> Whole is
+  fn (x : Int) is case x of | nonneg n -> zero | negsucc k -> succ k end end
+end
+
+-- Congruence into Int through both arguments of `wsub`.
+congWsub2 : (x1 : Whole) -> (y1 : Whole) -> (x2 : Whole) -> (y2 : Whole)
+  -> Eq Whole x1 y1 -> Eq Whole x2 y2 -> Eq Int (wsub x1 x2) (wsub y1 y2) is
+  fn (x1 : Whole) (y1 : Whole) (x2 : Whole) (y2 : Whole)
+     (p1 : Eq Whole x1 y1) (p2 : Eq Whole x2 y2) is
+    subst Whole x1 y1 p1 (fn (z : Whole) is Eq Int (wsub x1 x2) (wsub z y2) end)
+      (subst Whole x2 y2 p2 (fn (w : Whole) is Eq Int (wsub x1 x2) (wsub x1 w) end)
+         (refl (wsub x1 x2)))
+  end
+end
+
+-- The additive interchange law (x+y)+(u+v) = (x+u)+(y+v): pure assoc +
+-- comm regrouping. The workhorse for the degree-2 cross-equalities.
+addWInterchange : (x : Whole) -> (y : Whole) -> (u : Whole) -> (v : Whole)
+  -> Eq Whole (addW (addW x y) (addW u v)) (addW (addW x u) (addW y v)) is
+  fn (x : Whole) (y : Whole) (u : Whole) (v : Whole) is
+    transEq Whole (addW (addW x y) (addW u v)) (addW x (addW y (addW u v))) (addW (addW x u) (addW y v))
+      (addWAssoc x y (addW u v))
+      (transEq Whole (addW x (addW y (addW u v))) (addW x (addW u (addW y v))) (addW (addW x u) (addW y v))
+         (congW (fn (s : Whole) is addW x s end) (addW y (addW u v)) (addW u (addW y v))
+            (transEq Whole (addW y (addW u v)) (addW (addW y u) v) (addW u (addW y v))
+               (symEq Whole (addW (addW y u) v) (addW y (addW u v)) (addWAssoc y u v))
+               (transEq Whole (addW (addW y u) v) (addW (addW u y) v) (addW u (addW y v))
+                  (congW (fn (s : Whole) is addW s v end) (addW y u) (addW u y) (addWComm y u))
+                  (addWAssoc u y v))))
+         (symEq Whole (addW (addW x u) (addW y v)) (addW x (addW u (addW y v))) (addWAssoc x u (addW y v))))
+  end
+end
+
+-- ineg of a nonneg is the wsub of the reversed difference (0 - m). Both
+-- branches (zero / succ k) compute on the nose.
+inegNonneg : (m : Whole) -> Eq Int (ineg (nonneg m)) (wsub zero m) is
+  fn (m : Whole) is
+    WholeElim (fn (w : Whole) is Eq Int (ineg (nonneg w)) (wsub zero w) end)
+      (refl (nonneg zero))
+      (fn (k : Whole) (ih : Eq Int (ineg (nonneg k)) (wsub zero k)) is refl (negsucc k) end)
+      m
+  end
+end
+
+-- THE CROSS-EQUALITY BRIDGE. The difference pair of `wsub p n` differs from
+-- (p, n) by the wsub-choice, but the two pairs denote the same integer:
+-- posP(wsub p n) + n = p + negP(wsub p n). Case on the guard `leb n p` with
+-- the equation retained; subWAddCancel closes both branches.
+wsubPosNeg : (p : Whole) -> (n : Whole)
+  -> Eq Whole (addW (posP (wsub p n)) n) (addW p (negP (wsub p n))) is
+  fn (p : Whole) (n : Whole) is
+    boolCaseEq (leb n p)
+      (fn (g : Bool) is Eq Whole (addW (posP (wsub p n)) n) (addW p (negP (wsub p n))) end)
+      (fn (e1 : Eq Bool (leb n p) true) is
+         subst Int (nonneg (subW p n)) (wsub p n)
+           (symEq Int (wsub p n) (nonneg (subW p n)) (wsubTrue p n e1))
+           (fn (w : Int) is Eq Whole (addW (posP w) n) (addW p (negP w)) end)
+           (transEq Whole (addW (subW p n) n) (addW n (subW p n)) (addW p zero)
+              (addWComm (subW p n) n)
+              (transEq Whole (addW n (subW p n)) p (addW p zero)
+                 (subWAddCancel p n e1)
+                 (symEq Whole (addW p zero) p (addWZeroR p))))
+       end)
+      (fn (e2 : Eq Bool (leb n p) false) is
+         subst Int (negsucc (subW n (succ p))) (wsub p n)
+           (symEq Int (wsub p n) (negsucc (subW n (succ p))) (wsubFalse p n e2))
+           (fn (w : Int) is Eq Whole (addW (posP w) n) (addW p (negP w)) end)
+           (transEq Whole n (succ (addW p (subW n (succ p)))) (addW p (succ (subW n (succ p))))
+              (symEq Whole (succ (addW p (subW n (succ p)))) n
+                 (subWAddCancel n (succ p) (lebComplStrict p n e2)))
+              (symEq Whole (addW p (succ (subW n (succ p)))) (succ (addW p (subW n (succ p))))
+                 (addWSuccR p (subW n (succ p)))))
+       end)
+  end
+end
+
+-- iadd as a wsub of Whole polynomials. Four constructor cases: nonneg/nonneg
+-- is refl; the two mixed cases each need one addWZeroR rewrite (the stuck
+-- addW _ zero); negsucc/negsucc uses addWSuccR under a negsucc congruence.
+iaddSpec : (x : Int) -> (y : Int)
+  -> Eq Int (iadd x y) (wsub (addW (posP x) (posP y)) (addW (negP x) (negP y))) is
+  fn (x : Int) (y : Int) is
+    IntElim (fn (wx : Int) is Eq Int (iadd wx y) (wsub (addW (posP wx) (posP y)) (addW (negP wx) (negP y))) end)
+      (fn (a : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (iadd (nonneg a) wy) (wsub (addW (posP (nonneg a)) (posP wy)) (addW (negP (nonneg a)) (negP wy))) end)
+           (fn (c : Whole) is refl (nonneg (addW a c)) end)
+           (fn (d : Whole) is
+              congWsub2 a (addW a zero) (succ d) (succ d)
+                (symEq Whole (addW a zero) a (addWZeroR a)) (refl (succ d))
+            end)
+           y
+       end)
+      (fn (b : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (iadd (negsucc b) wy) (wsub (addW (posP (negsucc b)) (posP wy)) (addW (negP (negsucc b)) (negP wy))) end)
+           (fn (c : Whole) is
+              congWsub2 c c (succ b) (addW (succ b) zero)
+                (refl c)
+                (congW (fn (t : Whole) is succ t end) b (addW b zero)
+                   (symEq Whole (addW b zero) b (addWZeroR b)))
+            end)
+           (fn (d : Whole) is
+              congNegsucc (succ (addW b d)) (addW b (succ d))
+                (symEq Whole (addW b (succ d)) (succ (addW b d)) (addWSuccR b d))
+            end)
+           y
+       end)
+      x
+  end
+end
+
+-- imul as a wsub of Whole polynomials (the signed-pair product laid out over
+-- the two sign columns). Same-sign cases: rewrite the stuck addW _ zero /
+-- mulW _ zero to reach nonneg. Mixed-sign cases go through inegNonneg (the
+-- product is a negated nonneg, i.e. a `wsub zero _`).
+imulSpec : (x : Int) -> (y : Int)
+  -> Eq Int (imul x y)
+       (wsub (addW (mulW (posP x) (posP y)) (mulW (negP x) (negP y)))
+             (addW (mulW (posP x) (negP y)) (mulW (negP x) (posP y)))) is
+  fn (x : Int) (y : Int) is
+    IntElim (fn (wx : Int) is Eq Int (imul wx y)
+              (wsub (addW (mulW (posP wx) (posP y)) (mulW (negP wx) (negP y)))
+                    (addW (mulW (posP wx) (negP y)) (mulW (negP wx) (posP y)))) end)
+      (fn (a : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (imul (nonneg a) wy)
+                   (wsub (addW (mulW (posP (nonneg a)) (posP wy)) (mulW (negP (nonneg a)) (negP wy)))
+                         (addW (mulW (posP (nonneg a)) (negP wy)) (mulW (negP (nonneg a)) (posP wy)))) end)
+           (fn (c : Whole) is
+              congWsub2 (mulW a c) (addW (mulW a c) zero) zero (addW (mulW a zero) zero)
+                (symEq Whole (addW (mulW a c) zero) (mulW a c) (addWZeroR (mulW a c)))
+                (symEq Whole (addW (mulW a zero) zero) zero
+                   (transEq Whole (addW (mulW a zero) zero) (mulW a zero) zero
+                      (addWZeroR (mulW a zero)) (mulWZeroR a)))
+            end)
+           (fn (d : Whole) is
+              transEq Int (ineg (nonneg (mulW a (succ d)))) (wsub zero (mulW a (succ d)))
+                (wsub (addW (mulW a zero) zero) (addW (mulW a (succ d)) zero))
+                (inegNonneg (mulW a (succ d)))
+                (congWsub2 zero (addW (mulW a zero) zero) (mulW a (succ d)) (addW (mulW a (succ d)) zero)
+                   (symEq Whole (addW (mulW a zero) zero) zero
+                      (transEq Whole (addW (mulW a zero) zero) (mulW a zero) zero
+                         (addWZeroR (mulW a zero)) (mulWZeroR a)))
+                   (symEq Whole (addW (mulW a (succ d)) zero) (mulW a (succ d)) (addWZeroR (mulW a (succ d)))))
+            end)
+           y
+       end)
+      (fn (b : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (imul (negsucc b) wy)
+                   (wsub (addW (mulW (posP (negsucc b)) (posP wy)) (mulW (negP (negsucc b)) (negP wy)))
+                         (addW (mulW (posP (negsucc b)) (negP wy)) (mulW (negP (negsucc b)) (posP wy)))) end)
+           (fn (c : Whole) is
+              transEq Int (ineg (nonneg (mulW (succ b) c))) (wsub zero (mulW (succ b) c))
+                (wsub (mulW (succ b) zero) (mulW (succ b) c))
+                (inegNonneg (mulW (succ b) c))
+                (congWsub2 zero (mulW (succ b) zero) (mulW (succ b) c) (mulW (succ b) c)
+                   (symEq Whole (mulW (succ b) zero) zero (mulWZeroR (succ b)))
+                   (refl (mulW (succ b) c)))
+            end)
+           (fn (d : Whole) is
+              congWsub2 (mulW (succ b) (succ d)) (mulW (succ b) (succ d)) zero (mulW (succ b) zero)
+                (refl (mulW (succ b) (succ d)))
+                (symEq Whole (mulW (succ b) zero) zero (mulWZeroR (succ b)))
+            end)
+           y
+       end)
+      x
+  end
+end
+
+-- ineg as a wsub of the reversed difference. The nonneg case is exactly
+-- inegNonneg; the negsucc case computes.
+inegSpec : (x : Int) -> Eq Int (ineg x) (wsub (negP x) (posP x)) is
+  fn (x : Int) is
+    IntElim (fn (w : Int) is Eq Int (ineg w) (wsub (negP w) (posP w)) end)
+      (fn (n : Whole) is inegNonneg n end)
+      (fn (k : Whole) is refl (nonneg (succ k)) end)
+      x
+  end
+end
+
+-- Binary congruence on a Whole operation (there is no ambient cong2).
+cong2W : (f : Whole -> Whole -> Whole) -> (x1 : Whole) -> (y1 : Whole) -> (x2 : Whole) -> (y2 : Whole)
+  -> Eq Whole x1 y1 -> Eq Whole x2 y2 -> Eq Whole (f x1 x2) (f y1 y2) is
+  fn (f : Whole -> Whole -> Whole) (x1 : Whole) (y1 : Whole) (x2 : Whole) (y2 : Whole)
+     (p1 : Eq Whole x1 y1) (p2 : Eq Whole x2 y2) is
+    transEq Whole (f x1 x2) (f y1 x2) (f y1 y2)
+      (congW (fn (t : Whole) is f t x2 end) x1 y1 p1)
+      (congW (fn (t : Whole) is f y1 t end) x2 y2 p2)
+  end
+end
+
+-- Rewrite either operand of iadd (subst under the op; no ambient cong
+-- across the Int -> Int -> Int shape).
+congIaddL : (x : Int) -> (x' : Int) -> (y : Int) -> Eq Int x x' -> Eq Int (iadd x y) (iadd x' y) is
+  fn (x : Int) (x' : Int) (y : Int) (p : Eq Int x x') is
+    subst Int x x' p (fn (z : Int) is Eq Int (iadd x y) (iadd z y) end) (refl (iadd x y))
+  end
+end
+congIaddR : (x : Int) -> (y : Int) -> (y' : Int) -> Eq Int y y' -> Eq Int (iadd x y) (iadd x y') is
+  fn (x : Int) (y : Int) (y' : Int) (p : Eq Int y y') is
+    subst Int y y' p (fn (z : Int) is Eq Int (iadd x y) (iadd x z) end) (refl (iadd x y))
+  end
+end
+
+-- PUSH a wsub through iadd: iadd (wsub p n) z = wsub (p + posP z) (n + negP z).
+-- Chain iaddSpec at (wsub p n, z) with wsubEq; the cross-equality reduces
+-- through wsubPosNeg (P0 + n = p + N0), regrouped by addWInterchange.
+iaddWsub : (p : Whole) -> (n : Whole) -> (z : Int)
+  -> Eq Int (iadd (wsub p n) z) (wsub (addW p (posP z)) (addW n (negP z))) is
+  fn (p : Whole) (n : Whole) (z : Int) is
+    let P0 : Whole = posP (wsub p n) in
+    let N0 : Whole = negP (wsub p n) in
+    let pz : Whole = posP z in
+    let nz : Whole = negP z in
+    let K : Eq Whole (addW P0 n) (addW p N0) = wsubPosNeg p n in
+    let H : Eq Whole (addW (addW P0 pz) (addW n nz)) (addW (addW p pz) (addW N0 nz))
+      = transEq Whole (addW (addW P0 pz) (addW n nz)) (addW (addW P0 n) (addW pz nz)) (addW (addW p pz) (addW N0 nz))
+          (addWInterchange P0 pz n nz)
+          (transEq Whole (addW (addW P0 n) (addW pz nz)) (addW (addW p N0) (addW pz nz)) (addW (addW p pz) (addW N0 nz))
+             (congW (fn (zz : Whole) is addW zz (addW pz nz) end) (addW P0 n) (addW p N0) K)
+             (symEq Whole (addW (addW p pz) (addW N0 nz)) (addW (addW p N0) (addW pz nz)) (addWInterchange p pz N0 nz))) in
+    transEq Int (iadd (wsub p n) z)
+      (wsub (addW P0 pz) (addW N0 nz)) (wsub (addW p pz) (addW n nz))
+      (iaddSpec (wsub p n) z)
+      (wsubEq (addW P0 pz) (addW N0 nz) (addW p pz) (addW n nz) H)
+  end
+end
+
+-- Right mirror of iaddWsub: push a wsub through the SECOND operand of iadd.
+-- Same cross-equality (wsubPosNeg regrouped by addWInterchange), operands
+-- on the other side.
+iaddWsubR : (z : Int) -> (p : Whole) -> (n : Whole)
+  -> Eq Int (iadd z (wsub p n)) (wsub (addW (posP z) p) (addW (negP z) n)) is
+  fn (z : Int) (p : Whole) (n : Whole) is
+    let P0 : Whole = posP (wsub p n) in
+    let N0 : Whole = negP (wsub p n) in
+    let pz : Whole = posP z in
+    let nz : Whole = negP z in
+    let K : Eq Whole (addW P0 n) (addW p N0) = wsubPosNeg p n in
+    let H : Eq Whole (addW (addW pz P0) (addW nz n)) (addW (addW pz p) (addW nz N0))
+      = transEq Whole (addW (addW pz P0) (addW nz n)) (addW (addW pz nz) (addW P0 n)) (addW (addW pz p) (addW nz N0))
+          (addWInterchange pz P0 nz n)
+          (transEq Whole (addW (addW pz nz) (addW P0 n)) (addW (addW pz nz) (addW p N0)) (addW (addW pz p) (addW nz N0))
+             (congW (fn (zz : Whole) is addW (addW pz nz) zz end) (addW P0 n) (addW p N0) K)
+             (symEq Whole (addW (addW pz p) (addW nz N0)) (addW (addW pz nz) (addW p N0)) (addWInterchange pz p nz N0))) in
+    transEq Int (iadd z (wsub p n))
+      (wsub (addW pz P0) (addW nz N0)) (wsub (addW pz p) (addW nz n))
+      (iaddSpec z (wsub p n))
+      (wsubEq (addW pz P0) (addW nz N0) (addW pz p) (addW nz n) H)
+  end
+end
+
+-- ====================================================================
+-- THE REPRESENTATIVE LAWS, one per flavor, prelude bodies verbatim. Each
+-- is the pipeline in action: spec the operands, push the wsubs together,
+-- close with the matching Whole law.
+-- ====================================================================
+
+-- iadd is associative (collapse the inner op with iaddSpec, the outer with
+-- iaddWsub/iaddWsubR; close with addWAssoc componentwise).
+iaddAssoc : AssocT Int iadd is
+  fn (a : Int) (b : Int) (c : Int) is
+    transEq Int (iadd (iadd a b) c)
+      (wsub (addW (addW (posP a) (posP b)) (posP c)) (addW (addW (negP a) (negP b)) (negP c)))
+      (iadd a (iadd b c))
+      (transEq Int (iadd (iadd a b) c)
+         (iadd (wsub (addW (posP a) (posP b)) (addW (negP a) (negP b))) c)
+         (wsub (addW (addW (posP a) (posP b)) (posP c)) (addW (addW (negP a) (negP b)) (negP c)))
+         (congIaddL (iadd a b) (wsub (addW (posP a) (posP b)) (addW (negP a) (negP b))) c (iaddSpec a b))
+         (iaddWsub (addW (posP a) (posP b)) (addW (negP a) (negP b)) c))
+      (transEq Int
+         (wsub (addW (addW (posP a) (posP b)) (posP c)) (addW (addW (negP a) (negP b)) (negP c)))
+         (wsub (addW (posP a) (addW (posP b) (posP c))) (addW (negP a) (addW (negP b) (negP c))))
+         (iadd a (iadd b c))
+         (congWsub2 (addW (addW (posP a) (posP b)) (posP c)) (addW (posP a) (addW (posP b) (posP c)))
+                    (addW (addW (negP a) (negP b)) (negP c)) (addW (negP a) (addW (negP b) (negP c)))
+            (addWAssoc (posP a) (posP b) (posP c)) (addWAssoc (negP a) (negP b) (negP c)))
+         (symEq Int (iadd a (iadd b c))
+            (wsub (addW (posP a) (addW (posP b) (posP c))) (addW (negP a) (addW (negP b) (negP c))))
+            (transEq Int (iadd a (iadd b c))
+               (iadd a (wsub (addW (posP b) (posP c)) (addW (negP b) (negP c))))
+               (wsub (addW (posP a) (addW (posP b) (posP c))) (addW (negP a) (addW (negP b) (negP c))))
+               (congIaddR a (iadd b c) (wsub (addW (posP b) (posP c)) (addW (negP b) (negP c))) (iaddSpec b c))
+               (iaddWsubR a (addW (posP b) (posP c)) (addW (negP b) (negP c))))))
+  end
+end
+
+-- imul is commutative (mulWComm on the eight products + a column swap).
+imulComm : CommT Int imul is
+  fn (a : Int) (b : Int) is
+    transEq Int (imul a b)
+      (wsub (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))))
+      (imul b a)
+      (imulSpec a b)
+      (transEq Int
+         (wsub (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))))
+         (wsub (addW (mulW (posP b) (posP a)) (mulW (negP b) (negP a))) (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a))))
+         (imul b a)
+         (congWsub2
+            (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP b) (posP a)) (mulW (negP b) (negP a)))
+            (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a)))
+            (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+               (mulW (posP a) (posP b)) (mulW (posP b) (posP a)) (mulW (negP a) (negP b)) (mulW (negP b) (negP a))
+               (mulWComm (posP a) (posP b)) (mulWComm (negP a) (negP b)))
+            (transEq Whole
+               (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b)))
+               (addW (mulW (negP a) (posP b)) (mulW (posP a) (negP b)))
+               (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a)))
+               (addWComm (mulW (posP a) (negP b)) (mulW (negP a) (posP b)))
+               (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                  (mulW (negP a) (posP b)) (mulW (posP b) (negP a)) (mulW (posP a) (negP b)) (mulW (negP b) (posP a))
+                  (mulWComm (negP a) (posP b)) (mulWComm (posP a) (negP b)))))
+         (symEq Int (imul b a)
+            (wsub (addW (mulW (posP b) (posP a)) (mulW (negP b) (negP a))) (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a))))
+            (imulSpec b a)))
+  end
+end
+
+-- Additive inverse: ineg a cancels a on the left (to nonneg zero = wsub 0 0).
+-- The closing wsubEq cross-equality (negP a + posP a) + 0 = 0 + (posP a +
+-- negP a) IS commutativity of addW.
+inegInvL : NegInvLT Int iadd ineg (nonneg zero) is
+  fn (a : Int) is
+    transEq Int (iadd (ineg a) a)
+      (wsub (addW (negP a) (posP a)) (addW (posP a) (negP a)))
+      (nonneg zero)
+      (transEq Int (iadd (ineg a) a) (iadd (wsub (negP a) (posP a)) a) (wsub (addW (negP a) (posP a)) (addW (posP a) (negP a)))
+         (congIaddL (ineg a) (wsub (negP a) (posP a)) a (inegSpec a))
+         (iaddWsub (negP a) (posP a) a))
+      (wsubEq (addW (negP a) (posP a)) (addW (posP a) (negP a)) zero zero
+         (transEq Whole (addW (addW (negP a) (posP a)) zero) (addW (negP a) (posP a)) (addW (posP a) (negP a))
+            (addWZeroR (addW (negP a) (posP a)))
+            (addWComm (negP a) (posP a))))
+  end
+end
+
+-- ====================================================================
+-- THE PARTIAL DEMONSTRATION. The three laws chained by the same mkAnd
+-- discipline the prelude's full records use -- a sample of the And-chain
+-- shape of SemiringLaws/RingLaws, not the full assembly. The prelude's
+-- semiringLawsInt chains all eleven semiring slots this way, ringLawsInt
+-- layers inegInvL/inegInvR, and the abelian-group bridge is then one line
+-- (see the banner: abGroupLawsOfRing Int ringInt ringLawsInt).
+-- ====================================================================
+intLawsSample : And (AssocT Int iadd) (And (CommT Int imul) (NegInvLT Int iadd ineg (nonneg zero))) is
+  mkAnd (AssocT Int iadd) (And (CommT Int imul) (NegInvLT Int iadd ineg (nonneg zero)))
+    iaddAssoc
+    (mkAnd (CommT Int imul) (NegInvLT Int iadd ineg (nonneg zero)) imulComm inegInvL)
+end
+
+-- A runnable witness: (-3) + 5. iadd's negsucc/nonneg arm fires wsub 5 3,
+-- the guard leb 3 5 computes to true, and the result is nonneg (5 - 3) = 2.
+main : Int is iadd (negsucc 2) (nonneg 5) end
