@@ -206,3 +206,20 @@ func TestToRadixPipelinePresent(t *testing.T) {
 		}
 	}
 }
+
+// TestFracNzPresent pins Task 1 of the Frac field-laws campaign (Plan B): the
+// nonzero predicate nzFrac, a Bool zero-test lifted out of the quotient. The
+// lift's respect proof rides the canonical-Int zero-product lemma imulPosZero
+// (the one sanctioned cancellation-adjacent fact, scoped to a positive right
+// factor), which itself rides nonnegInj and the constructor discrimination.
+func TestFracNzPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{"isZeroInt", "nonnegInj", "imulPosZero", "isZeroResp", "isZeroF", "nzFrac"} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}

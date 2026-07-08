@@ -2362,6 +2362,121 @@ abGroupLawsInt : AbGroupLaws Int (groupOfRing Int ringInt) is
 end
 
 -- ====================================================================
+-- FRAC FIELD-LAWS SUPPORT (Plan B, Task 1): the canonical-Int zero
+-- lemmas the lifted Frac zero-test rides. imulPosZero is the ONE
+-- sanctioned cancellation-adjacent fact, scoped to a positive right
+-- factor; nothing here touches gcd or general cancellation.
+-- ====================================================================
+
+-- The Int zero-test: true exactly on nonneg zero.
+isZeroInt : Int -> Bool is
+  fn (i : Int) is
+    case i of
+    | nonneg n -> isZero n
+    | negsucc k -> false
+    end
+  end
+end
+
+-- SOUNDNESS of the zero-test: isZeroInt a = true forces a = nonneg zero.
+isZeroIntSound : (a : Int) -> Eq Bool (isZeroInt a) true -> Eq Int a (nonneg zero) is
+  fn (a : Int) is
+    IntElim (fn (w : Int) is Eq Bool (isZeroInt w) true -> Eq Int w (nonneg zero) end)
+      (fn (n : Whole) is
+         WholeElim (fn (m : Whole) is Eq Bool (isZeroInt (nonneg m)) true -> Eq Int (nonneg m) (nonneg zero) end)
+           (fn (h : Eq Bool (isZeroInt (nonneg zero)) true) is refl (nonneg zero) end)
+           (fn (k : Whole) (ih : Eq Bool (isZeroInt (nonneg k)) true -> Eq Int (nonneg k) (nonneg zero)) is
+              fn (h : Eq Bool (isZeroInt (nonneg (succ k))) true) is
+                boolDiscTF (Eq Int (nonneg (succ k)) (nonneg zero))
+                  (symEq Bool (isZeroInt (nonneg (succ k))) true h)
+              end
+            end)
+           n
+       end)
+      (fn (k : Whole) is
+         fn (h : Eq Bool (isZeroInt (negsucc k)) true) is
+           boolDiscTF (Eq Int (negsucc k) (nonneg zero))
+             (symEq Bool (isZeroInt (negsucc k)) true h)
+         end
+       end)
+      a
+  end
+end
+
+-- INJECTIVITY of nonneg (through the magnitude projection imag).
+nonnegInj : (a : Whole) -> (b : Whole) -> Eq Int (nonneg a) (nonneg b) -> Eq Whole a b is
+  fn (a : Whole) (b : Whole) (h : Eq Int (nonneg a) (nonneg b)) is
+    subst Int (nonneg a) (nonneg b) h (fn (z : Int) is Eq Whole a (imag z) end) (refl a)
+  end
+end
+
+-- CONSTRUCTOR DISCRIMINATION: negsucc never equals nonneg (transport the
+-- sign tag isign along the hypothesis; consumed via the boolDiscTF idiom).
+intTagDisc : (k : Whole) -> (n : Whole) -> Eq Int (negsucc k) (nonneg n) -> Eq Bool true false is
+  fn (k : Whole) (n : Whole) (h : Eq Int (negsucc k) (nonneg n)) is
+    subst Int (negsucc k) (nonneg n) h (fn (z : Int) is Eq Bool true (isign z) end) (refl true)
+  end
+end
+
+-- SUCC-HEADEDNESS of addW on a positive right addend: x + (d+1) is never
+-- zero (one addWSuccR rewrite exposes the succ head).
+addWPosR : (x : Whole) -> (d : Whole) -> Eq Bool (isZero (addW x (succ d))) false is
+  fn (x : Whole) (d : Whole) is
+    subst Whole (succ (addW x d)) (addW x (succ d))
+      (symEq Whole (addW x (succ d)) (succ (addW x d)) (addWSuccR x d))
+      (fn (z : Whole) is Eq Bool (isZero z) false end)
+      (refl false)
+  end
+end
+
+-- ZERO-PRODUCT at Whole with a positive right factor: n*(d+1) = 0 forces n = 0.
+mulWPosZero : (n : Whole) -> (d : Whole) -> Eq Whole (mulW n (succ d)) zero -> Eq Whole n zero is
+  fn (n : Whole) (d : Whole) is
+    WholeElim (fn (m : Whole) is Eq Whole (mulW m (succ d)) zero -> Eq Whole m zero end)
+      (fn (h : Eq Whole (mulW zero (succ d)) zero) is refl zero end)
+      (fn (k : Whole) (ih : Eq Whole (mulW k (succ d)) zero -> Eq Whole k zero) is
+         fn (h : Eq Whole (mulW (succ k) (succ d)) zero) is
+           boolDiscTF (Eq Whole (succ k) zero)
+             (transEq Bool true (isZero (mulW (succ k) (succ d))) false
+                (symEq Bool (isZero (mulW (succ k) (succ d))) true
+                   (subst Whole (mulW (succ k) (succ d)) zero h
+                      (fn (z : Whole) is Eq Bool (isZero (mulW (succ k) (succ d))) (isZero z) end)
+                      (refl (isZero (mulW (succ k) (succ d))))))
+                (addWPosR (mulW k (succ d)) d))
+         end
+       end)
+      n
+  end
+end
+
+-- THE ZERO-PRODUCT LEMMA over canonical Int: imul a (d+1) = 0 forces
+-- a = 0. nonneg arm: nonnegInj then mulWPosZero, closed by congNonneg.
+-- negsucc arm: imul computes to ineg (nonneg (addW .. (succ d))), an
+-- addWSuccR rewrite exposes the negsucc head, and the hypothesis becomes
+-- intTagDisc's shape, discharged ex falso by boolDiscTF.
+imulPosZero : (a : Int) -> (d : Whole) -> Eq Int (imul a (nonneg (succ d))) (nonneg zero) -> Eq Int a (nonneg zero) is
+  fn (a : Int) (d : Whole) is
+    IntElim (fn (w : Int) is Eq Int (imul w (nonneg (succ d))) (nonneg zero) -> Eq Int w (nonneg zero) end)
+      (fn (n : Whole) is
+         fn (h : Eq Int (imul (nonneg n) (nonneg (succ d))) (nonneg zero)) is
+           congNonneg n zero (mulWPosZero n d (nonnegInj (mulW n (succ d)) zero h))
+         end
+       end)
+      (fn (k : Whole) is
+         fn (h : Eq Int (imul (negsucc k) (nonneg (succ d))) (nonneg zero)) is
+           boolDiscTF (Eq Int (negsucc k) (nonneg zero))
+             (intTagDisc (addW (mulW k (succ d)) d) zero
+                (subst Whole (addW (mulW k (succ d)) (succ d)) (succ (addW (mulW k (succ d)) d))
+                   (addWSuccR (mulW k (succ d)) d)
+                   (fn (z : Whole) is Eq Int (ineg (nonneg z)) (nonneg zero) end)
+                   h))
+         end
+       end)
+      a
+  end
+end
+
+-- ====================================================================
 -- THE FRAC RUNG (Q), RE-FOUNDED AS A QUOTIENT (v4 Frac field laws, Plan A).
 -- A rational is an UNREDUCED pair: the numerator a signed Int, the
 -- denominator succ-encoded so it is positive BY CONSTRUCTION (qpair i d
@@ -3029,6 +3144,76 @@ divRingFrac : DivRing Frac is
     recipF
 end
 instance semiringFrac : Semiring Frac is divRingFrac.1.1 end
+
+-- ====================================================================
+-- FRAC LAWS (v4 Frac field laws, Plan B). The law records over the
+-- quotient Frac, proven representative-level (QRel cross-multiplication
+-- identities over Int) and lifted by qind + qsound. Task 1: the nonzero
+-- predicate nzFrac, a Bool zero-test lifted out of the quotient; its
+-- respect proof rides imulPosZero (the canonical-Int zero-product lemma
+-- above), never gcd.
+-- ====================================================================
+
+-- Zeroness TRANSFERS across QRel: rewrite the cross-multiplication along
+-- qnum p = 0 (the right side then computes to nonneg zero), and
+-- imulPosZero against the positive qden p forces qnum q = 0.
+qnumZeroTransfer : (p : QPair) -> (q : QPair) -> QRel p q
+  -> Eq Int (qnum p) (nonneg zero) -> Eq Int (qnum q) (nonneg zero) is
+  fn (p : QPair) (q : QPair) (r : QRel p q) (hz : Eq Int (qnum p) (nonneg zero)) is
+    imulPosZero (qnum q) (qdpred p)
+      (subst Int (qnum p) (nonneg zero) hz
+         (fn (z : Int) is Eq Int (imul (qnum q) (qden p)) (imul z (qden q)) end)
+         (symEq Int (imul (qnum p) (qden q)) (imul (qnum q) (qden p)) r))
+  end
+end
+
+-- WELL-DEFINEDNESS of the zero-test: both directions from the transfer
+-- (QRel is symmetric by symEq on the cross products), assembled by Bool
+-- cases retaining the discriminant equations; the mixed true/false case
+-- is impossible and discharged by boolDiscTF.
+isZeroResp : (p : QPair) -> (q : QPair) -> QRel p q
+  -> Eq Bool (isZeroInt (qnum p)) (isZeroInt (qnum q)) is
+  fn (p : QPair) (q : QPair) (r : QRel p q) is
+    boolCaseEq (isZeroInt (qnum p))
+      (fn (b : Bool) is Eq Bool b (isZeroInt (qnum q)) end)
+      (fn (hp : Eq Bool (isZeroInt (qnum p)) true) is
+         subst Int (nonneg zero) (qnum q)
+           (symEq Int (qnum q) (nonneg zero)
+              (qnumZeroTransfer p q r (isZeroIntSound (qnum p) hp)))
+           (fn (z : Int) is Eq Bool true (isZeroInt z) end)
+           (refl true)
+       end)
+      (fn (hp : Eq Bool (isZeroInt (qnum p)) false) is
+         boolCaseEq (isZeroInt (qnum q))
+           (fn (b : Bool) is Eq Bool false b end)
+           (fn (hq : Eq Bool (isZeroInt (qnum q)) true) is
+              boolDiscTF (Eq Bool false true)
+                (transEq Bool true (isZeroInt (qnum p)) false
+                   (symEq Bool (isZeroInt (qnum p)) true
+                      (subst Int (nonneg zero) (qnum p)
+                         (symEq Int (qnum p) (nonneg zero)
+                            (qnumZeroTransfer q p
+                               (symEq Int (imul (qnum p) (qden q)) (imul (qnum q) (qden p)) r)
+                               (isZeroIntSound (qnum q) hq)))
+                         (fn (z : Int) is Eq Bool (isZeroInt z) true end)
+                         (refl true)))
+                   hp)
+            end)
+           (fn (hq : Eq Bool (isZeroInt (qnum q)) false) is
+              refl false
+            end)
+       end)
+  end
+end
+
+-- The zero-test on Frac, lifted out of the quotient (well-defined by
+-- isZeroResp; no representative leaks).
+isZeroF : Frac -> Bool is
+  qlift QPair QRel Bool (fn (p : QPair) is isZeroInt (qnum p) end) isZeroResp
+end
+
+-- The NONZERO predicate the guarded reciprocal-inverse laws quantify over.
+nzFrac : Frac -> U is fn (x : Frac) is Eq Bool (isZeroF x) false end end
 
 -- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
