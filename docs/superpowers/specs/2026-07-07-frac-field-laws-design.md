@@ -1,8 +1,26 @@
 # v4 Frac law campaign: FieldLaws on a quotient Frac: Design
 
 Date: 2026-07-07
-Status: Author-directed ("Frac campaign"); quotient route per the recorded
-recommendation (Int campaign final report), proceeding.
+Status: Plan A COMPLETE on branch feat/frac-quotient (commits de39b2b,
+ca27b11, b4552c0, c9931e2). Cold single-prelude-load wall time measured
+0.34-0.37s (three runs), well under the 3s budget of Decision 5. Plan B
+(laws) is next. Quotient route per the recorded recommendation (Int
+campaign final report).
+
+### Plan A outcome notes
+
+- Show/Binary for Frac REMOVED pending the Plan B decision: any
+  string-rendering or canonical-pair observer out of the quotient needs
+  a respect proof that IS lowest-terms uniqueness, the number theory
+  this spec forbids. Candidates recorded: buy the uniqueness proof, or
+  render via the to_radix route once toRadixRespects is the observer
+  (changes the output format).
+- Demotions rebuilt over the lifted observers (floorQ / to_radix)
+  instead of the deleted fnum/fden projections.
+- Perf: the ported long-division core needed cmul/qdiv/qmod accel
+  registrations plus a subW-based eqW (no Bool accel kind exists, so
+  equality rides the accelerated subtraction). The duplicate leb-based
+  eqW was deleted (Rule 5).
 Parent: 2026-07-06-v4-tower-hierarchy-design.md (Decision 4 deferred Frac
 laws); consumes 2026-07-06-int-ring-laws-design.md (ringLawsInt is the
 algebra engine) and the 1b ladder (FieldLaws/DivRingLaws bundles).

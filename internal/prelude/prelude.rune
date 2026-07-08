@@ -3041,9 +3041,9 @@ instance semiringFrac : Semiring Frac is divRingFrac.1.1 end
 -- lemma certifying that the smart constructor's minus-zero normalization
 -- was a no-op on an already-non-negative magnitude; junk-free Int has no
 -- such lemma to state because it has no such junk to normalize away.) The
--- Frac edges' homomorphisms need gcd/reduce theory and ship with the Frac
--- laws campaign. The triangle ratOfInt . intOf = fracOf is DEFINITIONAL
--- (both sides are frac false n 1).
+-- Frac edges' homomorphisms ship with the Frac laws campaign (Plan B).
+-- The triangle ratOfInt . intOf = fracOf is DEFINITIONAL
+-- (both sides compute to qin (qpair (nonneg n) zero)).
 -- ====================================================================
 ratOfInt : Int -> Frac is
   fn (i : Int) is qin QPair QRel (qpair i zero) end

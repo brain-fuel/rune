@@ -4,6 +4,8 @@
 
 **Goal:** Re-found Frac as a quotient of raw pairs (Quot QPair QRel) with UNREDUCED qlift ops whose respect proofs are pure Int ring algebra, canonical display done computationally (Go fold + rune reduce in the codec), and the to_radix pipeline ported - all REPL behavior string-identical. Laws are Plan B.
 
+**Status: ALL TASKS COMPLETE (2026-07-07).** Task 1 (re-foundation) commits de39b2b + 4924fa3; Task 2 (to_radix port + demotions + perf fix) commits ca27b11, b4552c0, c9931e2; Task 3 (sweep + measurement + bookkeeping) closed with the full suite green and a cold prelude load of 0.34-0.37s against the 3s budget. Show/Binary for Frac removed pending Plan B (see the spec's Plan A outcome notes).
+
 **Architecture:** One-shot prelude surgery (the old data Frac dies; every op re-lifts through qlift with its respect proof), plus the licensed Go display-folding site (DecConfig, the Int-campaign precedent). ch113/ch116 (in listings/ch116_rational_field_complete.rune, which redeclares ch113 verbatim) provide the double-qlift op pattern and respect-proof shapes; ch203 provides the to_radix-via-qlift port source. Our Int being canonical data (not a quotient) makes every respect proof strictly simpler than the chapters' versions.
 
 **Tech Stack:** rune surface (internal/prelude/prelude.rune), Go display folding (surface/pretty.go + internal/session/session.go decConfig), Go tests.
@@ -69,27 +71,27 @@ Go display fold (surface/pretty.go + session.go):
 - DecConfig drops `Frac core.Hash`, gains `Qin, Qpair core.Hash` (session resolves `s.refs["qin"]` - the quotient builtin is registered in every session - and `s.refs["qpair"]`; On-gating per the existing optional-extras pattern).
 - The fold case: a saturated `qin _ _ (qpair i d)` where i is a folded Int (nonneg/negsucc numeral) and d a Whole numeral: compute num/den = |i| / (d+1), reduce by Go gcd (int arithmetic; bail to no-fold on bignum exactly as wholeVal already does), then render with the EXISTING output rules verbatim: zero unsigned "0"; den 1 renders signed whole; else signed "n/d".
 
-- [ ] **Step 1: baseline the pin battery**
+- [x] **Step 1: baseline the pin battery**
 
 Run: `go test ./internal/repl/ -run 'TestREPLTowerArithmetic|TestREPLNegationPromotes|TestREPLDecimalLiterals|TestREPLIntTower' -count=1 -v` -> PASS (record). Also grep the repl tests for to_radix pins and for any Show-Frac/interpolated-fraction pin; report findings BEFORE surgery if a Show Frac consumer exists.
 
-- [ ] **Step 2: failing presence test**
+- [x] **Step 2: failing presence test**
 
 `TestFracQuotientPresent` in tower_hash_test.go: names `QPair, QRel, Frac, fracOf, addF, mulF, recipF, divF, reduceQ`. Run -> FAIL.
 
-- [ ] **Step 3: the surgery**
+- [x] **Step 3: the surgery**
 
 Execute the full replacement per the Interfaces block: representation, raw ops, respect proofs, lifts, instances, reduceQ, Show/Binary removal per the binding resolution, old-Frac deletion (grep `frac false\|frac (\|fneg \|fnum \|fden ` -> the only survivors must be inside the to_radix section, which Task 2 owns - if to_radix cannot elaborate against the new Frac in the interim, gate it out the same way the section is reached: to_radix and its dependents may be TEMPORARILY COMMENTED with a `-- Task 2 rewires` banner, reported loudly; the REPL to_radix pins are then EXPECTED-FAIL until Task 2, and the Task 1 gate list excludes exactly them).
 
-- [ ] **Step 4: the Go fold**
+- [x] **Step 4: the Go fold**
 
 Rewrite the DecConfig Frac case per the Interfaces block; update decConfig in session.go. Run: `go test ./surface/ ./internal/session/ -count=1` -> PASS.
 
-- [ ] **Step 5: gates**
+- [x] **Step 5: gates**
 
 Run: `go test ./internal/repl/ -run 'TestREPLTowerArithmetic|TestREPLNegationPromotes|TestREPLDecimalLiterals|TestREPLIntTower' -count=1 -v` -> PASS with identical strings. Run the full repl+session suites; to_radix-dependent tests are the ONLY licensed temporary failures (enumerate them in the report). Record the single-prelude-load wall time (time a one-expression `rune repl` script or the existing load benchmark pattern) - the spec's 3s budget gate.
 
-- [ ] **Step 6: commit**
+- [x] **Step 6: commit**
 
 ```bash
 git add internal/prelude/prelude.rune surface/pretty.go internal/session/session.go internal/session/tower_hash_test.go
@@ -107,10 +109,10 @@ git commit -m "refactor(prelude)!: Frac re-founded as Quot QPair QRel (unreduced
 - Consumes: Task 1's Frac + qnum/qdpred/qden; the existing longDiv/RDec machinery (representative-level, unchanged); ch203's toRadixQ + toRadixRespects (listings/ch203_rational_canonical.rune ~lines 5229-5340) as the port source - their Z-layer respect steps become direct canonical-Int algebra.
 - Produces: `to_radix : Frac -> RDec is qlift QPair QRel RDec toRadixRep toRadixRespects end` (+ the sigplace/sigfig variants re-lifted the same way), with toRadixRep = the existing long-division expansion re-expressed over a QPair representative (sign from qnum's constructor, magnitudes from imag/qdpred). PLUS the floorQ port (ch203 floorRep/floorUnique -> floorQ : Frac -> Int via qlift) and the DEMOTION REBUILD: toWhole/toInt/toNat re-derived as compositions over the lifted observers (integrality = the RDec expansion terminates with no fractional digits and no repetend; integer part = floorQ; error arms and Result shapes EXACTLY as before so TestREPLDemotion strings hold verbatim). No new respect proof beyond the two ports.
 
-- [ ] **Step 1:** failing presence pins (toRadixRep, toRadixRespects, to_radix). Re-enable anything Task 1 temporarily gated.
-- [ ] **Step 2:** the port. toRadixRespects is the riskiest proof of Plan A: it shows the radix expansion is QRel-invariant (floor/mod uniqueness over cross-equal pairs). ch203 proved exactly this; port with our Int. If the port fights beyond its shape (a genuinely new obligation appears), STOP with the obligation stated - do NOT invent gcd theory to bridge it.
-- [ ] **Step 3:** gates: the to_radix REPL pins (`1/3 |> to_radix` -> `0.{3}`, `3/4` -> `0.75`, `1/6` -> `0.1{6}`, sigplace/sigfig pins per the existing tests) + TestREPLDemotion green with unchanged strings + FULL repl/session suites -> ALL PASS (no licensed failures remain).
-- [ ] **Step 4:** commit (pathspec: the two files).
+- [x] **Step 1:** failing presence pins (toRadixRep, toRadixRespects, to_radix). Re-enable anything Task 1 temporarily gated.
+- [x] **Step 2:** the port. toRadixRespects is the riskiest proof of Plan A: it shows the radix expansion is QRel-invariant (floor/mod uniqueness over cross-equal pairs). ch203 proved exactly this; port with our Int. If the port fights beyond its shape (a genuinely new obligation appears), STOP with the obligation stated - do NOT invent gcd theory to bridge it.
+- [x] **Step 3:** gates: the to_radix REPL pins (`1/3 |> to_radix` -> `0.{3}`, `3/4` -> `0.75`, `1/6` -> `0.1{6}`, sigplace/sigfig pins per the existing tests) + TestREPLDemotion green with unchanged strings + FULL repl/session suites -> ALL PASS (no licensed failures remain).
+- [x] **Step 4:** commit (pathspec: the two files).
 
 ---
 
@@ -119,6 +121,6 @@ git commit -m "refactor(prelude)!: Frac re-founded as Quot QPair QRel (unreduced
 **Files:**
 - Modify: `docs/superpowers/specs/2026-07-07-frac-field-laws-design.md` (status), `PARKING-LOT.md` (load numbers + the Show/Binary Plan-B note), roadmap.
 
-- [ ] **Step 1:** full `go test -timeout 30m ./...` (background + poll) -> ALL PASS. Sweep examples/ + cmd/ + harness/ for old-Frac assumptions (grep `frac \|fnum\|fden\|fneg` outside listings) - listings are self-contained and stay green untouched.
-- [ ] **Step 2:** record the measured single-load time in the spec status + PARKING-LOT (against the 3s budget); note the Show/Binary-for-Frac removal and its Plan-B design question.
-- [ ] **Step 3:** roadmap status line: Plan A shipped; Plan B (laws) next. Commit docs.
+- [x] **Step 1:** full `go test -timeout 30m ./...` (background + poll) -> ALL PASS. Sweep examples/ + cmd/ + harness/ for old-Frac assumptions (grep `frac \|fnum\|fden\|fneg` outside listings) - listings are self-contained and stay green untouched.
+- [x] **Step 2:** record the measured single-load time in the spec status + PARKING-LOT (against the 3s budget); note the Show/Binary-for-Frac removal and its Plan-B design question.
+- [x] **Step 3:** roadmap status line: Plan A shipped; Plan B (laws) next. Commit docs.

@@ -54,8 +54,11 @@ CommRing/Field bundles, bridges + transports, Whole commutative monoids,
 ch571) implemented. Int law campaign DONE (junk-free Int re-foundation
 + monus library + difference-pair transport + RingLaws/CommLaws/
 CommRingLaws + AbGroup via the bridge, ch572; display folding moved to
-nonneg/negsucc). Next: Frac campaign (design open: canonical-form vs
-quotient route; prelude proof-load headroom question queued). v5/v6 not
-yet decomposed. Each
+nonneg/negsucc). Frac campaign Plan A COMPLETE on feat/frac-quotient
+(quotient route: Frac = Quot QPair QRel, unreduced qlift ops, Go-side
+canonical display, to_radix/floorQ ported, Show/Binary Frac removed
+pending Plan B; cold prelude load 0.34-0.37s vs the 3s budget). Next:
+Frac Plan B (laws; prelude proof-load headroom question still queued).
+v5/v6 not yet decomposed. Each
 bump gets its own spec -> plan(s) -> implementation cycles when its turn
 comes.

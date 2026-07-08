@@ -648,3 +648,10 @@ levers are cross-session proof caching keyed on the certificate table, or
 moving law values out of the always-loaded prelude. Revisit BEFORE the Frac
 campaign lands its (larger) proof corpus - a comparable addition crosses the
 session-startup pain threshold.
+
+UPDATE (2026-07-07, Frac Plan A close): after the quotient re-foundation +
+to_radix port + perf fix (cmul/qdiv/qmod accels, subW-based eqW), a cold
+single-prelude `rune repl` load measures 0.34-0.37s against the spec's 3s
+budget - Plan A adds no load-time pain. The proof-caching question STAYS
+OPEN for Plan B, whose laws corpus (six law values, ch113/ch116-scale
+respect+law proofs) is the addition expected to press the budget.
