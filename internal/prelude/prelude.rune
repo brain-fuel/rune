@@ -4035,6 +4035,209 @@ mulFZeroR : (x : Frac) -> Eq Frac (mulF x (fracOf zero)) (fracOf zero) is
   end
 end
 
+-- --------------------------------------------------------------------
+-- Task 4: the NEGATION-INVERSE laws and the ring-level assemblies.
+-- rawNeg negates the numerator only, so rawAdd (rawNeg p) p computes to
+-- a cross numerator whose BOTH products carry qden p (qdpred of the
+-- rawNeg literal fires): iadd (imul (ineg np) dp) (imul np dp). One
+-- reversed idistribR folds it to imul (iadd (ineg np) np) dp, inegInvL
+-- collapses the sum, and imulZeroL kills both sides' cross products
+-- (the compound qden stays FOLDED, as in the annihilation laws).
+-- --------------------------------------------------------------------
+
+-- LEFT inverse on representatives: (-p) + p ~ 0/1.
+negInvLP : (p : QPair) -> QRel (rawAdd (rawNeg p) p) (qpair (nonneg zero) zero) is
+  fn (p : QPair) is
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let n0 : Int = iadd (imul (ineg np) dp) (imul np dp) in
+    transEq Int
+      (imul n0 (nonneg (succ zero)))
+      n0
+      (imul (nonneg zero) (qden (rawAdd (rawNeg p) p)))
+      (imulOneR n0)
+      (transEq Int
+         n0
+         (imul (iadd (ineg np) np) dp)
+         (imul (nonneg zero) (qden (rawAdd (rawNeg p) p)))
+         (symEq Int (imul (iadd (ineg np) np) dp) n0 (idistribR (ineg np) np dp))
+         (transEq Int
+            (imul (iadd (ineg np) np) dp)
+            (imul (nonneg zero) dp)
+            (imul (nonneg zero) (qden (rawAdd (rawNeg p) p)))
+            (congImulL (iadd (ineg np) np) (nonneg zero) dp (inegInvL np))
+            (transEq Int
+               (imul (nonneg zero) dp)
+               (nonneg zero)
+               (imul (nonneg zero) (qden (rawAdd (rawNeg p) p)))
+               (imulZeroL dp)
+               (symEq Int (imul (nonneg zero) (qden (rawAdd (rawNeg p) p))) (nonneg zero)
+                  (imulZeroL (qden (rawAdd (rawNeg p) p)))))))
+  end
+end
+
+-- RIGHT inverse on representatives: p + (-p) ~ 0/1. Mirror with the
+-- summands flipped and inegInvR.
+negInvRP : (p : QPair) -> QRel (rawAdd p (rawNeg p)) (qpair (nonneg zero) zero) is
+  fn (p : QPair) is
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let n0 : Int = iadd (imul np dp) (imul (ineg np) dp) in
+    transEq Int
+      (imul n0 (nonneg (succ zero)))
+      n0
+      (imul (nonneg zero) (qden (rawAdd p (rawNeg p))))
+      (imulOneR n0)
+      (transEq Int
+         n0
+         (imul (iadd np (ineg np)) dp)
+         (imul (nonneg zero) (qden (rawAdd p (rawNeg p))))
+         (symEq Int (imul (iadd np (ineg np)) dp) n0 (idistribR np (ineg np) dp))
+         (transEq Int
+            (imul (iadd np (ineg np)) dp)
+            (imul (nonneg zero) dp)
+            (imul (nonneg zero) (qden (rawAdd p (rawNeg p))))
+            (congImulL (iadd np (ineg np)) (nonneg zero) dp (inegInvR np))
+            (transEq Int
+               (imul (nonneg zero) dp)
+               (nonneg zero)
+               (imul (nonneg zero) (qden (rawAdd p (rawNeg p))))
+               (imulZeroL dp)
+               (symEq Int (imul (nonneg zero) (qden (rawAdd p (rawNeg p)))) (nonneg zero)
+                  (imulZeroL (qden (rawAdd p (rawNeg p))))))))
+  end
+end
+
+-- Lifted: fnegate x cancels x on both sides of addF. Single qind each;
+-- the fnegate + addF qlift iotas chain on the qin leaf (REPL-probed), so
+-- the leaf closes by a bare qsound.
+fnegInvL : (x : Frac) -> Eq Frac (addF (fnegate x) x) (fracOf zero) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is Eq Frac (addF (fnegate w) w) (fracOf zero) end)
+      (fn (p : QPair) is
+        qsound QPair QRel (rawAdd (rawNeg p) p) (qpair (nonneg zero) zero) (negInvLP p)
+      end)
+      x
+  end
+end
+
+fnegInvR : (x : Frac) -> Eq Frac (addF x (fnegate x)) (fracOf zero) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is Eq Frac (addF w (fnegate w)) (fracOf zero) end)
+      (fn (p : QPair) is
+        qsound QPair QRel (rawAdd p (rawNeg p)) (qpair (nonneg zero) zero) (negInvRP p)
+      end)
+      x
+  end
+end
+
+-- ====================================================================
+-- THE ASSEMBLED FRAC LAW RECORDS (Plan B, Task 4). The Int assembly
+-- nesting transcribed over divRingFrac's projections: divRingFrac.1.1's
+-- slots compute definitionally to addF / fracOf zero / mulF /
+-- fracOf (succ zero), so the chains state the raw lifted ops directly
+-- (exactly as semiringLawsInt states iadd/imul). abGroupLawsFrac cashes
+-- the 1b bridge in ONE line - Frac IS an abelian group under addition.
+-- ====================================================================
+semiringLawsFrac : SemiringLaws Frac (divRingFrac.1.1) is
+  mkAnd (AssocT Frac addF)
+        (And (CommT Frac addF)
+        (And (IdLT Frac addF (fracOf zero))
+        (And (IdRT Frac addF (fracOf zero))
+        (And (AssocT Frac mulF)
+        (And (IdLT Frac mulF (fracOf (succ zero)))
+        (And (IdRT Frac mulF (fracOf (succ zero)))
+        (And (DistribLT Frac addF mulF)
+        (And (DistribRT Frac addF mulF)
+        (And (AnnihLT Frac mulF (fracOf zero))
+             (AnnihRT Frac mulF (fracOf zero)))))))))))
+    addFAssoc
+    (mkAnd (CommT Frac addF)
+          (And (IdLT Frac addF (fracOf zero))
+          (And (IdRT Frac addF (fracOf zero))
+          (And (AssocT Frac mulF)
+          (And (IdLT Frac mulF (fracOf (succ zero)))
+          (And (IdRT Frac mulF (fracOf (succ zero)))
+          (And (DistribLT Frac addF mulF)
+          (And (DistribRT Frac addF mulF)
+          (And (AnnihLT Frac mulF (fracOf zero))
+               (AnnihRT Frac mulF (fracOf zero))))))))))
+      addFComm
+      (mkAnd (IdLT Frac addF (fracOf zero))
+            (And (IdRT Frac addF (fracOf zero))
+            (And (AssocT Frac mulF)
+            (And (IdLT Frac mulF (fracOf (succ zero)))
+            (And (IdRT Frac mulF (fracOf (succ zero)))
+            (And (DistribLT Frac addF mulF)
+            (And (DistribRT Frac addF mulF)
+            (And (AnnihLT Frac mulF (fracOf zero))
+                 (AnnihRT Frac mulF (fracOf zero)))))))))
+        addFZeroL
+        (mkAnd (IdRT Frac addF (fracOf zero))
+              (And (AssocT Frac mulF)
+              (And (IdLT Frac mulF (fracOf (succ zero)))
+              (And (IdRT Frac mulF (fracOf (succ zero)))
+              (And (DistribLT Frac addF mulF)
+              (And (DistribRT Frac addF mulF)
+              (And (AnnihLT Frac mulF (fracOf zero))
+                   (AnnihRT Frac mulF (fracOf zero))))))))
+          addFZeroR
+          (mkAnd (AssocT Frac mulF)
+                (And (IdLT Frac mulF (fracOf (succ zero)))
+                (And (IdRT Frac mulF (fracOf (succ zero)))
+                (And (DistribLT Frac addF mulF)
+                (And (DistribRT Frac addF mulF)
+                (And (AnnihLT Frac mulF (fracOf zero))
+                     (AnnihRT Frac mulF (fracOf zero)))))))
+            mulFAssoc
+            (mkAnd (IdLT Frac mulF (fracOf (succ zero)))
+                  (And (IdRT Frac mulF (fracOf (succ zero)))
+                  (And (DistribLT Frac addF mulF)
+                  (And (DistribRT Frac addF mulF)
+                  (And (AnnihLT Frac mulF (fracOf zero))
+                       (AnnihRT Frac mulF (fracOf zero))))))
+              mulFOneL
+              (mkAnd (IdRT Frac mulF (fracOf (succ zero)))
+                    (And (DistribLT Frac addF mulF)
+                    (And (DistribRT Frac addF mulF)
+                    (And (AnnihLT Frac mulF (fracOf zero))
+                         (AnnihRT Frac mulF (fracOf zero)))))
+                mulFOneR
+                (mkAnd (DistribLT Frac addF mulF)
+                      (And (DistribRT Frac addF mulF)
+                      (And (AnnihLT Frac mulF (fracOf zero))
+                           (AnnihRT Frac mulF (fracOf zero))))
+                  distribFL
+                  (mkAnd (DistribRT Frac addF mulF)
+                        (And (AnnihLT Frac mulF (fracOf zero))
+                             (AnnihRT Frac mulF (fracOf zero)))
+                    distribFR
+                    (mkAnd (AnnihLT Frac mulF (fracOf zero))
+                           (AnnihRT Frac mulF (fracOf zero))
+                      mulFZeroL
+                      mulFZeroR)))))))))
+end
+
+ringLawsFrac : RingLaws Frac (divRingFrac.1) is
+  mkAnd (SemiringLaws Frac (divRingFrac.1.1))
+    (And (NegInvLT Frac addF fnegate (fracOf zero)) (NegInvRT Frac addF fnegate (fracOf zero)))
+    semiringLawsFrac
+    (mkAnd (NegInvLT Frac addF fnegate (fracOf zero)) (NegInvRT Frac addF fnegate (fracOf zero))
+      fnegInvL fnegInvR)
+end
+
+commLawsFrac : CommLaws Frac semiringFrac is mulFComm end
+
+commRingLawsFrac : CommRingLaws Frac (divRingFrac.1) is
+  mkAnd (RingLaws Frac (divRingFrac.1)) (CommLaws Frac (divRingFrac.1.1)) ringLawsFrac commLawsFrac
+end
+
+abGroupLawsFrac : AbGroupLaws Frac (groupOfRing Frac (divRingFrac.1)) is
+  abGroupLawsOfRing Frac (divRingFrac.1) ringLawsFrac
+end
+
 -- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
 -- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),
@@ -4065,6 +4268,52 @@ intOfOne : Eq Int (intOf (succ zero)) (nonneg (succ zero)) is refl (nonneg (succ
 -- The commuting triangle, by refl: both sides compute to qin (qpair (nonneg n) zero).
 ratOfIntOf : (n : Whole) -> Eq Frac (ratOfInt (intOf n)) (fracOf n) is
   fn (n : Whole) is refl (fracOf n) end
+end
+
+-- --------------------------------------------------------------------
+-- The FRAC-EDGE homomorphisms (Plan B, Task 4; deferred from the tower
+-- graph by the v4 design's Decision 6, cheap now because the lifted ops
+-- are unreduced). MUL is definitional: rawMul on two denominator-1
+-- representatives computes straight to the denominator-1 product pair
+-- (numerator imul i j on the nose, dmul zero zero -> zero), so both
+-- sides are the SAME qin - refl. ADD needs one qsound: the cross
+-- numerator picks up unit factors (imul i 1 is stuck on a neutral i),
+-- discharged by imulOneR three ways. The fracOf homs are the ratOfInt
+-- homs at nonneg representatives (fracOf n = ratOfInt (nonneg n) and
+-- iadd/imul on two nonneg values compute, so the types convert).
+-- --------------------------------------------------------------------
+ratOfIntAddHom : (a : Int) -> (b : Int) -> Eq Frac (ratOfInt (iadd a b)) (addF (ratOfInt a) (ratOfInt b)) is
+  fn (a : Int) (b : Int) is
+    let n1 : Int = iadd (imul a (nonneg (succ zero))) (imul b (nonneg (succ zero))) in
+    qsound QPair QRel
+      (qpair (iadd a b) zero)
+      (rawAdd (qpair a zero) (qpair b zero))
+      (transEq Int
+         (imul (iadd a b) (nonneg (succ zero)))
+         (iadd a b)
+         (imul n1 (nonneg (succ zero)))
+         (imulOneR (iadd a b))
+         (transEq Int
+            (iadd a b)
+            n1
+            (imul n1 (nonneg (succ zero)))
+            (congIadd2 a (imul a (nonneg (succ zero))) b (imul b (nonneg (succ zero)))
+               (symEq Int (imul a (nonneg (succ zero))) a (imulOneR a))
+               (symEq Int (imul b (nonneg (succ zero))) b (imulOneR b)))
+            (symEq Int (imul n1 (nonneg (succ zero))) n1 (imulOneR n1))))
+  end
+end
+
+ratOfIntMulHom : (a : Int) -> (b : Int) -> Eq Frac (ratOfInt (imul a b)) (mulF (ratOfInt a) (ratOfInt b)) is
+  fn (a : Int) (b : Int) is refl (ratOfInt (imul a b)) end
+end
+
+fracOfAddHom : (a : Whole) -> (b : Whole) -> Eq Frac (fracOf (addW a b)) (addF (fracOf a) (fracOf b)) is
+  fn (a : Whole) (b : Whole) is ratOfIntAddHom (nonneg a) (nonneg b) end
+end
+
+fracOfMulHom : (a : Whole) -> (b : Whole) -> Eq Frac (fracOf (mulW a b)) (mulF (fracOf a) (fracOf b)) is
+  fn (a : Whole) (b : Whole) is refl (fracOf (mulW a b)) end
 end
 
 -- ====================================================================

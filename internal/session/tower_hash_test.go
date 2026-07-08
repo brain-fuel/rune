@@ -265,3 +265,25 @@ func TestFracMulLawsPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestFracRingLawsPresent pins Task 4 of the Frac field-laws campaign (Plan B):
+// the two negation-inverse laws, the five ring-level law-record assemblies
+// (mirroring the Int assembly nesting over divRingFrac's projections), and the
+// four tower-graph frac-edge homomorphisms (fracOf / ratOfInt preserve + and *,
+// each a single qsound over denominator-1 representatives).
+func TestFracRingLawsPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"negInvLP", "negInvRP", "fnegInvL", "fnegInvR",
+		"semiringLawsFrac", "ringLawsFrac", "commLawsFrac",
+		"commRingLawsFrac", "abGroupLawsFrac",
+		"fracOfAddHom", "fracOfMulHom", "ratOfIntAddHom", "ratOfIntMulHom",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
