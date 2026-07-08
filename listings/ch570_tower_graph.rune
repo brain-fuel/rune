@@ -13,30 +13,47 @@
 -- subset Sigma. `intOf` injects a Whole as a non-negative Int. `fracOf`
 -- injects a Whole as the whole-valued fraction n/1. `ratOfInt` injects an
 -- Int as the integer-valued fraction n/1 (same sign, denominator 1). The
--- diagram's TRIANGLE -- go Whole -> Int -> Frac, or go Whole -> Frac
--- directly -- commutes: `ratOfInt (intOf n)` and `fracOf n` are the SAME
--- fraction, by `ratOfIntOf`. That equality is DEFINITIONAL (both sides
--- reduce to `frac false n 1`), so the proof is `refl`.
+-- diagram TRIANGLE -- go Whole -> Int -> Frac, or go Whole -> Frac directly
+-- -- commutes: `ratOfInt (intOf n)` and `fracOf n` are the SAME fraction, by
+-- `ratOfIntOf`.
 --
--- The other two lemmas here (`intOfAdd`/`intOfMul`) show `intOf` is a
--- SEMIRING HOMOMORPHISM on its image: injecting two Wholes and adding
--- (multiplying) them as Ints agrees with adding (multiplying) them as
--- Wholes first and then injecting. `intOfOne` pins the unit case. All
--- three are now DIRECTLY BY REFL: Int is JUNK-FREE (`nonneg n` denotes n
--- and `negsucc k` denotes -(k+1), so every constructor application is a
--- distinct integer), and iadd/imul on two `nonneg` values compute straight
--- to `nonneg` of the Whole result, no normalizing step in between. An
--- earlier edition of this chapter carried a fifth lemma, `mkIntFalse`,
--- certifying that the old sign+magnitude Int's smart constructor was
--- transparent on a non-negative sign; the junk-free representation made
--- that normalization vacuous, so the lemma has nothing left to state and
--- is gone.
+-- FRAC IS NOW THE QUOTIENT. An earlier edition of this chapter modelled Frac
+-- as an own-shape sign+magnitude triple `frac : Bool -> Whole -> Whole`; the
+-- v4 Frac field-laws campaign (Plan B) re-founded Frac as the CLASSICAL
+-- QUOTIENT of raw pairs (numerator : Int, denominator positive by
+-- construction) under cross-multiplication `QRel`, so that the ring/field
+-- laws transport through pure Int algebra with NO gcd theory. This chapter
+-- is realigned to that representation: `fracOf n = qin (qpair (nonneg n) 0)`
+-- and `ratOfInt i = qin (qpair i 0)`, both denominator-1 pairs. The triangle
+-- `ratOfInt (intOf n) = fracOf n` stays DEFINITIONAL (both sides are
+-- `qin (qpair (nonneg n) 0)`), so `ratOfIntOf` is `refl`.
 --
--- Self-contained (the ch107 pattern; this chapter does not load the
--- prelude): the Whole kernels, Nat as the positive Whole subset + wholeOf,
--- the Int rung (nonneg/negsucc, intOf, iadd/imul and their helpers), the
--- Frac rung (fracOf), ratOfInt, then the four graph lemmas. Ends with a
--- runnable witness.
+-- THE INT-EDGE HOMS, unchanged. `intOfAdd`/`intOfMul`/`intOfOne` show `intOf`
+-- is a SEMIRING HOMOMORPHISM on its image, all BY REFL: Int is JUNK-FREE
+-- (`nonneg n` denotes n, `negsucc k` denotes -(k+1), every constructor
+-- application a distinct integer), and iadd/imul on two `nonneg` values
+-- compute straight to `nonneg` of the Whole result, no normalizing step in
+-- between.
+--
+-- THE FRAC-EDGE HOMS, added (Plan B, Task 4; deferred from the tower graph
+-- by the v4 design Decision 6, cheap now that the lifted ops are unreduced).
+-- `fracOfAddHom`/`fracOfMulHom` and `ratOfIntAddHom`/`ratOfIntMulHom` show
+-- `fracOf` and `ratOfInt` preserve + and *. MUL is definitional (rawMul on
+-- two denominator-1 pairs computes to the denominator-1 product pair, both
+-- sides the same `qin` -- refl). ADD needs one `qsound`: the cross numerator
+-- picks up unit factors (`imul i 1` is stuck on a neutral i), discharged by
+-- `imulOneR` three ways. The `fracOf` homs are the `ratOfInt` homs at nonneg
+-- representatives.
+--
+-- Self-contained (the ch107/ch572 pattern; this chapter does not load the
+-- prelude): its Whole/Bool/Int/QPair are LOCAL data (the mirror discipline
+-- here is SHAPE fidelity to the prelude, not hash equality -- these types are
+-- the chapter own). It restates the Whole kernels, Nat as the positive Whole
+-- subset + wholeOf, the junk-free Int rung and its full difference-model ring
+-- engine (the ch572 corpus: wsub / wsubEq / the specs / the monus-order
+-- library / the ring lemmas up through idistribR and imulAssoc), the quotient
+-- Frac rung with its cross-multiplication respect proofs and the lifted ops
+-- addF/mulF, then the eight graph lemmas. Ends with a runnable witness.
 
 data Whole : U is
   zero : Whole
@@ -45,9 +62,55 @@ end
 
 builtin nat Whole zero succ
 
--- The Whole-level arithmetic kernels (addW/mulW), named so `+`/`*` overload
--- across the tower elsewhere; here they are the raw operations the graph's
--- homomorphism lemmas are stated over.
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+-- isPos decides nonzero-ness: false on zero, true on every successor. It is
+-- the predicate that carves the counting numbers out of the wholes.
+isPos : Whole -> Bool is
+  fn (n : Whole) is
+    case n of
+    | zero -> false
+    | succ k -> true
+    end
+  end
+end
+
+-- Nat: the counting numbers {1,2,3,...} as the POSITIVE wholes -- a whole
+-- paired with a proof it is nonzero. `zero` cannot inhabit it, so Nat is
+-- zeroless by construction. `wholeOf` is the injection Nat -> Whole (= .1).
+Nat : U is
+  Sig Whole (fn (n : Whole) is Eq Bool (isPos n) true end)
+end
+one : Nat is
+  Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ zero) (refl true)
+end
+nsucc : Nat -> Nat is
+  fn (k : Nat) is
+    Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ (k.1)) (refl true)
+  end
+end
+-- The injection up the tower: a counting number IS its underlying whole.
+wholeOf : Nat -> Whole is
+  fn (k : Nat) is k.1 end
+end
+
+-- ====================================================================
+-- THE JUNK-FREE INT RUNG + its difference-model ring engine (the ch572
+-- corpus, mirrored). Whole is not closed under subtraction, so signed
+-- integers sit one rung up. Every ring lemma reduces an Int operation to a
+-- `wsub` of Whole polynomials and transports the matching Whole law through
+-- the keystone `wsubEq`. No gcd, no negative zero.
+-- ====================================================================
+data Int : U is
+  nonneg  : Whole -> Int
+| negsucc : Whole -> Int
+end
+
+data QPair : U is qpair : Int -> Whole -> QPair end
+
 addW : Whole -> Whole -> Whole is
   fn (m : Whole) (n : Whole) is
     case m of
@@ -75,7 +138,6 @@ pred : Whole -> Whole is
   end
 end
 
--- Truncated subtraction: m - n stops at zero. Feeds `wsub`'s magnitude step.
 subW : Whole -> Whole -> Whole is
   fn (m : Whole) (n : Whole) is
     case n of
@@ -85,12 +147,6 @@ subW : Whole -> Whole -> Whole is
   end
 end
 
-data Bool : U is
-  true : Bool
-| false : Bool
-end
-
--- leb m n decides m <= n; feeds `wsub`'s branch comparison.
 leb : Whole -> Whole -> Bool is
   fn (m : Whole) is
     case m of
@@ -105,65 +161,33 @@ leb : Whole -> Whole -> Bool is
   end
 end
 
--- isPos decides nonzero-ness: false on zero, true on every successor. It is
--- the predicate that carves the counting numbers out of the wholes.
-isPos : Whole -> Bool is
-  fn (n : Whole) is
-    case n of
-    | zero -> false
-    | succ k -> true
-    end
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
   end
 end
 
--- Nat: the counting numbers {1,2,3,...} as the POSITIVE wholes -- a whole
--- paired with a proof it is nonzero. `zero` cannot inhabit it (that would
--- need `Eq Bool false true`, uninhabited), so Nat is zeroless by
--- construction. `wholeOf` is the injection Nat -> Whole (= .1).
-Nat : U is
-  Sig Whole (fn (n : Whole) is Eq Bool (isPos n) true end)
-end
-
--- one = 1, the least counting number; the proof is refl since isPos (succ
--- zero) computes to true.
-one : Nat is
-  Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ zero) (refl true)
-end
-
--- nsucc steps a counting number up; the successor of anything is positive,
--- so the nonzero proof is refl regardless of the predecessor.
-nsucc : Nat -> Nat is
-  fn (k : Nat) is
-    Pair Whole (fn (n : Whole) is Eq Bool (isPos n) true end) (succ (k.1)) (refl true)
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
   end
 end
 
--- The injection up the tower: a counting number IS its underlying whole.
--- Nat is literally a subset of Whole, so wholeOf is the first projection;
--- its image is exactly the positives {1,2,3,...}.
-wholeOf : Nat -> Whole is
-  fn (k : Nat) is k.1 end
+subWSucc : (a : Whole) -> (b : Whole) -> Eq Whole (subW (succ a) (succ b)) (subW a b) is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (subW (succ a) (succ x)) (subW a x) end)
+      (refl a)
+      (fn (k : Whole) (ih : Eq Whole (subW (succ a) (succ k)) (subW a k)) is
+         subst Whole (subW (succ a) (succ k)) (subW a k) ih
+           (fn (z : Whole) is Eq Whole (subW (succ a) (succ (succ k))) (pred z) end)
+           (refl (subW (succ a) (succ (succ k))))
+       end)
+      b
+  end
 end
 
--- ====================================================================
--- THE INT RUNG. Whole is not closed under subtraction, so signed integers
--- sit one rung up. Int is JUNK-FREE: `nonneg n` denotes n and `negsucc k`
--- denotes -(k+1), so every constructor application is a distinct integer
--- and there is no representation outside the normalized image (no smart
--- constructor, no negative zero). `intOf` injects a whole as a
--- non-negative Int.
--- ====================================================================
-data Int : U is
-  nonneg  : Whole -> Int
-| negsucc : Whole -> Int
-end
 intOf : Whole -> Int is fn (n : Whole) is nonneg n end end
-isign : Int -> Bool is
-  fn (i : Int) is case i of | nonneg n -> false | negsucc k -> true end end
-end
-imag : Int -> Whole is
-  fn (i : Int) is case i of | nonneg n -> n | negsucc k -> succ k end end
-end
+
 ineg : Int -> Int is
   fn (i : Int) is
     case i of
@@ -172,7 +196,7 @@ ineg : Int -> Int is
     end
   end
 end
--- THE PROMOTION: whole minus whole, as a signed integer.
+
 wsub : Whole -> Whole -> Int is
   fn (a : Whole) (b : Whole) is
     case leb b a of
@@ -181,6 +205,7 @@ wsub : Whole -> Whole -> Int is
     end
   end
 end
+
 iadd : Int -> Int -> Int is
   fn (x : Int) (y : Int) is
     case x of
@@ -197,7 +222,7 @@ iadd : Int -> Int -> Int is
     end
   end
 end
-isub : Int -> Int -> Int is fn (x : Int) (y : Int) is iadd x (ineg y) end end
+
 imul : Int -> Int -> Int is
   fn (x : Int) (y : Int) is
     case x of
@@ -215,41 +240,1350 @@ imul : Int -> Int -> Int is
   end
 end
 
--- ====================================================================
--- THE FRAC RUNG. A SIGNED fraction: (sign, |num|, |den|). `fracOf` injects
--- a whole as the whole-valued fraction n/1.
--- ====================================================================
-data Frac : U is frac : Bool -> Whole -> Whole -> Frac end
-fracOf : Whole -> Frac is fn (n : Whole) is frac false n 1 end end
-
--- `ratOfInt` injects an Int as the integer-valued fraction n/1 (same sign,
--- denominator 1) -- the other leg of the diagram's triangle into Frac.
-ratOfInt : Int -> Frac is
-  fn (i : Int) is frac (isign i) (imag i) 1 end
+AssocT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> (c : A) -> Eq A (f (f a b) c) (f a (f b c)) end
 end
 
--- ====================================================================
--- THE FOUR GRAPH LEMMAS. intOfAdd/intOfMul/intOfOne show `intOf` is a
--- semiring homomorphism on its image; ratOfIntOf is the triangle's
--- commutativity. Every one is BY REFL: iadd/imul on two `nonneg` values
--- compute to `nonneg` of the Whole result on the nose (junk-free Int has
--- no normalizing constructor for a proof to see through -- the old
--- edition's `mkIntFalse` normalization lemma died with the negative zero
--- it normalized).
--- ====================================================================
+CommT : (A : U) -> (A -> A -> A) -> U is
+  fn (A : U) (f : A -> A -> A) is (a : A) -> (b : A) -> Eq A (f a b) (f b a) end
+end
+
+IdRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (f : A -> A -> A) (e : A) is (a : A) -> Eq A (f a e) a end
+end
+
+DistribLT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul a (add b c)) (add (mul a b) (mul a c))
+  end
+end
+
+DistribRT : (A : U) -> (A -> A -> A) -> (A -> A -> A) -> U is
+  fn (A : U) (add : A -> A -> A) (mul : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Eq A (mul (add a b) c) (add (mul a c) (mul b c))
+  end
+end
+
+AnnihRT : (A : U) -> (A -> A -> A) -> A -> U is
+  fn (A : U) (mul : A -> A -> A) (z : A) is (a : A) -> Eq A (mul a z) z end
+end
+
+congW : (f : Whole -> Whole) -> (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Whole (f x) (f y) is
+  fn (f : Whole -> Whole) (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Whole (f x) (f z) end) (refl (f x))
+  end
+end
+
+addWAssoc : AssocT Whole addW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW (addW x b) c) (addW x (addW b c)) end)
+      (refl (addW b c))
+      (fn (k : Whole) (ih : Eq Whole (addW (addW k b) c) (addW k (addW b c))) is
+         subst Whole (addW (addW k b) c) (addW k (addW b c)) ih
+           (fn (z : Whole) is Eq Whole (succ (addW (addW k b) c)) (succ z) end)
+           (refl (succ (addW (addW k b) c)))
+       end)
+      a
+  end
+end
+
+addWZeroR : IdRT Whole addW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x zero) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW k zero) k) is
+         subst Whole (addW k zero) k ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) zero) (succ z) end)
+           (refl (addW (succ k) zero))
+       end)
+      a
+  end
+end
+
+addWSuccR : (m : Whole) -> (n : Whole) -> Eq Whole (addW m (succ n)) (succ (addW m n)) is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x (succ n)) (succ (addW x n)) end)
+      (refl (succ n))
+      (fn (k : Whole) (ih : Eq Whole (addW k (succ n)) (succ (addW k n))) is
+         subst Whole (addW k (succ n)) (succ (addW k n)) ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) (succ n)) (succ z) end)
+           (refl (addW (succ k) (succ n)))
+       end)
+      m
+  end
+end
+
+addWComm : CommT Whole addW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x b) (addW b x) end)
+      (subst Whole (addW b zero) b (addWZeroR b)
+         (fn (z : Whole) is Eq Whole z (addW b zero) end)
+         (refl (addW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (addW k b) (addW b k)) is
+         subst Whole (succ (addW b k)) (addW b (succ k))
+           (subst Whole (addW b (succ k)) (succ (addW b k)) (addWSuccR b k)
+              (fn (z : Whole) is Eq Whole z (addW b (succ k)) end)
+              (refl (addW b (succ k))))
+           (fn (z : Whole) is Eq Whole (succ (addW k b)) z end)
+           (subst Whole (addW k b) (addW b k) ih
+              (fn (z : Whole) is Eq Whole (succ (addW k b)) (succ z) end)
+              (refl (succ (addW k b))))
+       end)
+      a
+  end
+end
+
+addWSwapR : (x : Whole) -> (y : Whole) -> (w : Whole) -> Eq Whole (addW (addW x y) w) (addW (addW x w) y) is
+  fn (x : Whole) (y : Whole) (w : Whole) is
+    transEq Whole (addW (addW x y) w) (addW x (addW y w)) (addW (addW x w) y)
+      (addWAssoc x y w)
+      (transEq Whole (addW x (addW y w)) (addW x (addW w y)) (addW (addW x w) y)
+         (congW (fn (t : Whole) is addW x t end) (addW y w) (addW w y) (addWComm y w))
+         (symEq Whole (addW (addW x w) y) (addW x (addW w y)) (addWAssoc x w y)))
+  end
+end
+
+addWShiftSucc : (a : Whole) -> (x : Whole) -> (y : Whole)
+  -> Eq Whole (addW (addW a x) (succ y)) (addW (addW a y) (succ x)) is
+  fn (a : Whole) (x : Whole) (y : Whole) is
+    transEq Whole (addW (addW a x) (succ y)) (addW a (addW x (succ y))) (addW (addW a y) (succ x))
+      (addWAssoc a x (succ y))
+      (transEq Whole (addW a (addW x (succ y))) (addW a (succ (addW y x))) (addW (addW a y) (succ x))
+         (congW (fn (t : Whole) is addW a t end) (addW x (succ y)) (succ (addW y x))
+            (transEq Whole (addW x (succ y)) (succ (addW x y)) (succ (addW y x))
+               (addWSuccR x y)
+               (congW (fn (t : Whole) is succ t end) (addW x y) (addW y x) (addWComm x y))))
+         (transEq Whole (addW a (succ (addW y x))) (addW a (addW y (succ x))) (addW (addW a y) (succ x))
+            (congW (fn (t : Whole) is addW a t end) (succ (addW y x)) (addW y (succ x))
+               (symEq Whole (addW y (succ x)) (succ (addW y x)) (addWSuccR y x)))
+            (symEq Whole (addW (addW a y) (succ x)) (addW a (addW y (succ x))) (addWAssoc a y (succ x)))))
+  end
+end
+
+mulWZeroR : AnnihRT Whole mulW zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x zero) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k zero) zero) is
+         transEq Whole (mulW (succ k) zero) (mulW k zero) zero
+           (addWZeroR (mulW k zero))
+           ih
+       end)
+      a
+  end
+end
+
+distribWR : DistribRT Whole addW mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW (addW x b) c) (addW (mulW x c) (mulW b c)) end)
+      (refl (mulW b c))
+      (fn (k : Whole) (ih : Eq Whole (mulW (addW k b) c) (addW (mulW k c) (mulW b c))) is
+         transEq Whole
+           (addW (mulW (addW k b) c) c)
+           (addW (addW (mulW k c) (mulW b c)) c)
+           (addW (addW (mulW k c) c) (mulW b c))
+           (congW (fn (t : Whole) is addW t c end) (mulW (addW k b) c) (addW (mulW k c) (mulW b c)) ih)
+           (addWSwapR (mulW k c) (mulW b c) c)
+       end)
+      a
+  end
+end
+
+mulWSuccR : (n : Whole) -> (m : Whole) -> Eq Whole (mulW n (succ m)) (addW (mulW n m) n) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x (succ m)) (addW (mulW x m) x) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k (succ m)) (addW (mulW k m) k)) is
+         transEq Whole
+           (addW (mulW k (succ m)) (succ m))
+           (addW (addW (mulW k m) k) (succ m))
+           (addW (addW (mulW k m) m) (succ k))
+           (congW (fn (t : Whole) is addW t (succ m) end) (mulW k (succ m)) (addW (mulW k m) k) ih)
+           (addWShiftSucc (mulW k m) k m)
+       end)
+      n
+  end
+end
+
+mulWComm : CommT Whole mulW is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x b) (mulW b x) end)
+      (subst Whole (mulW b zero) zero (mulWZeroR b)
+         (fn (z : Whole) is Eq Whole z (mulW b zero) end)
+         (refl (mulW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (mulW k b) (mulW b k)) is
+         transEq Whole (mulW (succ k) b) (addW (mulW b k) b) (mulW b (succ k))
+           (congW (fn (t : Whole) is addW t b end) (mulW k b) (mulW b k) ih)
+           (symEq Whole (mulW b (succ k)) (addW (mulW b k) b) (mulWSuccR b k))
+       end)
+      a
+  end
+end
+
+mulWAssoc : AssocT Whole mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW (mulW x b) c) (mulW x (mulW b c)) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW (mulW k b) c) (mulW k (mulW b c))) is
+         transEq Whole
+           (mulW (mulW (succ k) b) c)
+           (addW (mulW (mulW k b) c) (mulW b c))
+           (mulW (succ k) (mulW b c))
+           (distribWR (mulW k b) b c)
+           (congW (fn (t : Whole) is addW t (mulW b c) end) (mulW (mulW k b) c) (mulW k (mulW b c)) ih)
+       end)
+      a
+  end
+end
+
+distribWL : DistribLT Whole addW mulW is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    transEq Whole
+      (mulW a (addW b c))
+      (mulW (addW b c) a)
+      (addW (mulW a b) (mulW a c))
+      (mulWComm a (addW b c))
+      (transEq Whole
+         (mulW (addW b c) a)
+         (addW (mulW b a) (mulW c a))
+         (addW (mulW a b) (mulW a c))
+         (distribWR b c a)
+         (transEq Whole
+            (addW (mulW b a) (mulW c a))
+            (addW (mulW a b) (mulW c a))
+            (addW (mulW a b) (mulW a c))
+            (congW (fn (t : Whole) is addW t (mulW c a) end) (mulW b a) (mulW a b) (mulWComm b a))
+            (congW (fn (t : Whole) is addW (mulW a b) t end) (mulW c a) (mulW a c) (mulWComm c a))))
+  end
+end
+
+succInj : (a : Whole) -> (b : Whole) -> Eq Whole (succ a) (succ b) -> Eq Whole a b is
+  fn (a : Whole) (b : Whole) (p : Eq Whole (succ a) (succ b)) is
+    congW pred (succ a) (succ b) p
+  end
+end
+
+boolDiscTF : (G : U) -> Eq Bool true false -> G is
+  fn (G : U) (h : Eq Bool true false) is
+    subst Bool true false h
+      (fn (z : Bool) is
+         case z of
+         | true -> Eq Bool true true
+         | false -> G
+         end
+       end)
+      (refl true)
+  end
+end
+
+boolCaseEq : (g : Bool) -> (P : Bool -> U)
+  -> (Eq Bool g true -> P true) -> (Eq Bool g false -> P false) -> P g is
+  fn (g : Bool) (P : Bool -> U)
+     (ht : Eq Bool g true -> P true) (hf : Eq Bool g false -> P false) is
+    BoolElim (fn (x : Bool) is Eq Bool g x -> P x end) ht hf g (refl g)
+  end
+end
+
+congNonneg : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Int (nonneg x) (nonneg y) is
+  fn (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Int (nonneg x) (nonneg z) end) (refl (nonneg x))
+  end
+end
+
+congNegsucc : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Int (negsucc x) (negsucc y) is
+  fn (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Int (negsucc x) (negsucc z) end) (refl (negsucc x))
+  end
+end
+
+subWAddCancel : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) true -> Eq Whole (addW b (subW a b)) a is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is (m : Whole) -> Eq Bool (leb x m) true -> Eq Whole (addW x (subW m x)) m end)
+      (fn (m : Whole) (h : Eq Bool (leb zero m) true) is refl m end)
+      (fn (k : Whole) (ih : (m : Whole) -> Eq Bool (leb k m) true -> Eq Whole (addW k (subW m k)) m) is
+         fn (m : Whole) is
+           WholeElim (fn (y : Whole) is Eq Bool (leb (succ k) y) true -> Eq Whole (addW (succ k) (subW y (succ k))) y end)
+             (fn (h : Eq Bool (leb (succ k) zero) true) is
+                boolDiscTF (Eq Whole (addW (succ k) (subW zero (succ k))) zero)
+                  (symEq Bool (leb (succ k) zero) true h) end)
+             (fn (j : Whole) (ihb : Eq Bool (leb (succ k) j) true -> Eq Whole (addW (succ k) (subW j (succ k))) j) is
+                fn (h : Eq Bool (leb (succ k) (succ j)) true) is
+                  congW (fn (t : Whole) is succ t end) (addW k (subW (succ j) (succ k))) j
+                    (transEq Whole (addW k (subW (succ j) (succ k))) (addW k (subW j k)) j
+                       (congW (fn (t : Whole) is addW k t end) (subW (succ j) (succ k)) (subW j k) (subWSucc j k))
+                       (ih j h))
+                end end)
+             m
+         end end)
+      b
+      a
+  end
+end
+
+addWCancelL : (k : Whole) -> (a : Whole) -> (b : Whole) -> Eq Whole (addW k a) (addW k b) -> Eq Whole a b is
+  fn (k : Whole) (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x a) (addW x b) -> Eq Whole a b end)
+      (fn (h : Eq Whole (addW zero a) (addW zero b)) is h end)
+      (fn (n : Whole) (ih : Eq Whole (addW n a) (addW n b) -> Eq Whole a b) is
+         fn (h : Eq Whole (addW (succ n) a) (addW (succ n) b)) is
+           ih (succInj (addW n a) (addW n b) h)
+         end end)
+      k
+  end
+end
+
+lebSelfAddR : (m : Whole) -> (n : Whole) -> Eq Bool (leb m (addW m n)) true is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Bool (leb x (addW x n)) true end)
+      (refl true)
+      (fn (k : Whole) (ih : Eq Bool (leb k (addW k n)) true) is ih end)
+      m
+  end
+end
+
+lebComplStrict : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) false -> Eq Bool (leb (succ a) b) true is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (y : Whole) is (w : Whole) -> Eq Bool (leb y w) false -> Eq Bool (leb (succ w) y) true end)
+      (fn (w : Whole) (h : Eq Bool (leb zero w) false) is
+         boolDiscTF (Eq Bool (leb (succ w) zero) true) h end)
+      (fn (j : Whole) (ih : (w : Whole) -> Eq Bool (leb j w) false -> Eq Bool (leb (succ w) j) true) is
+         fn (w : Whole) is
+           WholeElim (fn (x : Whole) is Eq Bool (leb (succ j) x) false -> Eq Bool (leb (succ x) (succ j)) true end)
+             (fn (h : Eq Bool (leb (succ j) zero) false) is refl true end)
+             (fn (i : Whole) (ihx : Eq Bool (leb (succ j) i) false -> Eq Bool (leb (succ i) (succ j)) true) is
+                fn (h : Eq Bool (leb (succ j) (succ i)) false) is ih i h end end)
+             w
+         end end)
+      b
+      a
+  end
+end
+
+orderTransfer : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b) -> Eq Bool (leb b a) true -> Eq Bool (leb d c) true is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b)) (e1 : Eq Bool (leb b a) true) is
+    let ba : Eq Whole (addW b (subW a b)) a = subWAddCancel a b e1 in
+    let Hsub : Eq Whole (addW (addW b (subW a b)) d) (addW c b) =
+      subst Whole a (addW b (subW a b)) (symEq Whole (addW b (subW a b)) a ba)
+        (fn (z : Whole) is Eq Whole (addW z d) (addW c b) end) H in
+    let step : Eq Whole (addW b (addW (subW a b) d)) (addW b c) =
+      transEq Whole (addW b (addW (subW a b) d)) (addW (addW b (subW a b)) d) (addW b c)
+        (symEq Whole (addW (addW b (subW a b)) d) (addW b (addW (subW a b) d)) (addWAssoc b (subW a b) d))
+        (transEq Whole (addW (addW b (subW a b)) d) (addW c b) (addW b c) Hsub (addWComm c b)) in
+    let rdc : Eq Whole (addW (subW a b) d) c = addWCancelL b (addW (subW a b) d) c step in
+    let drc : Eq Whole (addW d (subW a b)) c =
+      transEq Whole (addW d (subW a b)) (addW (subW a b) d) c (addWComm d (subW a b)) rdc in
+    subst Whole (addW d (subW a b)) c drc (fn (z : Whole) is Eq Bool (leb d z) true end) (lebSelfAddR d (subW a b))
+  end
+end
+
+subWCrossTrue : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b)
+  -> Eq Bool (leb b a) true -> Eq Bool (leb d c) true
+  -> Eq Whole (subW a b) (subW c d) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b))
+     (e1 : Eq Bool (leb b a) true) (e2 : Eq Bool (leb d c) true) is
+    let sac1 : Eq Whole (addW b (subW a b)) a = subWAddCancel a b e1 in
+    let sac2 : Eq Whole (addW d (subW c d)) c = subWAddCancel c d e2 in
+    let L1 : Eq Whole (addW (addW b d) (subW a b)) (addW a d) =
+      transEq Whole (addW (addW b d) (subW a b)) (addW (addW b (subW a b)) d) (addW a d)
+        (symEq Whole (addW (addW b (subW a b)) d) (addW (addW b d) (subW a b))
+           (addWSwapR b (subW a b) d))
+        (congW (fn (t : Whole) is addW t d end) (addW b (subW a b)) a sac1) in
+    let R1 : Eq Whole (addW (addW b d) (subW c d)) (addW c b) =
+      transEq Whole (addW (addW b d) (subW c d)) (addW (addW d b) (subW c d)) (addW c b)
+        (congW (fn (t : Whole) is addW t (subW c d) end) (addW b d) (addW d b) (addWComm b d))
+        (transEq Whole (addW (addW d b) (subW c d)) (addW (addW d (subW c d)) b) (addW c b)
+           (symEq Whole (addW (addW d (subW c d)) b) (addW (addW d b) (subW c d))
+              (addWSwapR d (subW c d) b))
+           (congW (fn (t : Whole) is addW t b end) (addW d (subW c d)) c sac2)) in
+    let E : Eq Whole (addW (addW b d) (subW a b)) (addW (addW b d) (subW c d)) =
+      transEq Whole (addW (addW b d) (subW a b)) (addW a d) (addW (addW b d) (subW c d))
+        L1
+        (transEq Whole (addW a d) (addW c b) (addW (addW b d) (subW c d))
+           H
+           (symEq Whole (addW (addW b d) (subW c d)) (addW c b) R1)) in
+    addWCancelL (addW b d) (subW a b) (subW c d) E
+  end
+end
+
+subWCrossFalse : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b)
+  -> Eq Bool (leb b a) false -> Eq Bool (leb d c) false
+  -> Eq Whole (subW b (succ a)) (subW d (succ c)) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole)
+     (H : Eq Whole (addW a d) (addW c b))
+     (e1 : Eq Bool (leb b a) false) (e2 : Eq Bool (leb d c) false) is
+    let sac1 : Eq Whole (addW (succ a) (subW b (succ a))) b =
+      subWAddCancel b (succ a) (lebComplStrict a b e1) in
+    let sac2 : Eq Whole (addW (succ c) (subW d (succ c))) d =
+      subWAddCancel d (succ c) (lebComplStrict c d e2) in
+    let H1 : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c b) =
+      subst Whole d (addW (succ c) (subW d (succ c)))
+        (symEq Whole (addW (succ c) (subW d (succ c))) d sac2)
+        (fn (z : Whole) is Eq Whole (addW a z) (addW c b) end) H in
+    let Hb : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c (addW (succ a) (subW b (succ a)))) =
+      subst Whole b (addW (succ a) (subW b (succ a)))
+        (symEq Whole (addW (succ a) (subW b (succ a))) b sac1)
+        (fn (z : Whole) is Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c z) end) H1 in
+    let Llhs : Eq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW d (succ c)))) =
+      transEq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW a (addW c (subW d (succ c))))) (succ (addW (addW a c) (subW d (succ c))))
+        (addWSuccR a (addW c (subW d (succ c))))
+        (congW (fn (t : Whole) is succ t end) (addW a (addW c (subW d (succ c)))) (addW (addW a c) (subW d (succ c)))
+           (symEq Whole (addW (addW a c) (subW d (succ c))) (addW a (addW c (subW d (succ c))))
+              (addWAssoc a c (subW d (succ c))))) in
+    let Rrhs : Eq Whole (addW c (addW (succ a) (subW b (succ a)))) (succ (addW (addW a c) (subW b (succ a)))) =
+      transEq Whole (addW c (addW (succ a) (subW b (succ a)))) (succ (addW c (addW a (subW b (succ a))))) (succ (addW (addW a c) (subW b (succ a))))
+        (addWSuccR c (addW a (subW b (succ a))))
+        (congW (fn (t : Whole) is succ t end) (addW c (addW a (subW b (succ a)))) (addW (addW a c) (subW b (succ a)))
+           (transEq Whole (addW c (addW a (subW b (succ a)))) (addW (addW c a) (subW b (succ a))) (addW (addW a c) (subW b (succ a)))
+              (symEq Whole (addW (addW c a) (subW b (succ a))) (addW c (addW a (subW b (succ a))))
+                 (addWAssoc c a (subW b (succ a))))
+              (congW (fn (t : Whole) is addW t (subW b (succ a)) end) (addW c a) (addW a c) (addWComm c a)))) in
+    let succEq : Eq Whole (succ (addW (addW a c) (subW d (succ c)))) (succ (addW (addW a c) (subW b (succ a)))) =
+      transEq Whole (succ (addW (addW a c) (subW d (succ c)))) (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW b (succ a))))
+        (symEq Whole (addW a (addW (succ c) (subW d (succ c)))) (succ (addW (addW a c) (subW d (succ c)))) Llhs)
+        (transEq Whole (addW a (addW (succ c) (subW d (succ c)))) (addW c (addW (succ a) (subW b (succ a)))) (succ (addW (addW a c) (subW b (succ a))))
+           Hb Rrhs) in
+    symEq Whole (subW d (succ c)) (subW b (succ a))
+      (addWCancelL (addW a c) (subW d (succ c)) (subW b (succ a))
+         (succInj (addW (addW a c) (subW d (succ c))) (addW (addW a c) (subW b (succ a))) succEq))
+  end
+end
+
+wsubG : Bool -> Whole -> Whole -> Int is
+  fn (g : Bool) (a : Whole) (b : Whole) is
+    case g of
+    | true -> nonneg (subW a b)
+    | false -> negsucc (subW b (succ a))
+    end
+  end
+end
+
+wsubTrue : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) true -> Eq Int (wsub a b) (nonneg (subW a b)) is
+  fn (a : Whole) (b : Whole) (e : Eq Bool (leb b a) true) is
+    subst Bool true (leb b a) (symEq Bool (leb b a) true e)
+      (fn (g : Bool) is Eq Int (wsubG g a b) (nonneg (subW a b)) end)
+      (refl (nonneg (subW a b)))
+  end
+end
+
+wsubFalse : (a : Whole) -> (b : Whole) -> Eq Bool (leb b a) false -> Eq Int (wsub a b) (negsucc (subW b (succ a))) is
+  fn (a : Whole) (b : Whole) (e : Eq Bool (leb b a) false) is
+    subst Bool false (leb b a) (symEq Bool (leb b a) false e)
+      (fn (g : Bool) is Eq Int (wsubG g a b) (negsucc (subW b (succ a))) end)
+      (refl (negsucc (subW b (succ a))))
+  end
+end
+
+wsubEq : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole)
+  -> Eq Whole (addW a d) (addW c b) -> Eq Int (wsub a b) (wsub c d) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole) (H : Eq Whole (addW a d) (addW c b)) is
+    boolCaseEq (leb b a)
+      (fn (g1 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+      (fn (e1 : Eq Bool (leb b a) true) is
+         boolCaseEq (leb d c)
+           (fn (g2 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+           (fn (e2 : Eq Bool (leb d c) true) is
+              transEq Int (wsub a b) (nonneg (subW a b)) (wsub c d)
+                (wsubTrue a b e1)
+                (transEq Int (nonneg (subW a b)) (nonneg (subW c d)) (wsub c d)
+                   (congNonneg (subW a b) (subW c d) (subWCrossTrue a b c d H e1 e2))
+                   (symEq Int (wsub c d) (nonneg (subW c d)) (wsubTrue c d e2)))
+            end)
+           (fn (e2 : Eq Bool (leb d c) false) is
+              boolDiscTF (Eq Int (wsub a b) (wsub c d))
+                (transEq Bool true (leb d c) false
+                   (symEq Bool (leb d c) true (orderTransfer a b c d H e1)) e2)
+            end)
+       end)
+      (fn (e1 : Eq Bool (leb b a) false) is
+         boolCaseEq (leb d c)
+           (fn (g2 : Bool) is Eq Int (wsub a b) (wsub c d) end)
+           (fn (e2 : Eq Bool (leb d c) true) is
+              boolDiscTF (Eq Int (wsub a b) (wsub c d))
+                (transEq Bool true (leb b a) false
+                   (symEq Bool (leb b a) true
+                      (orderTransfer c d a b (symEq Whole (addW a d) (addW c b) H) e2))
+                   e1)
+            end)
+           (fn (e2 : Eq Bool (leb d c) false) is
+              transEq Int (wsub a b) (negsucc (subW b (succ a))) (wsub c d)
+                (wsubFalse a b e1)
+                (transEq Int (negsucc (subW b (succ a))) (negsucc (subW d (succ c))) (wsub c d)
+                   (congNegsucc (subW b (succ a)) (subW d (succ c)) (subWCrossFalse a b c d H e1 e2))
+                   (symEq Int (wsub c d) (negsucc (subW d (succ c))) (wsubFalse c d e2)))
+            end)
+       end)
+  end
+end
+
+posP : Int -> Whole is
+  fn (x : Int) is case x of | nonneg n -> n | negsucc k -> zero end end
+end
+
+negP : Int -> Whole is
+  fn (x : Int) is case x of | nonneg n -> zero | negsucc k -> succ k end end
+end
+
+congWsub2 : (x1 : Whole) -> (y1 : Whole) -> (x2 : Whole) -> (y2 : Whole)
+  -> Eq Whole x1 y1 -> Eq Whole x2 y2 -> Eq Int (wsub x1 x2) (wsub y1 y2) is
+  fn (x1 : Whole) (y1 : Whole) (x2 : Whole) (y2 : Whole)
+     (p1 : Eq Whole x1 y1) (p2 : Eq Whole x2 y2) is
+    subst Whole x1 y1 p1 (fn (z : Whole) is Eq Int (wsub x1 x2) (wsub z y2) end)
+      (subst Whole x2 y2 p2 (fn (w : Whole) is Eq Int (wsub x1 x2) (wsub x1 w) end)
+         (refl (wsub x1 x2)))
+  end
+end
+
+addWInterchange : (x : Whole) -> (y : Whole) -> (u : Whole) -> (v : Whole)
+  -> Eq Whole (addW (addW x y) (addW u v)) (addW (addW x u) (addW y v)) is
+  fn (x : Whole) (y : Whole) (u : Whole) (v : Whole) is
+    transEq Whole (addW (addW x y) (addW u v)) (addW x (addW y (addW u v))) (addW (addW x u) (addW y v))
+      (addWAssoc x y (addW u v))
+      (transEq Whole (addW x (addW y (addW u v))) (addW x (addW u (addW y v))) (addW (addW x u) (addW y v))
+         (congW (fn (s : Whole) is addW x s end) (addW y (addW u v)) (addW u (addW y v))
+            (transEq Whole (addW y (addW u v)) (addW (addW y u) v) (addW u (addW y v))
+               (symEq Whole (addW (addW y u) v) (addW y (addW u v)) (addWAssoc y u v))
+               (transEq Whole (addW (addW y u) v) (addW (addW u y) v) (addW u (addW y v))
+                  (congW (fn (s : Whole) is addW s v end) (addW y u) (addW u y) (addWComm y u))
+                  (addWAssoc u y v))))
+         (symEq Whole (addW (addW x u) (addW y v)) (addW x (addW u (addW y v))) (addWAssoc x u (addW y v))))
+  end
+end
+
+wsubRep : (x : Int) -> Eq Int (wsub (posP x) (negP x)) x is
+  fn (x : Int) is
+    IntElim (fn (w : Int) is Eq Int (wsub (posP w) (negP w)) w end)
+      (fn (n : Whole) is refl (nonneg n) end)
+      (fn (k : Whole) is refl (negsucc k) end)
+      x
+  end
+end
+
+inegNonneg : (m : Whole) -> Eq Int (ineg (nonneg m)) (wsub zero m) is
+  fn (m : Whole) is
+    WholeElim (fn (w : Whole) is Eq Int (ineg (nonneg w)) (wsub zero w) end)
+      (refl (nonneg zero))
+      (fn (k : Whole) (ih : Eq Int (ineg (nonneg k)) (wsub zero k)) is refl (negsucc k) end)
+      m
+  end
+end
+
+wsubPosNeg : (p : Whole) -> (n : Whole)
+  -> Eq Whole (addW (posP (wsub p n)) n) (addW p (negP (wsub p n))) is
+  fn (p : Whole) (n : Whole) is
+    boolCaseEq (leb n p)
+      (fn (g : Bool) is Eq Whole (addW (posP (wsub p n)) n) (addW p (negP (wsub p n))) end)
+      (fn (e1 : Eq Bool (leb n p) true) is
+         subst Int (nonneg (subW p n)) (wsub p n)
+           (symEq Int (wsub p n) (nonneg (subW p n)) (wsubTrue p n e1))
+           (fn (w : Int) is Eq Whole (addW (posP w) n) (addW p (negP w)) end)
+           (transEq Whole (addW (subW p n) n) (addW n (subW p n)) (addW p zero)
+              (addWComm (subW p n) n)
+              (transEq Whole (addW n (subW p n)) p (addW p zero)
+                 (subWAddCancel p n e1)
+                 (symEq Whole (addW p zero) p (addWZeroR p))))
+       end)
+      (fn (e2 : Eq Bool (leb n p) false) is
+         subst Int (negsucc (subW n (succ p))) (wsub p n)
+           (symEq Int (wsub p n) (negsucc (subW n (succ p))) (wsubFalse p n e2))
+           (fn (w : Int) is Eq Whole (addW (posP w) n) (addW p (negP w)) end)
+           (transEq Whole n (succ (addW p (subW n (succ p)))) (addW p (succ (subW n (succ p))))
+              (symEq Whole (succ (addW p (subW n (succ p)))) n
+                 (subWAddCancel n (succ p) (lebComplStrict p n e2)))
+              (symEq Whole (addW p (succ (subW n (succ p)))) (succ (addW p (subW n (succ p))))
+                 (addWSuccR p (subW n (succ p)))))
+       end)
+  end
+end
+
+iaddSpec : (x : Int) -> (y : Int)
+  -> Eq Int (iadd x y) (wsub (addW (posP x) (posP y)) (addW (negP x) (negP y))) is
+  fn (x : Int) (y : Int) is
+    IntElim (fn (wx : Int) is Eq Int (iadd wx y) (wsub (addW (posP wx) (posP y)) (addW (negP wx) (negP y))) end)
+      (fn (a : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (iadd (nonneg a) wy) (wsub (addW (posP (nonneg a)) (posP wy)) (addW (negP (nonneg a)) (negP wy))) end)
+           (fn (c : Whole) is refl (nonneg (addW a c)) end)
+           (fn (d : Whole) is
+              congWsub2 a (addW a zero) (succ d) (succ d)
+                (symEq Whole (addW a zero) a (addWZeroR a)) (refl (succ d))
+            end)
+           y
+       end)
+      (fn (b : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (iadd (negsucc b) wy) (wsub (addW (posP (negsucc b)) (posP wy)) (addW (negP (negsucc b)) (negP wy))) end)
+           (fn (c : Whole) is
+              congWsub2 c c (succ b) (addW (succ b) zero)
+                (refl c)
+                (congW (fn (t : Whole) is succ t end) b (addW b zero)
+                   (symEq Whole (addW b zero) b (addWZeroR b)))
+            end)
+           (fn (d : Whole) is
+              congNegsucc (succ (addW b d)) (addW b (succ d))
+                (symEq Whole (addW b (succ d)) (succ (addW b d)) (addWSuccR b d))
+            end)
+           y
+       end)
+      x
+  end
+end
+
+imulSpec : (x : Int) -> (y : Int)
+  -> Eq Int (imul x y)
+       (wsub (addW (mulW (posP x) (posP y)) (mulW (negP x) (negP y)))
+             (addW (mulW (posP x) (negP y)) (mulW (negP x) (posP y)))) is
+  fn (x : Int) (y : Int) is
+    IntElim (fn (wx : Int) is Eq Int (imul wx y)
+              (wsub (addW (mulW (posP wx) (posP y)) (mulW (negP wx) (negP y)))
+                    (addW (mulW (posP wx) (negP y)) (mulW (negP wx) (posP y)))) end)
+      (fn (a : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (imul (nonneg a) wy)
+                   (wsub (addW (mulW (posP (nonneg a)) (posP wy)) (mulW (negP (nonneg a)) (negP wy)))
+                         (addW (mulW (posP (nonneg a)) (negP wy)) (mulW (negP (nonneg a)) (posP wy)))) end)
+           (fn (c : Whole) is
+              congWsub2 (mulW a c) (addW (mulW a c) zero) zero (addW (mulW a zero) zero)
+                (symEq Whole (addW (mulW a c) zero) (mulW a c) (addWZeroR (mulW a c)))
+                (symEq Whole (addW (mulW a zero) zero) zero
+                   (transEq Whole (addW (mulW a zero) zero) (mulW a zero) zero
+                      (addWZeroR (mulW a zero)) (mulWZeroR a)))
+            end)
+           (fn (d : Whole) is
+              transEq Int (ineg (nonneg (mulW a (succ d)))) (wsub zero (mulW a (succ d)))
+                (wsub (addW (mulW a zero) zero) (addW (mulW a (succ d)) zero))
+                (inegNonneg (mulW a (succ d)))
+                (congWsub2 zero (addW (mulW a zero) zero) (mulW a (succ d)) (addW (mulW a (succ d)) zero)
+                   (symEq Whole (addW (mulW a zero) zero) zero
+                      (transEq Whole (addW (mulW a zero) zero) (mulW a zero) zero
+                         (addWZeroR (mulW a zero)) (mulWZeroR a)))
+                   (symEq Whole (addW (mulW a (succ d)) zero) (mulW a (succ d)) (addWZeroR (mulW a (succ d)))))
+            end)
+           y
+       end)
+      (fn (b : Whole) is
+         IntElim (fn (wy : Int) is Eq Int (imul (negsucc b) wy)
+                   (wsub (addW (mulW (posP (negsucc b)) (posP wy)) (mulW (negP (negsucc b)) (negP wy)))
+                         (addW (mulW (posP (negsucc b)) (negP wy)) (mulW (negP (negsucc b)) (posP wy)))) end)
+           (fn (c : Whole) is
+              transEq Int (ineg (nonneg (mulW (succ b) c))) (wsub zero (mulW (succ b) c))
+                (wsub (mulW (succ b) zero) (mulW (succ b) c))
+                (inegNonneg (mulW (succ b) c))
+                (congWsub2 zero (mulW (succ b) zero) (mulW (succ b) c) (mulW (succ b) c)
+                   (symEq Whole (mulW (succ b) zero) zero (mulWZeroR (succ b)))
+                   (refl (mulW (succ b) c)))
+            end)
+           (fn (d : Whole) is
+              congWsub2 (mulW (succ b) (succ d)) (mulW (succ b) (succ d)) zero (mulW (succ b) zero)
+                (refl (mulW (succ b) (succ d)))
+                (symEq Whole (mulW (succ b) zero) zero (mulWZeroR (succ b)))
+            end)
+           y
+       end)
+      x
+  end
+end
+
+mulCrossIdent : (u : Whole) -> (v : Whole) -> (r : Whole) -> (w : Whole) -> (s : Whole) -> (t : Whole)
+  -> Eq Whole (addW u w) (addW r v)
+  -> Eq Whole (addW (addW (mulW u s) (mulW v t)) (addW (mulW r t) (mulW w s)))
+              (addW (addW (mulW r s) (mulW w t)) (addW (mulW u t) (mulW v s))) is
+  fn (u : Whole) (v : Whole) (r : Whole) (w : Whole) (s : Whole) (t : Whole)
+     (hyp : Eq Whole (addW u w) (addW r v)) is
+    let a1 : Whole = mulW u s in
+    let a2 : Whole = mulW v t in
+    let a3 : Whole = mulW r t in
+    let a4 : Whole = mulW w s in
+    let b1 : Whole = mulW r s in
+    let b2 : Whole = mulW w t in
+    let b3 : Whole = mulW u t in
+    let b4 : Whole = mulW v s in
+    let colPz : Eq Whole (addW a1 a4) (addW b1 b4)
+      = transEq Whole (addW a1 a4) (mulW (addW u w) s) (addW b1 b4)
+          (symEq Whole (mulW (addW u w) s) (addW a1 a4) (distribWR u w s))
+          (transEq Whole (mulW (addW u w) s) (mulW (addW r v) s) (addW b1 b4)
+             (congW (fn (zz : Whole) is mulW zz s end) (addW u w) (addW r v) hyp)
+             (distribWR r v s)) in
+    let vrEq : Eq Whole (addW v r) (addW w u)
+      = transEq Whole (addW v r) (addW r v) (addW w u)
+          (addWComm v r)
+          (transEq Whole (addW r v) (addW u w) (addW w u)
+             (symEq Whole (addW u w) (addW r v) hyp)
+             (addWComm u w)) in
+    let g2 : Eq Whole (addW a2 a3) (addW b2 b3)
+      = transEq Whole (addW a2 a3) (mulW (addW v r) t) (addW b2 b3)
+          (symEq Whole (mulW (addW v r) t) (addW a2 a3) (distribWR v r t))
+          (transEq Whole (mulW (addW v r) t) (mulW (addW w u) t) (addW b2 b3)
+             (congW (fn (zz : Whole) is mulW zz t end) (addW v r) (addW w u) vrEq)
+             (distribWR w u t)) in
+    let part1 : Eq Whole (addW (addW a1 a2) (addW a3 a4)) (addW (addW a1 a4) (addW a2 a3))
+      = transEq Whole (addW (addW a1 a2) (addW a3 a4)) (addW (addW a1 a2) (addW a4 a3)) (addW (addW a1 a4) (addW a2 a3))
+          (congW (fn (zz : Whole) is addW (addW a1 a2) zz end) (addW a3 a4) (addW a4 a3) (addWComm a3 a4))
+          (addWInterchange a1 a2 a4 a3) in
+    let part2 : Eq Whole (addW (addW a1 a4) (addW a2 a3)) (addW (addW b1 b4) (addW b2 b3))
+      = transEq Whole (addW (addW a1 a4) (addW a2 a3)) (addW (addW b1 b4) (addW a2 a3)) (addW (addW b1 b4) (addW b2 b3))
+          (congW (fn (zz : Whole) is addW zz (addW a2 a3) end) (addW a1 a4) (addW b1 b4) colPz)
+          (congW (fn (zz : Whole) is addW (addW b1 b4) zz end) (addW a2 a3) (addW b2 b3) g2) in
+    let part3 : Eq Whole (addW (addW b1 b4) (addW b2 b3)) (addW (addW b1 b2) (addW b3 b4))
+      = transEq Whole (addW (addW b1 b4) (addW b2 b3)) (addW (addW b1 b2) (addW b4 b3)) (addW (addW b1 b2) (addW b3 b4))
+          (addWInterchange b1 b4 b2 b3)
+          (congW (fn (zz : Whole) is addW (addW b1 b2) zz end) (addW b4 b3) (addW b3 b4) (addWComm b4 b3)) in
+    transEq Whole (addW (addW a1 a2) (addW a3 a4)) (addW (addW a1 a4) (addW a2 a3)) (addW (addW b1 b2) (addW b3 b4))
+      part1
+      (transEq Whole (addW (addW a1 a4) (addW a2 a3)) (addW (addW b1 b4) (addW b2 b3)) (addW (addW b1 b2) (addW b3 b4))
+         part2 part3)
+  end
+end
+
+iaddWsub : (p : Whole) -> (n : Whole) -> (z : Int)
+  -> Eq Int (iadd (wsub p n) z) (wsub (addW p (posP z)) (addW n (negP z))) is
+  fn (p : Whole) (n : Whole) (z : Int) is
+    let P0 : Whole = posP (wsub p n) in
+    let N0 : Whole = negP (wsub p n) in
+    let pz : Whole = posP z in
+    let nz : Whole = negP z in
+    let K : Eq Whole (addW P0 n) (addW p N0) = wsubPosNeg p n in
+    let H : Eq Whole (addW (addW P0 pz) (addW n nz)) (addW (addW p pz) (addW N0 nz))
+      = transEq Whole (addW (addW P0 pz) (addW n nz)) (addW (addW P0 n) (addW pz nz)) (addW (addW p pz) (addW N0 nz))
+          (addWInterchange P0 pz n nz)
+          (transEq Whole (addW (addW P0 n) (addW pz nz)) (addW (addW p N0) (addW pz nz)) (addW (addW p pz) (addW N0 nz))
+             (congW (fn (zz : Whole) is addW zz (addW pz nz) end) (addW P0 n) (addW p N0) K)
+             (symEq Whole (addW (addW p pz) (addW N0 nz)) (addW (addW p N0) (addW pz nz)) (addWInterchange p pz N0 nz))) in
+    transEq Int (iadd (wsub p n) z)
+      (wsub (addW P0 pz) (addW N0 nz)) (wsub (addW p pz) (addW n nz))
+      (iaddSpec (wsub p n) z)
+      (wsubEq (addW P0 pz) (addW N0 nz) (addW p pz) (addW n nz) H)
+  end
+end
+
+imulWsub : (p : Whole) -> (n : Whole) -> (z : Int)
+  -> Eq Int (imul (wsub p n) z)
+       (wsub (addW (mulW p (posP z)) (mulW n (negP z)))
+             (addW (mulW p (negP z)) (mulW n (posP z)))) is
+  fn (p : Whole) (n : Whole) (z : Int) is
+    let P0 : Whole = posP (wsub p n) in
+    let N0 : Whole = negP (wsub p n) in
+    let pz : Whole = posP z in
+    let nz : Whole = negP z in
+    let K : Eq Whole (addW P0 n) (addW p N0) = wsubPosNeg p n in
+    let H : Eq Whole (addW (addW (mulW P0 pz) (mulW N0 nz)) (addW (mulW p nz) (mulW n pz)))
+                     (addW (addW (mulW p pz) (mulW n nz)) (addW (mulW P0 nz) (mulW N0 pz)))
+      = mulCrossIdent P0 N0 p n pz nz K in
+    transEq Int (imul (wsub p n) z)
+      (wsub (addW (mulW P0 pz) (mulW N0 nz)) (addW (mulW P0 nz) (mulW N0 pz)))
+      (wsub (addW (mulW p pz) (mulW n nz)) (addW (mulW p nz) (mulW n pz)))
+      (imulSpec (wsub p n) z)
+      (wsubEq (addW (mulW P0 pz) (mulW N0 nz)) (addW (mulW P0 nz) (mulW N0 pz))
+              (addW (mulW p pz) (mulW n nz)) (addW (mulW p nz) (mulW n pz)) H)
+  end
+end
+
+cong2W : (f : Whole -> Whole -> Whole) -> (x1 : Whole) -> (y1 : Whole) -> (x2 : Whole) -> (y2 : Whole)
+  -> Eq Whole x1 y1 -> Eq Whole x2 y2 -> Eq Whole (f x1 x2) (f y1 y2) is
+  fn (f : Whole -> Whole -> Whole) (x1 : Whole) (y1 : Whole) (x2 : Whole) (y2 : Whole)
+     (p1 : Eq Whole x1 y1) (p2 : Eq Whole x2 y2) is
+    transEq Whole (f x1 x2) (f y1 x2) (f y1 y2)
+      (congW (fn (t : Whole) is f t x2 end) x1 y1 p1)
+      (congW (fn (t : Whole) is f y1 t end) x2 y2 p2)
+  end
+end
+
+congIaddL : (x : Int) -> (x' : Int) -> (y : Int) -> Eq Int x x' -> Eq Int (iadd x y) (iadd x' y) is
+  fn (x : Int) (x' : Int) (y : Int) (p : Eq Int x x') is
+    subst Int x x' p (fn (z : Int) is Eq Int (iadd x y) (iadd z y) end) (refl (iadd x y))
+  end
+end
+
+congIaddR : (x : Int) -> (y : Int) -> (y' : Int) -> Eq Int y y' -> Eq Int (iadd x y) (iadd x y') is
+  fn (x : Int) (y : Int) (y' : Int) (p : Eq Int y y') is
+    subst Int y y' p (fn (z : Int) is Eq Int (iadd x y) (iadd x z) end) (refl (iadd x y))
+  end
+end
+
+congImulL : (x : Int) -> (x' : Int) -> (y : Int) -> Eq Int x x' -> Eq Int (imul x y) (imul x' y) is
+  fn (x : Int) (x' : Int) (y : Int) (p : Eq Int x x') is
+    subst Int x x' p (fn (z : Int) is Eq Int (imul x y) (imul z y) end) (refl (imul x y))
+  end
+end
+
+congImulR : (x : Int) -> (y : Int) -> (y' : Int) -> Eq Int y y' -> Eq Int (imul x y) (imul x y') is
+  fn (x : Int) (y : Int) (y' : Int) (p : Eq Int y y') is
+    subst Int y y' p (fn (z : Int) is Eq Int (imul x y) (imul x z) end) (refl (imul x y))
+  end
+end
+
+iaddWsub2 : (p1 : Whole) -> (n1 : Whole) -> (p2 : Whole) -> (n2 : Whole)
+  -> Eq Int (iadd (wsub p1 n1) (wsub p2 n2)) (wsub (addW p1 p2) (addW n1 n2)) is
+  fn (p1 : Whole) (n1 : Whole) (p2 : Whole) (n2 : Whole) is
+    let Q0 : Whole = posP (wsub p2 n2) in
+    let R0 : Whole = negP (wsub p2 n2) in
+    let K2 : Eq Whole (addW Q0 n2) (addW p2 R0) = wsubPosNeg p2 n2 in
+    let H : Eq Whole (addW (addW p1 Q0) (addW n1 n2)) (addW (addW p1 p2) (addW n1 R0))
+      = transEq Whole (addW (addW p1 Q0) (addW n1 n2)) (addW (addW p1 n1) (addW Q0 n2)) (addW (addW p1 p2) (addW n1 R0))
+          (addWInterchange p1 Q0 n1 n2)
+          (transEq Whole (addW (addW p1 n1) (addW Q0 n2)) (addW (addW p1 n1) (addW p2 R0)) (addW (addW p1 p2) (addW n1 R0))
+             (congW (fn (zz : Whole) is addW (addW p1 n1) zz end) (addW Q0 n2) (addW p2 R0) K2)
+             (symEq Whole (addW (addW p1 p2) (addW n1 R0)) (addW (addW p1 n1) (addW p2 R0)) (addWInterchange p1 p2 n1 R0))) in
+    transEq Int (iadd (wsub p1 n1) (wsub p2 n2))
+      (wsub (addW p1 Q0) (addW n1 R0)) (wsub (addW p1 p2) (addW n1 n2))
+      (iaddWsub p1 n1 (wsub p2 n2))
+      (wsubEq (addW p1 Q0) (addW n1 R0) (addW p1 p2) (addW n1 n2) H)
+  end
+end
+
+mulAssocCol : (a : Whole) -> (b : Whole) -> (c : Whole) -> (d : Whole) -> (e : Whole) -> (f : Whole)
+  -> Eq Whole
+       (addW (mulW (addW (mulW a c) (mulW b d)) e) (mulW (addW (mulW a d) (mulW b c)) f))
+       (addW (mulW (addW (mulW c e) (mulW d f)) a) (mulW (addW (mulW c f) (mulW d e)) b)) is
+  fn (a : Whole) (b : Whole) (c : Whole) (d : Whole) (e : Whole) (f : Whole) is
+    let ace : Whole = mulW a (mulW c e) in
+    let bde : Whole = mulW b (mulW d e) in
+    let adf : Whole = mulW a (mulW d f) in
+    let bcf : Whole = mulW b (mulW c f) in
+    let canon : Whole = addW (mulW a (addW (mulW c e) (mulW d f))) (mulW b (addW (mulW c f) (mulW d e))) in
+    let lhs2canon : Eq Whole
+          (addW (mulW (addW (mulW a c) (mulW b d)) e) (mulW (addW (mulW a d) (mulW b c)) f))
+          canon
+      = transEq Whole
+          (addW (mulW (addW (mulW a c) (mulW b d)) e) (mulW (addW (mulW a d) (mulW b c)) f))
+          (addW (addW (mulW (mulW a c) e) (mulW (mulW b d) e)) (addW (mulW (mulW a d) f) (mulW (mulW b c) f)))
+          canon
+          (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+             (mulW (addW (mulW a c) (mulW b d)) e) (addW (mulW (mulW a c) e) (mulW (mulW b d) e))
+             (mulW (addW (mulW a d) (mulW b c)) f) (addW (mulW (mulW a d) f) (mulW (mulW b c) f))
+             (distribWR (mulW a c) (mulW b d) e)
+             (distribWR (mulW a d) (mulW b c) f))
+          (transEq Whole
+             (addW (addW (mulW (mulW a c) e) (mulW (mulW b d) e)) (addW (mulW (mulW a d) f) (mulW (mulW b c) f)))
+             (addW (addW ace bde) (addW adf bcf))
+             canon
+             (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                (addW (mulW (mulW a c) e) (mulW (mulW b d) e)) (addW ace bde)
+                (addW (mulW (mulW a d) f) (mulW (mulW b c) f)) (addW adf bcf)
+                (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                   (mulW (mulW a c) e) ace (mulW (mulW b d) e) bde
+                   (mulWAssoc a c e) (mulWAssoc b d e))
+                (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                   (mulW (mulW a d) f) adf (mulW (mulW b c) f) bcf
+                   (mulWAssoc a d f) (mulWAssoc b c f)))
+             (transEq Whole
+                (addW (addW ace bde) (addW adf bcf))
+                (addW (addW ace adf) (addW bde bcf))
+                canon
+                (addWInterchange ace bde adf bcf)
+                (transEq Whole
+                   (addW (addW ace adf) (addW bde bcf))
+                   (addW (mulW a (addW (mulW c e) (mulW d f))) (mulW b (addW (mulW d e) (mulW c f))))
+                   canon
+                   (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                      (addW ace adf) (mulW a (addW (mulW c e) (mulW d f)))
+                      (addW bde bcf) (mulW b (addW (mulW d e) (mulW c f)))
+                      (symEq Whole (mulW a (addW (mulW c e) (mulW d f))) (addW ace adf) (distribWL a (mulW c e) (mulW d f)))
+                      (symEq Whole (mulW b (addW (mulW d e) (mulW c f))) (addW bde bcf) (distribWL b (mulW d e) (mulW c f))))
+                   (congW (fn (s : Whole) is addW (mulW a (addW (mulW c e) (mulW d f))) (mulW b s) end)
+                      (addW (mulW d e) (mulW c f)) (addW (mulW c f) (mulW d e))
+                      (addWComm (mulW d e) (mulW c f)))))) in
+    transEq Whole
+      (addW (mulW (addW (mulW a c) (mulW b d)) e) (mulW (addW (mulW a d) (mulW b c)) f))
+      canon
+      (addW (mulW (addW (mulW c e) (mulW d f)) a) (mulW (addW (mulW c f) (mulW d e)) b))
+      lhs2canon
+      (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+         (mulW a (addW (mulW c e) (mulW d f))) (mulW (addW (mulW c e) (mulW d f)) a)
+         (mulW b (addW (mulW c f) (mulW d e))) (mulW (addW (mulW c f) (mulW d e)) b)
+         (mulWComm a (addW (mulW c e) (mulW d f)))
+         (mulWComm b (addW (mulW c f) (mulW d e))))
+  end
+end
+
+imulComm : CommT Int imul is
+  fn (a : Int) (b : Int) is
+    transEq Int (imul a b)
+      (wsub (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))))
+      (imul b a)
+      (imulSpec a b)
+      (transEq Int
+         (wsub (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))))
+         (wsub (addW (mulW (posP b) (posP a)) (mulW (negP b) (negP a))) (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a))))
+         (imul b a)
+         (congWsub2
+            (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP b) (posP a)) (mulW (negP b) (negP a)))
+            (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a)))
+            (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+               (mulW (posP a) (posP b)) (mulW (posP b) (posP a)) (mulW (negP a) (negP b)) (mulW (negP b) (negP a))
+               (mulWComm (posP a) (posP b)) (mulWComm (negP a) (negP b)))
+            (transEq Whole
+               (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b)))
+               (addW (mulW (negP a) (posP b)) (mulW (posP a) (negP b)))
+               (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a)))
+               (addWComm (mulW (posP a) (negP b)) (mulW (negP a) (posP b)))
+               (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                  (mulW (negP a) (posP b)) (mulW (posP b) (negP a)) (mulW (posP a) (negP b)) (mulW (negP b) (posP a))
+                  (mulWComm (negP a) (posP b)) (mulWComm (posP a) (negP b)))))
+         (symEq Int (imul b a)
+            (wsub (addW (mulW (posP b) (posP a)) (mulW (negP b) (negP a))) (addW (mulW (posP b) (negP a)) (mulW (negP b) (posP a))))
+            (imulSpec b a)))
+  end
+end
+
+imulWsubR : (z : Int) -> (p : Whole) -> (n : Whole)
+  -> Eq Int (imul z (wsub p n))
+       (wsub (addW (mulW p (posP z)) (mulW n (negP z))) (addW (mulW p (negP z)) (mulW n (posP z)))) is
+  fn (z : Int) (p : Whole) (n : Whole) is
+    transEq Int (imul z (wsub p n)) (imul (wsub p n) z)
+      (wsub (addW (mulW p (posP z)) (mulW n (negP z))) (addW (mulW p (negP z)) (mulW n (posP z))))
+      (imulComm z (wsub p n))
+      (imulWsub p n z)
+  end
+end
+
+idistribR : DistribRT Int iadd imul is
+  fn (a : Int) (b : Int) (c : Int) is
+    transEq Int (imul (iadd a b) c)
+      (wsub (addW (mulW (addW (posP a) (posP b)) (posP c)) (mulW (addW (negP a) (negP b)) (negP c)))
+            (addW (mulW (addW (posP a) (posP b)) (negP c)) (mulW (addW (negP a) (negP b)) (posP c))))
+      (iadd (imul a c) (imul b c))
+      (transEq Int (imul (iadd a b) c)
+         (imul (wsub (addW (posP a) (posP b)) (addW (negP a) (negP b))) c)
+         (wsub (addW (mulW (addW (posP a) (posP b)) (posP c)) (mulW (addW (negP a) (negP b)) (negP c)))
+               (addW (mulW (addW (posP a) (posP b)) (negP c)) (mulW (addW (negP a) (negP b)) (posP c))))
+         (congImulL (iadd a b) (wsub (addW (posP a) (posP b)) (addW (negP a) (negP b))) c (iaddSpec a b))
+         (imulWsub (addW (posP a) (posP b)) (addW (negP a) (negP b)) c))
+      (transEq Int
+         (wsub (addW (mulW (addW (posP a) (posP b)) (posP c)) (mulW (addW (negP a) (negP b)) (negP c)))
+               (addW (mulW (addW (posP a) (posP b)) (negP c)) (mulW (addW (negP a) (negP b)) (posP c))))
+         (wsub (addW (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))))
+               (addW (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))))
+         (iadd (imul a c) (imul b c))
+         (congWsub2
+            (addW (mulW (addW (posP a) (posP b)) (posP c)) (mulW (addW (negP a) (negP b)) (negP c)))
+            (addW (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))))
+            (addW (mulW (addW (posP a) (posP b)) (negP c)) (mulW (addW (negP a) (negP b)) (posP c)))
+            (addW (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))))
+            (transEq Whole
+               (addW (mulW (addW (posP a) (posP b)) (posP c)) (mulW (addW (negP a) (negP b)) (negP c)))
+               (addW (addW (mulW (posP a) (posP c)) (mulW (posP b) (posP c))) (addW (mulW (negP a) (negP c)) (mulW (negP b) (negP c))))
+               (addW (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))))
+               (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                  (mulW (addW (posP a) (posP b)) (posP c)) (addW (mulW (posP a) (posP c)) (mulW (posP b) (posP c)))
+                  (mulW (addW (negP a) (negP b)) (negP c)) (addW (mulW (negP a) (negP c)) (mulW (negP b) (negP c)))
+                  (distribWR (posP a) (posP b) (posP c)) (distribWR (negP a) (negP b) (negP c)))
+               (addWInterchange (mulW (posP a) (posP c)) (mulW (posP b) (posP c)) (mulW (negP a) (negP c)) (mulW (negP b) (negP c))))
+            (transEq Whole
+               (addW (mulW (addW (posP a) (posP b)) (negP c)) (mulW (addW (negP a) (negP b)) (posP c)))
+               (addW (addW (mulW (posP a) (negP c)) (mulW (posP b) (negP c))) (addW (mulW (negP a) (posP c)) (mulW (negP b) (posP c))))
+               (addW (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))))
+               (cong2W (fn (u : Whole) (v : Whole) is addW u v end)
+                  (mulW (addW (posP a) (posP b)) (negP c)) (addW (mulW (posP a) (negP c)) (mulW (posP b) (negP c)))
+                  (mulW (addW (negP a) (negP b)) (posP c)) (addW (mulW (negP a) (posP c)) (mulW (negP b) (posP c)))
+                  (distribWR (posP a) (posP b) (negP c)) (distribWR (negP a) (negP b) (posP c)))
+               (addWInterchange (mulW (posP a) (negP c)) (mulW (posP b) (negP c)) (mulW (negP a) (posP c)) (mulW (negP b) (posP c)))))
+         (symEq Int (iadd (imul a c) (imul b c))
+            (wsub (addW (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))))
+                  (addW (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))))
+            (transEq Int (iadd (imul a c) (imul b c))
+               (iadd (wsub (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c)))) (imul b c))
+               (wsub (addW (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))))
+                     (addW (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))))
+               (congIaddL (imul a c) (wsub (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c)))) (imul b c) (imulSpec a c))
+               (transEq Int
+                  (iadd (wsub (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c)))) (imul b c))
+                  (iadd (wsub (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c))))
+                        (wsub (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))))
+                  (wsub (addW (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))))
+                        (addW (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))))
+                  (congIaddR (wsub (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c)))) (imul b c) (wsub (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))) (imulSpec b c))
+                  (iaddWsub2 (addW (mulW (posP a) (posP c)) (mulW (negP a) (negP c))) (addW (mulW (posP a) (negP c)) (mulW (negP a) (posP c)))
+                             (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))))))))
+  end
+end
+
+imulAssoc : AssocT Int imul is
+  fn (a : Int) (b : Int) (c : Int) is
+    transEq Int (imul (imul a b) c)
+      (wsub (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (posP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (negP c)))
+            (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (negP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (posP c))))
+      (imul a (imul b c))
+      (transEq Int (imul (imul a b) c)
+         (imul (wsub (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b)))) c)
+         (wsub (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (posP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (negP c)))
+               (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (negP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (posP c))))
+         (congImulL (imul a b) (wsub (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b)))) c (imulSpec a b))
+         (imulWsub (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) c))
+      (transEq Int
+         (wsub (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (posP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (negP c)))
+               (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (negP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (posP c))))
+         (wsub (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (posP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (negP a)))
+               (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (negP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (posP a))))
+         (imul a (imul b c))
+         (congWsub2
+            (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (posP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (negP c)))
+            (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (posP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (negP a)))
+            (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (negP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (posP c)))
+            (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (negP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (posP a)))
+            (mulAssocCol (posP a) (negP a) (posP b) (negP b) (posP c) (negP c))
+            (transEq Whole
+               (addW (mulW (addW (mulW (posP a) (posP b)) (mulW (negP a) (negP b))) (negP c)) (mulW (addW (mulW (posP a) (negP b)) (mulW (negP a) (posP b))) (posP c)))
+               (addW (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (posP a)) (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (negP a)))
+               (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (negP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (posP a)))
+               (mulAssocCol (posP a) (negP a) (posP b) (negP b) (negP c) (posP c))
+               (addWComm (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (posP a)) (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (negP a)))))
+         (symEq Int (imul a (imul b c))
+            (wsub (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (posP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (negP a)))
+                  (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (negP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (posP a))))
+            (transEq Int (imul a (imul b c))
+               (imul a (wsub (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))))
+               (wsub (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (posP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (negP a)))
+                     (addW (mulW (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (negP a)) (mulW (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c))) (posP a))))
+               (congImulR a (imul b c) (wsub (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))) (imulSpec b c))
+               (imulWsubR a (addW (mulW (posP b) (posP c)) (mulW (negP b) (negP c))) (addW (mulW (posP b) (negP c)) (mulW (negP b) (posP c)))))))
+  end
+end
+
+imulOneR : IdRT Int imul (nonneg (succ zero)) is
+  fn (a : Int) is
+    transEq Int (imul a (nonneg (succ zero)))
+      (wsub (addW (posP a) zero) (addW (negP a) zero))
+      a
+      (imulWsubR a (succ zero) zero)
+      (transEq Int (wsub (addW (posP a) zero) (addW (negP a) zero)) (wsub (posP a) (negP a)) a
+         (congWsub2 (addW (posP a) zero) (posP a) (addW (negP a) zero) (negP a) (addWZeroR (posP a)) (addWZeroR (negP a)))
+         (wsubRep a))
+  end
+end
+
+qnum   : QPair -> Int   is fn (p : QPair) is case p of | qpair i d -> i end end end
+
+qdpred : QPair -> Whole is fn (p : QPair) is case p of | qpair i d -> d end end end
+
+qden : QPair -> Int is fn (p : QPair) is nonneg (succ (qdpred p)) end end
+
+QRel : QPair -> QPair -> Prop is
+  fn (p : QPair) (q : QPair) is
+    Eq Int (imul (qnum p) (qden q)) (imul (qnum q) (qden p))
+  end
+end
+
+Frac : U is Quot QPair QRel end
+
+fracOf : Whole -> Frac is fn (n : Whole) is qin QPair QRel (qpair (nonneg n) zero) end end
+
+dmul : Whole -> Whole -> Whole is
+  fn (a : Whole) (b : Whole) is addW (mulW a (succ b)) b end
+end
+
+dmulSucc : (a : Whole) -> (b : Whole) -> Eq Whole (mulW (succ a) (succ b)) (succ (dmul a b)) is
+  fn (a : Whole) (b : Whole) is addWSuccR (mulW a (succ b)) b end
+end
+
+rawMul : QPair -> QPair -> QPair is
+  fn (p : QPair) (q : QPair) is
+    qpair (imul (qnum p) (qnum q)) (dmul (qdpred p) (qdpred q))
+  end
+end
+
+rawAdd : QPair -> QPair -> QPair is
+  fn (p : QPair) (q : QPair) is
+    qpair (iadd (imul (qnum p) (qden q)) (imul (qnum q) (qden p))) (dmul (qdpred p) (qdpred q))
+  end
+end
+
+congIadd2 : (x1 : Int) -> (y1 : Int) -> (x2 : Int) -> (y2 : Int)
+  -> Eq Int x1 y1 -> Eq Int x2 y2 -> Eq Int (iadd x1 x2) (iadd y1 y2) is
+  fn (x1 : Int) (y1 : Int) (x2 : Int) (y2 : Int) (p : Eq Int x1 y1) (q : Eq Int x2 y2) is
+    transEq Int (iadd x1 x2) (iadd y1 x2) (iadd y1 y2)
+      (congIaddL x1 y1 x2 p)
+      (congIaddR y1 x2 y2 q)
+  end
+end
+
+imulInterchange : (a : Int) -> (b : Int) -> (c : Int) -> (d : Int)
+  -> Eq Int (imul (imul a b) (imul c d)) (imul (imul a c) (imul b d)) is
+  fn (a : Int) (b : Int) (c : Int) (d : Int) is
+    transEq Int (imul (imul a b) (imul c d)) (imul a (imul b (imul c d))) (imul (imul a c) (imul b d))
+      (imulAssoc a b (imul c d))
+      (transEq Int (imul a (imul b (imul c d))) (imul a (imul (imul b c) d)) (imul (imul a c) (imul b d))
+         (congImulR a (imul b (imul c d)) (imul (imul b c) d)
+            (symEq Int (imul (imul b c) d) (imul b (imul c d)) (imulAssoc b c d)))
+         (transEq Int (imul a (imul (imul b c) d)) (imul a (imul (imul c b) d)) (imul (imul a c) (imul b d))
+            (congImulR a (imul (imul b c) d) (imul (imul c b) d)
+               (congImulL (imul b c) (imul c b) d (imulComm b c)))
+            (transEq Int (imul a (imul (imul c b) d)) (imul a (imul c (imul b d))) (imul (imul a c) (imul b d))
+               (congImulR a (imul (imul c b) d) (imul c (imul b d)) (imulAssoc c b d))
+               (symEq Int (imul (imul a c) (imul b d)) (imul a (imul c (imul b d))) (imulAssoc a c (imul b d))))))
+  end
+end
+
+qdenMul : (p : QPair) -> (q : QPair) -> Eq Int (qden (rawMul p q)) (imul (qden p) (qden q)) is
+  fn (p : QPair) (q : QPair) is
+    symEq Int (imul (qden p) (qden q)) (qden (rawMul p q))
+      (congNonneg (mulW (succ (qdpred p)) (succ (qdpred q))) (succ (dmul (qdpred p) (qdpred q)))
+         (dmulSucc (qdpred p) (qdpred q)))
+  end
+end
+
+mulRespR : (p : QPair) -> (q : QPair) -> (q' : QPair) -> QRel q q' -> QRel (rawMul p q) (rawMul p q') is
+  fn (p : QPair) (q : QPair) (q' : QPair) (h : QRel q q') is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let nq' : Int = qnum q' in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let dq' : Int = qden q' in
+    transEq Int
+      (imul (imul np nq) (qden (rawMul p q')))
+      (imul (imul np nq) (imul dp dq'))
+      (imul (imul np nq') (qden (rawMul p q)))
+      (congImulR (imul np nq) (qden (rawMul p q')) (imul dp dq') (qdenMul p q'))
+      (transEq Int
+         (imul (imul np nq) (imul dp dq'))
+         (imul (imul np dp) (imul nq dq'))
+         (imul (imul np nq') (qden (rawMul p q)))
+         (imulInterchange np nq dp dq')
+         (transEq Int
+            (imul (imul np dp) (imul nq dq'))
+            (imul (imul np dp) (imul nq' dq))
+            (imul (imul np nq') (qden (rawMul p q)))
+            (congImulR (imul np dp) (imul nq dq') (imul nq' dq) h)
+            (transEq Int
+               (imul (imul np dp) (imul nq' dq))
+               (imul (imul np nq') (imul dp dq))
+               (imul (imul np nq') (qden (rawMul p q)))
+               (symEq Int (imul (imul np nq') (imul dp dq)) (imul (imul np dp) (imul nq' dq)) (imulInterchange np nq' dp dq))
+               (congImulR (imul np nq') (imul dp dq) (qden (rawMul p q)) (symEq Int (qden (rawMul p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+
+mulRespL : (p : QPair) -> (p' : QPair) -> (q : QPair) -> QRel p p' -> QRel (rawMul p q) (rawMul p' q) is
+  fn (p : QPair) (p' : QPair) (q : QPair) (h : QRel p p') is
+    let np : Int = qnum p in
+    let np' : Int = qnum p' in
+    let nq : Int = qnum q in
+    let dp : Int = qden p in
+    let dp' : Int = qden p' in
+    let dq : Int = qden q in
+    transEq Int
+      (imul (imul np nq) (qden (rawMul p' q)))
+      (imul (imul np nq) (imul dp' dq))
+      (imul (imul np' nq) (qden (rawMul p q)))
+      (congImulR (imul np nq) (qden (rawMul p' q)) (imul dp' dq) (qdenMul p' q))
+      (transEq Int
+         (imul (imul np nq) (imul dp' dq))
+         (imul (imul np dp') (imul nq dq))
+         (imul (imul np' nq) (qden (rawMul p q)))
+         (imulInterchange np nq dp' dq)
+         (transEq Int
+            (imul (imul np dp') (imul nq dq))
+            (imul (imul np' dp) (imul nq dq))
+            (imul (imul np' nq) (qden (rawMul p q)))
+            (congImulL (imul np dp') (imul np' dp) (imul nq dq) h)
+            (transEq Int
+               (imul (imul np' dp) (imul nq dq))
+               (imul (imul np' nq) (imul dp dq))
+               (imul (imul np' nq) (qden (rawMul p q)))
+               (symEq Int (imul (imul np' nq) (imul dp dq)) (imul (imul np' dp) (imul nq dq)) (imulInterchange np' nq dp dq))
+               (congImulR (imul np' nq) (imul dp dq) (qden (rawMul p q)) (symEq Int (qden (rawMul p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+
+mulFR : QPair -> Frac -> Frac is
+  fn (p : QPair) is
+    qlift QPair QRel Frac
+      (fn (q : QPair) is qin QPair QRel (rawMul p q) end)
+      (fn (q : QPair) (q' : QPair) (r : QRel q q') is
+        qsound QPair QRel (rawMul p q) (rawMul p q') (mulRespR p q q' r)
+      end)
+  end
+end
+
+mulF : Frac -> Frac -> Frac is
+  qlift QPair QRel (Frac -> Frac) mulFR
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      fn (z : Frac) is
+        qind QPair QRel (fn (w : Frac) is Eq Frac (mulFR p w) (mulFR p' w) end)
+          (fn (q : QPair) is
+            qsound QPair QRel (rawMul p q) (rawMul p' q) (mulRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+addRespR : (p : QPair) -> (q : QPair) -> (q' : QPair) -> QRel q q' -> QRel (rawAdd p q) (rawAdd p q') is
+  fn (p : QPair) (q : QPair) (q' : QPair) (h : QRel q q') is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let nq' : Int = qnum q' in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let dq' : Int = qden q' in
+    let n1 : Int = iadd (imul np dq) (imul nq dp) in
+    let n2 : Int = iadd (imul np dq') (imul nq' dp) in
+    let term1 : Eq Int (imul (imul np dq) (imul dp dq')) (imul (imul np dq') (imul dp dq)) =
+      transEq Int (imul (imul np dq) (imul dp dq')) (imul (imul np dp) (imul dq dq')) (imul (imul np dq') (imul dp dq))
+        (imulInterchange np dq dp dq')
+        (transEq Int (imul (imul np dp) (imul dq dq')) (imul (imul np dp) (imul dq' dq)) (imul (imul np dq') (imul dp dq))
+           (congImulR (imul np dp) (imul dq dq') (imul dq' dq) (imulComm dq dq'))
+           (symEq Int (imul (imul np dq') (imul dp dq)) (imul (imul np dp) (imul dq' dq)) (imulInterchange np dq' dp dq))) in
+    let term2 : Eq Int (imul (imul nq dp) (imul dp dq')) (imul (imul nq' dp) (imul dp dq)) =
+      transEq Int (imul (imul nq dp) (imul dp dq')) (imul (imul nq dp) (imul dq' dp)) (imul (imul nq' dp) (imul dp dq))
+        (congImulR (imul nq dp) (imul dp dq') (imul dq' dp) (imulComm dp dq'))
+        (transEq Int (imul (imul nq dp) (imul dq' dp)) (imul (imul nq dq') (imul dp dp)) (imul (imul nq' dp) (imul dp dq))
+           (imulInterchange nq dp dq' dp)
+           (transEq Int (imul (imul nq dq') (imul dp dp)) (imul (imul nq' dq) (imul dp dp)) (imul (imul nq' dp) (imul dp dq))
+              (congImulL (imul nq dq') (imul nq' dq) (imul dp dp) h)
+              (transEq Int (imul (imul nq' dq) (imul dp dp)) (imul (imul nq' dp) (imul dq dp)) (imul (imul nq' dp) (imul dp dq))
+                 (symEq Int (imul (imul nq' dp) (imul dq dp)) (imul (imul nq' dq) (imul dp dp)) (imulInterchange nq' dp dq dp))
+                 (congImulR (imul nq' dp) (imul dq dp) (imul dp dq) (imulComm dq dp))))) in
+    transEq Int
+      (imul n1 (qden (rawAdd p q')))
+      (imul n1 (imul dp dq'))
+      (imul n2 (qden (rawAdd p q)))
+      (congImulR n1 (qden (rawAdd p q')) (imul dp dq') (qdenMul p q'))
+      (transEq Int
+         (imul n1 (imul dp dq'))
+         (iadd (imul (imul np dq) (imul dp dq')) (imul (imul nq dp) (imul dp dq')))
+         (imul n2 (qden (rawAdd p q)))
+         (idistribR (imul np dq) (imul nq dp) (imul dp dq'))
+         (transEq Int
+            (iadd (imul (imul np dq) (imul dp dq')) (imul (imul nq dp) (imul dp dq')))
+            (iadd (imul (imul np dq') (imul dp dq)) (imul (imul nq' dp) (imul dp dq)))
+            (imul n2 (qden (rawAdd p q)))
+            (congIadd2
+               (imul (imul np dq) (imul dp dq')) (imul (imul np dq') (imul dp dq))
+               (imul (imul nq dp) (imul dp dq')) (imul (imul nq' dp) (imul dp dq))
+               term1 term2)
+            (transEq Int
+               (iadd (imul (imul np dq') (imul dp dq)) (imul (imul nq' dp) (imul dp dq)))
+               (imul n2 (imul dp dq))
+               (imul n2 (qden (rawAdd p q)))
+               (symEq Int (imul n2 (imul dp dq)) (iadd (imul (imul np dq') (imul dp dq)) (imul (imul nq' dp) (imul dp dq)))
+                  (idistribR (imul np dq') (imul nq' dp) (imul dp dq)))
+               (congImulR n2 (imul dp dq) (qden (rawAdd p q)) (symEq Int (qden (rawAdd p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+
+addRespL : (p : QPair) -> (p' : QPair) -> (q : QPair) -> QRel p p' -> QRel (rawAdd p q) (rawAdd p' q) is
+  fn (p : QPair) (p' : QPair) (q : QPair) (h : QRel p p') is
+    let np : Int = qnum p in
+    let np' : Int = qnum p' in
+    let nq : Int = qnum q in
+    let dp : Int = qden p in
+    let dp' : Int = qden p' in
+    let dq : Int = qden q in
+    let n1 : Int = iadd (imul np dq) (imul nq dp) in
+    let n2 : Int = iadd (imul np' dq) (imul nq dp') in
+    let term1 : Eq Int (imul (imul np dq) (imul dp' dq)) (imul (imul np' dq) (imul dp dq)) =
+      transEq Int (imul (imul np dq) (imul dp' dq)) (imul (imul np dp') (imul dq dq)) (imul (imul np' dq) (imul dp dq))
+        (imulInterchange np dq dp' dq)
+        (transEq Int (imul (imul np dp') (imul dq dq)) (imul (imul np' dp) (imul dq dq)) (imul (imul np' dq) (imul dp dq))
+           (congImulL (imul np dp') (imul np' dp) (imul dq dq) h)
+           (symEq Int (imul (imul np' dq) (imul dp dq)) (imul (imul np' dp) (imul dq dq)) (imulInterchange np' dq dp dq))) in
+    transEq Int
+      (imul n1 (qden (rawAdd p' q)))
+      (imul n1 (imul dp' dq))
+      (imul n2 (qden (rawAdd p q)))
+      (congImulR n1 (qden (rawAdd p' q)) (imul dp' dq) (qdenMul p' q))
+      (transEq Int
+         (imul n1 (imul dp' dq))
+         (iadd (imul (imul np dq) (imul dp' dq)) (imul (imul nq dp) (imul dp' dq)))
+         (imul n2 (qden (rawAdd p q)))
+         (idistribR (imul np dq) (imul nq dp) (imul dp' dq))
+         (transEq Int
+            (iadd (imul (imul np dq) (imul dp' dq)) (imul (imul nq dp) (imul dp' dq)))
+            (iadd (imul (imul np' dq) (imul dp dq)) (imul (imul nq dp') (imul dp dq)))
+            (imul n2 (qden (rawAdd p q)))
+            (congIadd2
+               (imul (imul np dq) (imul dp' dq)) (imul (imul np' dq) (imul dp dq))
+               (imul (imul nq dp) (imul dp' dq)) (imul (imul nq dp') (imul dp dq))
+               term1
+               (imulInterchange nq dp dp' dq))
+            (transEq Int
+               (iadd (imul (imul np' dq) (imul dp dq)) (imul (imul nq dp') (imul dp dq)))
+               (imul n2 (imul dp dq))
+               (imul n2 (qden (rawAdd p q)))
+               (symEq Int (imul n2 (imul dp dq)) (iadd (imul (imul np' dq) (imul dp dq)) (imul (imul nq dp') (imul dp dq)))
+                  (idistribR (imul np' dq) (imul nq dp') (imul dp dq)))
+               (congImulR n2 (imul dp dq) (qden (rawAdd p q)) (symEq Int (qden (rawAdd p q)) (imul dp dq) (qdenMul p q))))))
+  end
+end
+
+addFR : QPair -> Frac -> Frac is
+  fn (p : QPair) is
+    qlift QPair QRel Frac
+      (fn (q : QPair) is qin QPair QRel (rawAdd p q) end)
+      (fn (q : QPair) (q' : QPair) (r : QRel q q') is
+        qsound QPair QRel (rawAdd p q) (rawAdd p q') (addRespR p q q' r)
+      end)
+  end
+end
+
+addF : Frac -> Frac -> Frac is
+  qlift QPair QRel (Frac -> Frac) addFR
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      fn (z : Frac) is
+        qind QPair QRel (fn (w : Frac) is Eq Frac (addFR p w) (addFR p' w) end)
+          (fn (q : QPair) is
+            qsound QPair QRel (rawAdd p q) (rawAdd p' q) (addRespL p p' q r)
+          end)
+          z
+      end
+    end)
+end
+
+ratOfInt : Int -> Frac is
+  fn (i : Int) is qin QPair QRel (qpair i zero) end
+end
 
 intOfAdd : (a : Whole) -> (b : Whole) -> Eq Int (iadd (intOf a) (intOf b)) (intOf (addW a b)) is
   fn (a : Whole) (b : Whole) is refl (nonneg (addW a b)) end
 end
+
 intOfMul : (a : Whole) -> (b : Whole) -> Eq Int (imul (intOf a) (intOf b)) (intOf (mulW a b)) is
   fn (a : Whole) (b : Whole) is refl (nonneg (mulW a b)) end
 end
+
 intOfOne : Eq Int (intOf (succ zero)) (nonneg (succ zero)) is refl (nonneg (succ zero)) end
 
--- The commuting triangle, by refl: ratOfInt (intOf n) = frac false n 1 = fracOf n.
 ratOfIntOf : (n : Whole) -> Eq Frac (ratOfInt (intOf n)) (fracOf n) is
-  fn (n : Whole) is refl (frac false n 1) end
+  fn (n : Whole) is refl (fracOf n) end
 end
 
--- A runnable witness: inject 3 : Whole up to Int, then across to Frac.
+ratOfIntAddHom : (a : Int) -> (b : Int) -> Eq Frac (ratOfInt (iadd a b)) (addF (ratOfInt a) (ratOfInt b)) is
+  fn (a : Int) (b : Int) is
+    let n1 : Int = iadd (imul a (nonneg (succ zero))) (imul b (nonneg (succ zero))) in
+    qsound QPair QRel
+      (qpair (iadd a b) zero)
+      (rawAdd (qpair a zero) (qpair b zero))
+      (transEq Int
+         (imul (iadd a b) (nonneg (succ zero)))
+         (iadd a b)
+         (imul n1 (nonneg (succ zero)))
+         (imulOneR (iadd a b))
+         (transEq Int
+            (iadd a b)
+            n1
+            (imul n1 (nonneg (succ zero)))
+            (congIadd2 a (imul a (nonneg (succ zero))) b (imul b (nonneg (succ zero)))
+               (symEq Int (imul a (nonneg (succ zero))) a (imulOneR a))
+               (symEq Int (imul b (nonneg (succ zero))) b (imulOneR b)))
+            (symEq Int (imul n1 (nonneg (succ zero))) n1 (imulOneR n1))))
+  end
+end
+
+ratOfIntMulHom : (a : Int) -> (b : Int) -> Eq Frac (ratOfInt (imul a b)) (mulF (ratOfInt a) (ratOfInt b)) is
+  fn (a : Int) (b : Int) is refl (ratOfInt (imul a b)) end
+end
+
+fracOfAddHom : (a : Whole) -> (b : Whole) -> Eq Frac (fracOf (addW a b)) (addF (fracOf a) (fracOf b)) is
+  fn (a : Whole) (b : Whole) is ratOfIntAddHom (nonneg a) (nonneg b) end
+end
+
+fracOfMulHom : (a : Whole) -> (b : Whole) -> Eq Frac (fracOf (mulW a b)) (mulF (fracOf a) (fracOf b)) is
+  fn (a : Whole) (b : Whole) is refl (fracOf (mulW a b)) end
+end
+
+-- A runnable witness: inject 3 : Whole up to Int, then across to Frac
+-- (= qin (qpair (nonneg 3) 0), the integer-valued fraction 3/1).
 main : Frac is ratOfInt (intOf 3) end

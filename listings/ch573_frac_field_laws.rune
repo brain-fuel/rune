@@ -1,0 +1,737 @@
+-- Chapter 573: THE FRAC FIELD LAWS -- how the quotient dodged gcd, and how
+-- canonical Int made the GENERAL reciprocal inverse provable where the old
+-- rational field could only close the positive subtype.
+--
+-- THE ROUTE ARGUMENT: QUOTIENT BEATS GCD. A rational is a fraction, and the
+-- naive way to make fractions a type is to store them in lowest terms: pick
+-- the canonical representative by dividing out the gcd. That representation
+-- looks tidy but it poisons every proof. To show `a/b * c/d = (a*c)/(b*d)`
+-- you must show the RIGHT-HAND side reduces to the same lowest-terms pair as
+-- the product of the two reduced inputs, and that is a theorem about gcd and
+-- coprimality -- number theory the algebra never asked for. The campaign
+-- takes the CLASSICAL construction instead: Frac is the QUOTIENT of raw
+-- pairs (numerator : Int, denominator positive by construction) under
+-- cross-multiplication `i1/d1 ~ i2/d2  iff  i1*d2 = i2*d1`. The ops act on
+-- representatives UNREDUCED; each is lifted through `qlift`/`qind` with a
+-- respect proof whose entire content is Int ring algebra (the ch572 corpus).
+-- No gcd fact is ever proven -- the hard line of the spec. Canonical display
+-- (lowest terms) survives only as a COMPUTATIONAL fold at print time, never
+-- the subject of a proof. `Frac = Quot QPair QRel`.
+--
+-- THE ZERO-PRODUCT LEMMA + nzFrac. A field needs a nonzero predicate to
+-- guard the reciprocal. On the quotient it is a Bool zero-test lifted out
+-- of the class: `isZeroInt (qnum p)` tests a representative, and it RESPECTS
+-- the relation (`isZeroResp`) so it descends to `isZeroF : Frac -> Bool` and
+-- `nzFrac x = Eq Bool (isZeroF x) false`. The respect proof rides ONE
+-- canonical-Int fact, the ZERO-PRODUCT lemma:
+--
+--   imulPosZero : imul a (nonneg (succ d)) = nonneg zero  ->  a = nonneg zero
+--
+-- with a positive right factor, a product is zero only if the left factor
+-- is. This is the single sanctioned cancellation-adjacent fact of the whole
+-- campaign (spec Decision), and it is NOT gcd: it is proven by case on `a`
+-- (nonneg -> `mulWPosZero` on the magnitude; negsucc -> the product is
+-- negsucc-headed, colliding with `nonneg zero` via `intTagDisc`, discharged
+-- ex falso). `qnumZeroTransfer` carries zeroness across `QRel` by rewriting
+-- the cross-multiplication and applying imulPosZero against the (positive)
+-- denominator; `isZeroResp` bundles both directions by Bool cases.
+--
+-- THE REPRESENTATIVE NOVELTY, IN FULL: recipInvLP. The one genuinely new
+-- proof of the campaign is the GENERAL reciprocal inverse `p * recip p ~ 1`.
+-- The book's earlier rational field (ch113/ch116) could only close the
+-- POSITIVE subtype: there the integer layer Z was ITSELF a quotient of
+-- Nat-pairs, so a numerator's sign was never in canonical form and the
+-- negative case stayed open. Our Int is canonical DATA (`nonneg`/`negsucc`),
+-- so the numerator splits into exactly three constructor cases, and the
+-- decisive computational fact is that
+--
+--   imul (negsucc k) (negsucc d)  ==  nonneg (mulW (succ k) (succ d))
+--
+-- ON THE NOSE, even under open binders: imul's two-negatives arm runs
+-- through its internal double `ineg` to a nonneg product with no residue.
+-- So the negsucc numerator is DEFINITIONALLY EQUAL to the positive one, and
+-- both non-zero arms close by the IDENTICAL algebra `recipInvClose` -- no
+-- sign theory to discharge. The nonneg-zero arm is the guard-excluded junk
+-- case: `isZeroInt (nonneg zero)` computes to `true`, so the guard IS
+-- `Eq Bool true false`, discharged ex falso by `boolDiscTF`, and no equation
+-- about the junk 0/1 recip value is ever proven. This chapter carries
+-- recipInvClose, its numerator-explicit worker recipInvLPOn, and recipInvLP
+-- IN FULL, prelude bodies mirrored verbatim.
+--
+-- THE SIX LAW VALUES. On this representative-level engine the prelude proves
+-- every Frac law by qind + qsound over the ch572 Int lemmas -- additive
+-- (assoc/comm/zeroL/zeroR), multiplicative (assoc/comm/oneL/oneR),
+-- distributive, annihilation, negation -- and the RT dual recipInvRP + the
+-- lifts recipFInvL/recipFInvR, then assembles the SIX law VALUES that are
+-- the campaign's deliverable:
+--
+--   semiringLawsFrac : SemiringLaws Frac (divRingFrac.1.1)
+--   ringLawsFrac     : RingLaws Frac (divRingFrac.1)
+--   commLawsFrac     : CommLaws Frac semiringFrac
+--   commRingLawsFrac : CommRingLaws Frac (divRingFrac.1)
+--   abGroupLawsFrac  : AbGroupLaws Frac (groupOfRing Frac (divRingFrac.1))
+--   fieldLawsFrac    : FieldLaws Frac divRingFrac nzFrac
+--
+-- fieldLawsFrac is FieldLaws' FIRST inhabitant -- the ladder's first field.
+-- The abelian-group value is not asserted but reassembled from the ring laws
+-- by the ch571 bridge `abGroupLawsOfRing`. This chapter carries the
+-- REPRESENTATIVE novelty (recipInvLP) plus nzFrac in full, as the ch572
+-- pattern does for the Int laws; the full lift stack and the six records
+-- live in the prelude, same method, no new machinery.
+--
+-- HONEST SCOPE. Show/Binary instances for Frac are REMOVED: any string
+-- rendering out of the quotient needs a respect proof that IS lowest-terms
+-- uniqueness -- exactly the number theory the quotient route exists to
+-- avoid. Plan B revisits a canonical rendering via `to_radix`; that
+-- lowest-terms-uniqueness wall is the campaign's one acknowledged open
+-- design question, not a proof gap in the laws.
+--
+-- Self-contained (the ch572 pattern; this chapter does not load the
+-- prelude): restates the Whole/Bool kernels, the equality plumbing, the
+-- multiplicative Whole/Int lemmas the closure needs (NO additive `wsub`
+-- engine -- a representative-level QRel over `rawMul`/`rawRecip` touches
+-- only multiplication), a self-contained `imul`-by-one pair (the prelude
+-- proves these through its difference-model engine; here they are proven
+-- directly, discharging the SAME statement), the junk-free Int, the quotient
+-- Frac rung, the zero-product line (nzFrac), and recipInvLP. Ends with a
+-- runnable witness: 2/1 * 1/2 computes to the unreduced 2/2.
+
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+-- The Whole-level arithmetic kernels. addW recurses on its FIRST argument,
+-- mulW steps by `addW ih n`. This chapter needs only these two (the
+-- reciprocal-inverse algebra is purely multiplicative; no subtraction).
+addW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> n
+    | succ k with ih -> succ ih
+    end
+  end
+end
+
+mulW : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case m of
+    | zero -> 0
+    | succ k with ih -> addW ih n
+    end
+  end
+end
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+-- `isZero` is the depth-1 zero-test (a constructor dispatch, no eliminator
+-- loop); `isZeroInt` reads it on a nonneg numerator.
+isZero : Whole -> Bool is
+  fn (n : Whole) is case n of | zero -> true | succ k -> false end end
+end
+
+-- Equality plumbing built from `subst` (the sole Leibniz primitive).
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- Local congruence (there is no ambient cong): rewrite under a Whole context.
+congW : (f : Whole -> Whole) -> (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Whole (f x) (f y) is
+  fn (f : Whole -> Whole) (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Whole (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- General congruence across types (subst under any function).
+congE : (A : U) -> (B : U) -> (f : A -> B) -> (x : A) -> (y : A) -> Eq A x y -> Eq B (f x) (f y) is
+  fn (A : U) (B : U) (f : A -> B) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq B (f x) (f z) end) (refl (f x))
+  end
+end
+
+-- ====================================================================
+-- THE MULTIPLICATIVE WHOLE LEMMAS the closure needs (ch569's proofs,
+-- restated). Only the (Whole,*,1) facts appear: the reciprocal-inverse
+-- algebra transports down to `mulW` commutativity and its unit law.
+-- ====================================================================
+
+-- addW is associative (induction on the first argument).
+addWAssoc : (a : Whole) -> (b : Whole) -> (c : Whole) -> Eq Whole (addW (addW a b) c) (addW a (addW b c)) is
+  fn (a : Whole) (b : Whole) (c : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW (addW x b) c) (addW x (addW b c)) end)
+      (refl (addW b c))
+      (fn (k : Whole) (ih : Eq Whole (addW (addW k b) c) (addW k (addW b c))) is
+         subst Whole (addW (addW k b) c) (addW k (addW b c)) ih
+           (fn (z : Whole) is Eq Whole (succ (addW (addW k b) c)) (succ z) end)
+           (refl (succ (addW (addW k b) c)))
+       end)
+      a
+  end
+end
+
+-- addW a zero = a (induction on a; the recursion is stuck on a neutral first arg).
+addWZeroR : (a : Whole) -> Eq Whole (addW a zero) a is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x zero) x end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (addW k zero) k) is
+         subst Whole (addW k zero) k ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) zero) (succ z) end)
+           (refl (addW (succ k) zero))
+       end)
+      a
+  end
+end
+
+-- Pushing a successor out of the second argument.
+addWSuccR : (m : Whole) -> (n : Whole) -> Eq Whole (addW m (succ n)) (succ (addW m n)) is
+  fn (m : Whole) (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x (succ n)) (succ (addW x n)) end)
+      (refl (succ n))
+      (fn (k : Whole) (ih : Eq Whole (addW k (succ n)) (succ (addW k n))) is
+         subst Whole (addW k (succ n)) (succ (addW k n)) ih
+           (fn (z : Whole) is Eq Whole (addW (succ k) (succ n)) (succ z) end)
+           (refl (addW (succ k) (succ n)))
+       end)
+      m
+  end
+end
+
+-- addW is commutative (induction on the first argument; needs addWZeroR + addWSuccR).
+addWComm : (a : Whole) -> (b : Whole) -> Eq Whole (addW a b) (addW b a) is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (addW x b) (addW b x) end)
+      (subst Whole (addW b zero) b (addWZeroR b)
+         (fn (z : Whole) is Eq Whole z (addW b zero) end)
+         (refl (addW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (addW k b) (addW b k)) is
+         subst Whole (succ (addW b k)) (addW b (succ k))
+           (subst Whole (addW b (succ k)) (succ (addW b k)) (addWSuccR b k)
+              (fn (z : Whole) is Eq Whole z (addW b (succ k)) end)
+              (refl (addW b (succ k))))
+           (fn (z : Whole) is Eq Whole (succ (addW k b)) z end)
+           (subst Whole (addW k b) (addW b k) ih
+              (fn (z : Whole) is Eq Whole (succ (addW k b)) (succ z) end)
+              (refl (succ (addW k b))))
+       end)
+      a
+  end
+end
+
+-- (a + x) + succ y = (a + y) + succ x (assoc + succ-shift + comm); feeds mulWSuccR.
+addWShiftSucc : (a : Whole) -> (x : Whole) -> (y : Whole)
+  -> Eq Whole (addW (addW a x) (succ y)) (addW (addW a y) (succ x)) is
+  fn (a : Whole) (x : Whole) (y : Whole) is
+    transEq Whole (addW (addW a x) (succ y)) (addW a (addW x (succ y))) (addW (addW a y) (succ x))
+      (addWAssoc a x (succ y))
+      (transEq Whole (addW a (addW x (succ y))) (addW a (succ (addW y x))) (addW (addW a y) (succ x))
+         (congW (fn (t : Whole) is addW a t end) (addW x (succ y)) (succ (addW y x))
+            (transEq Whole (addW x (succ y)) (succ (addW x y)) (succ (addW y x))
+               (addWSuccR x y)
+               (congW (fn (t : Whole) is succ t end) (addW x y) (addW y x) (addWComm x y))))
+         (transEq Whole (addW a (succ (addW y x))) (addW a (addW y (succ x))) (addW (addW a y) (succ x))
+            (congW (fn (t : Whole) is addW a t end) (succ (addW y x)) (addW y (succ x))
+               (symEq Whole (addW y (succ x)) (succ (addW y x)) (addWSuccR y x)))
+            (symEq Whole (addW (addW a y) (succ x)) (addW a (addW y (succ x))) (addWAssoc a y (succ x)))))
+  end
+end
+
+-- mul a zero = 0 (induction on a; addWZeroR mops up the stuck `addW _ zero`).
+mulWZeroR : (a : Whole) -> Eq Whole (mulW a zero) zero is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x zero) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k zero) zero) is
+         transEq Whole (mulW (succ k) zero) (mulW k zero) zero
+           (addWZeroR (mulW k zero))
+           ih
+       end)
+      a
+  end
+end
+
+-- Multiplicative successor-shift: mul n (succ m) = mul n m + n (induction on n).
+mulWSuccR : (n : Whole) -> (m : Whole) -> Eq Whole (mulW n (succ m)) (addW (mulW n m) n) is
+  fn (n : Whole) (m : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x (succ m)) (addW (mulW x m) x) end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (mulW k (succ m)) (addW (mulW k m) k)) is
+         transEq Whole
+           (addW (mulW k (succ m)) (succ m))
+           (addW (addW (mulW k m) k) (succ m))
+           (addW (addW (mulW k m) m) (succ k))
+           (congW (fn (t : Whole) is addW t (succ m) end) (mulW k (succ m)) (addW (mulW k m) k) ih)
+           (addWShiftSucc (mulW k m) k m)
+       end)
+      n
+  end
+end
+
+-- mul is commutative (induction on the first argument; needs mulWZeroR + mulWSuccR).
+mulWComm : (a : Whole) -> (b : Whole) -> Eq Whole (mulW a b) (mulW b a) is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (mulW x b) (mulW b x) end)
+      (subst Whole (mulW b zero) zero (mulWZeroR b)
+         (fn (z : Whole) is Eq Whole z (mulW b zero) end)
+         (refl (mulW b zero)))
+      (fn (k : Whole) (ih : Eq Whole (mulW k b) (mulW b k)) is
+         transEq Whole (mulW (succ k) b) (addW (mulW b k) b) (mulW b (succ k))
+           (congW (fn (t : Whole) is addW t b end) (mulW k b) (mulW b k) ih)
+           (symEq Whole (mulW b (succ k)) (addW (mulW b k) b) (mulWSuccR b k))
+       end)
+      a
+  end
+end
+
+-- mul n 1 = n: mulWSuccR at zero, then the stuck `addW (mulW n zero) n`
+-- collapses once mulWZeroR fires (addW zero n = n definitionally).
+mulWOneR : (n : Whole) -> Eq Whole (mulW n (succ zero)) n is
+  fn (n : Whole) is
+    transEq Whole (mulW n (succ zero)) (addW (mulW n zero) n) n
+      (mulWSuccR n zero)
+      (congW (fn (t : Whole) is addW t n end) (mulW n zero) zero (mulWZeroR n))
+  end
+end
+
+-- ====================================================================
+-- THE JUNK-FREE INT (the prelude's block, mirrored). `nonneg n` denotes n,
+-- `negsucc k` denotes -(k+1): a bijection with Z, so a case split is a
+-- complete analysis and no lemma ever mentions a second zero. `imul` carries
+-- the offset bookkeeping in its negsucc arms; `ineg` negates.
+-- ====================================================================
+data Int : U is
+  nonneg  : Whole -> Int
+| negsucc : Whole -> Int
+end
+isign : Int -> Bool is
+  fn (i : Int) is case i of | nonneg n -> false | negsucc k -> true end end
+end
+imag : Int -> Whole is
+  fn (i : Int) is case i of | nonneg n -> n | negsucc k -> succ k end end
+end
+ineg : Int -> Int is
+  fn (i : Int) is
+    case i of
+    | nonneg n -> case n of | zero -> nonneg zero | succ k -> negsucc k end
+    | negsucc k -> nonneg (succ k)
+    end
+  end
+end
+imul : Int -> Int -> Int is
+  fn (x : Int) (y : Int) is
+    case x of
+    | nonneg a ->
+        case y of
+        | nonneg c -> nonneg (mulW a c)
+        | negsucc d -> ineg (nonneg (mulW a (succ d)))
+        end
+    | negsucc b ->
+        case y of
+        | nonneg c -> ineg (nonneg (mulW (succ b) c))
+        | negsucc d -> nonneg (mulW (succ b) (succ d))
+        end
+    end
+  end
+end
+
+-- EX-FALSO from a Bool absurdity: subst along `true = false` with a Bool-CASE
+-- motive whose true-arm is trivial and whose false-arm is the goal. Discharges
+-- impossible branches WITHOUT an Empty type.
+boolDiscTF : (G : U) -> Eq Bool true false -> G is
+  fn (G : U) (h : Eq Bool true false) is
+    subst Bool true false h
+      (fn (z : Bool) is
+         case z of
+         | true -> Eq Bool true true
+         | false -> G
+         end
+       end)
+      (refl true)
+  end
+end
+
+-- Case on a Bool while RETAINING the discriminant equation (the motive is
+-- `Eq Bool g x -> P x`, applied to `refl g`).
+boolCaseEq : (g : Bool) -> (P : Bool -> U)
+  -> (Eq Bool g true -> P true) -> (Eq Bool g false -> P false) -> P g is
+  fn (g : Bool) (P : Bool -> U)
+     (ht : Eq Bool g true -> P true) (hf : Eq Bool g false -> P false) is
+    BoolElim (fn (x : Bool) is Eq Bool g x -> P x end) ht hf g (refl g)
+  end
+end
+
+-- Congruence from Whole into Int through the nonneg constructor.
+congNonneg : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Int (nonneg x) (nonneg y) is
+  fn (x : Whole) (y : Whole) (p : Eq Whole x y) is
+    subst Whole x y p (fn (z : Whole) is Eq Int (nonneg x) (nonneg z) end) (refl (nonneg x))
+  end
+end
+
+-- ====================================================================
+-- IMUL BY ONE, SELF-CONTAINED. The prelude proves these through its
+-- difference-model engine (imulSpec/imulWsubR/wsubRep); here they are proven
+-- DIRECTLY, discharging the SAME statements (this chapter carries no `wsub`
+-- machinery -- only recipInvClose consumes them, at nonneg arguments).
+-- imulOneL is refl in both arms: mulW (succ zero) c reduces to c on the nose.
+-- ====================================================================
+imulOneL : (a : Int) -> Eq Int (imul (nonneg (succ zero)) a) a is
+  fn (a : Int) is
+    IntElim (fn (w : Int) is Eq Int (imul (nonneg (succ zero)) w) w end)
+      (fn (c : Whole) is refl (nonneg c) end)
+      (fn (d : Whole) is refl (negsucc d) end)
+      a
+  end
+end
+imulOneR : (a : Int) -> Eq Int (imul a (nonneg (succ zero))) a is
+  fn (a : Int) is
+    IntElim (fn (w : Int) is Eq Int (imul w (nonneg (succ zero))) w end)
+      (fn (n : Whole) is congNonneg (mulW n (succ zero)) n (mulWOneR n) end)
+      (fn (k : Whole) is
+         transEq Int (ineg (nonneg (mulW (succ k) (succ zero)))) (ineg (nonneg (succ k))) (negsucc k)
+           (congE Whole Int (fn (t : Whole) is ineg (nonneg t) end) (mulW (succ k) (succ zero)) (succ k) (mulWOneR (succ k)))
+           (refl (negsucc k))
+       end)
+      a
+  end
+end
+
+-- ====================================================================
+-- TASK 1 SUPPORT: the zero-test and its canonical-Int zero-product lemma.
+-- These join the Int lemma area (before the Frac rung) so the Frac code can
+-- see them; each is mirrored verbatim from the prelude.
+-- ====================================================================
+
+isZeroInt : Int -> Bool is
+  fn (i : Int) is
+    case i of
+    | nonneg n -> isZero n
+    | negsucc k -> false
+    end
+  end
+end
+
+-- SOUNDNESS of the zero-test: isZeroInt a = true forces a = nonneg zero.
+isZeroIntSound : (a : Int) -> Eq Bool (isZeroInt a) true -> Eq Int a (nonneg zero) is
+  fn (a : Int) is
+    IntElim (fn (w : Int) is Eq Bool (isZeroInt w) true -> Eq Int w (nonneg zero) end)
+      (fn (n : Whole) is
+         WholeElim (fn (m : Whole) is Eq Bool (isZeroInt (nonneg m)) true -> Eq Int (nonneg m) (nonneg zero) end)
+           (fn (h : Eq Bool (isZeroInt (nonneg zero)) true) is refl (nonneg zero) end)
+           (fn (k : Whole) (ih : Eq Bool (isZeroInt (nonneg k)) true -> Eq Int (nonneg k) (nonneg zero)) is
+              fn (h : Eq Bool (isZeroInt (nonneg (succ k))) true) is
+                boolDiscTF (Eq Int (nonneg (succ k)) (nonneg zero))
+                  (symEq Bool (isZeroInt (nonneg (succ k))) true h)
+              end
+            end)
+           n
+       end)
+      (fn (k : Whole) is
+         fn (h : Eq Bool (isZeroInt (negsucc k)) true) is
+           boolDiscTF (Eq Int (negsucc k) (nonneg zero))
+             (symEq Bool (isZeroInt (negsucc k)) true h)
+         end
+       end)
+      a
+  end
+end
+
+-- INJECTIVITY of nonneg (through the magnitude projection imag).
+nonnegInj : (a : Whole) -> (b : Whole) -> Eq Int (nonneg a) (nonneg b) -> Eq Whole a b is
+  fn (a : Whole) (b : Whole) (h : Eq Int (nonneg a) (nonneg b)) is
+    subst Int (nonneg a) (nonneg b) h (fn (z : Int) is Eq Whole a (imag z) end) (refl a)
+  end
+end
+
+-- CONSTRUCTOR DISCRIMINATION: negsucc never equals nonneg (transport the
+-- sign tag isign along the hypothesis; consumed via the boolDiscTF idiom).
+intTagDisc : (k : Whole) -> (n : Whole) -> Eq Int (negsucc k) (nonneg n) -> Eq Bool true false is
+  fn (k : Whole) (n : Whole) (h : Eq Int (negsucc k) (nonneg n)) is
+    subst Int (negsucc k) (nonneg n) h (fn (z : Int) is Eq Bool true (isign z) end) (refl true)
+  end
+end
+
+-- SUCC-HEADEDNESS of addW on a positive right addend: x + (d+1) is never
+-- zero (one addWSuccR rewrite exposes the succ head).
+addWPosR : (x : Whole) -> (d : Whole) -> Eq Bool (isZero (addW x (succ d))) false is
+  fn (x : Whole) (d : Whole) is
+    subst Whole (succ (addW x d)) (addW x (succ d))
+      (symEq Whole (addW x (succ d)) (succ (addW x d)) (addWSuccR x d))
+      (fn (z : Whole) is Eq Bool (isZero z) false end)
+      (refl false)
+  end
+end
+
+-- ZERO-PRODUCT at Whole with a positive right factor: n*(d+1) = 0 forces n = 0.
+mulWPosZero : (n : Whole) -> (d : Whole) -> Eq Whole (mulW n (succ d)) zero -> Eq Whole n zero is
+  fn (n : Whole) (d : Whole) is
+    WholeElim (fn (m : Whole) is Eq Whole (mulW m (succ d)) zero -> Eq Whole m zero end)
+      (fn (h : Eq Whole (mulW zero (succ d)) zero) is refl zero end)
+      (fn (k : Whole) (ih : Eq Whole (mulW k (succ d)) zero -> Eq Whole k zero) is
+         fn (h : Eq Whole (mulW (succ k) (succ d)) zero) is
+           boolDiscTF (Eq Whole (succ k) zero)
+             (transEq Bool true (isZero (mulW (succ k) (succ d))) false
+                (symEq Bool (isZero (mulW (succ k) (succ d))) true
+                   (subst Whole (mulW (succ k) (succ d)) zero h
+                      (fn (z : Whole) is Eq Bool (isZero (mulW (succ k) (succ d))) (isZero z) end)
+                      (refl (isZero (mulW (succ k) (succ d))))))
+                (addWPosR (mulW k (succ d)) d))
+         end
+       end)
+      n
+  end
+end
+
+-- THE ZERO-PRODUCT LEMMA over canonical Int: imul a (d+1) = 0 forces
+-- a = 0. nonneg arm: nonnegInj then mulWPosZero, closed by congNonneg.
+-- negsucc arm: imul computes to ineg (nonneg (addW .. (succ d))), an
+-- addWSuccR rewrite exposes the negsucc head, and the hypothesis becomes
+-- intTagDisc's shape, discharged ex falso by boolDiscTF.
+imulPosZero : (a : Int) -> (d : Whole) -> Eq Int (imul a (nonneg (succ d))) (nonneg zero) -> Eq Int a (nonneg zero) is
+  fn (a : Int) (d : Whole) is
+    IntElim (fn (w : Int) is Eq Int (imul w (nonneg (succ d))) (nonneg zero) -> Eq Int w (nonneg zero) end)
+      (fn (n : Whole) is
+         fn (h : Eq Int (imul (nonneg n) (nonneg (succ d))) (nonneg zero)) is
+           congNonneg n zero (mulWPosZero n d (nonnegInj (mulW n (succ d)) zero h))
+         end
+       end)
+      (fn (k : Whole) is
+         fn (h : Eq Int (imul (negsucc k) (nonneg (succ d))) (nonneg zero)) is
+           boolDiscTF (Eq Int (negsucc k) (nonneg zero))
+             (intTagDisc (addW (mulW k (succ d)) d) zero
+                (subst Whole (addW (mulW k (succ d)) (succ d)) (succ (addW (mulW k (succ d)) d))
+                   (addWSuccR (mulW k (succ d)) d)
+                   (fn (z : Whole) is Eq Int (ineg (nonneg z)) (nonneg zero) end)
+                   h))
+         end
+       end)
+      a
+  end
+end
+
+-- ====================================================================
+-- THE FRAC RUNG (Q), AS A QUOTIENT. A rational is an UNREDUCED pair: the
+-- numerator a signed Int, the denominator succ-encoded so it is positive BY
+-- CONSTRUCTION (qpair i d denotes i / (d+1); no zero-denominator state
+-- exists). Frac is the quotient of these pairs by cross-multiplication over
+-- Int, and the ops act on representatives UNREDUCED. Show/Binary instances
+-- for Frac are REMOVED (any string rendering needs a respect proof that IS
+-- lowest-terms uniqueness -- the number theory the quotient route avoids;
+-- Plan B revisits via to_radix).
+-- ====================================================================
+data QPair : U is qpair : Int -> Whole -> QPair end
+qnum   : QPair -> Int   is fn (p : QPair) is case p of | qpair i d -> i end end end
+qdpred : QPair -> Whole is fn (p : QPair) is case p of | qpair i d -> d end end end
+
+-- The denominator as a positive Int: qden (qpair i d) = d+1.
+qden : QPair -> Int is fn (p : QPair) is nonneg (succ (qdpred p)) end end
+
+-- Cross-multiplication: (i1 / sd1) ~ (i2 / sd2) iff i1*sd2 = i2*sd1 in
+-- Int. Eq Int lands in Prop, so QRel is Prop-valued (the relation sort
+-- the Quot builtin takes).
+QRel : QPair -> QPair -> Prop is
+  fn (p : QPair) (q : QPair) is
+    Eq Int (imul (qnum p) (qden q)) (imul (qnum q) (qden p))
+  end
+end
+Frac : U is Quot QPair QRel end
+
+-- A bare numeral at Frac is the whole-valued fraction n/1.
+fracOf : Whole -> Frac is fn (n : Whole) is qin QPair QRel (qpair (nonneg n) zero) end end
+
+-- The product-denominator INDEX: succ (dmul d1 d2) = (d1+1)*(d2+1).
+dmul : Whole -> Whole -> Whole is
+  fn (a : Whole) (b : Whole) is addW (mulW a (succ b)) b end
+end
+dmulSucc : (a : Whole) -> (b : Whole) -> Eq Whole (mulW (succ a) (succ b)) (succ (dmul a b)) is
+  fn (a : Whole) (b : Whole) is addWSuccR (mulW a (succ b)) b end
+end
+
+-- Raw ops on representatives, UNREDUCED. rawMul is componentwise; rawRecip
+-- swaps numerator and denominator (recip of a zero numerator is the junk
+-- value 0/1, the ops-ladder convention). rawRecip factors through a
+-- numerator-explicit worker so a proof can eliminate on the numerator.
+rawMul : QPair -> QPair -> QPair is
+  fn (p : QPair) (q : QPair) is
+    qpair (imul (qnum p) (qnum q)) (dmul (qdpred p) (qdpred q))
+  end
+end
+rawRecipOn : Int -> Whole -> QPair is
+  fn (i : Int) (d : Whole) is
+    case i of
+    | nonneg n ->
+        case n of
+        | zero -> qpair (nonneg zero) zero
+        | succ k -> qpair (nonneg (succ d)) k
+        end
+    | negsucc k -> qpair (negsucc d) k
+    end
+  end
+end
+rawRecip : QPair -> QPair is fn (p : QPair) is rawRecipOn (qnum p) (qdpred p) end end
+
+-- ====================================================================
+-- FRAC LAWS, Task 1: the NONZERO predicate nzFrac, a Bool zero-test lifted
+-- out of the quotient; its respect proof rides imulPosZero (the
+-- canonical-Int zero-product lemma above), never gcd.
+-- ====================================================================
+
+-- Zeroness TRANSFERS across QRel: rewrite the cross-multiplication along
+-- qnum p = 0 (the right side then computes to nonneg zero), and
+-- imulPosZero against the positive qden p forces qnum q = 0.
+qnumZeroTransfer : (p : QPair) -> (q : QPair) -> QRel p q
+  -> Eq Int (qnum p) (nonneg zero) -> Eq Int (qnum q) (nonneg zero) is
+  fn (p : QPair) (q : QPair) (r : QRel p q) (hz : Eq Int (qnum p) (nonneg zero)) is
+    imulPosZero (qnum q) (qdpred p)
+      (subst Int (qnum p) (nonneg zero) hz
+         (fn (z : Int) is Eq Int (imul (qnum q) (qden p)) (imul z (qden q)) end)
+         (symEq Int (imul (qnum p) (qden q)) (imul (qnum q) (qden p)) r))
+  end
+end
+
+-- WELL-DEFINEDNESS of the zero-test: both directions from the transfer
+-- (QRel is symmetric by symEq on the cross products), assembled by Bool
+-- cases retaining the discriminant equations; the mixed true/false case
+-- is impossible and discharged by boolDiscTF.
+isZeroResp : (p : QPair) -> (q : QPair) -> QRel p q
+  -> Eq Bool (isZeroInt (qnum p)) (isZeroInt (qnum q)) is
+  fn (p : QPair) (q : QPair) (r : QRel p q) is
+    boolCaseEq (isZeroInt (qnum p))
+      (fn (b : Bool) is Eq Bool b (isZeroInt (qnum q)) end)
+      (fn (hp : Eq Bool (isZeroInt (qnum p)) true) is
+         subst Int (nonneg zero) (qnum q)
+           (symEq Int (qnum q) (nonneg zero)
+              (qnumZeroTransfer p q r (isZeroIntSound (qnum p) hp)))
+           (fn (z : Int) is Eq Bool true (isZeroInt z) end)
+           (refl true)
+       end)
+      (fn (hp : Eq Bool (isZeroInt (qnum p)) false) is
+         boolCaseEq (isZeroInt (qnum q))
+           (fn (b : Bool) is Eq Bool false b end)
+           (fn (hq : Eq Bool (isZeroInt (qnum q)) true) is
+              boolDiscTF (Eq Bool false true)
+                (transEq Bool true (isZeroInt (qnum p)) false
+                   (symEq Bool (isZeroInt (qnum p)) true
+                      (subst Int (nonneg zero) (qnum p)
+                         (symEq Int (qnum p) (nonneg zero)
+                            (qnumZeroTransfer q p
+                               (symEq Int (imul (qnum p) (qden q)) (imul (qnum q) (qden p)) r)
+                               (isZeroIntSound (qnum q) hq)))
+                         (fn (z : Int) is Eq Bool (isZeroInt z) true end)
+                         (refl true)))
+                   hp)
+            end)
+           (fn (hq : Eq Bool (isZeroInt (qnum q)) false) is
+              refl false
+            end)
+       end)
+  end
+end
+
+-- The zero-test on Frac, lifted out of the quotient (well-defined by
+-- isZeroResp; no representative leaks).
+isZeroF : Frac -> Bool is
+  qlift QPair QRel Bool (fn (p : QPair) is isZeroInt (qnum p) end) isZeroResp
+end
+
+-- The NONZERO predicate the guarded reciprocal-inverse laws quantify over.
+nzFrac : Frac -> U is fn (x : Frac) is Eq Bool (isZeroF x) false end end
+
+-- ====================================================================
+-- FRAC LAWS, Task 5 (the campaign's genuinely new proof): the GUARDED recip
+-- inverse `p * recip p ~ 1`. ch113/ch116 only closed the POSITIVE subtype
+-- (their Z was itself a quotient, so sign normalization stayed open);
+-- canonical Int closes the general case by cases on the numerator. The KEY:
+-- imul (negsucc k) (negsucc d) computes on the nose to the SAME
+-- nonneg (mulW (succ k) (succ d)) as the positive numerator (two negatives
+-- -> a nonneg product, definitionally), so the negsucc case reuses the
+-- IDENTICAL closing algebra -- no sign theory is needed.
+-- ====================================================================
+
+-- The shared closing identity for both non-zero numerator cases. The
+-- product p * recip p has numerator nonneg (mulW (succ k) (succ d)) and
+-- denominator index dmul d k; cross-multiplied against 1/1 the goal is
+-- imul num 1 = imul 1 (succ (dmul d k)), stripped by imulOneR/imulOneL to
+-- nonneg (mulW (succ k) (succ d)) = nonneg (succ (dmul d k)), closed by
+-- mulWComm + dmulSucc (mulW (succ k) (succ d) = mulW (succ d) (succ k) =
+-- succ (dmul d k)).
+recipInvClose : (k : Whole) -> (d : Whole)
+  -> Eq Int (imul (nonneg (mulW (succ k) (succ d))) (nonneg (succ zero)))
+            (imul (nonneg (succ zero)) (nonneg (succ (dmul d k)))) is
+  fn (k : Whole) (d : Whole) is
+    transEq Int
+      (imul (nonneg (mulW (succ k) (succ d))) (nonneg (succ zero)))
+      (nonneg (mulW (succ k) (succ d)))
+      (imul (nonneg (succ zero)) (nonneg (succ (dmul d k))))
+      (imulOneR (nonneg (mulW (succ k) (succ d))))
+      (transEq Int
+        (nonneg (mulW (succ k) (succ d)))
+        (nonneg (succ (dmul d k)))
+        (imul (nonneg (succ zero)) (nonneg (succ (dmul d k))))
+        (congNonneg (mulW (succ k) (succ d)) (succ (dmul d k))
+          (transEq Whole (mulW (succ k) (succ d)) (mulW (succ d) (succ k)) (succ (dmul d k))
+            (mulWComm (succ k) (succ d))
+            (dmulSucc d k)))
+        (symEq Int (imul (nonneg (succ zero)) (nonneg (succ (dmul d k)))) (nonneg (succ (dmul d k)))
+          (imulOneL (nonneg (succ (dmul d k))))))
+  end
+end
+
+-- p * recip p ~ 1/1, guarded by a non-zero numerator. Worker over the
+-- numerator-explicit representative (i, d); IntElim + WholeElim mirror
+-- recipRespOn's split so rawRecipOn computes in each arm. The nonneg zero
+-- arm is discharged ex falso by boolDiscTF (the guard IS Eq Bool true
+-- false there); the nonneg (succ k) and negsucc k arms both close by
+-- recipInvClose (their numerators are definitionally equal).
+recipInvLPOn : (i : Int) -> (d : Whole) -> Eq Bool (isZeroInt i) false
+  -> QRel (rawMul (qpair i d) (rawRecipOn i d)) (qpair (nonneg (succ zero)) zero) is
+  fn (i : Int) (d : Whole) is
+    IntElim (fn (w : Int) is Eq Bool (isZeroInt w) false
+        -> QRel (rawMul (qpair w d) (rawRecipOn w d)) (qpair (nonneg (succ zero)) zero) end)
+      (fn (n : Whole) is
+        WholeElim (fn (m : Whole) is Eq Bool (isZeroInt (nonneg m)) false
+            -> QRel (rawMul (qpair (nonneg m) d) (rawRecipOn (nonneg m) d)) (qpair (nonneg (succ zero)) zero) end)
+          (fn (h : Eq Bool (isZeroInt (nonneg zero)) false) is
+             boolDiscTF (QRel (rawMul (qpair (nonneg zero) d) (rawRecipOn (nonneg zero) d)) (qpair (nonneg (succ zero)) zero)) h
+           end)
+          (fn (k : Whole) (ih : Eq Bool (isZeroInt (nonneg k)) false
+              -> QRel (rawMul (qpair (nonneg k) d) (rawRecipOn (nonneg k) d)) (qpair (nonneg (succ zero)) zero)) is
+             fn (h : Eq Bool (isZeroInt (nonneg (succ k))) false) is
+               recipInvClose k d
+             end
+           end)
+          n
+       end)
+      (fn (k : Whole) is
+         fn (h : Eq Bool (isZeroInt (negsucc k)) false) is
+           recipInvClose k d
+         end
+       end)
+      i
+  end
+end
+
+recipInvLP : (p : QPair) -> Eq Bool (isZeroInt (qnum p)) false
+  -> QRel (rawMul p (rawRecip p)) (qpair (nonneg (succ zero)) zero) is
+  fn (p : QPair) (h : Eq Bool (isZeroInt (qnum p)) false) is
+    recipInvLPOn (qnum p) (qdpred p) h
+  end
+end
+
+-- A runnable witness: the reciprocal product 2/1 * recip(2/1). rawRecip
+-- swaps to 1/2 (numerator nonneg 1, denominator index succ zero), rawMul is
+-- componentwise, and the result is the UNREDUCED 2/2 -- qpair (nonneg 2)
+-- (succ zero), one cross-multiplication away from 1/1 (recipInvLP proves the
+-- QRel to 1/1, no gcd reduction performed).
+main : QPair is rawMul (qpair (nonneg 2) zero) (rawRecip (qpair (nonneg 2) zero)) end
