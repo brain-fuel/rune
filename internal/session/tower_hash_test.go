@@ -287,3 +287,25 @@ func TestFracRingLawsPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestFracFieldLawsPresent pins Task 5 of the Frac field-laws campaign (Plan B):
+// the guarded recip inverse laws and the FieldLaws bundle's first inhabitant.
+// recipInvLP/RP are the campaign's one genuinely new proof - ch113/ch116 only
+// closed the positive subtype; canonical Int closes negsucc too (its two-negative
+// numerator computes to the SAME nonneg product as the positive case). They lift
+// to recipFInvL/R (guarded by nzFrac) and assemble into divRingLawsFrac and
+// fieldLawsFrac.
+func TestFracFieldLawsPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"recipInvLP", "recipInvRP", "recipFInvL", "recipFInvR",
+		"divRingLawsFrac", "fieldLawsFrac",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}

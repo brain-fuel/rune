@@ -4239,6 +4239,181 @@ abGroupLawsFrac : AbGroupLaws Frac (groupOfRing Frac (divRingFrac.1)) is
 end
 
 -- ====================================================================
+-- FRAC LAWS (Plan B, Task 5): the GUARDED recip inverse laws and the
+-- FieldLaws bundle's FIRST inhabitant. This is the campaign's one
+-- genuinely new proof: ch113/ch116 only closed the POSITIVE subtype
+-- (their Z was itself a quotient, so sign normalization stayed open);
+-- canonical Int closes the general case by cases on the numerator. The
+-- KEY: imul (negsucc k) (negsucc d) computes on the nose to the SAME
+-- nonneg (mulW (succ k) (succ d)) as the positive numerator (two
+-- negatives -> a nonneg product, definitionally), so the negsucc case
+-- reuses the IDENTICAL closing algebra - no sign theory is needed.
+-- ====================================================================
+
+-- The shared closing identity for both non-zero numerator cases. The
+-- product p * recip p has numerator nonneg (mulW (succ k) (succ d)) and
+-- denominator index dmul d k; cross-multiplied against 1/1 the goal is
+-- imul num 1 = imul 1 (succ (dmul d k)), stripped by imulOneR/imulOneL to
+-- nonneg (mulW (succ k) (succ d)) = nonneg (succ (dmul d k)), closed by
+-- mulWComm + dmulSucc (mulW (succ k) (succ d) = mulW (succ d) (succ k) =
+-- succ (dmul d k)).
+recipInvClose : (k : Whole) -> (d : Whole)
+  -> Eq Int (imul (nonneg (mulW (succ k) (succ d))) (nonneg (succ zero)))
+            (imul (nonneg (succ zero)) (nonneg (succ (dmul d k)))) is
+  fn (k : Whole) (d : Whole) is
+    transEq Int
+      (imul (nonneg (mulW (succ k) (succ d))) (nonneg (succ zero)))
+      (nonneg (mulW (succ k) (succ d)))
+      (imul (nonneg (succ zero)) (nonneg (succ (dmul d k))))
+      (imulOneR (nonneg (mulW (succ k) (succ d))))
+      (transEq Int
+        (nonneg (mulW (succ k) (succ d)))
+        (nonneg (succ (dmul d k)))
+        (imul (nonneg (succ zero)) (nonneg (succ (dmul d k))))
+        (congNonneg (mulW (succ k) (succ d)) (succ (dmul d k))
+          (transEq Whole (mulW (succ k) (succ d)) (mulW (succ d) (succ k)) (succ (dmul d k))
+            (mulWComm (succ k) (succ d))
+            (dmulSucc d k)))
+        (symEq Int (imul (nonneg (succ zero)) (nonneg (succ (dmul d k)))) (nonneg (succ (dmul d k)))
+          (imulOneL (nonneg (succ (dmul d k))))))
+  end
+end
+
+-- p * recip p ~ 1/1, guarded by a non-zero numerator. Worker over the
+-- numerator-explicit representative (i, d); IntElim + WholeElim mirror
+-- recipRespOn's split so rawRecipOn computes in each arm. The nonneg zero
+-- arm is discharged ex falso by boolDiscTF (the guard IS Eq Bool true
+-- false there); the nonneg (succ k) and negsucc k arms both close by
+-- recipInvClose (their numerators are definitionally equal).
+recipInvLPOn : (i : Int) -> (d : Whole) -> Eq Bool (isZeroInt i) false
+  -> QRel (rawMul (qpair i d) (rawRecipOn i d)) (qpair (nonneg (succ zero)) zero) is
+  fn (i : Int) (d : Whole) is
+    IntElim (fn (w : Int) is Eq Bool (isZeroInt w) false
+        -> QRel (rawMul (qpair w d) (rawRecipOn w d)) (qpair (nonneg (succ zero)) zero) end)
+      (fn (n : Whole) is
+        WholeElim (fn (m : Whole) is Eq Bool (isZeroInt (nonneg m)) false
+            -> QRel (rawMul (qpair (nonneg m) d) (rawRecipOn (nonneg m) d)) (qpair (nonneg (succ zero)) zero) end)
+          (fn (h : Eq Bool (isZeroInt (nonneg zero)) false) is
+             boolDiscTF (QRel (rawMul (qpair (nonneg zero) d) (rawRecipOn (nonneg zero) d)) (qpair (nonneg (succ zero)) zero)) h
+           end)
+          (fn (k : Whole) (ih : Eq Bool (isZeroInt (nonneg k)) false
+              -> QRel (rawMul (qpair (nonneg k) d) (rawRecipOn (nonneg k) d)) (qpair (nonneg (succ zero)) zero)) is
+             fn (h : Eq Bool (isZeroInt (nonneg (succ k))) false) is
+               recipInvClose k d
+             end
+           end)
+          n
+       end)
+      (fn (k : Whole) is
+         fn (h : Eq Bool (isZeroInt (negsucc k)) false) is
+           recipInvClose k d
+         end
+       end)
+      i
+  end
+end
+
+recipInvLP : (p : QPair) -> Eq Bool (isZeroInt (qnum p)) false
+  -> QRel (rawMul p (rawRecip p)) (qpair (nonneg (succ zero)) zero) is
+  fn (p : QPair) (h : Eq Bool (isZeroInt (qnum p)) false) is
+    recipInvLPOn (qnum p) (qdpred p) h
+  end
+end
+
+-- recip p * p ~ 1/1: the RT mirror, proven DIRECTLY (deriving it from
+-- recipInvLP + mulCommP would route through QRel transitivity, which is
+-- the forbidden cancellation). The succ arms reuse recipInvClose with k
+-- and d swapped: recip p * p has numerator nonneg (mulW (succ d) (succ k))
+-- and denominator index dmul k d, exactly recipInvClose d k's shape.
+recipInvRPOn : (i : Int) -> (d : Whole) -> Eq Bool (isZeroInt i) false
+  -> QRel (rawMul (rawRecipOn i d) (qpair i d)) (qpair (nonneg (succ zero)) zero) is
+  fn (i : Int) (d : Whole) is
+    IntElim (fn (w : Int) is Eq Bool (isZeroInt w) false
+        -> QRel (rawMul (rawRecipOn w d) (qpair w d)) (qpair (nonneg (succ zero)) zero) end)
+      (fn (n : Whole) is
+        WholeElim (fn (m : Whole) is Eq Bool (isZeroInt (nonneg m)) false
+            -> QRel (rawMul (rawRecipOn (nonneg m) d) (qpair (nonneg m) d)) (qpair (nonneg (succ zero)) zero) end)
+          (fn (h : Eq Bool (isZeroInt (nonneg zero)) false) is
+             boolDiscTF (QRel (rawMul (rawRecipOn (nonneg zero) d) (qpair (nonneg zero) d)) (qpair (nonneg (succ zero)) zero)) h
+           end)
+          (fn (k : Whole) (ih : Eq Bool (isZeroInt (nonneg k)) false
+              -> QRel (rawMul (rawRecipOn (nonneg k) d) (qpair (nonneg k) d)) (qpair (nonneg (succ zero)) zero)) is
+             fn (h : Eq Bool (isZeroInt (nonneg (succ k))) false) is
+               recipInvClose d k
+             end
+           end)
+          n
+       end)
+      (fn (k : Whole) is
+         fn (h : Eq Bool (isZeroInt (negsucc k)) false) is
+           recipInvClose d k
+         end
+       end)
+      i
+  end
+end
+
+recipInvRP : (p : QPair) -> Eq Bool (isZeroInt (qnum p)) false
+  -> QRel (rawMul (rawRecip p) p) (qpair (nonneg (succ zero)) zero) is
+  fn (p : QPair) (h : Eq Bool (isZeroInt (qnum p)) false) is
+    recipInvRPOn (qnum p) (qdpred p) h
+  end
+end
+
+-- The lifts. The qind motive carries the guard hypothesis (a Prop by
+-- impredicativity: nzFrac x -> Eq Frac ... is a Pi into Prop). At a qin
+-- leaf nzFrac (qin p) computes to Eq Bool (isZeroInt (qnum p)) false
+-- (isZeroF's qlift iota fires), so the guard feeds recipInvL/RP directly;
+-- mulF/recipF's iotas make the goal qin (rawMul ...) so qsound closes it.
+-- recipFInvL fills the RecipInvLT slot (recip x * x), recipFInvR the
+-- RecipInvRT slot (x * recip x), matching the record formers exactly.
+recipFInvL : (x : Frac) -> nzFrac x -> Eq Frac (mulF (recipF x) x) (fracOf (succ zero)) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is nzFrac w -> Eq Frac (mulF (recipF w) w) (fracOf (succ zero)) end)
+      (fn (p : QPair) is
+        fn (h : nzFrac (qin QPair QRel p)) is
+          qsound QPair QRel (rawMul (rawRecip p) p) (qpair (nonneg (succ zero)) zero) (recipInvRP p h)
+        end
+      end)
+      x
+  end
+end
+
+recipFInvR : (x : Frac) -> nzFrac x -> Eq Frac (mulF x (recipF x)) (fracOf (succ zero)) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is nzFrac w -> Eq Frac (mulF w (recipF w)) (fracOf (succ zero)) end)
+      (fn (p : QPair) is
+        fn (h : nzFrac (qin QPair QRel p)) is
+          qsound QPair QRel (rawMul p (rawRecip p)) (qpair (nonneg (succ zero)) zero) (recipInvLP p h)
+        end
+      end)
+      x
+  end
+end
+
+-- The FieldLaws bundle's FIRST inhabitant. DivRingLaws = RingLaws + the
+-- two guarded inverse laws (RecipInvLT then RecipInvRT); FieldLaws adds
+-- CommLaws. The projections divRingFrac.1.1.2.2.1 / .2 / .1.1.2.2.2
+-- compute to mulF / recipF / fracOf (succ zero), so the inverse slots
+-- accept recipFInvL / recipFInvR on the nose.
+divRingLawsFrac : DivRingLaws Frac divRingFrac nzFrac is
+  mkAnd (RingLaws Frac (divRingFrac.1))
+    (And (RecipInvLT Frac (divRingFrac.1.1.2.2.1) (divRingFrac.2) (divRingFrac.1.1.2.2.2) nzFrac)
+         (RecipInvRT Frac (divRingFrac.1.1.2.2.1) (divRingFrac.2) (divRingFrac.1.1.2.2.2) nzFrac))
+    ringLawsFrac
+    (mkAnd (RecipInvLT Frac (divRingFrac.1.1.2.2.1) (divRingFrac.2) (divRingFrac.1.1.2.2.2) nzFrac)
+           (RecipInvRT Frac (divRingFrac.1.1.2.2.1) (divRingFrac.2) (divRingFrac.1.1.2.2.2) nzFrac)
+      recipFInvL recipFInvR)
+end
+
+fieldLawsFrac : FieldLaws Frac divRingFrac nzFrac is
+  mkAnd (DivRingLaws Frac divRingFrac nzFrac) (CommLaws Frac (divRingFrac.1.1))
+    divRingLawsFrac commLawsFrac
+end
+
+-- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
 -- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),
 -- intOf (Whole -> Int), fracOf (Whole -> Frac), ratOfInt (Int -> Frac).
