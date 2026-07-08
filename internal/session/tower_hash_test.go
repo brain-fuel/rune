@@ -223,3 +223,23 @@ func TestFracNzPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestFracAddLawsPresent pins Task 2 of the Frac field-laws campaign (Plan B):
+// the four ADDITIVE laws over the quotient Frac. Each is proven at the
+// representative level (a QRel cross-multiplication identity over canonical
+// Int, closed by the ringLawsInt ingredient lemmas) and lifted to Frac by
+// qind + qsound.
+func TestFracAddLawsPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"addAssocP", "addCommP", "addZeroLP", "addZeroRP",
+		"addFAssoc", "addFComm", "addFZeroL", "addFZeroR",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
