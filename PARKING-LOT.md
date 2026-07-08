@@ -655,3 +655,19 @@ single-prelude `rune repl` load measures 0.34-0.37s against the spec's 3s
 budget - Plan A adds no load-time pain. The proof-caching question STAYS
 OPEN for Plan B, whose laws corpus (six law values, ch113/ch116-scale
 respect+law proofs) is the addition expected to press the budget.
+
+UPDATE (2026-07-08, Frac Plan B close): the budget HELD. After the six law
+values + all the representative-level respect/law lemmas landed in the
+prelude, a cold single-prelude `rune repl` load measures 0.27-0.29s (three
+runs of `echo "1/3 + 2/3" | rune repl`) - still under Plan A's own
+0.34-0.37s and an order of magnitude under the 3s budget. The Frac law
+corpus, though ch113/ch116-scale, added NO measurable per-load pain: unlike
+the Int campaign's +26s to the repl SUITE (many test-driven reloads), the
+single cold prelude load is cheap because elaboration is amortized once per
+process. So the pre-approved laws.rune split was NOT triggered. DISPOSITION:
+cross-session proof caching STAYS PARKED with NO new pressure - the two
+completed law campaigns (Int, Frac) both fit the cold-start budget, so the
+lever is unneeded until a future corpus actually crosses the 3s cold-load
+line. (The Int-campaign +26s repl-SUITE cost above is a test-throughput
+concern, distinct from the cold-load budget, and remains the standing reason
+to revisit caching if the suite time itself becomes the pain.)

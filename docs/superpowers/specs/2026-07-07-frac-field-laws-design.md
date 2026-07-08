@@ -1,11 +1,42 @@
 # v4 Frac law campaign: FieldLaws on a quotient Frac: Design
 
 Date: 2026-07-07
-Status: Plan A COMPLETE on branch feat/frac-quotient (commits de39b2b,
-ca27b11, b4552c0, c9931e2). Cold single-prelude-load wall time measured
-0.34-0.37s (three runs), well under the 3s budget of Decision 5. Plan B
-(laws) is next. Quotient route per the recorded recommendation (Int
-campaign final report).
+Status: Plan B COMPLETE on branch feat/frac-laws (commits 9f3d9f6,
+e6d3c8d, 3bedb2c, 0b1f176, 1a57a3f, 15669c3, plus this closing
+bookkeeping commit). Cold single-prelude-load wall time measured
+0.27-0.29s (three runs, `echo "1/3 + 2/3" | rune repl`), well under the
+3s budget of Decision 5 - the ~20 Frac law defs added NO measurable
+load-time pain (still under Plan A's own 0.34-0.37s), so the pre-approved
+laws.rune split contingency was NOT triggered and the whole Frac campaign
+(Plan A re-foundation + Plan B laws) is DONE. Plan A was COMPLETE on
+branch feat/frac-quotient (commits de39b2b, ca27b11, b4552c0, c9931e2;
+its cold load measured 0.34-0.37s). Quotient route per the recorded
+recommendation (Int campaign final report).
+
+### Plan B outcome notes
+
+- The six law VALUES landed in the prelude's FRAC LAWS section, over the
+  quotient Frac = Quot QPair QRel with unreduced qlift ops:
+  semiringLawsFrac, ringLawsFrac, commLawsFrac (+ commRingLawsFrac),
+  abGroupLawsFrac (via abGroupLawsOfRing), divRingLawsFrac, and the
+  deliverable `fieldLawsFrac : FieldLaws Frac divRingFrac nzFrac` - the
+  1b FieldLaws bundle's FIRST INHABITANT.
+- The campaign's mathematical novelty: the GENERAL negsucc reciprocal
+  inverse law closed ON THE NOSE via canonical Int, where ch113/ch116
+  could NOT. Their integer layer was itself a quotient of Nat-pairs, so
+  the general (signed) case demanded sign-normalization they left open;
+  our Int is canonical junk-free data, so `imul (negsucc k) (negsucc d)`
+  computes through two negations to `nonneg (mulW (succ k)(succ d))` and
+  the same closing algebra as the positive case discharges it (shared
+  recipInvClose). No gcd, coprimality, or lowest-terms fact was ever
+  proven (spec hard line held).
+- STILL OPEN (recorded, not in scope here): Show/Binary for Frac remain
+  removed - the "Plan-B-of-Show" design question (buy the lowest-terms
+  uniqueness proof, or render via the to_radix observer with a changed
+  output format) is unresolved and deferred. The duplicate
+  cong/sym/trans combinator families (explicit congE/symEq/transEq vs
+  the implicit cong/sym/trans) still want consolidation - a follow-up,
+  not a Frac-campaign obligation.
 
 ### Plan A outcome notes
 
