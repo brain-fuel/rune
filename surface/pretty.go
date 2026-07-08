@@ -50,7 +50,7 @@ func opRightAssoc(name string) bool {
 // Bound variables are named from the Scope.Name hints carried for display, freshened
 // on shadowing so the printed names never capture. Because names are reconstructed,
 // parse . resolve . pretty . resolve is the identity on core up to the de Bruijn
-// form — which is what the round-trip property asserts.
+// form - which is what the round-trip property asserts.
 func Pretty(t core.Tm) string {
 	return PrettyWith(t, nil)
 }
@@ -237,7 +237,7 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 		}
 		return "-" + strconv.Itoa(k+1), true
 	case ref.Hash == p.dec.Ok && len(args) == 3:
-		// ok A E v : a successful Result — show the payload (the A E type args are
+		// ok A E v : a successful Result - show the payload (the A E type args are
 		// the first two explicit arguments). Fall through if the payload is not a
 		// foldable numeric value.
 		if inner, ok := p.decimalStr(args[2]); ok {
@@ -248,7 +248,7 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 		}
 		return "", false
 	case ref.Hash == p.dec.Err && len(args) == 3:
-		// err A E e : a failed Result — render the ArithErr payload as a message
+		// err A E e : a failed Result - render the ArithErr payload as a message
 		// (the Show boundary). Fall back to a bare "err" for any other payload.
 		if msg, ok := p.arithErrStr(args[2]); ok {
 			return "err: " + msg, true
@@ -311,7 +311,7 @@ func (p *printer) decimalStr(t core.Tm) (string, bool) {
 	return "", false
 }
 
-// wholeBig reads a Whole as a *big.Int — the full-precision sibling of wholeVal,
+// wholeBig reads a Whole as a *big.Int - the full-precision sibling of wholeVal,
 // needed because a packed string overflows int64 after a handful of bytes. It sees
 // a compressed NatLit, a folded succ-chain, or a Nat Σ-pair (folds to its first
 // component). Returns ok=false for anything else.
@@ -329,7 +329,7 @@ func (p *printer) wholeBig(t core.Tm) (*big.Int, bool) {
 }
 
 // stringStr folds a saturated `bytes <packed>` application back to the quoted
-// string literal it desugared from — the exact inverse of surface.strLit. The
+// string literal it desugared from - the exact inverse of surface.strLit. The
 // packing is low-byte-first with a 0x01 sentinel on top (n = 256^k + Σ cᵢ·256ⁱ),
 // so the decode peels bytes via mod/div 256 until only the sentinel (n ≤ 1)
 // remains. Folds ONLY when the bytes are valid UTF-8 (so the literal round-trips);
@@ -357,7 +357,7 @@ func (p *printer) stringStr(t core.Tm) (string, bool) {
 		bs = append(bs, byte(mod.Int64()))
 	}
 	// A well-formed packed string ends on exactly the sentinel (acc == 1); anything
-	// else (acc == 0, i.e. no sentinel) is not a string we produced — print raw.
+	// else (acc == 0, i.e. no sentinel) is not a string we produced - print raw.
 	if acc.Cmp(one) != 0 {
 		return "", false
 	}
@@ -399,7 +399,7 @@ func quoteString(s string) string {
 }
 
 // arithErrStr renders an ArithErr value (a Result's error payload) as a human
-// message — the Show boundary for the prelude's arithmetic-error union. Each
+// message - the Show boundary for the prelude's arithmetic-error union. Each
 // constructor carries its operands; the message reads them back out. Returns
 // ok=false for anything that is not a recognised, foldable ArithErr.
 func (p *printer) arithErrStr(t core.Tm) (string, bool) {
@@ -578,7 +578,7 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 	case core.Lam:
 		// fn (x : U) (y : U) … is BODY end. The core lambda is un-annotated, so the
 		// printer emits the sole base type U for every binder domain (GRAMMAR.md §8);
-		// re-resolution discards it. The block is self-delimiting, hence an atom — it
+		// re-resolution discards it. The block is self-delimiting, hence an atom - it
 		// needs no surrounding parentheses at any precedence.
 		body := core.Tm(x)
 		cur := names
@@ -629,8 +629,8 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 			})
 		} else {
 			p.wrap(sb, prec, precArrow, func() {
-				// A domain whose printed tail is "(e : T)" — an annotation, or an
-				// application whose last argument is one — collides with dependent-Pi
+				// A domain whose printed tail is "(e : T)" - an annotation, or an
+				// application whose last argument is one - collides with dependent-Pi
 				// binder syntax once the "->" follows. Parenthesize it so the arrow
 				// cannot bind into it.
 				if arrowDomainAmbiguous(x.Dom) {
@@ -703,7 +703,7 @@ func (p *printer) print(sb *strings.Builder, t core.Tm, names []string, prec int
 		})
 	case core.NatLit:
 		// A compressed numeral folds back to its decimal digit on output
-		// (C7 / R-NUM, Decision 3) — inputs and outputs are both ordinary digits.
+		// (C7 / R-NUM, Decision 3) - inputs and outputs are both ordinary digits.
 		sb.WriteString(x.N.String())
 	default:
 		sb.WriteString("?")
@@ -773,7 +773,7 @@ func debugCore(sb *strings.Builder, t core.Tm) {
 // DebugCoreNamed renders a core term as the same explicit structural tree as
 // DebugCore, but HUMAN-READABLE: references print as their definition name (not a
 // @hash), binders carry a freshened name (not an unnamed λ/Π and bare de Bruijn
-// indices), and every node kind is shown — including NatLit (the number) and the
+// indices), and every node kind is shown - including NatLit (the number) and the
 // equality/Sigma formers DebugCore renders as `?`. It is the REPL's :ast view; like
 // :core it is a debug tree, not a sentence of the surface grammar. refNames maps a
 // definition's content hash to its display name (Session.RefNames()).
@@ -932,8 +932,8 @@ func debugCoreNamed(sb *strings.Builder, t core.Tm, refs map[core.Hash]string, s
 	}
 }
 
-// infixApp recognizes `Ref⁺ l r` — a saturated, explicit, binary application of
-// a definition whose display name is an infix operator — and returns the pieces
+// infixApp recognizes `Ref⁺ l r` - a saturated, explicit, binary application of
+// a definition whose display name is an infix operator - and returns the pieces
 // for infix printing.
 func (p *printer) infixApp(a core.App) (name string, l, r core.Tm, lvl int, ok bool) {
 	if a.Icit != core.Expl {

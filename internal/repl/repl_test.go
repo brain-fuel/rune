@@ -13,7 +13,7 @@ import (
 
 // TestREPLReload is the D7 dev-loop gate: :reload re-reads the last :load'd file from
 // disk, so an edit on disk takes effect live. Content-addressing makes it a hot reload
-// — the unchanged data decl hits the cache, the edited `dv` re-elaborates and its name
+// - the unchanged data decl hits the cache, the edited `dv` re-elaborates and its name
 // rebinds (latest-wins). We load dv = 1, edit the file to dv = 2, :reload, and see 2.
 func TestREPLReload(t *testing.T) {
 	dir := t.TempDir()
@@ -98,7 +98,7 @@ func TestREPLSession(t *testing.T) {
 
 // TestREPLDeclParity checks the REPL has FULL parity with the file loader on
 // top-level forms: a multi-line `data` declaration, a `foreign` axiom, a `partial`
-// definition, REDEFINITION (editing — latest wins), and a `module` block. Every form
+// definition, REDEFINITION (editing - latest wins), and a `module` block. Every form
 // `rune` accepts in a source file works interactively.
 func TestREPLDeclParity(t *testing.T) {
 	script := []string{
@@ -142,7 +142,7 @@ func TestREPLDeclParity(t *testing.T) {
 }
 
 // TestREPLMutualData checks a `mutual data` group (MB1) declares in the REPL and its
-// per-member eliminator computes — a feature isn't done until it works in `rune repl`.
+// per-member eliminator computes - a feature isn't done until it works in `rune repl`.
 func TestREPLMutualData(t *testing.T) {
 	script := []string{
 		"data Nat : U is",
@@ -284,7 +284,7 @@ func TestREPLNegationPromotes(t *testing.T) {
 		"-3 * 2",            // stays Int through multiplication
 		"negate (negate 3)", // double negation, Int -> Int
 		"-3 - 2",            // Int minus Int
-		"-1/3",              // (negate 1) / 3 — the operand is Int, the quotient Frac
+		"-1/3",              // (negate 1) / 3 - the operand is Int, the quotient Frac
 		"-2/4",              // negated, reduced
 		":quit",
 	}
@@ -445,8 +445,8 @@ func TestREPLIntTower(t *testing.T) {
 
 // TestREPLDemotion is the acceptance test for the checked DESCENT down the tower:
 // `3/1` is `3 : Frac` (a rational that happens to be whole), and `toWhole`/`toInt`/
-// `toNat` demote it only when it is integral (denominator 1) — `toWhole`/`toNat`
-// only when non-negative, and `toNat` only when nonzero (a counting number) —
+// `toNat` demote it only when it is integral (denominator 1) - `toWhole`/`toNat`
+// only when non-negative, and `toNat` only when nonzero (a counting number) -
 // returning a `Result A ArithErr`. The failure branch is the DISCRIMINATED UNION
 // `ArithErr`, each variant carrying its operands and folded to a message at the
 // print boundary. The implicit climb up is met by an explicit, checked climb down.
@@ -493,7 +493,7 @@ func TestREPLDemotion(t *testing.T) {
 	}
 }
 
-// TestREPLResultRefs is the acceptance test for numbered, referenceable results —
+// TestREPLResultRefs is the acceptance test for numbered, referenceable results -
 // the irb x jshell fusion. Every submitted form claims a line number N (irb-style,
 // shown in the prompt); a bare-expression result is named $N (jshell-style) and
 // bound so later input can recall it by $N or by a bare $ (the latest). Definitions
@@ -526,7 +526,7 @@ func TestREPLResultRefs(t *testing.T) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
 		}
 	}
-	// After :reset the counter restarts, so the next result is $1 again — and there
+	// After :reset the counter restarts, so the next result is $1 again - and there
 	// must be exactly two "$1 ==> " lines in the whole session (before and after reset).
 	if n := strings.Count(got, "$1 ==> "); n != 2 {
 		t.Errorf("expected two $1 results (pre- and post-reset), got %d\n%s", n, got)
@@ -537,7 +537,7 @@ func TestREPLResultRefs(t *testing.T) {
 }
 
 // TestREPLDivisionPromotes is the regression test that `/` PROMOTES Whole / Whole
-// to Frac (ℕ is not closed under division, exactly as − promotes to ℤ) — so it works
+// to Frac (ℕ is not closed under division, exactly as − promotes to ℤ) - so it works
 // on bound Whole VALUES, not just bare numeral literals that inject to Frac. The bug:
 // `$3/5` (a referenced Whole result) failed with "expected Frac, got Whole" while the
 // literal `16/5` worked.
@@ -575,7 +575,7 @@ func TestREPLDivisionPromotes(t *testing.T) {
 // TestREPLRadixAndSigfigs is the acceptance test that the fraction / radix /
 // significant-figure feature WORKS AT THE PROMPT (not just as listings): `/`
 // builds a fraction, `|>` pipes it into a conversion, and the result prints in
-// positional notation — exact (with the repetend bracketed) or rounded.
+// positional notation - exact (with the repetend bracketed) or rounded.
 func TestREPLRadixAndSigfigs(t *testing.T) {
 	script := []string{
 		"1/3",                        // a fraction prints as a/b
@@ -620,6 +620,57 @@ func TestREPLRadixAndSigfigs(t *testing.T) {
 	}
 }
 
+// TestREPLRadixLargeDen is the performance-regression pin for `to_radix`'s
+// long-division core on the quotient Frac. Two independently fatal costs were
+// fixed, and each input below pins one of them:
+//
+//  1. ARITHMETIC (kernel-accel registration, C7/R-NUM Decision 1, mirroring
+//     `builtin natMul mulW`): `expand` calls `cmul rem 10`/`qdiv r10 den`/
+//     `qmod r10 den` on every digit, and unregistered the ch203-ported defs
+//     case-peel `rem` itself - O(den) per digit, O(den^2) per expansion, and
+//     a genuine Go stack overflow at 10^8-scale remainders. `builtin natMul
+//     cmul` / `builtin natDiv qdiv` / `builtin natMod qmod` fire the
+//     one-bigint-step iota-rule instead (independent def-hash-keyed accel
+//     entries; the mulW/`//`/`%` registrations are untouched).
+//  2. CYCLE DETECTION: `wmember`/`windex` compare each remainder against
+//     every seen remainder via `eqW`, and the classic double-peel `eqW`
+//     costs O(min(m,n)) eliminator steps per comparison - the dominant
+//     O(period^2 * den) term for long repetends (~24s at den 997, and
+//     pre-existing on main), and ~10^8 steps for a SINGLE comparison at a
+//     10^9 denominator. `eqW` is now `subW`-based (both truncated
+//     differences vanish, one accelerated bigint step per comparison, the
+//     `leW` discipline), with eqWRefl/eqWSound/eqWComplete/eqWSuccSucc
+//     re-proving the new body in the prelude so the ported respect proofs
+//     are untouched.
+//
+// `1/97` (period 96) exercises the accelerated loop and cycle test many
+// times; `0.123456789` (denominator 10^9) is the reported crasher - it
+// stack-overflowed before fix 1 and was OOM-killed before fix 2, so its mere
+// completion is the pin. No wall-clock assertions (flaky); completion within
+// the test timeout is the gate. (Both run well under a second post-fix;
+// 1/997 dropped from ~24s to ~0.3s.)
+func TestREPLRadixLargeDen(t *testing.T) {
+	script := []string{
+		"1/97 |> to_radix",        // period-96 repetend, many cycle-test comparisons
+		"0.123456789 |> to_radix", // 10^9 denominator, 10^8-scale remainders
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"0.{010309278350515463917525773195876288659793814432989690721649484536082474226804123711340206185567} : RDec",
+		"0.123456789 : RDec",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q\n--- full output ---\n%s", want, got)
+		}
+	}
+}
+
 // TestREPLLargeArithAndAST guards two things: (1) the prelude registers +/*/-
 // for the bigint accel, so a large product like 4000*4000 returns its literal in
 // one step instead of materialising 16M succ nodes and overflowing the stack at
@@ -645,7 +696,7 @@ func TestREPLLargeArithAndAST(t *testing.T) {
 		"8000 : Whole",     // 4000 + 4000
 		"999 : Int",        // 1000 - 1 promotes to Int (ℕ not closed under subtraction)
 		"10000002341234123412341234000000000000000 : Whole", // beyond int64, exact
-		"((+ 1) 2)", // :ast — names, not @hash; NatLits shown, not ?
+		"((+ 1) 2)", // :ast - names, not @hash; NatLits shown, not ?
 	} {
 		if !strings.Contains(got, w) {
 			t.Errorf("output missing %q\n--- full output ---\n%s", w, got)
@@ -676,7 +727,7 @@ func TestREPLNumericTower(t *testing.T) {
 	got := out.String()
 	for _, w := range []string{
 		"5 : Whole",                    // numerals are Whole
-		"Nat -> Whole",                 // :type wholeOf — distinct types, injection
+		"Nat -> Whole",                 // :type wholeOf - distinct types, injection
 		"1 : Whole",                    // wholeOf one
 		"2 : Whole",                    // wholeOf (nsucc one)
 		"cannot unify true with false", // zero rejected from Nat
@@ -689,7 +740,7 @@ func TestREPLNumericTower(t *testing.T) {
 
 // TestREPLRunShadow drives `:run` through a prelude session: the expression is
 // type checked by the kernel, then evaluated through the erased JS shadow under
-// node — calculation without a certificate. The BigInt shadow applies (the
+// node - calculation without a certificate. The BigInt shadow applies (the
 // prelude's builtin nat is constructor-form), so 35 * 186 is arithmetic, not
 // unary chain-walking.
 func TestREPLRunShadow(t *testing.T) {
@@ -758,10 +809,10 @@ func TestREPLContinuationThenEOF(t *testing.T) {
 
 // TestREPLParseFromString is the acceptance test for the goal: getting Wholes,
 // Ints, and Rationals from the command line. A `"…"` literal is a PACKED binary
-// string (a single bignum, not a [Char] list — "Haskell's binary thing only
+// string (a single bignum, not a [Char] list - "Haskell's binary thing only
 // better"); it computes in the kernel, so parseWhole/parseInt/parseFrac run in the
-// REPL. Parsing is TOTAL — a bad token or a 0 denominator is an `err` value, never
-// a crash (D1) — and rationals come back reduced.
+// REPL. Parsing is TOTAL - a bad token or a 0 denominator is an `err` value, never
+// a crash (D1) - and rationals come back reduced.
 func TestREPLParseFromString(t *testing.T) {
 	// parseFrac is REMOVED with the Binary-Frac layer by the quotient
 	// re-foundation (Plan B revisits Frac serialization via to_radix); the
@@ -983,7 +1034,7 @@ func TestREPLInterpolation(t *testing.T) {
 }
 
 // TestREPLScribeDL loads the ch561 scribe display-list codec into a REPL
-// session (the whole listing, fed line by line — a feature isn't done until it
+// session (the whole listing, fed line by line - a feature isn't done until it
 // works in `rune repl`) and evaluates a parse in-session: the ps program
 // "1 2 moveto fill" parses to two ops, and a diagnostic carries its position.
 func TestREPLScribeDL(t *testing.T) {

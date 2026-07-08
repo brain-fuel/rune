@@ -3,8 +3,8 @@
 // pipeline lives in one place and is never duplicated. It owns a content-addressed
 // store, the name environment that resolution looks references up in, and (Phase 1)
 // the typed pipeline: every definition is type checked on entry, and its
-// well-typedness certificate — keyed by content hash and the exact set of bodies
-// the check unfolded — lands in the store's proof cache.
+// well-typedness certificate - keyed by content hash and the exact set of bodies
+// the check unfolded - lands in the store's proof cache.
 package session
 
 import (
@@ -126,7 +126,7 @@ func (t natAccelTable) NatCtors() (zero, succ core.Hash, ok bool) {
 // natAccelInfo returns the session's acceleration table as a core.NatAccelInfo,
 // or nil when nothing is registered (so m.NatAccel stays nil and tryRules short-
 // circuits exactly as before). The nat constructor hashes come from the active
-// `builtin nat` binding — the accel rule needs them to fold its bigint result
+// `builtin nat` binding - the accel rule needs them to fold its bigint result
 // back into the right literal.
 func (s *Session) natAccelInfo() core.NatAccelInfo {
 	if len(s.natAccel) == 0 {
@@ -159,7 +159,7 @@ func (s *Session) Reset() {
 // resetBuiltins clears the session and re-registers every ambient builtin group
 // (quotients, the fibrant stratum, the cubical Kan/face/interval machinery, Σ, IO,
 // equivalences, Glue, the HIT kit, …). It does NOT load the derived-univalence
-// prelude — `compilePrelude` calls it to build a builtins-only session in which to
+// prelude - `compilePrelude` calls it to build a builtins-only session in which to
 // elaborate that prelude, so the two must stay separable.
 func (s *Session) resetBuiltins() {
 	s.st = store.New()
@@ -343,12 +343,12 @@ func (s *Session) ResolveExpr(e surface.Exp) (core.Tm, error) {
 }
 
 // AddDef resolves, TYPE CHECKS, and adds a definition to the session. A reference
-// to a not-yet-defined name is rejected — recursion arrives with Phase-4 totality.
+// to a not-yet-defined name is rejected - recursion arrives with Phase-4 totality.
 // Redefining a name updates it in place (its position in the listing is kept).
 //
 // The check is cached: the definition's content hash is computed first (resolution
 // is cheap and untyped), and if the store already holds a certificate for that
-// hash whose dependency hashes all resolve, the check is skipped — a proof-cache
+// hash whose dependency hashes all resolve, the check is skipped - a proof-cache
 // hit. Otherwise the definition is elaborated and checked, and a certificate is
 // recorded with the exact unfolded-dependency set the machine logged.
 func (s *Session) AddDef(d surface.Def) (Def, error) {
@@ -612,8 +612,8 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 // binding accepts any bound TERMS z : T and s : T -> T, not only the
 // constructors of a data declaration (the numeric-tower amendment, rung C4:
 // numerals can mean an integer or a rational). When the binding IS the
-// constructor form, the session remembers that — the BigInt codegen shadow
-// applies only there. The declaration is session state only — nothing enters
+// constructor form, the session remembers that - the BigInt codegen shadow
+// applies only there. The declaration is session state only - nothing enters
 // the store.
 func (s *Session) AddBuiltinNat(b surface.BuiltinNat) error {
 	if _, ok := s.refs[b.TyName]; !ok {
@@ -640,7 +640,7 @@ func (s *Session) AddBuiltinNat(b surface.BuiltinNat) error {
 // tower rung C4): `builtin int Z intOf` / `builtin rat Rat ratOf`. It requires an
 // active `builtin nat` (the injection's domain is that Nat) and validates the
 // named function has type `Nat -> Ty`. Thereafter a numeral CHECKED AT Ty lowers
-// to `inj (NatLit n)` (elaborate/check_surface.go elabNum) — the inner literal is
+// to `inj (NatLit n)` (elaborate/check_surface.go elabNum) - the inner literal is
 // a genuine Nat (bignum + accel intact), and inj carries it into the tower type.
 // Session state only; nothing enters the store. Multiple injections coexist,
 // dispatched by the expected type; a re-declaration of the same kind replaces it.
@@ -655,7 +655,7 @@ func (s *Session) AddBuiltinNumInj(b surface.BuiltinNumInj) error {
 		return fmt.Errorf("builtin %s: unknown name %q", b.Kind, b.InjName)
 	}
 	// Type validation: the injection must be `Nat -> Ty` against the active
-	// `builtin nat` type — the rung-C4 discipline (validate by TYPE, not shape).
+	// `builtin nat` type - the rung-C4 discipline (validate by TYPE, not shape).
 	natTy := surface.EVar{Name: s.nat.TyName}
 	want := surface.EPi{Param: "_", Dom: natTy, Cod: surface.EVar{Name: b.TyName}}
 	el := s.elaborator()
@@ -709,13 +709,13 @@ var natOpKinds = map[string]struct {
 // recursive body is refl.
 //
 // Soundness gate (the metatheory-review event, made a REGISTRATION-TIME check
-// rather than a trust assumption). A wrong registration — `builtin natAdd foo`
-// where `foo` is actually multiplication — would let the accel produce `a+b`
+// rather than a trust assumption). A wrong registration - `builtin natAdd foo`
+// where `foo` is actually multiplication - would let the accel produce `a+b`
 // while `foo`'s body peels to `a*b`, two values that should be equal yet differ,
 // i.e. UNSOUND. So registration is gated twice, layered:
 //
 //  1. TYPE validation (rung-C4): the def must have type `Nat -> Nat -> Nat`
-//     against the active `builtin nat` type — the same shape check `builtin nat`
+//     against the active `builtin nat` type - the same shape check `builtin nat`
 //     applies to succ.
 //  2. SAMPLE / differential validation: for a fixed battery of (a,b) pairs, the
 //     def's own UNFOLDED result (computed with acceleration OFF, i.e. by the
@@ -725,7 +725,7 @@ var natOpKinds = map[string]struct {
 //     differential test the design property-tests into a hard gate at the trust
 //     boundary.
 //
-// Like `builtin nat`, the declaration is session state only — nothing enters the
+// Like `builtin nat`, the declaration is session state only - nothing enters the
 // store. It requires an active `builtin nat` (the accel rule folds its bigint
 // result into that binding's literal).
 func (s *Session) AddBuiltinNatOp(b surface.BuiltinNatOp) error {
@@ -749,7 +749,7 @@ func (s *Session) AddBuiltinNatOp(b surface.BuiltinNatOp) error {
 	// (2) Sample / differential validation: the def's UNFOLDED result must agree
 	// with the integer semantics on a battery of pairs (incl. boundary and an
 	// asymmetric large-ish case). Acceleration is OFF here (the def's recursive
-	// body peels the literals), so this compares the body against the bigint op —
+	// body peels the literals), so this compares the body against the bigint op -
 	// exactly the agreement the kernel will later assume when accel fires.
 	samples := [][2]int64{{0, 0}, {0, 1}, {1, 0}, {1, 1}, {2, 3}, {3, 2}, {5, 7}, {7, 5}}
 	for _, p := range samples {
@@ -760,7 +760,7 @@ func (s *Session) AddBuiltinNatOp(b surface.BuiltinNatOp) error {
 		}
 		if got != want {
 			return fmt.Errorf(
-				"builtin %s: %q does not compute %s — on (%d,%d) it yields %d, the op requires %d; refusing the registration (an accelerated op MUST agree with its own recursive body, or the kernel would be unsound)",
+				"builtin %s: %q does not compute %s - on (%d,%d) it yields %d, the op requires %d; refusing the registration (an accelerated op MUST agree with its own recursive body, or the kernel would be unsound)",
 				b.Kind, b.DefName, b.Kind, p[0], p[1], got, want)
 		}
 	}
@@ -771,7 +771,7 @@ func (s *Session) AddBuiltinNatOp(b surface.BuiltinNatOp) error {
 }
 
 // unfoldedNatCall evaluates `def a b` for nat literals a,b by the def's ORDINARY
-// recursive body — acceleration explicitly OFF — and reads the resulting numeral
+// recursive body - acceleration explicitly OFF - and reads the resulting numeral
 // back as an int64. It is the registration-time differential oracle: what the
 // kernel computes when the accel rule does NOT fire. Returns an error if the
 // result is not a concrete numeral (e.g. the def gets stuck).
@@ -832,7 +832,7 @@ func (s *Session) natLitValueOf(t core.Tm) (int64, bool) {
 }
 
 // bindingIsCtors reports whether a builtin-nat binding names exactly the
-// zero/succ constructors of a data-declared type — the shape the BigInt
+// zero/succ constructors of a data-declared type - the shape the BigInt
 // codegen shadow compiles to machine integers.
 func (s *Session) bindingIsCtors(b surface.BuiltinNat) bool {
 	tyH := s.refs[b.TyName]
@@ -867,7 +867,7 @@ func (s *Session) Pretty(t core.Tm) string {
 
 // decConfig resolves the prelude's fraction/decimal constructor hashes so the
 // printer can fold them to positional notation (1/3, 0.{3}). It is On only when
-// every name resolves — a bare or non-prelude session leaves folding off.
+// every name resolves - a bare or non-prelude session leaves folding off.
 func (s *Session) decConfig() surface.DecConfig {
 	// qin is the quotient builtin's injection head (registered in every session);
 	// qpair is the prelude's raw rational-pair constructor. A saturated
@@ -956,8 +956,8 @@ func (s *Session) elaborator() *elaborate.Elaborator {
 
 // classKeyOfType extracts (class-former, last-arg-head) from an instance's type
 // `C … T` (e.g. Monoid Nat → (Monoid, Nat)) so it can be registered in the
-// instance table. PARAMETRIC instances (C2b) carry leading Pis — `{A : U} -> Eq A
-// -> Eq (List A)` — which are peeled first so the key is read off the CODOMAIN's
+// instance table. PARAMETRIC instances (C2b) carry leading Pis - `{A : U} -> Eq A
+// -> Eq (List A)` - which are peeled first so the key is read off the CODOMAIN's
 // class application (here (Eq, List)); the premises are resolved by recursive
 // search at the use site (elaborate/resolveClass). Returns ok=false if the
 // codomain is not a ref-headed class application.
@@ -1020,7 +1020,7 @@ func (s *Session) ElabExpr(e surface.Exp) (tm, ty core.Tm, err error) {
 // newNormalizer builds a fresh per-run core Machine with the full ι wiring over
 // the session store. When accel is true it also installs the C7 acceleration
 // table (m.NatAccel); with accel false the nat ops reduce by their ordinary recursive
-// bodies — the latter is the registration-time differential oracle
+// bodies - the latter is the registration-time differential oracle
 // (unfoldedNatCall) the soundness gate compares the accelerated rule against.
 func (s *Session) newNormalizer(accel bool) *core.Machine {
 	m := core.NewMachine(s.st)
@@ -1071,7 +1071,7 @@ func (s *Session) NormalizeExpr(t core.Tm) core.Tm {
 }
 
 // NormalizeExprFolded reduces redexes (incl. stuck projections like `Fst subWhole`)
-// but leaves top-level definition references FOLDED — so a type displays with its
+// but leaves top-level definition references FOLDED - so a type displays with its
 // names intact (`Result Nat ArithErr`, not `Result (Sig Whole …) ArithErr`) while a
 // resolved-dictionary projection still collapses to the underlying type.
 func (s *Session) NormalizeExprFolded(t core.Tm) core.Tm {
@@ -1102,7 +1102,7 @@ func (s *Session) AddData(d surface.DataDef) ([]string, error) {
 // AddDataGroup elaborates and stores a MUTUALLY-recursive `mutual data … end` group
 // (MB1). The members are elaborated together (each former in scope in every member's
 // constructors), content-addressed as one group (store.AddDataGroup, tag 'G'), and
-// every former/constructor/eliminator is bound in declaration order — so codegen
+// every former/constructor/eliminator is bound in declaration order - so codegen
 // emits each member's eliminator (same-type IH) and constructors like any datatype.
 func (s *Session) AddDataGroup(g surface.DataGroup) ([]string, error) {
 	el := s.elaborator()
@@ -1128,8 +1128,8 @@ func (s *Session) AddDataGroup(g surface.DataGroup) ([]string, error) {
 
 // BindResult binds a REPL expression result under a synthesized name (e.g. the
 // internal name behind a $N reference) so later input can name it. It stores
-// (ty, tm) and registers the name for RESOLUTION ONLY — deliberately not in
-// refNames/byHash/order — so the binding resolves and unfolds without cluttering
+// (ty, tm) and registers the name for RESOLUTION ONLY - deliberately not in
+// refNames/byHash/order - so the binding resolves and unfolds without cluttering
 // :list or hijacking value pretty-printing. tm and ty must be zonked and meta-free,
 // which is exactly what ElabExpr returns.
 func (s *Session) BindResult(name string, tm, ty core.Tm) {
@@ -1279,7 +1279,7 @@ func (s *Session) isIOType(ty core.Tm) bool {
 
 // EmitExpr elaborates a surface expression against the session (the kernel
 // stays the authority on typing) and lowers it to an erased program whose Main
-// is a synthetic entry — WITHOUT registering the expression as a session
+// is a synthetic entry - WITHOUT registering the expression as a session
 // definition. This is the REPL's `:run` seam: the kernel evaluator proves, the
 // erased shadow performs.
 func (s *Session) EmitExpr(e surface.Exp) (codegen.Program, error) {
@@ -1308,7 +1308,7 @@ func (s *Session) EmitExpr(e surface.Exp) (codegen.Program, error) {
 	p.Defs = append(p.Defs, codegen.DefSpec{Name: entry, Body: ir})
 	p.Main = entry
 	// An IO-typed expression is RUN (its world thunk forced), not printed as a
-	// neutral value — so `:run do ... end` (and `:run printNat 1`) performs its
+	// neutral value - so `:run do ... end` (and `:run printNat 1`) performs its
 	// effects rather than showing the unforced thunk.
 	p.IOMain = s.isIOType(ty)
 	// Tree-shake and guard against prim collisions and drifted-group numerals,
@@ -1348,7 +1348,7 @@ type emitEnv struct {
 func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	var p codegen.Program
 	// A registered `builtin nat` group compiles to machine integers (rung 6)
-	// — only in its data-constructor form. A generalized binding (numerals
+	// - only in its data-constructor form. A generalized binding (numerals
 	// meaning an integer, a rational, …) computes through its successor term.
 	//
 	// DRIFT GATE: p.Nat set does NOT by itself imply the group emits natively.
@@ -1389,7 +1389,7 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 		// `foreign Bin : U`, `foreign Float : U`): it denotes a type at runtime and
 		// erases to the unit token, exactly like a datatype former. Without this, a
 		// bare reference to it in an erased position (an eliminator motive, an
-		// explicit type argument) would leak as a bodiless IForeign accessor —
+		// explicit type argument) would leak as a bodiless IForeign accessor -
 		// undefined on the backends that require every accessor to be defined.
 		if s.st.IsAssumed(h) {
 			if d, ok := s.byHash[h]; ok {
@@ -1404,7 +1404,7 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	}
 	// The fibrant layer's TYPE formers erase like any type: UF, El, fib, piF,
 	// pathF, pathU. Its VALUE members must not deploy at all (below): v3's
-	// criterion for the inner layer is "elaborates and checks", not "runs" —
+	// criterion for the inner layer is "elaborates and checks", not "runs" -
 	// computational inner univalence is the §F frontier.
 	if fhs, ok := s.st.FibHashes(); ok {
 		for _, i := range []int{0, 1, 2, 3, 4, 7} {
@@ -1412,13 +1412,13 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 		}
 	}
 	// The interval I is a type former (erases to the unit token); its value
-	// members (i0, i1, ineg, imin, imax) have no runtime meaning yet — paths
-	// get a shadow at §F phase 5 — so they are inner-tainted (innerTaint below).
+	// members (i0, i1, ineg, imin, imax) have no runtime meaning yet - paths
+	// get a shadow at §F phase 5 - so they are inner-tainted (innerTaint below).
 	if ihs, ok := s.st.IntervalHashes(); ok {
 		typeRefs[ihs[0]] = true
 	}
 	// The face lattice type F is a type former (erases to the unit token); its
-	// value members (ieq0/ieq1/fand/for/ftop/fbot) are inner — cofibrations
+	// value members (ieq0/ieq1/fand/for/ftop/fbot) are inner - cofibrations
 	// drive Kan operations, with no runtime meaning yet (innerTaint below).
 	if chs, ok := s.st.FaceHashes(); ok {
 		typeRefs[chs[0]] = true
@@ -1510,7 +1510,7 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	// arguments erase to the unit token, instead of leaking deep proof-only
 	// numerals into the shadow (ref_docs/rune-verified-implementations.md).
 	eraser := elaborate.NewEraser(s.elaborator(), eraseNames, typeRefs)
-	// `foreign` axioms (R-FFI) erase to IForeign host accessors, not IGlobals —
+	// `foreign` axioms (R-FFI) erase to IForeign host accessors, not IGlobals -
 	// the host links the implementation under the same accessor on every backend.
 	foreign := map[core.Hash]bool{}
 	for _, h := range s.order {
@@ -1563,18 +1563,18 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 		}
 		// Inner-layer taint: a definition whose erased body references a
 		// fibrant VALUE member (or another tainted definition) checks but
-		// does not deploy in v3 — transport along a ua-path has no erased
+		// does not deploy in v3 - transport along a ua-path has no erased
 		// meaning yet, and emitting it would silently compute the wrong
 		// function. Tainted definitions are skipped; only a tainted MAIN is
 		// an error (the callers' check; see ref_docs/rune-v3-design.md §F).
 		if bad := innerTaint(ir, tainted); bad != "" {
 			// B5 / R-ERASE2 (deploy-ban slice): inner cubical scaffolding that
-			// COMPUTES AWAY to an outer value has a genuine runtime meaning — its
+			// COMPUTES AWAY to an outer value has a genuine runtime meaning - its
 			// NORMAL FORM (definitionally equal by NbE) is taint-free. Retry the
 			// erasure on the normalized body; if the inner ops reduced off (e.g.
 			// `transp (λ_. fib Nat) zero ~> zero`, `papp … (preflF) i0 ~> x`), the
 			// result deploys soundly. If the normal form still carries inner heads
-			// it stays tainted (skipped) exactly as before — so this only ever ADDS
+			// it stays tainted (skipped) exactly as before - so this only ever ADDS
 			// sound deployments, never emits a guessed erasure.
 			nf := s.NormalizeExpr(body)
 			if irNF, err2 := eraser.Def(ty, nf); err2 == nil && innerTaint(irNF, tainted) == "" {
@@ -1733,7 +1733,7 @@ func findLitNat(p codegen.Program) (string, bool) {
 func innerTaint(t codegen.Ir, tainted map[string]string) string {
 	inner := map[string]bool{"preflF": true, "pathJ": true, "ureflU": true, "castU": true,
 		// The derived-univalence prelude defs produce inner values (pathU / El of an
-		// inner type) with no erased meaning AS VALUES — a def that references one is
+		// inner type) with no erased meaning AS VALUES - a def that references one is
 		// provisionally tainted, then B5 retries on its normal form (so `castU`-through
 		// -`ua` that computes to an outer Bool still deploys, while a bare `ua` path
 		// stays refused).

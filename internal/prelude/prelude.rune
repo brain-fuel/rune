@@ -1,9 +1,9 @@
 -- The REPL prelude: enough arithmetic for `1 + 1` to mean 2 at the prompt.
--- Everything here is ordinary surface rune — the same definitions as the
+-- Everything here is ordinary surface rune - the same definitions as the
 -- ch11 listing, no special status in the core. `rune repl --no-prelude`
 -- starts a bare session (the book's discipline: nothing you didn't write).
 --
--- The numeric tower. `Whole` is the FOUNDATION — the initial algebra {0,1,2,…}
+-- The numeric tower. `Whole` is the FOUNDATION - the initial algebra {0,1,2,…}
 -- with `zero`/`succ`, the type induction bottoms out on and the one bare
 -- numerals bind to (so `0` has a type). `Nat` is the COUNTING numbers {1,2,3,…}
 -- sitting one rung up (no zero), injected into `Whole` by `wholeOf`. `Int` and
@@ -19,7 +19,7 @@ builtin nat Whole zero succ
 
 -- The Whole-level arithmetic kernels. These are NAMED (addW/mulW/subW) so the
 -- operators `+`/`-`/`*` below can be OVERLOADED across the tower (Whole and the
--- signed fractions) by typeclass dispatch — `1 + 1` is Whole addition, `1/3 + 2/3`
+-- signed fractions) by typeclass dispatch - `1 + 1` is Whole addition, `1/3 + 2/3`
 -- is fraction addition, the SAME symbol. The kernels carry the bigint acceleration.
 
 addW : Whole -> Whole -> Whole is
@@ -46,7 +46,7 @@ mulW : Whole -> Whole -> Whole is
   end
 end
 
--- Accelerate multiplication likewise — what makes `4000 * 4000` instant instead
+-- Accelerate multiplication likewise - what makes `4000 * 4000` instant instead
 -- of materialising 16 million succ nodes (and overflowing the stack at readback).
 builtin natMul mulW
 
@@ -254,7 +254,7 @@ end
 
 -- leW: the accel-friendly `<=`. `subW` is the kernel-accelerated native subtract
 -- (O(1) on bignums) and `isZero` is depth-1, so `leW a b` is O(1) in COMPILED code
--- where `leb a b` is O(a) — `leb` recurses into a comparison FUNCTION the eager
+-- where `leb a b` is O(a) - `leb` recurses into a comparison FUNCTION the eager
 -- NatElim codegen fully unrolls (catastrophic on packed-bignum-sized Wholes; fine
 -- in the lazy kernel). Prefer `leW` for comparisons on values that deploy.
 leW : Whole -> Whole -> Bool is
@@ -379,11 +379,11 @@ isPos : Whole -> Bool is
   end
 end
 
--- Nat: the counting numbers {1,2,3,…} as the POSITIVE wholes — a whole paired
+-- Nat: the counting numbers {1,2,3,…} as the POSITIVE wholes - a whole paired
 -- with a proof it is nonzero. A bare Peano `data Nat is one | nsucc` would be
 -- HASH-IDENTICAL to Whole (same shape, and identity is structure not names), so
 -- the distinct type must have distinct structure: this Σ. `zero` cannot inhabit
--- it — that would need `Eq Bool false true`, which is uninhabited — so Nat is
+-- it - that would need `Eq Bool false true`, which is uninhabited - so Nat is
 -- zeroless by construction. `wholeOf` is the injection Nat ↪ Whole (= .1).
 Nat : U is
   Sig Whole (fn (n : Whole) is Eq Bool (isPos n) true end)
@@ -536,10 +536,10 @@ end
 -- R": its dictionary is just the operation `A -> A -> R`. Indexing the RESULT type
 -- R as a separate parameter (keyed by A, the last argument) makes the instances
 -- distinct AND lets the result type be a plain inferred type rather than a stuck
--- projection — so `(2 - 5) + 1` composes. Whole − Whole promotes to Int, Int − Int
+-- projection - so `(2 - 5) + 1` composes. Whole − Whole promotes to Int, Int − Int
 -- stays Int, Frac − Frac stays Frac. `2 - 5` is `-3 : Int`, `5 - 2` is `3 : Int`,
 -- `1/3 - 2/3` is `-1/3 : Frac`. Whole − Whole has no whole answer, so `-` will not
--- type-check at Whole — use `monus`/`minus` (below) for a whole result.
+-- type-check at Whole - use `monus`/`minus` (below) for a whole result.
 -- ====================================================================
 SubR : U -> U -> U is fn (R : U) (A : U) is A -> A -> R end end
 instance subWhole : SubR Int  Whole is wsub end
@@ -3083,16 +3083,16 @@ data Result : U -> U -> U is
 | err : (A : U) -> (E : U) -> E -> Result A E
 end
 
--- ArithErr — a DISCRIMINATED UNION of the ways an arithmetic operation can fail,
+-- ArithErr - a DISCRIMINATED UNION of the ways an arithmetic operation can fail,
 -- each variant CARRYING the operands that explain it (the Idris2 / Lean4 / Haskell
 -- spirit: an error is structured DATA, not a string). The human-readable message is
--- the Show boundary — here the REPL's pretty-printer, which folds each variant to a
+-- the Show boundary - here the REPL's pretty-printer, which folds each variant to a
 -- sentence (`divByZero 7 0` -> "cannot divide 7 by 0"), so the operands need not be
 -- re-parsed out of a baked f-string. Room is left for further faults: add a
--- constructor and a renderer arm. `divByZero a b` covers the `b = (1-1)` case — the
+-- constructor and a renderer arm. `divByZero a b` covers the `b = (1-1)` case - the
 -- zero denominator is carried, whatever expression produced it.
 data ArithErr : U is
-  divByZero   : Whole -> Whole -> ArithErr   -- a / 0  — carries (numerator, denominator)
+  divByZero   : Whole -> Whole -> ArithErr   -- a / 0  - carries (numerator, denominator)
 | notIntegral : Frac  -> ArithErr            -- demotion of a value with denominator > 1
 | negative    : Frac  -> ArithErr            -- demotion of a negative value to Whole / Nat
 | notCounting : Frac  -> ArithErr            -- demotion of zero to a counting number (Nat)
@@ -3113,11 +3113,22 @@ end
 
 data WList : U is wnil : WList | wcons : Whole -> WList -> WList end
 
+-- Equality on Whole, ACCEL-FRIENDLY (mirrors `leW` above): two wholes agree
+-- exactly when both truncated differences vanish. `subW` is the kernel-
+-- accelerated monus, so on closed literals each test is one bigint step plus
+-- a depth-1 case, where the classic double-peel recursion costs O(min(m,n))
+-- eliminator steps per call. That cost is fatal inside `wmember`/`windex`:
+-- `expand`'s cycle test compares remainders as large as the denominator, and
+-- a decimal literal like 0.123456789 lands a 10^9 denominator, so ONE peeled
+-- comparison is ~10^8 steps. The peeled recursion remains the SPEC:
+-- eqWRefl/eqWSound/eqWComplete below prove this body reflects Whole equality,
+-- and every proof in the file consumes eqW only through those lemmas (plus
+-- eqWSuccSucc, the propositional successor-peel).
 eqW : Whole -> Whole -> Bool is
-  fn (m : Whole) is
-    case m of
-    | zero -> fn (n : Whole) is case n of | zero -> true | succ j -> false end end
-    | succ k with ih -> fn (n : Whole) is case n of | zero -> false | succ j -> ih j end end
+  fn (m : Whole) (n : Whole) is
+    case subW m n of
+    | zero -> isZero (subW n m)
+    | succ k -> false
     end
   end
 end
@@ -3197,6 +3208,22 @@ cmul : Whole -> Whole -> Whole is
     end
   end
 end
+
+-- Accelerate cmul on closed literals too (C7 / R-NUM Decision 1). `expand`
+-- calls `cmul rem 10` on every long-division step, and the recursion peels
+-- `rem` (up to `den`-1) steps, so an unaccelerated call is O(den) per step and
+-- O(den^2) over the whole expansion - fatal on a realistic decimal literal
+-- (a denominator like 10^9 overflows the readback stack). Registration is a
+-- SECOND accel entry keyed on cmul's own content hash (natAccel is a
+-- def-hash -> op map, not exclusive per op-kind), so mulW's existing `builtin
+-- natMul mulW` registration is untouched and every proof above (mulZeroR,
+-- mulDistR, mulSuccR, mulComm, mulOneR, ...) keeps unfolding cmul's real
+-- recursive body: the accel ι-rule fires ONLY when both arguments force to a
+-- closed NatLit (core.tryNatAccel), so open-term reasoning over variables
+-- like `k`/`n` is unaffected. Bridge to the recursive body is refl; agreement
+-- with bigint multiplication is the differential-tested registration gate.
+builtin natMul cmul
+
 qdivF : Whole -> Whole -> Whole -> Whole is
   fn (fuel : Whole) is
     case fuel of
@@ -3216,6 +3243,18 @@ qdivF : Whole -> Whole -> Whole -> Whole is
 end
 qdiv : Whole -> Whole -> Whole is fn (m : Whole) (n : Whole) is qdivF m m n end end
 qmod : Whole -> Whole -> Whole is fn (a : Whole) (b : Whole) is subW a (cmul (qdiv a b) b) end end
+
+-- Accelerate qdiv/qmod on closed literals (same C7/R-NUM discipline as cmul
+-- above): `expand` calls `qdiv r10 den`/`qmod r10 den` directly on every
+-- step, and qdivF/qmod's fuel-bounded recursion is bounded by the numerator,
+-- so an unaccelerated call is another O(den) cost per digit. These accel
+-- entries are independent of the existing `builtin natDiv //`/`builtin
+-- natMod %` registrations (different def hashes) and fire only on closed
+-- NatLit arguments, so the ported respect proofs (which reason about qdiv/
+-- qmod applied to open variables like rp/rq/b0/d0/p/q) keep unfolding the
+-- real recursive bodies unchanged.
+builtin natDiv qdiv
+builtin natMod qmod
 
 -- Long division with cycle detection. fuel bounds the loop (a cycle appears within
 -- `den` steps by pigeonhole); seen records remainders in position order so a recur
@@ -4237,7 +4276,7 @@ addZeroL : (r : Whole) -> Eq Whole (addW zero r) r is
 end
 
 -- QUOTIENT UNIQUENESS (ported from ch13's divUnique; ch203's cmul puts the divisor
--- on the LEFT — cmul (succ q) b = addW b (cmul q b) — so the leading b cancels via
+-- on the LEFT - cmul (succ q) b = addW b (cmul q b) - so the leading b cancels via
 -- addCancelL, and the cross-case contradiction reuses notLtMidB after an addComm.)
 
 divUnique : (b : Whole) -> (q1 : Whole) -> (q2 : Whole) -> (r1 : Whole) -> (r2 : Whole)
@@ -4295,7 +4334,7 @@ ltLeSucc : (a : Whole) -> (s : Whole) -> Eq Bool (ltb a s) (leb (succ a) s) is
   end
 end
 -- ltb x (x + succ m) = true   (ported from ch13's ltbAddSucc; addW recurses on 2nd arg,
--- and ltb on the first, so we induct on x and peel both via addSuccL is not needed —
+-- and ltb on the first, so we induct on x and peel both via addSuccL is not needed -
 -- x + succ m has a succ head after addSuccR, lining ltb's succ/succ recursion up).
 
 ltbAddSucc : (x : Whole) -> (m : Whole) -> Eq Bool (ltb x (addW x (succ m))) true is
@@ -4456,7 +4495,7 @@ end
 -- both by divLaw against the COMMON denominator (succ b0)·(succ d0), bound the two
 -- remainders (cmul ra d, cmul rc b) below it, and divUnique forces the quotients
 -- equal.  This is exactly what makes each decimal DIGIT a function of the rational
--- value — the engine of the to_radix respect proof.
+-- value - the engine of the to_radix respect proof.
 
 floorUniqueGeneral : (b0 : Whole) -> (d0 : Whole) -> (a : Whole) -> (c : Whole)
     -> Eq Whole (cmul a (succ d0)) (cmul c (succ b0))
@@ -4545,7 +4584,7 @@ end
 -- respect proof needs (it multiplies a numerator by a positive denominator
 -- zden q = intOf (succ (qdpred q))).  qind drops m to a representative (a, b);
 -- then imul (qin (a,b)) (intOf n) ≡ qin (a·n + b·0, a·0 + b·n), whose canon-abs
--- is addW (monus (a·n)(b·n)) (monus (b·n)(a·n)) once the 0-products clear — and
+-- is addW (monus (a·n)(b·n)) (monus (b·n)(a·n)) once the 0-products clear - and
 -- |m|·n = (|a−b|)·n distributes to exactly that pair via mulMonusDistR (twice).
 
 -- --- CANONICAL-INT BRIDGES (replacing ch203's quotient-Z natAbs/sign lemmas) ---
@@ -4648,7 +4687,7 @@ end
 -- nonzero-test  case _ of zero->false | succ->true  agrees on  x  and  x·(succ n):
 -- x=0 ⇒ cmul 0 (succ n) ≡ 0 (cmul recurses on its first arg), both false; x=succ j ⇒
 -- cmul (succ j)(succ n) ≡ succ (…) (addW recurses on succ n's head), both true.  This
--- is the sign analogue of monusZeroR for imag — a positive factor never flips a
+-- is the sign analogue of monusZeroR for imag - a positive factor never flips a
 -- nonzero magnitude to zero or back.
 
 nzMulSucc : (x : Whole) -> (n : Whole)
@@ -4680,7 +4719,7 @@ signResp : (p : QPair) -> (q : QPair) -> QRel p q
 end
 
 -- ============================================================================
--- RUNG 3 (fractional digits) — foundations.
+-- RUNG 3 (fractional digits) - foundations.
 -- ============================================================================
 
 -- CANCELLATION of a positive multiplier:  x·(succ k) = y·(succ k)  ⟹  x = y.
@@ -4705,14 +4744,28 @@ mulRightCancel : (k : Whole) -> (x : Whole) -> (y : Whole)
   end
 end
 
--- eqW is REFLEXIVE:  eqW n n = true.  succ/succ reduces to the recursive call by ι.
+-- subW n n = 0: peel matched successors with subWSucc; the base is ι.
+
+subSelf : (n : Whole) -> Eq Whole (subW n n) zero is
+  fn (n : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (subW x x) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (subW k k) zero) is trans (subWSucc k k) ih end)
+      n
+  end
+end
+
+-- eqW is REFLEXIVE:  eqW n n = true.  Both of the body's scrutinees are the
+-- SAME term subW n n, so one subst along subSelf rewrites them to zero at
+-- once and the body computes to true.
 
 eqWRefl : (n : Whole) -> Eq Bool (eqW n n) true is
   fn (n : Whole) is
-    WholeElim (fn (x : Whole) is Eq Bool (eqW x x) true end)
+    subst Whole zero (subW n n) (sym (subSelf n))
+      (fn (z : Whole) is
+         Eq Bool (case z of | zero -> isZero z | succ k -> false end) true
+       end)
       (refl true)
-      (fn (k : Whole) (ih : Eq Bool (eqW k k) true) is ih end)
-      n
   end
 end
 
@@ -4724,35 +4777,85 @@ eqWComplete : (x : Whole) -> (y : Whole) -> Eq Whole x y -> Eq Bool (eqW x y) tr
   end
 end
 
--- eqW is SOUND:  eqW x y = true  ⟹  x = y.  Double induction; the mismatched-head
--- branches discharge an absurd  false = true  via lteAbsurdNat, the succ/succ branch
--- recurses (eqW (succ k)(succ u) ≡ eqW k u) and re-applies succ.
+-- Both truncations zero forces equality: double induction, the mismatched
+-- corners transport a whole-headed discriminator to an absurd false = true
+-- (subW _ zero ≡ _ by ι), the succ/succ corner peels both sides with subWSucc
+-- and re-applies succ.
+
+monusBothZeroEq : (x : Whole) -> (y : Whole)
+    -> Eq Whole (subW x y) zero -> Eq Whole (subW y x) zero -> Eq Whole x y is
+  fn (x : Whole) is
+    WholeElim (fn (w : Whole) is
+        (y : Whole) -> Eq Whole (subW w y) zero -> Eq Whole (subW y w) zero -> Eq Whole w y end)
+      (fn (y : Whole) is
+         case y of
+         | zero -> fn (h1 : Eq Whole (subW zero zero) zero) (h2 : Eq Whole (subW zero zero) zero) is
+             refl zero end
+         | succ u -> fn (h1 : Eq Whole (subW zero (succ u)) zero) (h2 : Eq Whole (subW (succ u) zero) zero) is
+             lteAbsurdNat zero (succ u)
+               (subst Whole (succ u) zero h2
+                  (fn (z : Whole) is Eq Bool (case z of | zero -> false | succ j -> true end) true end)
+                  (refl true)) end
+         end
+       end)
+      (fn (k : Whole) (ih : (y : Whole) -> Eq Whole (subW k y) zero -> Eq Whole (subW y k) zero -> Eq Whole k y) is
+         fn (y : Whole) is
+           case y of
+           | zero -> fn (h1 : Eq Whole (subW (succ k) zero) zero) (h2 : Eq Whole (subW zero (succ k)) zero) is
+               lteAbsurdNat (succ k) zero
+                 (subst Whole (succ k) zero h1
+                    (fn (z : Whole) is Eq Bool (case z of | zero -> false | succ j -> true end) true end)
+                    (refl true)) end
+           | succ u -> fn (h1 : Eq Whole (subW (succ k) (succ u)) zero) (h2 : Eq Whole (subW (succ u) (succ k)) zero) is
+               cong (fn (z : Whole) is succ z end)
+                 (ih u (trans (sym (subWSucc k u)) h1) (trans (sym (subWSucc u k)) h2)) end
+           end
+         end
+       end)
+      x
+  end
+end
+
+-- eqW is SOUND:  eqW x y = true  ⟹  x = y.  Case on each scrutinee's VALUE
+-- while retaining the equation (WholeElim fed refl, the BoolElim-with-refl
+-- idiom): a succ value transports h to an absurd false = true, so both
+-- truncations are zero and monusBothZeroEq closes it.
 
 eqWSound : (x : Whole) -> (y : Whole) -> Eq Bool (eqW x y) true -> Eq Whole x y is
-  fn (x : Whole) is
-    WholeElim (fn (w : Whole) is (y : Whole) -> Eq Bool (eqW w y) true -> Eq Whole w y end)
-      (fn (y : Whole) is
-        WholeElim (fn (u : Whole) is Eq Bool (eqW zero u) true -> Eq Whole zero u end)
-          (fn (h : Eq Bool (eqW zero zero) true) is refl zero end)
-          (fn (u' : Whole) (ihu : Eq Bool (eqW zero u') true -> Eq Whole zero u') is
-            fn (h : Eq Bool (eqW zero (succ u')) true) is
-              lteAbsurdNat zero (succ u') h end
-          end)
-          y
-      end)
-      (fn (k : Whole) (ih : (y : Whole) -> Eq Bool (eqW k y) true -> Eq Whole k y) is
-        fn (y : Whole) is
-          WholeElim (fn (u : Whole) is Eq Bool (eqW (succ k) u) true -> Eq Whole (succ k) u end)
-            (fn (h : Eq Bool (eqW (succ k) zero) true) is
-              lteAbsurdNat (succ k) zero h end)
-            (fn (u' : Whole) (ihu : Eq Bool (eqW (succ k) u') true -> Eq Whole (succ k) u') is
-              fn (h : Eq Bool (eqW (succ k) (succ u')) true) is
-                cong (fn (z : Whole) is succ z end) (ih u' h) end
+  fn (x : Whole) (y : Whole) (h : Eq Bool (eqW x y) true) is
+    WholeElim (fn (w : Whole) is Eq Whole (subW x y) w -> Eq Whole x y end)
+      (fn (e1 : Eq Whole (subW x y) zero) is
+         let h1 : Eq Bool (isZero (subW y x)) true =
+           subst Whole (subW x y) zero e1
+             (fn (z : Whole) is
+                Eq Bool (case z of | zero -> isZero (subW y x) | succ k -> false end) true
+              end)
+             h in
+         WholeElim (fn (v : Whole) is Eq Whole (subW y x) v -> Eq Whole x y end)
+           (fn (e2 : Eq Whole (subW y x) zero) is monusBothZeroEq x y e1 e2 end)
+           (fn (j : Whole) (ihj : Eq Whole (subW y x) j -> Eq Whole x y) is
+              fn (e2 : Eq Whole (subW y x) (succ j)) is
+                lteAbsurdNat x y
+                  (subst Whole (subW y x) (succ j) e2
+                     (fn (z : Whole) is Eq Bool (isZero z) true end)
+                     h1)
+              end
             end)
-            y
-        end
-      end)
-      x
+           (subW y x)
+           (refl (subW y x))
+       end)
+      (fn (k : Whole) (ihk : Eq Whole (subW x y) k -> Eq Whole x y) is
+         fn (e1 : Eq Whole (subW x y) (succ k)) is
+           lteAbsurdNat x y
+             (subst Whole (subW x y) (succ k) e1
+                (fn (z : Whole) is
+                   Eq Bool (case z of | zero -> isZero (subW y x) | succ kk -> false end) true
+                 end)
+                h)
+         end
+       end)
+      (subW x y)
+      (refl (subW x y))
   end
 end
 
@@ -4763,7 +4866,7 @@ and : Bool -> Bool -> Bool is
 end
 
 -- BOOL EXTENSIONALITY:  two bools sharing the same truth value are equal.  The
--- p=true case syms f (refl true); the p=false case splits q — true contradicts via
+-- p=true case syms f (refl true); the p=false case splits q - true contradicts via
 -- g (refl true), false is refl.  The decidable bridge: it turns a biconditional on
 -- nonzero-tests into an actual Bool equality.
 
@@ -5008,7 +5111,7 @@ windexCross : (b0 : Whole) -> (d0 : Whole) -> (sP : WList) -> (sQ : WList)
 end
 
 -- ============================================================================
--- RUNG 3 — the per-step cross-equality is preserved through the long division.
+-- RUNG 3 - the per-step cross-equality is preserved through the long division.
 -- ============================================================================
 
 -- a=true and b=true give and a b = true (and true b ≡ b).
@@ -5132,7 +5235,7 @@ wcrossSnoc : (b0 : Whole) -> (d0 : Whole) -> (seenP : WList) -> (seenQ : WList)
 end
 
 -- ============================================================================
--- RUNG 3 — the lockstep:  equal fuel + cross-equal state ⟹ equal FBody.
+-- RUNG 3 - the lockstep:  equal fuel + cross-equal state ⟹ equal FBody.
 -- ============================================================================
 
 -- Ex falso for a successor equal to zero (succ-headed terms never equal zero).
@@ -5148,10 +5251,10 @@ end
 -- THE LOCKSTEP.  With the SAME fuel, two long divisions whose current remainders are
 -- cross-equal (remP·sd = remQ·sb) and whose seen-lists correspond (wcrossB) emit the
 -- SAME FBody.  Induction on fuel; the per-step case structure mirrors expand:
---   * fuel 0           — both hit the floor fbody wnil 0 true (refl);
---   * rem 0 / rem 0    — both terminate (refl); the mixed 0/succ corners are impossible
+--   * fuel 0           - both hit the floor fbody wnil 0 true (refl);
+--   * rem 0 / rem 0    - both terminate (refl); the mixed 0/succ corners are impossible
 --                        by succNotZero on the cross-equality;
---   * succ / succ      — wmemberCross aligns the cycle test, windexCross the repetend
+--   * succ / succ      - wmemberCross aligns the cycle test, windexCross the repetend
 --                        index (true branch), and on the false branch the digit agrees
 --                        (floorUniqueGeneral), the next remainder stays cross-equal
 --                        (natModCrossStep ∘ mul10Cross), the seen-lists stay corresponding
@@ -5280,7 +5383,7 @@ expandCross : (b0 : Whole) -> (d0 : Whole) -> (fuel : Whole)
 end
 
 -- ============================================================================
--- RUNG 3 — fuel sufficiency (pigeonhole).  List infrastructure first.
+-- RUNG 3 - fuel sufficiency (pigeonhole).  List infrastructure first.
 -- ============================================================================
 
 -- Boolean negation and its reflection.
@@ -5362,6 +5465,25 @@ lteSuccR : (a : Whole) -> (b : Whole) -> Eq Bool (leb a b) true -> Eq Bool (leb 
   end
 end
 
+-- eqW peels matched successors PROPOSITIONALLY (the classic double-peel body
+-- did it by ι): rewrite each of the body's two scrutinees along subWSucc.
+
+eqWSuccSucc : (a : Whole) -> (b : Whole) -> Eq Bool (eqW (succ a) (succ b)) (eqW a b) is
+  fn (a : Whole) (b : Whole) is
+    subst Whole (subW b a) (subW (succ b) (succ a)) (sym (subWSucc b a))
+      (fn (w : Whole) is
+         Eq Bool (case subW (succ a) (succ b) of | zero -> isZero w | succ k -> false end)
+                 (eqW a b)
+       end)
+      (subst Whole (subW a b) (subW (succ a) (succ b)) (sym (subWSucc a b))
+         (fn (z : Whole) is
+            Eq Bool (case z of | zero -> isZero (subW b a) | succ k -> false end)
+                    (eqW a b)
+          end)
+         (refl (eqW a b)))
+  end
+end
+
 -- x < succ d and x ≠ d ⟹ x < d.  Double induction; mismatched corners are absurd.
 
 ltSuccNe : (h : Whole) -> (d : Whole) -> Eq Bool (ltb h (succ d)) true -> Eq Bool (eqW h d) false
@@ -5385,7 +5507,7 @@ ltSuccNe : (h : Whole) -> (d : Whole) -> Eq Bool (ltb h (succ d)) true -> Eq Boo
            | zero -> fn (hlt : Eq Bool (ltb (succ k) (succ zero)) true) (hne : Eq Bool (eqW (succ k) zero) false) is
                boolDisjoint (Eq Bool (ltb (succ k) zero) true) (trans (sym (ltbZero k)) hlt) end
            | succ d' -> fn (hlt : Eq Bool (ltb (succ k) (succ (succ d'))) true) (hne : Eq Bool (eqW (succ k) (succ d')) false) is
-               ih d' hlt hne end
+               ih d' hlt (trans (sym (eqWSuccSucc k d')) hne) end
            end
          end
        end)
@@ -5596,8 +5718,8 @@ end
 
 -- THE PIGEONHOLE.  A duplicate-free WList whose entries are all < den has length
 -- ≤ den.  Induction on den: at den = 0 nothing is < 0 so the list is empty; at
--- succ d, either d is absent (weaken the bound and recurse) or present (delete it —
--- length drops by one, no-dup/bound/absence are preserved — recurse at d).
+-- succ d, either d is absent (weaken the bound and recurse) or present (delete it -
+-- length drops by one, no-dup/bound/absence are preserved - recurse at d).
 
 lenBound : (den : Whole) -> (xs : WList)
     -> Eq Bool (noDupW xs) true -> Eq Bool (allLt den xs) true
@@ -5736,8 +5858,8 @@ end
 -- provided both fuels cover the remaining capacity (cap = den − |seen|).  Induction on
 -- cap, threading the seen-list invariants (no-dup, all < den, exact capacity, rem in
 -- range).  At cap 0 the seen-list is full: any unseen nonzero rem would make
--- (wcons rem seen) a distinct list of length den+1 bounded by den — impossible by
--- lenBound — so wmember fires and both terminate identically; otherwise the floor is
+-- (wcons rem seen) a distinct list of length den+1 bounded by den - impossible by
+-- lenBound - so wmember fires and both terminate identically; otherwise the floor is
 -- never reached.  At cap > 0 the cycle test aligns the two (same scrutinee), the digit
 -- is identical, and the IH (one less capacity, one less fuel each) closes the tails.
 
@@ -5940,7 +6062,7 @@ bodyResp : (p : QPair) -> (q : QPair) -> QRel p q
   end
 end
 
--- THE WELL-DEFINEDNESS: toRadixRep is constant on each QRel class — equal sign
+-- THE WELL-DEFINEDNESS: toRadixRep is constant on each QRel class - equal sign
 -- (signResp), equal integer part (intPartResp), equal fractional body (bodyResp).
 
 toRadixRespects : (p : QPair) -> (q : QPair) -> QRel p q
@@ -5978,7 +6100,7 @@ toRadixRespects : (p : QPair) -> (q : QPair) -> QRel p q
   end
 end
 
--- THE DECIMAL OF A RATIONAL, on Q itself — the qlift of toRadixRep through QRel.
+-- THE DECIMAL OF A RATIONAL, on Q itself - the qlift of toRadixRep through QRel.
 
 nzNat : Whole -> Bool is
   fn (t : Whole) is case t of | zero -> false | succ k -> true end end
@@ -6056,7 +6178,7 @@ end
 -- to floorRep p, and floorUnique is the proof obligation qlift demands.
 
 -- ============================================================================
--- THE DECIMAL OF A RATIONAL, on Frac itself — the qlift of toRadixRep through
+-- THE DECIMAL OF A RATIONAL, on Frac itself - the qlift of toRadixRep through
 -- QRel (well-definedness = toRadixRespects: the expansion is class-invariant).
 -- ============================================================================
 to_radix : Frac -> RDec is
@@ -6069,7 +6191,7 @@ floorQ : Frac -> Int is qlift QPair QRel Int floorRep floorUnique end
 -- ----------------------------------------------------------------------------
 -- SIGNIFICANT-FIGURE ROUNDING, re-lifted as PURE POST-FUNCTIONS of the already-
 -- lifted to_radix output.  A pure function of a lifted observer respects QRel for
--- free — no second respect proof.  The RDec digit stream is read repetend-aware.
+-- free - no second respect proof.  The RDec digit stream is read repetend-aware.
 -- ----------------------------------------------------------------------------
 
 -- the i-th element of a WList (0-indexed), 0 past the end.
@@ -6156,7 +6278,7 @@ to_radix_sigfig : Whole -> Frac -> RDec is
 end
 
 -- ============================================================================
--- DEMOTION, checked — REBUILT on the LIFTED observers.  Climbing the tower is
+-- DEMOTION, checked - REBUILT on the LIFTED observers.  Climbing the tower is
 -- implicit; coming back DOWN is a deliberate, checked descent.  A Frac is integral
 -- iff its exact decimal has NO fractional digits (empty digit list); its integer
 -- value is then floorQ (exact for an integral value).  toWhole/toNat additionally
@@ -6220,12 +6342,12 @@ end
 -- ====================================================================
 -- Packed binary strings + total numeric parsing (D1 + B4 + the goal).
 -- `Bytes` is "Haskell's binary thing only better": a String is a SINGLE Whole
--- (a bignum) packing the UTF-8 bytes — NOT a [Char] cons-list. The first byte is
+-- (a bignum) packing the UTF-8 bytes - NOT a [Char] cons-list. The first byte is
 -- least-significant and a 0x01 SENTINEL caps the top, so the length is recoverable
 -- (leading-NUL bytes survive) and `uncons` is O(1): head = code % 256, tail =
 -- code // 256, and the string is exhausted when code <= 1 (sentinel only). A
 -- literal `"3/4"` desugars (surface) to `bytes <packed>`, so strings COMPUTE in
--- the kernel — these parsers run in the REPL, no host needed. The `// %` accel
+-- the kernel - these parsers run in the REPL, no host needed. The `// %` accel
 -- (above) keeps uncons one bigint step.
 -- ====================================================================
 
@@ -6254,7 +6376,7 @@ strCons : Whole -> Bytes -> Bytes is
 end
 
 -- byte length and concatenation are structural recursion on FUEL (byte count), NEVER on
--- the packed code (~256^length — a code-sized recursion OOMs the eager codegen, the leb
+-- the packed code (~256^length - a code-sized recursion OOMs the eager codegen, the leb
 -- lesson). The loops early-return at the sentinel, so runtime is O(length); `strFuel` is
 -- only a safety bound far past any practical string.
 strFuel : Whole is 1048576 end
@@ -6315,7 +6437,7 @@ eqW  : Whole -> Whole -> Bool is fn (a : Whole) (b : Whole) is andB (leb a b) (l
 -- a byte is an ASCII decimal digit iff 48 ('0') <= c <= 57 ('9').
 isDigitB : Whole -> Bool is fn (c : Whole) is andB (leb 48 c) (leb c 57) end end
 
--- the ways a parse can fail (D1: total, a value you must case on — never a crash).
+-- the ways a parse can fail (D1: total, a value you must case on - never a crash).
 data ParseErr : U is
   emptyStr  : ParseErr     -- nothing to parse
 | notNumber : ParseErr     -- a byte that is not a digit / sign / slash
@@ -6387,7 +6509,7 @@ end
 
 
 -- ====================================================================
--- Binary: encode/decode between a value and its packed-Bytes rendering — the
+-- Binary: encode/decode between a value and its packed-Bytes rendering - the
 -- "both" half of the goal (a serialization class, like Data.Binary, ONLY BETTER:
 -- decode is TOTAL, returning Result, never a partial crashing `get`). The textual
 -- parsers above ARE the decoders; the encoders render back to the same packed
@@ -6482,7 +6604,7 @@ roundWhole : Whole -> Result Whole ParseErr is fn (n : Whole) is parseWhole (enc
 roundInt   : Int   -> Result Int   ParseErr is fn (i : Int)   is parseInt   (encodeInt   i) end end
 
 -- Proof-carrying round-trips: decode-after-encode is the identity, MACHINE-CHECKED
--- by refl (it computes) — the "only better than a partial read" guarantee, on
+-- by refl (it computes) - the "only better than a partial read" guarantee, on
 -- concrete values; and a malformed token decodes to exactly the right error, not a
 -- crash. These elaborate at prelude load, so they are a standing regression gate.
 rtWhole : Eq (Result Whole ParseErr) (roundWhole 42) (ok Whole ParseErr 42) is
@@ -6496,11 +6618,11 @@ rtBad : Eq (Result Whole ParseErr) (parseWhole "9z") (err Whole ParseErr notNumb
 end
 
 -- ====================================================================
--- UNICODE: explicit levels (Rust-style). The DEFAULT level is BYTES — `strLen`/
+-- UNICODE: explicit levels (Rust-style). The DEFAULT level is BYTES - `strLen`/
 -- `strHead` above are UTF-8 bytes, matching the packed representation. This section
 -- adds the RUNE (codepoint) level: `runeLen` counts Unicode scalar values by skipping
 -- UTF-8 continuation bytes (0x80..0xBF), so `runeLen "é" = 1` while `strLen "é" = 2`.
--- (GRAPHEME clusters — the user-perceived-character level — need Unicode tables and are
+-- (GRAPHEME clusters - the user-perceived-character level - need Unicode tables and are
 -- future work; PARKING-LOT.) Fuel-bounded by byte length, never the packed code.
 -- ====================================================================
 
