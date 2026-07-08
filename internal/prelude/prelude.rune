@@ -6433,7 +6433,6 @@ end
 instance magmaBytes : Magma Bytes is strApp end
 instance monoidBytes    : Monoid Bytes is mkMonoid Bytes strApp (bytes 1) end
 
-eqW  : Whole -> Whole -> Bool is fn (a : Whole) (b : Whole) is andB (leb a b) (leb b a) end end
 -- a byte is an ASCII decimal digit iff 48 ('0') <= c <= 57 ('9').
 isDigitB : Whole -> Bool is fn (c : Whole) is andB (leb 48 c) (leb c 57) end end
 
