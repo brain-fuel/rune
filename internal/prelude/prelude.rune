@@ -3496,6 +3496,545 @@ addFZeroR : (x : Frac) -> Eq Frac (addF x (fracOf zero)) x is
   end
 end
 
+-- --------------------------------------------------------------------
+-- Task 3: the MULTIPLICATIVE, DISTRIBUTIVE, and ANNIHILATION laws.
+-- Same architecture as Task 2: a representative-level QRel identity
+-- over rawMul/rawAdd (pure Int ring algebra: the ringLawsInt corpus
+-- plus imulInterchange), lifted to Frac by qind + qsound. mulF's
+-- double-qlift iota computes qin-leaves to qin (rawMul ...) on the
+-- nose (REPL-probed on open representatives), so leaves close bare.
+-- --------------------------------------------------------------------
+
+-- COMMUTATIVITY on representatives: the componentwise numerator swaps
+-- (imulComm) and the product denominator swaps (imulComm), each side
+-- lined up through qdenMul.
+mulCommP : (p : QPair) -> (q : QPair) -> QRel (rawMul p q) (rawMul q p) is
+  fn (p : QPair) (q : QPair) is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let n1 : Int = imul np nq in
+    let n2 : Int = imul nq np in
+    transEq Int
+      (imul n1 (qden (rawMul q p)))
+      (imul n1 (imul dq dp))
+      (imul n2 (qden (rawMul p q)))
+      (congImulR n1 (qden (rawMul q p)) (imul dq dp) (qdenMul q p))
+      (transEq Int
+         (imul n1 (imul dq dp))
+         (imul n2 (imul dq dp))
+         (imul n2 (qden (rawMul p q)))
+         (congImulL n1 n2 (imul dq dp) (imulComm np nq))
+         (transEq Int
+            (imul n2 (imul dq dp))
+            (imul n2 (imul dp dq))
+            (imul n2 (qden (rawMul p q)))
+            (congImulR n2 (imul dq dp) (imul dp dq) (imulComm dq dp))
+            (congImulR n2 (imul dp dq) (qden (rawMul p q))
+               (symEq Int (qden (rawMul p q)) (imul dp dq) (qdenMul p q)))))
+  end
+end
+
+-- LEFT ONE on representatives: 1/1 * p ~ p. The numerator collapses by
+-- imulOneL; the denominator by qdenMul + imulOneL (qden of the one
+-- pair is 1).
+mulOneLP : (p : QPair) -> QRel (rawMul (qpair (nonneg (succ zero)) zero) p) p is
+  fn (p : QPair) is
+    let one : QPair = qpair (nonneg (succ zero)) zero in
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let n1 : Int = imul (nonneg (succ zero)) np in
+    let hd : Eq Int (qden (rawMul one p)) dp =
+      transEq Int (qden (rawMul one p)) (imul (nonneg (succ zero)) dp) dp
+        (qdenMul one p)
+        (imulOneL dp) in
+    transEq Int
+      (imul n1 dp)
+      (imul np dp)
+      (imul np (qden (rawMul one p)))
+      (congImulL n1 np dp (imulOneL np))
+      (congImulR np dp (qden (rawMul one p)) (symEq Int (qden (rawMul one p)) dp hd))
+  end
+end
+
+-- RIGHT ONE on representatives: p * 1/1 ~ p. Mirror with imulOneR.
+mulOneRP : (p : QPair) -> QRel (rawMul p (qpair (nonneg (succ zero)) zero)) p is
+  fn (p : QPair) is
+    let one : QPair = qpair (nonneg (succ zero)) zero in
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let n1 : Int = imul np (nonneg (succ zero)) in
+    let hd : Eq Int (qden (rawMul p one)) dp =
+      transEq Int (qden (rawMul p one)) (imul dp (nonneg (succ zero))) dp
+        (qdenMul p one)
+        (imulOneR dp) in
+    transEq Int
+      (imul n1 dp)
+      (imul np dp)
+      (imul np (qden (rawMul p one)))
+      (congImulL n1 np dp (imulOneR np))
+      (congImulR np dp (qden (rawMul p one)) (symEq Int (qden (rawMul p one)) dp hd))
+  end
+end
+
+-- LEFT ANNIHILATION on representatives: 0/1 * p ~ 0/1. Both cross
+-- products collapse to zero by imulZeroL (the right one applied at the
+-- compound denominator, which stays folded).
+mulZeroLP : (p : QPair) -> QRel (rawMul (qpair (nonneg zero) zero) p) (qpair (nonneg zero) zero) is
+  fn (p : QPair) is
+    let z0 : QPair = qpair (nonneg zero) zero in
+    let np : Int = qnum p in
+    transEq Int
+      (imul (imul (nonneg zero) np) (nonneg (succ zero)))
+      (imul (nonneg zero) (nonneg (succ zero)))
+      (imul (nonneg zero) (qden (rawMul z0 p)))
+      (congImulL (imul (nonneg zero) np) (nonneg zero) (nonneg (succ zero)) (imulZeroL np))
+      (transEq Int
+         (imul (nonneg zero) (nonneg (succ zero)))
+         (nonneg zero)
+         (imul (nonneg zero) (qden (rawMul z0 p)))
+         (imulZeroL (nonneg (succ zero)))
+         (symEq Int (imul (nonneg zero) (qden (rawMul z0 p))) (nonneg zero)
+            (imulZeroL (qden (rawMul z0 p)))))
+  end
+end
+
+-- RIGHT ANNIHILATION on representatives: p * 0/1 ~ 0/1. Mirror with
+-- imulZeroR on the numerator.
+mulZeroRP : (p : QPair) -> QRel (rawMul p (qpair (nonneg zero) zero)) (qpair (nonneg zero) zero) is
+  fn (p : QPair) is
+    let z0 : QPair = qpair (nonneg zero) zero in
+    let np : Int = qnum p in
+    transEq Int
+      (imul (imul np (nonneg zero)) (nonneg (succ zero)))
+      (imul (nonneg zero) (nonneg (succ zero)))
+      (imul (nonneg zero) (qden (rawMul p z0)))
+      (congImulL (imul np (nonneg zero)) (nonneg zero) (nonneg (succ zero)) (imulZeroR np))
+      (transEq Int
+         (imul (nonneg zero) (nonneg (succ zero)))
+         (nonneg zero)
+         (imul (nonneg zero) (qden (rawMul p z0)))
+         (imulZeroL (nonneg (succ zero)))
+         (symEq Int (imul (nonneg zero) (qden (rawMul p z0))) (nonneg zero)
+            (imulZeroL (qden (rawMul p z0)))))
+  end
+end
+
+-- ASSOCIATIVITY on representatives: rawMul is componentwise, so the
+-- numerator is one imulAssoc and the denominator is the same qdenMul
+-- threading as addAssocP (unfold both sides to products, regroup by
+-- imulAssoc, fold back). Strictly easier than the additive case: no
+-- numerator unfolding is needed (qnum of a rawMul computes on the nose).
+mulAssocP : (p : QPair) -> (q : QPair) -> (r : QPair)
+  -> QRel (rawMul (rawMul p q) r) (rawMul p (rawMul q r)) is
+  fn (p : QPair) (q : QPair) (r : QPair) is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let nr : Int = qnum r in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let dr : Int = qden r in
+    let dpq : Int = qden (rawMul p q) in
+    let dqr : Int = qden (rawMul q r) in
+    let nL : Int = imul (imul np nq) nr in
+    let nR : Int = imul np (imul nq nr) in
+    transEq Int
+      (imul nL (qden (rawMul p (rawMul q r))))
+      (imul nL (imul dp dqr))
+      (imul nR (qden (rawMul (rawMul p q) r)))
+      (congImulR nL (qden (rawMul p (rawMul q r))) (imul dp dqr) (qdenMul p (rawMul q r)))
+      (transEq Int
+         (imul nL (imul dp dqr))
+         (imul nL (imul dp (imul dq dr)))
+         (imul nR (qden (rawMul (rawMul p q) r)))
+         (congImulR nL (imul dp dqr) (imul dp (imul dq dr))
+            (congImulR dp dqr (imul dq dr) (qdenMul q r)))
+         (transEq Int
+            (imul nL (imul dp (imul dq dr)))
+            (imul nR (imul dp (imul dq dr)))
+            (imul nR (qden (rawMul (rawMul p q) r)))
+            (congImulL nL nR (imul dp (imul dq dr)) (imulAssoc np nq nr))
+            (transEq Int
+               (imul nR (imul dp (imul dq dr)))
+               (imul nR (imul (imul dp dq) dr))
+               (imul nR (qden (rawMul (rawMul p q) r)))
+               (congImulR nR (imul dp (imul dq dr)) (imul (imul dp dq) dr)
+                  (symEq Int (imul (imul dp dq) dr) (imul dp (imul dq dr)) (imulAssoc dp dq dr)))
+               (congImulR nR (imul (imul dp dq) dr) (qden (rawMul (rawMul p q) r))
+                  (symEq Int (qden (rawMul (rawMul p q) r)) (imul (imul dp dq) dr)
+                     (transEq Int (qden (rawMul (rawMul p q) r)) (imul dpq dr) (imul (imul dp dq) dr)
+                        (qdenMul (rawMul p q) r)
+                        (congImulL dpq (imul dp dq) dr (qdenMul p q))))))))
+  end
+end
+
+-- The RIGHT-distributivity cross-multiplication identity, factored out
+-- of distribRP (the ch113 qmulDistRP shape over canonical Int, its
+-- Z-quotient plumbing collapsed): with a b c the three numerators and
+-- x y z the three denominators,
+--   ((a*y + b*x)*c) * ((x*z)*(y*z))  =  ((a*c)*(y*z) + (b*c)*(x*z)) * ((x*y)*z).
+-- imulInterchange is the workhorse: regroup the denominator square,
+-- slide c against z*z (imulAssoc), and open/fold the sum by idistribR.
+distribRNum : (a : Int) -> (b : Int) -> (c : Int) -> (x : Int) -> (y : Int) -> (z : Int)
+  -> Eq Int
+       (imul (imul (iadd (imul a y) (imul b x)) c) (imul (imul x z) (imul y z)))
+       (imul (iadd (imul (imul a c) (imul y z)) (imul (imul b c) (imul x z))) (imul (imul x y) z)) is
+  fn (a : Int) (b : Int) (c : Int) (x : Int) (y : Int) (z : Int) is
+    let s : Int = iadd (imul a y) (imul b x) in
+    let xy : Int = imul x y in
+    let zz : Int = imul z z in
+    let cz : Int = imul c z in
+    let m : Int = iadd (imul (imul a c) (imul y z)) (imul (imul b c) (imul x z)) in
+    let hm : Eq Int (imul s cz) m =
+      transEq Int (imul s cz) (iadd (imul (imul a y) cz) (imul (imul b x) cz)) m
+        (idistribR (imul a y) (imul b x) cz)
+        (congIadd2 (imul (imul a y) cz) (imul (imul a c) (imul y z))
+                   (imul (imul b x) cz) (imul (imul b c) (imul x z))
+           (symEq Int (imul (imul a c) (imul y z)) (imul (imul a y) cz) (imulInterchange a c y z))
+           (symEq Int (imul (imul b c) (imul x z)) (imul (imul b x) cz) (imulInterchange b c x z))) in
+    transEq Int
+      (imul (imul s c) (imul (imul x z) (imul y z)))
+      (imul (imul s c) (imul xy zz))
+      (imul m (imul xy z))
+      (congImulR (imul s c) (imul (imul x z) (imul y z)) (imul xy zz) (imulInterchange x z y z))
+      (transEq Int
+         (imul (imul s c) (imul xy zz))
+         (imul (imul s xy) (imul c zz))
+         (imul m (imul xy z))
+         (imulInterchange s c xy zz)
+         (transEq Int
+            (imul (imul s xy) (imul c zz))
+            (imul (imul s xy) (imul cz z))
+            (imul m (imul xy z))
+            (congImulR (imul s xy) (imul c zz) (imul cz z)
+               (symEq Int (imul (imul c z) z) (imul c (imul z z)) (imulAssoc c z z)))
+            (transEq Int
+               (imul (imul s xy) (imul cz z))
+               (imul (imul s cz) (imul xy z))
+               (imul m (imul xy z))
+               (symEq Int (imul (imul s cz) (imul xy z)) (imul (imul s xy) (imul cz z))
+                  (imulInterchange s cz xy z))
+               (congImulL (imul s cz) m (imul xy z) hm))))
+  end
+end
+
+-- RIGHT DISTRIBUTIVITY on representatives: (p+q)*r ~ p*r + q*r.
+-- Unfold the compound denominators through qdenMul (interleaving
+-- congImulL/congImulR since both factors are compound), dispatch the
+-- pure-Int identity by distribRNum, fold the numerator and denominator
+-- back.
+distribRP : (p : QPair) -> (q : QPair) -> (r : QPair)
+  -> QRel (rawMul (rawAdd p q) r) (rawAdd (rawMul p r) (rawMul q r)) is
+  fn (p : QPair) (q : QPair) (r : QPair) is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let nr : Int = qnum r in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let dr : Int = qden r in
+    let dpr : Int = qden (rawMul p r) in
+    let dqr : Int = qden (rawMul q r) in
+    let nA : Int = imul (iadd (imul np dq) (imul nq dp)) nr in
+    let nB : Int = iadd (imul (imul np nr) dqr) (imul (imul nq nr) dpr) in
+    let nBf : Int = iadd (imul (imul np nr) (imul dq dr)) (imul (imul nq nr) (imul dp dr)) in
+    transEq Int
+      (imul nA (qden (rawAdd (rawMul p r) (rawMul q r))))
+      (imul nA (imul dpr dqr))
+      (imul nB (qden (rawMul (rawAdd p q) r)))
+      (congImulR nA (qden (rawAdd (rawMul p r) (rawMul q r))) (imul dpr dqr)
+         (qdenMul (rawMul p r) (rawMul q r)))
+      (transEq Int
+         (imul nA (imul dpr dqr))
+         (imul nA (imul (imul dp dr) dqr))
+         (imul nB (qden (rawMul (rawAdd p q) r)))
+         (congImulR nA (imul dpr dqr) (imul (imul dp dr) dqr)
+            (congImulL dpr (imul dp dr) dqr (qdenMul p r)))
+         (transEq Int
+            (imul nA (imul (imul dp dr) dqr))
+            (imul nA (imul (imul dp dr) (imul dq dr)))
+            (imul nB (qden (rawMul (rawAdd p q) r)))
+            (congImulR nA (imul (imul dp dr) dqr) (imul (imul dp dr) (imul dq dr))
+               (congImulR (imul dp dr) dqr (imul dq dr) (qdenMul q r)))
+            (transEq Int
+               (imul nA (imul (imul dp dr) (imul dq dr)))
+               (imul nBf (imul (imul dp dq) dr))
+               (imul nB (qden (rawMul (rawAdd p q) r)))
+               (distribRNum np nq nr dp dq dr)
+               (transEq Int
+                  (imul nBf (imul (imul dp dq) dr))
+                  (imul nB (imul (imul dp dq) dr))
+                  (imul nB (qden (rawMul (rawAdd p q) r)))
+                  (congImulL nBf nB (imul (imul dp dq) dr)
+                     (congIadd2 (imul (imul np nr) (imul dq dr)) (imul (imul np nr) dqr)
+                                (imul (imul nq nr) (imul dp dr)) (imul (imul nq nr) dpr)
+                        (congImulR (imul np nr) (imul dq dr) dqr (symEq Int dqr (imul dq dr) (qdenMul q r)))
+                        (congImulR (imul nq nr) (imul dp dr) dpr (symEq Int dpr (imul dp dr) (qdenMul p r)))))
+                  (congImulR nB (imul (imul dp dq) dr) (qden (rawMul (rawAdd p q) r))
+                     (symEq Int (qden (rawMul (rawAdd p q) r)) (imul (imul dp dq) dr)
+                        (transEq Int (qden (rawMul (rawAdd p q) r)) (imul (qden (rawAdd p q)) dr) (imul (imul dp dq) dr)
+                           (qdenMul (rawAdd p q) r)
+                           (congImulL (qden (rawAdd p q)) (imul dp dq) dr (qdenMul p q)))))))))
+  end
+end
+
+-- The LEFT-distributivity cross-multiplication identity, mirror of
+-- distribRNum with the shared factor on the left:
+--   (a*(b*z + c*y)) * ((x*y)*(x*z))  =  ((a*b)*(x*z) + (a*c)*(x*y)) * (x*(y*z)).
+distribLNum : (a : Int) -> (b : Int) -> (c : Int) -> (x : Int) -> (y : Int) -> (z : Int)
+  -> Eq Int
+       (imul (imul a (iadd (imul b z) (imul c y))) (imul (imul x y) (imul x z)))
+       (imul (iadd (imul (imul a b) (imul x z)) (imul (imul a c) (imul x y))) (imul x (imul y z))) is
+  fn (a : Int) (b : Int) (c : Int) (x : Int) (y : Int) (z : Int) is
+    let t : Int = iadd (imul b z) (imul c y) in
+    let ax : Int = imul a x in
+    let xx : Int = imul x x in
+    let yz : Int = imul y z in
+    let m : Int = iadd (imul (imul a b) (imul x z)) (imul (imul a c) (imul x y)) in
+    let hm : Eq Int (imul ax t) m =
+      transEq Int (imul ax t) (iadd (imul ax (imul b z)) (imul ax (imul c y))) m
+        (idistribL ax (imul b z) (imul c y))
+        (congIadd2 (imul ax (imul b z)) (imul (imul a b) (imul x z))
+                   (imul ax (imul c y)) (imul (imul a c) (imul x y))
+           (symEq Int (imul (imul a b) (imul x z)) (imul ax (imul b z)) (imulInterchange a b x z))
+           (symEq Int (imul (imul a c) (imul x y)) (imul ax (imul c y)) (imulInterchange a c x y))) in
+    transEq Int
+      (imul (imul a t) (imul (imul x y) (imul x z)))
+      (imul (imul a t) (imul xx yz))
+      (imul m (imul x yz))
+      (congImulR (imul a t) (imul (imul x y) (imul x z)) (imul xx yz) (imulInterchange x y x z))
+      (transEq Int
+         (imul (imul a t) (imul xx yz))
+         (imul (imul a xx) (imul t yz))
+         (imul m (imul x yz))
+         (imulInterchange a t xx yz)
+         (transEq Int
+            (imul (imul a xx) (imul t yz))
+            (imul (imul ax x) (imul t yz))
+            (imul m (imul x yz))
+            (congImulL (imul a xx) (imul ax x) (imul t yz)
+               (symEq Int (imul (imul a x) x) (imul a (imul x x)) (imulAssoc a x x)))
+            (transEq Int
+               (imul (imul ax x) (imul t yz))
+               (imul (imul ax t) (imul x yz))
+               (imul m (imul x yz))
+               (symEq Int (imul (imul ax t) (imul x yz)) (imul (imul ax x) (imul t yz))
+                  (imulInterchange ax t x yz))
+               (congImulL (imul ax t) m (imul x yz) hm))))
+  end
+end
+
+-- LEFT DISTRIBUTIVITY on representatives: p*(q+r) ~ p*q + p*r. Proven
+-- DIRECTLY (deriving it from distribRP at the representative level
+-- would need QRel transitivity, which is exactly the general
+-- cancellation this campaign avoids); same qdenMul threading as
+-- distribRP with distribLNum as the pure-Int core.
+distribLP : (p : QPair) -> (q : QPair) -> (r : QPair)
+  -> QRel (rawMul p (rawAdd q r)) (rawAdd (rawMul p q) (rawMul p r)) is
+  fn (p : QPair) (q : QPair) (r : QPair) is
+    let np : Int = qnum p in
+    let nq : Int = qnum q in
+    let nr : Int = qnum r in
+    let dp : Int = qden p in
+    let dq : Int = qden q in
+    let dr : Int = qden r in
+    let dpq : Int = qden (rawMul p q) in
+    let dpr : Int = qden (rawMul p r) in
+    let nA : Int = imul np (iadd (imul nq dr) (imul nr dq)) in
+    let nB : Int = iadd (imul (imul np nq) dpr) (imul (imul np nr) dpq) in
+    let nBf : Int = iadd (imul (imul np nq) (imul dp dr)) (imul (imul np nr) (imul dp dq)) in
+    transEq Int
+      (imul nA (qden (rawAdd (rawMul p q) (rawMul p r))))
+      (imul nA (imul dpq dpr))
+      (imul nB (qden (rawMul p (rawAdd q r))))
+      (congImulR nA (qden (rawAdd (rawMul p q) (rawMul p r))) (imul dpq dpr)
+         (qdenMul (rawMul p q) (rawMul p r)))
+      (transEq Int
+         (imul nA (imul dpq dpr))
+         (imul nA (imul (imul dp dq) dpr))
+         (imul nB (qden (rawMul p (rawAdd q r))))
+         (congImulR nA (imul dpq dpr) (imul (imul dp dq) dpr)
+            (congImulL dpq (imul dp dq) dpr (qdenMul p q)))
+         (transEq Int
+            (imul nA (imul (imul dp dq) dpr))
+            (imul nA (imul (imul dp dq) (imul dp dr)))
+            (imul nB (qden (rawMul p (rawAdd q r))))
+            (congImulR nA (imul (imul dp dq) dpr) (imul (imul dp dq) (imul dp dr))
+               (congImulR (imul dp dq) dpr (imul dp dr) (qdenMul p r)))
+            (transEq Int
+               (imul nA (imul (imul dp dq) (imul dp dr)))
+               (imul nBf (imul dp (imul dq dr)))
+               (imul nB (qden (rawMul p (rawAdd q r))))
+               (distribLNum np nq nr dp dq dr)
+               (transEq Int
+                  (imul nBf (imul dp (imul dq dr)))
+                  (imul nB (imul dp (imul dq dr)))
+                  (imul nB (qden (rawMul p (rawAdd q r))))
+                  (congImulL nBf nB (imul dp (imul dq dr))
+                     (congIadd2 (imul (imul np nq) (imul dp dr)) (imul (imul np nq) dpr)
+                                (imul (imul np nr) (imul dp dq)) (imul (imul np nr) dpq)
+                        (congImulR (imul np nq) (imul dp dr) dpr (symEq Int dpr (imul dp dr) (qdenMul p r)))
+                        (congImulR (imul np nr) (imul dp dq) dpq (symEq Int dpq (imul dp dq) (qdenMul p q)))))
+                  (congImulR nB (imul dp (imul dq dr)) (qden (rawMul p (rawAdd q r)))
+                     (symEq Int (qden (rawMul p (rawAdd q r))) (imul dp (imul dq dr))
+                        (transEq Int (qden (rawMul p (rawAdd q r))) (imul dp (qden (rawAdd q r))) (imul dp (imul dq dr))
+                           (qdenMul p (rawAdd q r))
+                           (congImulR dp (qden (rawAdd q r)) (imul dq dr) (qdenMul q r)))))))))
+  end
+end
+
+-- The LIFTED multiplicative/distributive/annihilation laws. Stacked
+-- qind exactly as the additive lifts: the motives are Prop by
+-- impredicativity, the mulF/addF iotas compute every qin-leaf down to
+-- qin (rawMul/rawAdd ...), and qsound closes with the representative
+-- lemma. fracOf (succ zero) / fracOf zero compute to their qin pairs
+-- definitionally, so the one/zero leaves convert on the nose.
+mulFAssoc : (x : Frac) -> (y : Frac) -> (z : Frac)
+  -> Eq Frac (mulF (mulF x y) z) (mulF x (mulF y z)) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (wx : Frac) is (y : Frac) -> (z : Frac) -> Eq Frac (mulF (mulF wx y) z) (mulF wx (mulF y z)) end)
+      (fn (p : QPair) is
+        fn (y : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is (z : Frac) -> Eq Frac (mulF (mulF (qin QPair QRel p) wy) z) (mulF (qin QPair QRel p) (mulF wy z)) end)
+            (fn (q : QPair) is
+              fn (z : Frac) is
+                qind QPair QRel
+                  (fn (wz : Frac) is Eq Frac (mulF (mulF (qin QPair QRel p) (qin QPair QRel q)) wz) (mulF (qin QPair QRel p) (mulF (qin QPair QRel q) wz)) end)
+                  (fn (r : QPair) is
+                    qsound QPair QRel
+                      (rawMul (rawMul p q) r) (rawMul p (rawMul q r))
+                      (mulAssocP p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+mulFComm : (x : Frac) -> (y : Frac) -> Eq Frac (mulF x y) (mulF y x) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (wx : Frac) is (y : Frac) -> Eq Frac (mulF wx y) (mulF y wx) end)
+      (fn (p : QPair) is
+        fn (y : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is Eq Frac (mulF (qin QPair QRel p) wy) (mulF wy (qin QPair QRel p)) end)
+            (fn (q : QPair) is
+              qsound QPair QRel (rawMul p q) (rawMul q p) (mulCommP p q)
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+mulFOneL : (x : Frac) -> Eq Frac (mulF (fracOf (succ zero)) x) x is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is Eq Frac (mulF (fracOf (succ zero)) w) w end)
+      (fn (p : QPair) is
+        qsound QPair QRel (rawMul (qpair (nonneg (succ zero)) zero) p) p (mulOneLP p)
+      end)
+      x
+  end
+end
+
+mulFOneR : (x : Frac) -> Eq Frac (mulF x (fracOf (succ zero))) x is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is Eq Frac (mulF w (fracOf (succ zero))) w end)
+      (fn (p : QPair) is
+        qsound QPair QRel (rawMul p (qpair (nonneg (succ zero)) zero)) p (mulOneRP p)
+      end)
+      x
+  end
+end
+
+distribFL : (x : Frac) -> (y : Frac) -> (z : Frac)
+  -> Eq Frac (mulF x (addF y z)) (addF (mulF x y) (mulF x z)) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (wx : Frac) is (y : Frac) -> (z : Frac) -> Eq Frac (mulF wx (addF y z)) (addF (mulF wx y) (mulF wx z)) end)
+      (fn (p : QPair) is
+        fn (y : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is (z : Frac) -> Eq Frac (mulF (qin QPair QRel p) (addF wy z)) (addF (mulF (qin QPair QRel p) wy) (mulF (qin QPair QRel p) z)) end)
+            (fn (q : QPair) is
+              fn (z : Frac) is
+                qind QPair QRel
+                  (fn (wz : Frac) is Eq Frac (mulF (qin QPair QRel p) (addF (qin QPair QRel q) wz)) (addF (mulF (qin QPair QRel p) (qin QPair QRel q)) (mulF (qin QPair QRel p) wz)) end)
+                  (fn (r : QPair) is
+                    qsound QPair QRel
+                      (rawMul p (rawAdd q r)) (rawAdd (rawMul p q) (rawMul p r))
+                      (distribLP p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+distribFR : (x : Frac) -> (y : Frac) -> (z : Frac)
+  -> Eq Frac (mulF (addF x y) z) (addF (mulF x z) (mulF y z)) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (wx : Frac) is (y : Frac) -> (z : Frac) -> Eq Frac (mulF (addF wx y) z) (addF (mulF wx z) (mulF y z)) end)
+      (fn (p : QPair) is
+        fn (y : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is (z : Frac) -> Eq Frac (mulF (addF (qin QPair QRel p) wy) z) (addF (mulF (qin QPair QRel p) z) (mulF wy z)) end)
+            (fn (q : QPair) is
+              fn (z : Frac) is
+                qind QPair QRel
+                  (fn (wz : Frac) is Eq Frac (mulF (addF (qin QPair QRel p) (qin QPair QRel q)) wz) (addF (mulF (qin QPair QRel p) wz) (mulF (qin QPair QRel q) wz)) end)
+                  (fn (r : QPair) is
+                    qsound QPair QRel
+                      (rawMul (rawAdd p q) r) (rawAdd (rawMul p r) (rawMul q r))
+                      (distribRP p q r)
+                  end)
+                  z
+              end
+            end)
+            y
+        end
+      end)
+      x
+  end
+end
+
+mulFZeroL : (x : Frac) -> Eq Frac (mulF (fracOf zero) x) (fracOf zero) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is Eq Frac (mulF (fracOf zero) w) (fracOf zero) end)
+      (fn (p : QPair) is
+        qsound QPair QRel (rawMul (qpair (nonneg zero) zero) p) (qpair (nonneg zero) zero) (mulZeroLP p)
+      end)
+      x
+  end
+end
+
+mulFZeroR : (x : Frac) -> Eq Frac (mulF x (fracOf zero)) (fracOf zero) is
+  fn (x : Frac) is
+    qind QPair QRel
+      (fn (w : Frac) is Eq Frac (mulF w (fracOf zero)) (fracOf zero) end)
+      (fn (p : QPair) is
+        qsound QPair QRel (rawMul p (qpair (nonneg zero) zero)) (qpair (nonneg zero) zero) (mulZeroRP p)
+      end)
+      x
+  end
+end
+
 -- ====================================================================
 -- THE TOWER GRAPH (v4). Named injections up the tower with homomorphism
 -- certificates. Edges: wholeOf (Nat -> Whole, the projection, above),

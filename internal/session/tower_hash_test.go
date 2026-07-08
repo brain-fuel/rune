@@ -243,3 +243,25 @@ func TestFracAddLawsPresent(t *testing.T) {
 		}
 	}
 }
+
+// TestFracMulLawsPresent pins Task 3 of the Frac field-laws campaign (Plan B):
+// the eight MULTIPLICATIVE/distributive/annihilation laws over the quotient
+// Frac. Each is proven at the representative level (a QRel cross-multiplication
+// identity over canonical Int, closed by the ringLawsInt ingredient lemmas plus
+// imulInterchange) and lifted to Frac by qind + qsound.
+func TestFracMulLawsPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"mulAssocP", "mulCommP", "mulOneLP", "mulOneRP",
+		"distribLP", "distribRP", "mulZeroLP", "mulZeroRP",
+		"mulFAssoc", "mulFComm", "mulFOneL", "mulFOneR",
+		"distribFL", "distribFR", "mulFZeroL", "mulFZeroR",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
