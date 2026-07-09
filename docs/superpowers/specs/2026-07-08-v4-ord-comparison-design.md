@@ -1,8 +1,25 @@
 # v4 Ord + comparison: DecEq / Ord classes, ordered-algebra bridge, host-native lowering: Design
 
 Date: 2026-07-08
-Status: Author-approved (session). Full scope: tower instances + ordered-algebra
-bridge + all-backend lowering.
+Status: PLAN A COMPLETE (2026-07-09). Full scope: tower instances + ordered-algebra
+bridge + all-backend lowering. Plan A (the classes + tower DecEq/Ord instances,
+Decisions 1-4 + 7) landed on feat/ord-classes across five commits: d369e9b (Task 1:
+Ordering type + DecEq/Ord ops classes + laws records + comparison defaults),
+35039f5 (Task 2: Whole DecEq/Ord instances from the leb corpus), 6950fee (Task 3:
+Int ileb/ieqb + sign-case DecEq/Ord instances), 618c5af (Task 4: Frac comparison
+over the quotient + DecEq/Ord instances, the positive-scaling respect proof), and
+Task 5 (ch574 doctrine chapter + the DecEq/Ord/Ordering hash-collision audit +
+Plan A close). Cold `rune repl` prelude load steady-state ~0.5s vs the 3s budget
+(cold-cache first exec 3.5s is page-cache warmup).
+
+Plan A OUTCOME. The three coherent comparison views (le / compare / Le) landed as
+one two-field Ord ops record plus the erased Le proof-view, with DecEq a
+principled standalone class (Bool-marker Sig, distinct hash confirmed by the
+audit). The campaign's real content is that the Frac quotient order is proven to
+respect the relation by POSITIVE-SCALING MONOTONICITY (ilebMulPosR / lebMulPosR),
+never by multiplicative cancellation and never by any gcd / lowest-terms fact -
+the hard line of the spec held. Plan B (the ordered-algebra bridge, Decision 5)
+and Plan C (all-backend native lowering, Decision 6) are next.
 Parent: docs/superpowers/plans/2026-07-06-three-majors-roadmap.md (v4 numerics;
 Ord is the named prerequisite for Real/IEEE754/Decimal).
 Consumes: the v4 algebra hierarchy (Semiring/Ring/DivRing ops + laws split,

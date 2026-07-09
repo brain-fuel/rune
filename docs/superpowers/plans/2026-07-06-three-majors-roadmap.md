@@ -65,6 +65,12 @@ STILL OPEN (out of the whole-Frac-campaign scope): Show/Binary Frac remain
 removed pending the Plan-B-of-Show design question; the duplicate
 cong/sym/trans combinator consolidation is a follow-up. Next v4: the
 remaining new types (Word/Decimal/IEEE754/Real/Complex/Quaternion),
-literals, REPL compiled-eval, Ord. v5/v6 not yet decomposed. Each
+literals, REPL compiled-eval, Ord. Ord campaign Plan A COMPLETE on
+feat/ord-classes (DecEq/Ord classes + laws records + the three coherent
+views le/compare/Le + PROVEN Whole/Int/Frac DecEq/Ord instances; the Frac
+quotient order proven by positive-scaling monotonicity, no cancellation;
+ch574 doctrine chapter + hash audit; cold load ~0.5s vs 3s budget);
+Plan B (the ordered-algebra bridge) then Plan C (all-backend native
+lowering) next. v5/v6 not yet decomposed. Each
 bump gets its own spec -> plan(s) -> implementation cycles when its turn
 comes.

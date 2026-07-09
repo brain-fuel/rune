@@ -64,10 +64,10 @@
 
 - IMPORTANT collision note: `DecEq A` as a bare `A -> A -> Bool` and `Ord`'s `le` field are the same type. This is why DecEq is a RECORD (mkDecEq wraps the function) - so its hash is a Sig, distinct from a bare arrow and from Ord's two-field Sig. Confirm in Task 5's audit; if the record form still collides with another one-field record, add a phantom marker field (documented).
 
-- [ ] **Step 1:** Write failing presence test `TestOrdScaffoldPresent` in tower_hash_test.go asserting the session resolves: Ordering, flipOrd, DecEq, mkDecEq, eqbOf, Ord, mkOrd, leOf, compareOf, Le, compareFromLe, leFromCompare, DecEqLaws, OrdLaws. Run: `go test ./internal/session/ -run TestOrdScaffoldPresent -count=1` - FAIL.
-- [ ] **Step 2:** Add Ordering + flipOrd + the two classes + accessors + Le + defaults + derived + the two laws records, in the high ORDERING+DECEQ+ORD banner section (depends only on Bool/Eq/Sig). Prelude loads (`go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` as a cheap load check).
-- [ ] **Step 3:** Run: `go test ./internal/session/ -run TestOrdScaffoldPresent -count=1` - PASS. Then `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 4:** Commit: `git commit -m "feat(prelude): Ordering type + DecEq/Ord classes + laws records + comparison defaults"` (explicit pathspecs).
+- [x] **Step 1:** Write failing presence test `TestOrdScaffoldPresent` in tower_hash_test.go asserting the session resolves: Ordering, flipOrd, DecEq, mkDecEq, eqbOf, Ord, mkOrd, leOf, compareOf, Le, compareFromLe, leFromCompare, DecEqLaws, OrdLaws. Run: `go test ./internal/session/ -run TestOrdScaffoldPresent -count=1` - FAIL.
+- [x] **Step 2:** Add Ordering + flipOrd + the two classes + accessors + Le + defaults + derived + the two laws records, in the high ORDERING+DECEQ+ORD banner section (depends only on Bool/Eq/Sig). Prelude loads (`go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` as a cheap load check).
+- [x] **Step 3:** Run: `go test ./internal/session/ -run TestOrdScaffoldPresent -count=1` - PASS. Then `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 4:** Commit: `git commit -m "feat(prelude): Ordering type + DecEq/Ord classes + laws records + comparison defaults"` (explicit pathspecs).
 
 ---
 
@@ -86,11 +86,11 @@
   - `ordLawsWhole : OrdLaws Whole ordWhole` = the six-slot mkAnd chain: leRefl=lebRefl, leTrans=lebTrans, leAntisym=lteAntisym, leTotal from `lebComplete` (case on leb a b: true -> or _ _ = true by refl-ish; false -> lebComplete gives leb b a = true, so or false true = true - build the Bool identity), cmpEq and cmpLe from the `compareFromLe` definition unfolding (compare a b = eq means both leb directions true, so lteAntisym closes cmpEq; compare a b = lt means leb a b true, closing cmpLe - these unfold the default `compareFromLe`; probe the reduction in the REPL first).
 - Le Whole ordWhole a b computes to `Eq Bool (leb a b) true`, so the existing lemmas' outputs match the slot types on the nose.
 
-- [ ] **Step 1:** Presence test `TestWholeOrdInstancesPresent` (decEqWhole, ordWhole, decEqLawsWhole, ordLawsWhole). FAIL.
-- [ ] **Step 2:** Add the two instances (after the leb/eqW corpus). Prelude loads. Probe in REPL: `compareOf Whole ordWhole 2 3` -> lt-shaped, `leOf Whole ordWhole 3 3` -> true, `eqbOf Whole decEqWhole 4 4` -> true.
-- [ ] **Step 3:** Add decEqLawsWhole + ordLawsWhole. The cmpEq/cmpLe slots require unfolding compareFromLe: if a slot sticks, add a small local lemma `compareFromLeEq`/`compareFromLeLt` characterizing the default (these are reusable by Int/Frac later, so name them generally, not Whole-specific). Prelude loads.
-- [ ] **Step 4:** Presence PASS; `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 5:** Commit: `git commit -m "feat(prelude): Whole DecEq + Ord instances (total order from the leb corpus)"`
+- [x] **Step 1:** Presence test `TestWholeOrdInstancesPresent` (decEqWhole, ordWhole, decEqLawsWhole, ordLawsWhole). FAIL.
+- [x] **Step 2:** Add the two instances (after the leb/eqW corpus). Prelude loads. Probe in REPL: `compareOf Whole ordWhole 2 3` -> lt-shaped, `leOf Whole ordWhole 3 3` -> true, `eqbOf Whole decEqWhole 4 4` -> true.
+- [x] **Step 3:** Add decEqLawsWhole + ordLawsWhole. The cmpEq/cmpLe slots require unfolding compareFromLe: if a slot sticks, add a small local lemma `compareFromLeEq`/`compareFromLeLt` characterizing the default (these are reusable by Int/Frac later, so name them generally, not Whole-specific). Prelude loads.
+- [x] **Step 4:** Presence PASS; `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 5:** Commit: `git commit -m "feat(prelude): Whole DecEq + Ord instances (total order from the leb corpus)"`
 
 ---
 
@@ -111,11 +111,11 @@
   - `ordLawsInt : OrdLaws Int ordInt` - leRefl/leTrans/leAntisym/leTotal by case analysis on the Int constructors reducing each to the corresponding Whole lemma (the negsucc/negsucc case reverses, so leTrans on two negsuccs uses lebTrans with swapped operands; leAntisym on negsuccs uses lteAntisym then cong negsucc). cmpEq/cmpLe via the compareFromLe characterization lemmas from Task 2.
 - Constructor injectivity: `nonnegInj` exists (Frac Task 1). Need `negsuccInj : (k j) -> Eq Int (negsucc k) (negsucc j) -> Eq Whole k j` (mirror nonnegInj via the isign/imag-style projection; grep for a negsucc projection, else add it). Mixed-constructor discrimination via `intTagDisc` (Frac Task 1) / its dual.
 
-- [ ] **Step 1:** Presence test `TestIntOrdInstancesPresent` (ileb, ieqb, decEqInt, ordInt, decEqLawsInt, ordLawsInt). FAIL.
-- [ ] **Step 2:** Add ileb + ieqb + any needed injectivity helper. Prelude loads. REPL probe: `ileb (nonneg 2) (nonneg 3)` -> true; `ileb (negsucc 0) (nonneg 0)` -> true (-1 <= 0); `ileb (negsucc 2) (negsucc 0)` -> true (-3 <= -1); `ileb (nonneg 0) (negsucc 0)` -> false; `ieqb (negsucc 1) (negsucc 1)` -> true.
-- [ ] **Step 3:** Add the instances + laws. Prelude loads.
-- [ ] **Step 4:** Presence PASS; `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 5:** Commit: `git commit -m "feat(prelude): Int comparison (ileb/ieqb) + DecEq + Ord instances (sign-case order)"`
+- [x] **Step 1:** Presence test `TestIntOrdInstancesPresent` (ileb, ieqb, decEqInt, ordInt, decEqLawsInt, ordLawsInt). FAIL.
+- [x] **Step 2:** Add ileb + ieqb + any needed injectivity helper. Prelude loads. REPL probe: `ileb (nonneg 2) (nonneg 3)` -> true; `ileb (negsucc 0) (nonneg 0)` -> true (-1 <= 0); `ileb (negsucc 2) (negsucc 0)` -> true (-3 <= -1); `ileb (nonneg 0) (negsucc 0)` -> false; `ieqb (negsucc 1) (negsucc 1)` -> true.
+- [x] **Step 3:** Add the instances + laws. Prelude loads.
+- [x] **Step 4:** Presence PASS; `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 5:** Commit: `git commit -m "feat(prelude): Int comparison (ileb/ieqb) + DecEq + Ord instances (sign-case order)"`
 
 ---
 
@@ -138,12 +138,12 @@
   - `ordLawsFrac : OrdLaws Frac ordFrac` - the six slots lifted by qind to representatives, each closed by ileb's Int order laws (ordLawsInt) plus ilebMulPosR for the cross-terms. leAntisym is the substantial one (cross `<=` both ways at the representative level gives QRel, then qsound). leTotal from ileb totality (ordLawsInt.leTotal) on the cross terms. cmpEq/cmpLe via the compareFromLe characterization.
 - STOP contingency: if leCrossResp or ordLawsFrac.leAntisym demands the forbidden multiplicative cancellation (not just positive-scaling monotonicity), STOP and report the exact obligation.
 
-- [ ] **Step 1:** Presence test `TestFracOrdInstancesPresent` (ilebMulPosR, leCrossResp or leRespL/R, leF, eqF, decEqFrac, ordFrac, decEqLawsFrac, ordLawsFrac). FAIL.
-- [ ] **Step 2:** REPL-probe the cross computation on closed values first (`ileb (imul (nonneg 1)(nonneg 3)) (imul (nonneg 1)(nonneg 2))` for 1/2 vs 1/3). Prove lebMulPosR (Whole) then ilebMulPosR (Int). Prelude loads.
-- [ ] **Step 3:** Prove leCrossResp (or leRespL/R), define leF/eqF via qlift, add instances. Prelude loads. REPL probe: `leF (1/3) (1/2)` -> true; `leF (1/2) (1/3)` -> false; `leF (2/4) (1/2)` and `leF (1/2) (2/4)` both true (non-canonical equal); `eqF (2/4) (1/2)` -> true; a negative: `leF (-1/2) (1/3)` -> true.
-- [ ] **Step 4:** Prove ordLawsFrac + decEqLawsFrac. Prelude loads. Presence PASS.
-- [ ] **Step 5:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 6:** Commit: `git commit -m "feat(prelude): Frac comparison over the quotient (leF/eqF) + DecEq + Ord instances (positive-scaling respect proof)"`
+- [x] **Step 1:** Presence test `TestFracOrdInstancesPresent` (ilebMulPosR, leCrossResp or leRespL/R, leF, eqF, decEqFrac, ordFrac, decEqLawsFrac, ordLawsFrac). FAIL.
+- [x] **Step 2:** REPL-probe the cross computation on closed values first (`ileb (imul (nonneg 1)(nonneg 3)) (imul (nonneg 1)(nonneg 2))` for 1/2 vs 1/3). Prove lebMulPosR (Whole) then ilebMulPosR (Int). Prelude loads.
+- [x] **Step 3:** Prove leCrossResp (or leRespL/R), define leF/eqF via qlift, add instances. Prelude loads. REPL probe: `leF (1/3) (1/2)` -> true; `leF (1/2) (1/3)` -> false; `leF (2/4) (1/2)` and `leF (1/2) (2/4)` both true (non-canonical equal); `eqF (2/4) (1/2)` -> true; a negative: `leF (-1/2) (1/3)` -> true.
+- [x] **Step 4:** Prove ordLawsFrac + decEqLawsFrac. Prelude loads. Presence PASS.
+- [x] **Step 5:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 6:** Commit: `git commit -m "feat(prelude): Frac comparison over the quotient (leF/eqF) + DecEq + Ord instances (positive-scaling respect proof)"`
 
 ---
 
@@ -159,11 +159,11 @@
 - Produces: ch574, a byte-identical MIRROR of the prelude's ORDERING+DECEQ+ORD section with book narration (the ch572/ch573 pattern; chapters load with NO prelude, self-contained - restate the Bool/Whole/Int/Frac supporting types the section needs, following how ch573 scoped itself). Narration covers: the three coherent views and why both le and compare live in the ops class, the ops/laws split for ordering, DecEq as a principled standalone class, and the Frac respect proof in full (positive-scaling monotonicity, the campaign's novelty). Every definition byte-identical to its prelude twin; narration in comments only.
 - Hash audit: add "DecEq", "Ord", "Ordering" (and confirm no collision) to the `names` slice in TestTowerClassHashesDistinct.
 
-- [ ] **Step 1:** Extend TestTowerClassHashesDistinct with DecEq/Ord/Ordering. Run `go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` - expected PASS (if a collision appears, resolve per Task 1's phantom-marker note, then re-run). Commit is folded into Step 4.
-- [ ] **Step 2:** Read ch572/ch573 headers as the template. Write ch574 (self-contained mirror + narration; no em-dashes). Run the listings gate: `go test ./harness -run 'Listings.*ch574|ListingsElaborateAndCheck' -count=1 -timeout 20m` (find the exact gate name by grepping harness/ for how ch573 is run) - expected PASS.
-- [ ] **Step 3:** Full `go test -timeout 30m ./...` - ALL PASS (run detached, poll the log file; do not foreground-wait or pgrep your own command string). Measure single cold `rune repl` prelude load (build ./cmd/rune once, three `echo "1/3 + 2/3" | rune repl` runs, record wall time; 3s budget).
-- [ ] **Step 4:** Bookkeeping: spec Status -> Plan A COMPLETE (commits + load time vs budget); roadmap Ord line -> Plan A done, Plan B (bridge) next; check this plan's Task 1-5 boxes. Em-dash grep on all changed files (added lines): zero.
-- [ ] **Step 5:** Commit: `git commit -m "docs(listings): ch574 Ord classes chapter + hash audit + Plan A close"` (chapter + test + docs, explicit pathspecs).
+- [x] **Step 1:** Extend TestTowerClassHashesDistinct with DecEq/Ord/Ordering. Run `go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` - expected PASS (if a collision appears, resolve per Task 1's phantom-marker note, then re-run). Commit is folded into Step 4.
+- [x] **Step 2:** Read ch572/ch573 headers as the template. Write ch574 (self-contained mirror + narration; no em-dashes). Run the listings gate: `go test ./harness -run 'Listings.*ch574|ListingsElaborateAndCheck' -count=1 -timeout 20m` (find the exact gate name by grepping harness/ for how ch573 is run) - expected PASS.
+- [x] **Step 3:** Full `go test -timeout 30m ./...` - ALL PASS (run detached, poll the log file; do not foreground-wait or pgrep your own command string). Measure single cold `rune repl` prelude load (build ./cmd/rune once, three `echo "1/3 + 2/3" | rune repl` runs, record wall time; 3s budget).
+- [x] **Step 4:** Bookkeeping: spec Status -> Plan A COMPLETE (commits + load time vs budget); roadmap Ord line -> Plan A done, Plan B (bridge) next; check this plan's Task 1-5 boxes. Em-dash grep on all changed files (added lines): zero.
+- [x] **Step 5:** Commit: `git commit -m "docs(listings): ch574 Ord classes chapter + hash audit + Plan A close"` (chapter + test + docs, explicit pathspecs).
 
 ---
 
