@@ -5105,6 +5105,95 @@ OrdLaws : (A : U) -> Ord A -> U is
   end
 end
 
+-- Ordering DISCRIMINATORS for the compareFromLe characterization below. Feeding
+-- congE into boolDiscTF turns a bad Ordering equation into `Eq Bool true false`:
+--   notEqOrd separates eq from {lt,gt}  (both `compare = eq` contradictions);
+--   isGtOrd  separates gt from lt       (the `compare = lt` false-branch).
+notEqOrd : Ordering -> Bool is
+  fn (o : Ordering) is case o of | lt -> true | eq -> false | gt -> true end end
+end
+isGtOrd : Ordering -> Bool is
+  fn (o : Ordering) is case o of | lt -> false | eq -> false | gt -> true end end
+end
+
+-- CHARACTERIZATION of the compareFromLe default (GENERAL over any carrier and
+-- any `le`, so ordInt/ordFrac reuse them - all three build compare with
+-- compareFromLe). `compare a b = eq` forces BOTH le directions true (feeding
+-- antisymmetry); `compare a b = lt` forces `le a b` true (feeding Le). Both case
+-- on the le values with the retained-equation helper, transport the hypothesis
+-- through compareFromLe's unfolding to a concrete Ordering, then discriminate.
+compareFromLeEq : (A : U) -> (le : A -> A -> Bool) -> (a : A) -> (b : A)
+    -> Eq Ordering (compareFromLe A le a b) eq
+    -> And (Eq Bool (le a b) true) (Eq Bool (le b a) true) is
+  fn (A : U) (le : A -> A -> Bool) (a : A) (b : A)
+     (h : Eq Ordering (compareFromLe A le a b) eq) is
+    boolCaseEq (le a b)
+      (fn (_g1 : Bool) is And (Eq Bool (le a b) true) (Eq Bool (le b a) true) end)
+      (fn (e1 : Eq Bool (le a b) true) is
+         boolCaseEq (le b a)
+           (fn (_g2 : Bool) is And (Eq Bool (le a b) true) (Eq Bool (le b a) true) end)
+           (fn (e2 : Eq Bool (le b a) true) is
+              mkAnd (Eq Bool (le a b) true) (Eq Bool (le b a) true) e1 e2 end)
+           (fn (e2 : Eq Bool (le b a) false) is
+              let h1 : Eq Ordering
+                  (case true of
+                   | true  -> (case (le b a) of | true -> eq | false -> lt end)
+                   | false -> gt
+                   end) eq =
+                subst Bool (le a b) true e1
+                  (fn (w1 : Bool) is Eq Ordering
+                     (case w1 of
+                      | true  -> (case (le b a) of | true -> eq | false -> lt end)
+                      | false -> gt
+                      end) eq end)
+                  h in
+              let h2 : Eq Ordering lt eq =
+                subst Bool (le b a) false e2
+                  (fn (w2 : Bool) is Eq Ordering
+                     (case w2 of | true -> eq | false -> lt end) eq end)
+                  h1 in
+              boolDiscTF (And (Eq Bool (le a b) true) (Eq Bool (le b a) true))
+                (congE Ordering Bool notEqOrd lt eq h2)
+            end)
+       end)
+      (fn (e1 : Eq Bool (le a b) false) is
+         let hgt : Eq Ordering gt eq =
+           subst Bool (le a b) false e1
+             (fn (w1 : Bool) is Eq Ordering
+                (case w1 of
+                 | true  -> (case (le b a) of | true -> eq | false -> lt end)
+                 | false -> gt
+                 end) eq end)
+             h in
+         boolDiscTF (And (Eq Bool (le a b) true) (Eq Bool (le b a) true))
+           (congE Ordering Bool notEqOrd gt eq hgt)
+       end)
+  end
+end
+
+compareFromLeLt : (A : U) -> (le : A -> A -> Bool) -> (a : A) -> (b : A)
+    -> Eq Ordering (compareFromLe A le a b) lt
+    -> Eq Bool (le a b) true is
+  fn (A : U) (le : A -> A -> Bool) (a : A) (b : A)
+     (h : Eq Ordering (compareFromLe A le a b) lt) is
+    boolCaseEq (le a b)
+      (fn (_g1 : Bool) is Eq Bool (le a b) true end)
+      (fn (e1 : Eq Bool (le a b) true) is e1 end)
+      (fn (e1 : Eq Bool (le a b) false) is
+         let hgt : Eq Ordering gt lt =
+           subst Bool (le a b) false e1
+             (fn (w1 : Bool) is Eq Ordering
+                (case w1 of
+                 | true  -> (case (le b a) of | true -> eq | false -> lt end)
+                 | false -> gt
+                 end) lt end)
+             h in
+         boolDiscTF (Eq Bool (le a b) true)
+           (congE Ordering Bool isGtOrd gt lt hgt)
+       end)
+  end
+end
+
 -- REFLEXIVITY of leb (ch65).
 
 lteRefl : (n : Whole) -> Eq Bool (leb n n) true is
@@ -6430,6 +6519,76 @@ eqWSound : (x : Whole) -> (y : Whole) -> Eq Bool (eqW x y) true -> Eq Whole x y 
       (subW x y)
       (refl (subW x y))
   end
+end
+
+-- ====================================================================
+-- WHOLE DecEq + Ord INSTANCES (v4). The decidable-equality and total-order
+-- instances for Whole, built by REUSING the leb/eqW corpus above verbatim.
+-- `Le Whole ordWhole a b` computes to `Eq Bool (leb a b) true` and
+-- `eqbOf Whole decEqWhole` computes to `eqW`, so every lemma's output type
+-- matches its law slot on the nose. Laws are plain defs (not instances).
+-- ====================================================================
+instance decEqWhole : DecEq Whole is mkDecEq Whole eqW end
+instance ordWhole   : Ord Whole   is mkOrd Whole leb (compareFromLe Whole leb) end
+
+-- DecEq laws: soundness = eqWSound, reflexivity = eqWRefl (eqbOf reduces to eqW).
+decEqLawsWhole : DecEqLaws Whole decEqWhole is
+  mkAnd ((a : Whole) -> (b : Whole) -> Eq Bool (eqbOf Whole decEqWhole a b) true -> Eq Whole a b)
+        ((a : Whole) -> Eq Bool (eqbOf Whole decEqWhole a a) true)
+    eqWSound
+    eqWRefl
+end
+
+-- Whole's order is TOTAL: `leb a b = false` forces `leb b a = true`
+-- (lebComplete), so `or (leb a b) (leb b a)` is always true. Case on `leb a b`
+-- keeping the equation: the true arm is `or true _ = true` by refl, the false
+-- arm is `or false (leb b a) = leb b a`, closed by lebComplete.
+leTotalWhole : (a : Whole) -> (b : Whole) -> Eq Bool (or (leb a b) (leb b a)) true is
+  fn (a : Whole) (b : Whole) is
+    boolCaseEq (leb a b)
+      (fn (g : Bool) is Eq Bool (or g (leb b a)) true end)
+      (fn (_e1 : Eq Bool (leb a b) true) is refl true end)
+      (fn (e1 : Eq Bool (leb a b) false) is lebComplete a b e1 end)
+  end
+end
+
+-- Ord laws: the six total-order slots. leRefl/leTrans/leAntisym are the leb
+-- corpus verbatim (Le computes to the leb equation); leTotal is leTotalWhole;
+-- cmpEq/cmpLe unfold compareFromLe via the general characterization lemmas
+-- (compareFromLeEq feeds lteAntisym, compareFromLeLt gives Le directly).
+ordLawsWhole : OrdLaws Whole ordWhole is
+  mkAnd ((a : Whole) -> Le Whole ordWhole a a)
+    (And ((a : Whole) -> (b : Whole) -> (c : Whole) -> Le Whole ordWhole a b -> Le Whole ordWhole b c -> Le Whole ordWhole a c)
+    (And ((a : Whole) -> (b : Whole) -> Le Whole ordWhole a b -> Le Whole ordWhole b a -> Eq Whole a b)
+    (And ((a : Whole) -> (b : Whole) -> Eq Bool (or (leOf Whole ordWhole a b) (leOf Whole ordWhole b a)) true)
+    (And ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) eq -> Eq Whole a b)
+         ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) lt -> Le Whole ordWhole a b)))))
+    lebRefl
+    (mkAnd ((a : Whole) -> (b : Whole) -> (c : Whole) -> Le Whole ordWhole a b -> Le Whole ordWhole b c -> Le Whole ordWhole a c)
+      (And ((a : Whole) -> (b : Whole) -> Le Whole ordWhole a b -> Le Whole ordWhole b a -> Eq Whole a b)
+      (And ((a : Whole) -> (b : Whole) -> Eq Bool (or (leOf Whole ordWhole a b) (leOf Whole ordWhole b a)) true)
+      (And ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) eq -> Eq Whole a b)
+           ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) lt -> Le Whole ordWhole a b))))
+      lebTrans
+      (mkAnd ((a : Whole) -> (b : Whole) -> Le Whole ordWhole a b -> Le Whole ordWhole b a -> Eq Whole a b)
+        (And ((a : Whole) -> (b : Whole) -> Eq Bool (or (leOf Whole ordWhole a b) (leOf Whole ordWhole b a)) true)
+        (And ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) eq -> Eq Whole a b)
+             ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) lt -> Le Whole ordWhole a b)))
+        lteAntisym
+        (mkAnd ((a : Whole) -> (b : Whole) -> Eq Bool (or (leOf Whole ordWhole a b) (leOf Whole ordWhole b a)) true)
+          (And ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) eq -> Eq Whole a b)
+               ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) lt -> Le Whole ordWhole a b))
+          leTotalWhole
+          (mkAnd ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) eq -> Eq Whole a b)
+                 ((a : Whole) -> (b : Whole) -> Eq Ordering (compareOf Whole ordWhole a b) lt -> Le Whole ordWhole a b)
+            (fn (a : Whole) (b : Whole) (h : Eq Ordering (compareOf Whole ordWhole a b) eq) is
+               let pr : And (Eq Bool (leb a b) true) (Eq Bool (leb b a) true) =
+                 compareFromLeEq Whole leb a b h in
+               lteAntisym a b (pr.1) (pr.2)
+             end)
+            (fn (a : Whole) (b : Whole) (h : Eq Ordering (compareOf Whole ordWhole a b) lt) is
+               compareFromLeLt Whole leb a b h
+             end)))))
 end
 
 -- Boolean conjunction:  and true b = b, and false b = false.
