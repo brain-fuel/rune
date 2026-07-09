@@ -92,6 +92,28 @@ func TestIntOrdInstancesPresent(t *testing.T) {
 	}
 }
 
+// TestFracOrdInstancesPresent pins Task 4 of the v4 Ord campaign: the Frac
+// comparison lifted out of the quotient (leF/eqF), its positive-scaling
+// respect proof (ilebMulPosR + leRespL/leRespR), the DecEq/Ord instances,
+// and their laws records (the six total-order slots + DecEq soundness). The
+// substantial content is ilebMulPosR (Int positive-scaling order
+// monotonicity, NOT cancellation) and leAntisym via qsound. Elaboration is
+// the proof check, so their presence means the total order over Frac holds.
+func TestFracOrdInstancesPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"ilebMulPosR", "lebMulPosR", "leRespL", "leRespR",
+		"leF", "eqF", "decEqFrac", "ordFrac", "decEqLawsFrac", "ordLawsFrac",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
 // semiring laws (the proven tier of the v4 hierarchy): the laws value
 // must exist and elaborate against the laws record over semiringWhole.

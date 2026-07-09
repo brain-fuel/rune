@@ -8722,3 +8722,459 @@ module Std.Float is
   foreign getFloat : IO Float end
   foreign printFloat : Float -> IO Float end
 end
+
+-- ====================================================================
+-- FRAC ORDER + DECEQ (v4 Ord campaign, Task 4). The Frac comparison is a
+-- cross-multiplication ileb lifted out of the quotient by qlift; its
+-- respect proof is Int POSITIVE-SCALING order MONOTONICITY (ilebMulPosR),
+-- an ordered-semiring fact, NOT multiplicative cancellation. This section
+-- sits at the file tail so it sees ileb (Task 3), ordLawsInt, `and`, and
+-- the Int ring-algebra corpus above.
+-- ====================================================================
+
+-- Whole positive-scaling monotonicity, the real mathematical content.
+-- lebAddSameL: adding the same c on the LEFT preserves leb. Induction on
+-- c; addW recurses left, so succ c exposes a succ head on both operands
+-- and leb steps to the predecessors, landing on the ih verbatim.
+lebAddSameL : (c : Whole) -> (x : Whole) -> (y : Whole) -> Eq Bool (leb (addW c x) (addW c y)) (leb x y) is
+  fn (c : Whole) (x : Whole) (y : Whole) is
+    WholeElim (fn (m : Whole) is Eq Bool (leb (addW m x) (addW m y)) (leb x y) end)
+      (refl (leb x y))
+      (fn (k : Whole) (ih : Eq Bool (leb (addW k x) (addW k y)) (leb x y)) is ih end)
+      c
+  end
+end
+
+-- lebMulPosR: scaling both sides of a Whole `<=` by a POSITIVE (succ d)
+-- leaves the comparison unchanged (positive-scaling monotonicity, the
+-- Whole floor ilebMulPosR reduces to). Induction on the first operand.
+-- succ/zero: dmulSucc exposes the succ head so leb (succ _) zero = false.
+-- succ/succ: mulW (succ k)(succ d) = addW (mulW k (succ d))(succ d), commute
+-- the (succ d) to the left and cancel it with lebAddSameL, land on the ih.
+lebMulPosR : (x : Whole) -> (y : Whole) -> (d : Whole) -> Eq Bool (leb (mulW x (succ d)) (mulW y (succ d))) (leb x y) is
+  fn (x : Whole) (y : Whole) (d : Whole) is
+    WholeElim (fn (m : Whole) is (n : Whole) -> Eq Bool (leb (mulW m (succ d)) (mulW n (succ d))) (leb m n) end)
+      (fn (n : Whole) is refl (leb zero n) end)
+      (fn (k : Whole) (ih : (n : Whole) -> Eq Bool (leb (mulW k (succ d)) (mulW n (succ d))) (leb k n)) is
+         fn (n : Whole) is
+           WholeElim (fn (nn : Whole) is Eq Bool (leb (mulW (succ k) (succ d)) (mulW nn (succ d))) (leb (succ k) nn) end)
+             (subst Whole (succ (dmul k d)) (mulW (succ k) (succ d))
+                (symEq Whole (mulW (succ k) (succ d)) (succ (dmul k d)) (dmulSucc k d))
+                (fn (w : Whole) is Eq Bool (leb w zero) false end)
+                (refl false))
+             (fn (j : Whole) (ihj : Eq Bool (leb (mulW (succ k) (succ d)) (mulW j (succ d))) (leb (succ k) j)) is
+                transEq Bool
+                  (leb (addW (mulW k (succ d)) (succ d)) (addW (mulW j (succ d)) (succ d)))
+                  (leb (addW (succ d) (mulW k (succ d))) (addW (succ d) (mulW j (succ d))))
+                  (leb k j)
+                  (transEq Bool
+                     (leb (addW (mulW k (succ d)) (succ d)) (addW (mulW j (succ d)) (succ d)))
+                     (leb (addW (succ d) (mulW k (succ d))) (addW (mulW j (succ d)) (succ d)))
+                     (leb (addW (succ d) (mulW k (succ d))) (addW (succ d) (mulW j (succ d))))
+                     (congE Whole Bool (fn (t : Whole) is leb t (addW (mulW j (succ d)) (succ d)) end)
+                        (addW (mulW k (succ d)) (succ d)) (addW (succ d) (mulW k (succ d)))
+                        (addWComm (mulW k (succ d)) (succ d)))
+                     (congE Whole Bool (fn (t : Whole) is leb (addW (succ d) (mulW k (succ d))) t end)
+                        (addW (mulW j (succ d)) (succ d)) (addW (succ d) (mulW j (succ d)))
+                        (addWComm (mulW j (succ d)) (succ d))))
+                  (transEq Bool
+                     (leb (addW (succ d) (mulW k (succ d))) (addW (succ d) (mulW j (succ d))))
+                     (leb (mulW k (succ d)) (mulW j (succ d)))
+                     (leb k j)
+                     (lebAddSameL (succ d) (mulW k (succ d)) (mulW j (succ d)))
+                     (ih j))
+              end)
+             n
+         end
+       end)
+      x y
+  end
+end
+
+-- imulSwap3R: swap the last two factors of a triple Int product,
+-- (a*b)*c = (a*c)*b (assoc, commute the inner pair, assoc back). The one
+-- rearrangement the cross-multiplication respect proofs lean on.
+imulSwap3R : (a : Int) -> (b : Int) -> (c : Int) -> Eq Int (imul (imul a b) c) (imul (imul a c) b) is
+  fn (a : Int) (b : Int) (c : Int) is
+    transEq Int (imul (imul a b) c) (imul a (imul b c)) (imul (imul a c) b)
+      (imulAssoc a b c)
+      (transEq Int (imul a (imul b c)) (imul a (imul c b)) (imul (imul a c) b)
+         (congImulR a (imul b c) (imul c b) (imulComm b c))
+         (symEq Int (imul (imul a c) b) (imul a (imul c b)) (imulAssoc a c b)))
+  end
+end
+
+-- congIleb2: congruence of the Int comparison under equal operands.
+congIleb2 : (u : Int) -> (u2 : Int) -> (v : Int) -> (v2 : Int)
+    -> Eq Int u u2 -> Eq Int v v2 -> Eq Bool (ileb u v) (ileb u2 v2) is
+  fn (u : Int) (u2 : Int) (v : Int) (v2 : Int) (eu : Eq Int u u2) (ev : Eq Int v v2) is
+    transEq Bool (ileb u v) (ileb u2 v) (ileb u2 v2)
+      (congE Int Bool (fn (t : Int) is ileb t v end) u u2 eu)
+      (congE Int Bool (fn (t : Int) is ileb u2 t end) v v2 ev)
+  end
+end
+
+-- imulNegPos: a negative Int times a positive Int is the negsucc-headed
+-- value, exposed via dmulSucc (mulW (succ j)(succ d) = succ (dmul j d)),
+-- so the mixed-sign cases of ilebMulPosR can read off ileb's sign constant.
+imulNegPos : (j : Whole) -> (d : Whole) -> Eq Int (imul (negsucc j) (nonneg (succ d))) (negsucc (dmul j d)) is
+  fn (j : Whole) (d : Whole) is
+    subst Whole (succ (dmul j d)) (mulW (succ j) (succ d))
+      (symEq Whole (mulW (succ j) (succ d)) (succ (dmul j d)) (dmulSucc j d))
+      (fn (w : Whole) is Eq Int (ineg (nonneg w)) (negsucc (dmul j d)) end)
+      (refl (negsucc (dmul j d)))
+  end
+end
+
+-- ilebMulPosR: THE campaign key lemma. Multiplying both sides of an Int
+-- `<=` by a POSITIVE Int (nonneg (succ d)) leaves the comparison
+-- unchanged - ordered-semiring MONOTONICITY (preserves AND reflects),
+-- explicitly NOT cancellation. Four sign cases: nonneg/nonneg reduces to
+-- lebMulPosR; negsucc/negsucc rewrites both products to negsucc (imulNegPos),
+-- reads off the sign-reversed leb, and reduces to lebMulPosR on the
+-- successor magnitudes; the mixed cases rewrite the negative product to a
+-- negsucc so ileb reads off its sign-mismatch constant.
+ilebMulPosR : (a : Int) -> (b : Int) -> (d : Whole) -> Eq Bool (ileb (imul a (nonneg (succ d))) (imul b (nonneg (succ d)))) (ileb a b) is
+  fn (a : Int) (b : Int) (d : Whole) is
+    IntElim (fn (wa : Int) is Eq Bool (ileb (imul wa (nonneg (succ d))) (imul b (nonneg (succ d)))) (ileb wa b) end)
+      (fn (x : Whole) is
+         IntElim (fn (wb : Int) is Eq Bool (ileb (imul (nonneg x) (nonneg (succ d))) (imul wb (nonneg (succ d)))) (ileb (nonneg x) wb) end)
+           (fn (y : Whole) is lebMulPosR x y d end)
+           (fn (j : Whole) is
+              subst Int (negsucc (dmul j d)) (imul (negsucc j) (nonneg (succ d)))
+                (symEq Int (imul (negsucc j) (nonneg (succ d))) (negsucc (dmul j d)) (imulNegPos j d))
+                (fn (z : Int) is Eq Bool (ileb (imul (nonneg x) (nonneg (succ d))) z) false end)
+                (refl false)
+            end)
+           b
+       end)
+      (fn (k : Whole) is
+         IntElim (fn (wb : Int) is Eq Bool (ileb (imul (negsucc k) (nonneg (succ d))) (imul wb (nonneg (succ d)))) (ileb (negsucc k) wb) end)
+           (fn (y : Whole) is
+              subst Int (negsucc (dmul k d)) (imul (negsucc k) (nonneg (succ d)))
+                (symEq Int (imul (negsucc k) (nonneg (succ d))) (negsucc (dmul k d)) (imulNegPos k d))
+                (fn (z : Int) is Eq Bool (ileb z (imul (nonneg y) (nonneg (succ d)))) true end)
+                (refl true)
+            end)
+           (fn (j : Whole) is
+              subst Int (negsucc (dmul k d)) (imul (negsucc k) (nonneg (succ d)))
+                (symEq Int (imul (negsucc k) (nonneg (succ d))) (negsucc (dmul k d)) (imulNegPos k d))
+                (fn (z : Int) is Eq Bool (ileb z (imul (negsucc j) (nonneg (succ d)))) (leb j k) end)
+                (subst Int (negsucc (dmul j d)) (imul (negsucc j) (nonneg (succ d)))
+                   (symEq Int (imul (negsucc j) (nonneg (succ d))) (negsucc (dmul j d)) (imulNegPos j d))
+                   (fn (z : Int) is Eq Bool (ileb (negsucc (dmul k d)) z) (leb j k) end)
+                   (transEq Bool
+                      (leb (succ (dmul j d)) (succ (dmul k d)))
+                      (leb (mulW (succ j) (succ d)) (mulW (succ k) (succ d)))
+                      (leb j k)
+                      (transEq Bool
+                         (leb (succ (dmul j d)) (succ (dmul k d)))
+                         (leb (mulW (succ j) (succ d)) (succ (dmul k d)))
+                         (leb (mulW (succ j) (succ d)) (mulW (succ k) (succ d)))
+                         (congE Whole Bool (fn (t : Whole) is leb t (succ (dmul k d)) end)
+                            (succ (dmul j d)) (mulW (succ j) (succ d))
+                            (symEq Whole (mulW (succ j) (succ d)) (succ (dmul j d)) (dmulSucc j d)))
+                         (congE Whole Bool (fn (t : Whole) is leb (mulW (succ j) (succ d)) t end)
+                            (succ (dmul k d)) (mulW (succ k) (succ d))
+                            (symEq Whole (mulW (succ k) (succ d)) (succ (dmul k d)) (dmulSucc k d))))
+                      (lebMulPosR (succ j) (succ k) d)))
+            end)
+           b
+       end)
+      a
+  end
+end
+
+-- leRespR: the cross-comparison respects the RIGHT representative. Scale
+-- the source comparison by the target denominator qden q' (positive) and
+-- the target comparison by qden q via ilebMulPosR, then the QRel identity
+-- (imul nq dq' = imul nq' dq) rewrites the scaled numerators into each
+-- other. Mirrors the field-laws addRespR/mulRespR choreography, but the
+-- middle rewrite lands in a Bool comparison (congIleb2), not a QRel.
+leRespR : (p : QPair) -> (q : QPair) -> (q' : QPair) -> QRel q q'
+    -> Eq Bool (ileb (imul (qnum p) (qden q)) (imul (qnum q) (qden p)))
+               (ileb (imul (qnum p) (qden q')) (imul (qnum q') (qden p))) is
+  fn (p : QPair) (q : QPair) (q' : QPair) (h : QRel q q') is
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let nq : Int = qnum q in
+    let dq : Int = qden q in
+    let nq' : Int = qnum q' in
+    let dq' : Int = qden q' in
+    transEq Bool
+      (ileb (imul np dq) (imul nq dp))
+      (ileb (imul (imul np dq') dq) (imul (imul nq' dp) dq))
+      (ileb (imul np dq') (imul nq' dp))
+      (transEq Bool
+         (ileb (imul np dq) (imul nq dp))
+         (ileb (imul (imul np dq) dq') (imul (imul nq dp) dq'))
+         (ileb (imul (imul np dq') dq) (imul (imul nq' dp) dq))
+         (symEq Bool
+            (ileb (imul (imul np dq) dq') (imul (imul nq dp) dq'))
+            (ileb (imul np dq) (imul nq dp))
+            (ilebMulPosR (imul np dq) (imul nq dp) (qdpred q')))
+         (congIleb2 (imul (imul np dq) dq') (imul (imul np dq') dq)
+                    (imul (imul nq dp) dq') (imul (imul nq' dp) dq)
+            (imulSwap3R np dq dq')
+            (transEq Int (imul (imul nq dp) dq') (imul (imul nq dq') dp) (imul (imul nq' dp) dq)
+               (imulSwap3R nq dp dq')
+               (transEq Int (imul (imul nq dq') dp) (imul (imul nq' dq) dp) (imul (imul nq' dp) dq)
+                  (congImulL (imul nq dq') (imul nq' dq) dp h)
+                  (imulSwap3R nq' dq dp)))))
+      (ilebMulPosR (imul np dq') (imul nq' dp) (qdpred q))
+  end
+end
+
+-- leRespL: the cross-comparison respects the LEFT representative (the
+-- addRespL/mulRespL dual). Scale by qden p'/qden p and let QRel p p'
+-- (imul np dp' = imul np' dp) rewrite the numerators.
+leRespL : (p : QPair) -> (p' : QPair) -> (q : QPair) -> QRel p p'
+    -> Eq Bool (ileb (imul (qnum p) (qden q)) (imul (qnum q) (qden p)))
+               (ileb (imul (qnum p') (qden q)) (imul (qnum q) (qden p'))) is
+  fn (p : QPair) (p' : QPair) (q : QPair) (h : QRel p p') is
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let np' : Int = qnum p' in
+    let dp' : Int = qden p' in
+    let nq : Int = qnum q in
+    let dq : Int = qden q in
+    transEq Bool
+      (ileb (imul np dq) (imul nq dp))
+      (ileb (imul (imul np' dq) dp) (imul (imul nq dp') dp))
+      (ileb (imul np' dq) (imul nq dp'))
+      (transEq Bool
+         (ileb (imul np dq) (imul nq dp))
+         (ileb (imul (imul np dq) dp') (imul (imul nq dp) dp'))
+         (ileb (imul (imul np' dq) dp) (imul (imul nq dp') dp))
+         (symEq Bool
+            (ileb (imul (imul np dq) dp') (imul (imul nq dp) dp'))
+            (ileb (imul np dq) (imul nq dp))
+            (ilebMulPosR (imul np dq) (imul nq dp) (qdpred p')))
+         (congIleb2 (imul (imul np dq) dp') (imul (imul np' dq) dp)
+                    (imul (imul nq dp) dp') (imul (imul nq dp') dp)
+            (transEq Int (imul (imul np dq) dp') (imul (imul np dp') dq) (imul (imul np' dq) dp)
+               (imulSwap3R np dq dp')
+               (transEq Int (imul (imul np dp') dq) (imul (imul np' dp) dq) (imul (imul np' dq) dp)
+                  (congImulL (imul np dp') (imul np' dp) dq h)
+                  (imulSwap3R np' dp dq)))
+            (imulSwap3R nq dp dp')))
+      (ilebMulPosR (imul np' dq) (imul nq dp') (qdpred p))
+  end
+end
+
+-- leF: the Frac comparison, a double qlift over the Int cross-comparison
+-- ileb (qnum p * qden q) (qnum q * qden p), mirroring addF's spelling.
+-- leRespR fixes the right argument, leRespL (via qind) the left; both are
+-- pure Int positive-scaling monotonicity, no gcd, no cancellation.
+leFR : QPair -> Frac -> Bool is
+  fn (p : QPair) is
+    qlift QPair QRel Bool
+      (fn (q : QPair) is ileb (imul (qnum p) (qden q)) (imul (qnum q) (qden p)) end)
+      (fn (q : QPair) (q' : QPair) (r : QRel q q') is leRespR p q q' r end)
+  end
+end
+leF : Frac -> Frac -> Bool is
+  qlift QPair QRel (Frac -> Bool) leFR
+    (fn (p : QPair) (p' : QPair) (r : QRel p p') is
+      fn (z : Frac) is
+        qind QPair QRel (fn (w : Frac) is Eq Bool (leFR p w) (leFR p' w) end)
+          (fn (q : QPair) is leRespL p p' q r end)
+          z
+      end
+    end)
+end
+
+-- eqF: quotient equality via antisymmetry - x = y iff x <= y AND y <= x.
+-- Reuses leF's respect proof (no new respect obligation); soundness feeds
+-- leAntisymF below.
+eqF : Frac -> Frac -> Bool is
+  fn (x : Frac) (y : Frac) is and (leF x y) (leF y x) end
+end
+
+instance decEqFrac : DecEq Frac is mkDecEq Frac eqF end
+instance ordFrac   : Ord Frac   is mkOrd Frac leF (compareFromLe Frac leF) end
+
+-- The six OrdLaws slots for Frac, each lifted by qind to representatives
+-- where leF reduces to the Int cross-comparison, then closed by the Int
+-- order laws (ordLawsInt's ilebReflP/ilebTransP/ilebAntisymP/ilebTotalP)
+-- plus ilebMulPosR wherever a denominator has to be scaled.
+
+-- REFLEXIVITY: cross p p = ileb (np*dp)(np*dp), true by ilebReflP.
+leReflF : (a : Frac) -> Le Frac ordFrac a a is
+  fn (a : Frac) is
+    qind QPair QRel (fn (w : Frac) is Eq Bool (leF w w) true end)
+      (fn (p : QPair) is ilebReflP (imul (qnum p) (qden p)) end)
+      a
+  end
+end
+
+-- crossTransP: transitivity of the cross-comparison at the representative
+-- level - the substantial computation. From np*dq <= nq*dp and nq*dr <=
+-- nr*dq, scale the first by dr and the second by dp (ilebMulPosR), align
+-- the shared middle nq*dp*dr, chain with ilebTransP, then reflect out the
+-- common dq (ilebMulPosR again) to land np*dr <= nr*dp. All positive
+-- scaling; NO cancellation.
+crossTransP : (p : QPair) -> (q : QPair) -> (r : QPair)
+    -> Eq Bool (ileb (imul (qnum p) (qden q)) (imul (qnum q) (qden p))) true
+    -> Eq Bool (ileb (imul (qnum q) (qden r)) (imul (qnum r) (qden q))) true
+    -> Eq Bool (ileb (imul (qnum p) (qden r)) (imul (qnum r) (qden p))) true is
+  fn (p : QPair) (q : QPair) (r : QPair)
+     (h1 : Eq Bool (ileb (imul (qnum p) (qden q)) (imul (qnum q) (qden p))) true)
+     (h2 : Eq Bool (ileb (imul (qnum q) (qden r)) (imul (qnum r) (qden q))) true) is
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let nq : Int = qnum q in
+    let dq : Int = qden q in
+    let nr : Int = qnum r in
+    let dr : Int = qden r in
+    let s1 : Eq Bool (ileb (imul (imul np dq) dr) (imul (imul nq dp) dr)) true =
+      transEq Bool (ileb (imul (imul np dq) dr) (imul (imul nq dp) dr)) (ileb (imul np dq) (imul nq dp)) true
+        (ilebMulPosR (imul np dq) (imul nq dp) (qdpred r))
+        h1 in
+    let s2raw : Eq Bool (ileb (imul (imul nq dr) dp) (imul (imul nr dq) dp)) true =
+      transEq Bool (ileb (imul (imul nq dr) dp) (imul (imul nr dq) dp)) (ileb (imul nq dr) (imul nr dq)) true
+        (ilebMulPosR (imul nq dr) (imul nr dq) (qdpred p))
+        h2 in
+    let s2 : Eq Bool (ileb (imul (imul nq dp) dr) (imul (imul nr dq) dp)) true =
+      transEq Bool (ileb (imul (imul nq dp) dr) (imul (imul nr dq) dp)) (ileb (imul (imul nq dr) dp) (imul (imul nr dq) dp)) true
+        (symEq Bool (ileb (imul (imul nq dr) dp) (imul (imul nr dq) dp)) (ileb (imul (imul nq dp) dr) (imul (imul nr dq) dp))
+           (congIleb2 (imul (imul nq dr) dp) (imul (imul nq dp) dr) (imul (imul nr dq) dp) (imul (imul nr dq) dp)
+              (imulSwap3R nq dr dp)
+              (refl (imul (imul nr dq) dp))))
+        s2raw in
+    let s3 : Eq Bool (ileb (imul (imul np dq) dr) (imul (imul nr dq) dp)) true =
+      ilebTransP (imul (imul np dq) dr) (imul (imul nq dp) dr) (imul (imul nr dq) dp) s1 s2 in
+    let s4 : Eq Bool (ileb (imul (imul np dr) dq) (imul (imul nr dp) dq)) true =
+      transEq Bool (ileb (imul (imul np dr) dq) (imul (imul nr dp) dq)) (ileb (imul (imul np dq) dr) (imul (imul nr dq) dp)) true
+        (symEq Bool (ileb (imul (imul np dq) dr) (imul (imul nr dq) dp)) (ileb (imul (imul np dr) dq) (imul (imul nr dp) dq))
+           (congIleb2 (imul (imul np dq) dr) (imul (imul np dr) dq) (imul (imul nr dq) dp) (imul (imul nr dp) dq)
+              (imulSwap3R np dq dr)
+              (imulSwap3R nr dq dp)))
+        s3 in
+    transEq Bool (ileb (imul np dr) (imul nr dp)) (ileb (imul (imul np dr) dq) (imul (imul nr dp) dq)) true
+      (symEq Bool (ileb (imul (imul np dr) dq) (imul (imul nr dp) dq)) (ileb (imul np dr) (imul nr dp))
+         (ilebMulPosR (imul np dr) (imul nr dp) (qdpred q)))
+      s4
+  end
+end
+
+-- TRANSITIVITY: triple qind to representatives, closed by crossTransP.
+leTransF : (a : Frac) -> (b : Frac) -> (c : Frac)
+    -> Le Frac ordFrac a b -> Le Frac ordFrac b c -> Le Frac ordFrac a c is
+  fn (a : Frac) (b : Frac) (c : Frac) (hab : Le Frac ordFrac a b) (hbc : Le Frac ordFrac b c) is
+    qind QPair QRel
+      (fn (wx : Frac) is (yy : Frac) -> (zz : Frac) -> Eq Bool (leF wx yy) true -> Eq Bool (leF yy zz) true -> Eq Bool (leF wx zz) true end)
+      (fn (p : QPair) is
+        fn (yy : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is (zz : Frac) -> Eq Bool (leF (qin QPair QRel p) wy) true -> Eq Bool (leF wy zz) true -> Eq Bool (leF (qin QPair QRel p) zz) true end)
+            (fn (q : QPair) is
+              fn (zz : Frac) is
+                qind QPair QRel
+                  (fn (wz : Frac) is Eq Bool (leF (qin QPair QRel p) (qin QPair QRel q)) true -> Eq Bool (leF (qin QPair QRel q) wz) true -> Eq Bool (leF (qin QPair QRel p) wz) true end)
+                  (fn (r : QPair) is
+                    fn (g1 : Eq Bool (leF (qin QPair QRel p) (qin QPair QRel q)) true) (g2 : Eq Bool (leF (qin QPair QRel q) (qin QPair QRel r)) true) is
+                      crossTransP p q r g1 g2
+                    end
+                   end)
+                  zz
+              end
+            end)
+            yy
+        end
+      end)
+      a b c hab hbc
+  end
+end
+
+-- ANTISYMMETRY: the substantial slot. Double qind gives, at representatives,
+-- np*dq <= nq*dp AND nq*dp <= np*dq; ilebAntisymP forces np*dq = nq*dp,
+-- which IS QRel p q, and qsound turns that identification into Eq Frac.
+leAntisymF : (a : Frac) -> (b : Frac)
+    -> Le Frac ordFrac a b -> Le Frac ordFrac b a -> Eq Frac a b is
+  fn (a : Frac) (b : Frac) (hab : Le Frac ordFrac a b) (hba : Le Frac ordFrac b a) is
+    qind QPair QRel
+      (fn (wx : Frac) is (yy : Frac) -> Eq Bool (leF wx yy) true -> Eq Bool (leF yy wx) true -> Eq Frac wx yy end)
+      (fn (p : QPair) is
+        fn (yy : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is Eq Bool (leF (qin QPair QRel p) wy) true -> Eq Bool (leF wy (qin QPair QRel p)) true -> Eq Frac (qin QPair QRel p) wy end)
+            (fn (q : QPair) is
+              fn (g1 : Eq Bool (leF (qin QPair QRel p) (qin QPair QRel q)) true) (g2 : Eq Bool (leF (qin QPair QRel q) (qin QPair QRel p)) true) is
+                qsound QPair QRel p q
+                  (ilebAntisymP (imul (qnum p) (qden q)) (imul (qnum q) (qden p)) g1 g2)
+              end
+            end)
+            yy
+        end
+      end)
+      a b hab hba
+  end
+end
+
+-- TOTALITY: double qind, closed by ilebTotalP on the cross terms.
+leTotalF : (a : Frac) -> (b : Frac)
+    -> Eq Bool (or (leOf Frac ordFrac a b) (leOf Frac ordFrac b a)) true is
+  fn (a : Frac) (b : Frac) is
+    qind QPair QRel
+      (fn (wx : Frac) is (yy : Frac) -> Eq Bool (or (leOf Frac ordFrac wx yy) (leOf Frac ordFrac yy wx)) true end)
+      (fn (p : QPair) is
+        fn (yy : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is Eq Bool (or (leOf Frac ordFrac (qin QPair QRel p) wy) (leOf Frac ordFrac wy (qin QPair QRel p))) true end)
+            (fn (q : QPair) is ilebTotalP (imul (qnum p) (qden q)) (imul (qnum q) (qden p)) end)
+            yy
+        end
+      end)
+      a b
+  end
+end
+
+-- The Ord laws record for Frac: the six slots assembled as the mkAnd chain
+-- (ordLawsWhole/ordLawsInt style). cmpEq feeds leAntisymF via the general
+-- compareFromLe characterization; cmpLe is compareFromLeLt directly.
+ordLawsFrac : OrdLaws Frac ordFrac is
+  mkAnd ((a : Frac) -> Le Frac ordFrac a a)
+    (And ((a : Frac) -> (b : Frac) -> (c : Frac) -> Le Frac ordFrac a b -> Le Frac ordFrac b c -> Le Frac ordFrac a c)
+    (And ((a : Frac) -> (b : Frac) -> Le Frac ordFrac a b -> Le Frac ordFrac b a -> Eq Frac a b)
+    (And ((a : Frac) -> (b : Frac) -> Eq Bool (or (leOf Frac ordFrac a b) (leOf Frac ordFrac b a)) true)
+    (And ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) eq -> Eq Frac a b)
+         ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) lt -> Le Frac ordFrac a b)))))
+    leReflF
+    (mkAnd ((a : Frac) -> (b : Frac) -> (c : Frac) -> Le Frac ordFrac a b -> Le Frac ordFrac b c -> Le Frac ordFrac a c)
+      (And ((a : Frac) -> (b : Frac) -> Le Frac ordFrac a b -> Le Frac ordFrac b a -> Eq Frac a b)
+      (And ((a : Frac) -> (b : Frac) -> Eq Bool (or (leOf Frac ordFrac a b) (leOf Frac ordFrac b a)) true)
+      (And ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) eq -> Eq Frac a b)
+           ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) lt -> Le Frac ordFrac a b))))
+      leTransF
+      (mkAnd ((a : Frac) -> (b : Frac) -> Le Frac ordFrac a b -> Le Frac ordFrac b a -> Eq Frac a b)
+        (And ((a : Frac) -> (b : Frac) -> Eq Bool (or (leOf Frac ordFrac a b) (leOf Frac ordFrac b a)) true)
+        (And ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) eq -> Eq Frac a b)
+             ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) lt -> Le Frac ordFrac a b)))
+        leAntisymF
+        (mkAnd ((a : Frac) -> (b : Frac) -> Eq Bool (or (leOf Frac ordFrac a b) (leOf Frac ordFrac b a)) true)
+          (And ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) eq -> Eq Frac a b)
+               ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) lt -> Le Frac ordFrac a b))
+          leTotalF
+          (mkAnd ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) eq -> Eq Frac a b)
+                 ((a : Frac) -> (b : Frac) -> Eq Ordering (compareOf Frac ordFrac a b) lt -> Le Frac ordFrac a b)
+            (fn (a : Frac) (b : Frac) (h : Eq Ordering (compareOf Frac ordFrac a b) eq) is
+               let pr : And (Eq Bool (leF a b) true) (Eq Bool (leF b a) true) =
+                 compareFromLeEq Frac leF a b h in
+               leAntisymF a b (pr.1) (pr.2)
+             end)
+            (fn (a : Frac) (b : Frac) (h : Eq Ordering (compareOf Frac ordFrac a b) lt) is
+               compareFromLeLt Frac leF a b h
+             end)))))
+end
+
+-- DecEq laws for Frac: soundness consumes leAntisymF (eqF x y = true means
+-- leF both ways, antisymmetry gives Eq Frac); reflexivity is leReflF twice.
+decEqLawsFrac : DecEqLaws Frac decEqFrac is
+  mkAnd ((a : Frac) -> (b : Frac) -> Eq Bool (eqbOf Frac decEqFrac a b) true -> Eq Frac a b)
+        ((a : Frac) -> Eq Bool (eqbOf Frac decEqFrac a a) true)
+    (fn (a : Frac) (b : Frac) (h : Eq Bool (eqbOf Frac decEqFrac a b) true) is
+       leAntisymF a b (andTrueL (leF a b) (leF b a) h) (andTrueR (leF a b) (leF b a) h)
+     end)
+    (fn (a : Frac) is andBoth (leF a a) (leF a a) (leReflF a) (leReflF a) end)
+end
