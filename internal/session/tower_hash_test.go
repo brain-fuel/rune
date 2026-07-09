@@ -30,6 +30,29 @@ func TestTowerClassHashesDistinct(t *testing.T) {
 	}
 }
 
+// TestOrdScaffoldPresent pins Task 1 of the v4 Ord campaign: the Ordering
+// type, the DecEq and Ord ops classes with their accessors, the erased Le
+// proof-view, the two comparison defaults, and the DecEqLaws/OrdLaws law
+// records. The prelude must resolve every one (elaboration is the proof
+// check, so their presence means they are well-formed).
+func TestOrdScaffoldPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"Ordering", "flipOrd",
+		"DecEq", "mkDecEq", "eqbOf",
+		"Ord", "mkOrd", "leOf", "compareOf", "Le",
+		"compareFromLe", "leFromCompare",
+		"DecEqLaws", "OrdLaws",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
 // semiring laws (the proven tier of the v4 hierarchy): the laws value
 // must exist and elaborate against the laws record over semiringWhole.

@@ -4961,6 +4961,150 @@ or : Bool -> Bool -> Bool is
   end
 end
 
+-- ====================================================================
+-- ORDERING + DECEQ + ORD (v4). The ordering layer of the numeric tower,
+-- mirroring the algebra hierarchy's ops/laws split EXACTLY: ops classes are
+-- Sigma-records, laws are separate And-chain records, and the guarded tier is
+-- the absence of laws. Three COHERENT comparison views live here: the decidable
+-- Bool `le`, the three-way `compare : A -> A -> Ordering`, and the erased
+-- proof-side `Le` (both directions coherent by the two default derivations).
+-- Depends only on Bool/Eq/Sig/And/or - placed high, before the leb corpus and
+-- the tower instances (Whole/Int/Frac register downstream, one per task).
+--
+-- POSITIONAL DISCIPLINE (the Num lesson, gated by TestTowerClassHashesDistinct):
+--   Ordering  : a three-nullary-constructor datatype (distinct from Bool's two).
+--   DecEq A   = Sig (A->A->Bool) (fn _ is Bool end) - a RECORD, not a bare arrow.
+--               A bare `A -> A -> Bool` is structurally identical to Ord's `le`
+--               field and to any binary-Bool op class; wrapping the operation in
+--               a Sig (with a Bool phantom-marker second field, value `true`)
+--               gives DecEq a distinct hash, exactly as Semiring is a record not
+--               a bare tuple. (Bool marker, not a fresh nullary type: a new
+--               single-nullary-ctor datatype risks the one-nullary-ctor collision
+--               the Blame comment records.)
+--   Ord A     = Sig (A->A->Bool) (fn _le is A->A->Ordering end) - two-field ops
+--               record, le then compare. Its Sig differs from DecEq's in the
+--               SECOND family (A->A->Ordering vs Bool), so the two are distinct.
+-- ====================================================================
+
+data Ordering : U is
+  lt : Ordering
+| eq : Ordering
+| gt : Ordering
+end
+
+-- Swap the verdict of a comparison: lt <-> gt, eq fixed (lifted from ch335).
+flipOrd : Ordering -> Ordering is
+  fn (o : Ordering) is
+    OrderingElim (fn (x : Ordering) is Ordering end) gt eq lt o
+  end
+end
+
+-- DECIDABLE EQUALITY as a standalone ops class. The eqb operation IS the class
+-- payload; the Bool second field is a phantom marker giving the record a hash
+-- distinct from a bare `A -> A -> Bool` (see the banner). Laws in DecEqLaws.
+DecEq : U -> U is
+  fn (A : U) is Sig (A -> A -> Bool) (fn (_e : A -> A -> Bool) is Bool end) end
+end
+mkDecEq : (A : U) -> (A -> A -> Bool) -> DecEq A is
+  fn (A : U) (e : A -> A -> Bool) is
+    Pair (A -> A -> Bool) (fn (_e : A -> A -> Bool) is Bool end) e true
+  end
+end
+eqbOf : (A : U) -> DecEq A -> A -> A -> Bool is
+  fn (A : U) (d : DecEq A) is d.1 end
+end
+
+-- TOTAL ORDER as a two-field ops class: le (decidable Bool) then compare
+-- (three-way). Both live in the ops record so an instance ships both coherent
+-- views; the default derivations below keep them in sync. Laws in OrdLaws.
+Ord : U -> U is
+  fn (A : U) is
+    Sig (A -> A -> Bool) (fn (_le : A -> A -> Bool) is A -> A -> Ordering end)
+  end
+end
+mkOrd : (A : U) -> (A -> A -> Bool) -> (A -> A -> Ordering) -> Ord A is
+  fn (A : U) (le : A -> A -> Bool) (cmp : A -> A -> Ordering) is
+    Pair (A -> A -> Bool) (fn (_le : A -> A -> Bool) is A -> A -> Ordering end) le cmp
+  end
+end
+leOf : (A : U) -> Ord A -> A -> A -> Bool is
+  fn (A : U) (o : Ord A) is o.1 end
+end
+compareOf : (A : U) -> Ord A -> A -> A -> Ordering is
+  fn (A : U) (o : Ord A) is o.2 end
+end
+
+-- The erased PROOF-SIDE view: `Le A o a b` computes to `Eq Bool (leOf A o a b)
+-- true`, so every leb-corpus lemma's output type matches the OrdLaws slots on
+-- the nose (Task 2 onward).
+Le : (A : U) -> Ord A -> A -> A -> U is
+  fn (A : U) (o : Ord A) (a : A) (b : A) is Eq Bool (leOf A o a b) true end
+end
+
+-- DEFAULT compare from le: a<=b and b<=a -> eq; a<=b only -> lt; else -> gt.
+-- ordWhole/ordInt/ordFrac all build their compare with this, so one pair of
+-- characterization lemmas (Task 2) serves all three cmpEq/cmpLe obligations.
+compareFromLe : (A : U) -> (A -> A -> Bool) -> A -> A -> Ordering is
+  fn (A : U) (le : A -> A -> Bool) (a : A) (b : A) is
+    let lab : Bool = le a b in
+    let lba : Bool = le b a in
+    case lab of
+    | true  -> case lba of | true -> eq | false -> lt end
+    | false -> gt
+    end
+  end
+end
+
+-- DEFAULT le from compare: lt or eq -> true, gt -> false.
+leFromCompare : (A : U) -> (A -> A -> Ordering) -> A -> A -> Bool is
+  fn (A : U) (cmp : A -> A -> Ordering) (a : A) (b : A) is
+    case cmp a b of
+    | lt -> true
+    | eq -> true
+    | gt -> false
+    end
+  end
+end
+
+-- Derived comparisons over an Ord: ge is le with operands swapped; ltB is
+-- strict-below (le a b and not (le b a)), the negation inlined as a case (no
+-- notB/andB dependency, keeping this section above the Bool-logic corpus).
+ge : (A : U) -> Ord A -> A -> A -> Bool is
+  fn (A : U) (o : Ord A) (a : A) (b : A) is leOf A o b a end
+end
+ltB : (A : U) -> Ord A -> A -> A -> Bool is
+  fn (A : U) (o : Ord A) (a : A) (b : A) is
+    case leOf A o a b of
+    | true  -> case leOf A o b a of | true -> false | false -> true end
+    | false -> false
+    end
+  end
+end
+
+-- DECEQ LAWS: soundness (eqb reflects propositional equality) and reflexivity.
+-- Separate from the DecEq ops record, so a decidable-but-unproven carrier still
+-- gets a DecEq instance. Statement formers inlined in the And.
+DecEqLaws : (A : U) -> DecEq A -> U is
+  fn (A : U) (d : DecEq A) is
+    And ((a : A) -> (b : A) -> Eq Bool (eqbOf A d a b) true -> Eq A a b)
+        ((a : A) -> Eq Bool (eqbOf A d a a) true)
+  end
+end
+
+-- ORD LAWS: the six total-order slots as a flat And-chain (SemiringLaws style).
+-- leRefl / leTrans / leAntisym / leTotal characterize le; cmpEq / cmpLe tie the
+-- compare view to it (both proven via compareFromLe's unfolding downstream).
+OrdLaws : (A : U) -> Ord A -> U is
+  fn (A : U) (o : Ord A) is
+    And ((a : A) -> Le A o a a)
+    (And ((a : A) -> (b : A) -> (c : A) -> Le A o a b -> Le A o b c -> Le A o a c)
+    (And ((a : A) -> (b : A) -> Le A o a b -> Le A o b a -> Eq A a b)
+    (And ((a : A) -> (b : A) -> Eq Bool (or (leOf A o a b) (leOf A o b a)) true)
+    (And ((a : A) -> (b : A) -> Eq Ordering (compareOf A o a b) eq -> Eq A a b)
+         ((a : A) -> (b : A) -> Eq Ordering (compareOf A o a b) lt -> Le A o a b)))))
+  end
+end
+
 -- REFLEXIVITY of leb (ch65).
 
 lteRefl : (n : Whole) -> Eq Bool (leb n n) true is
