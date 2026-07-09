@@ -73,6 +73,25 @@ func TestWholeOrdInstancesPresent(t *testing.T) {
 	}
 }
 
+// TestIntOrdInstancesPresent pins Task 3 of the v4 Ord campaign: the Int
+// comparison primitives (ileb/ieqb) plus the DecEq/Ord instances and their
+// laws records, all built by constructor-case analysis reducing to the Whole
+// leb/eqW corpus. Elaboration is the proof check, so their presence means the
+// total order over the signed integers holds.
+func TestIntOrdInstancesPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"ileb", "ieqb", "decEqInt", "ordInt", "decEqLawsInt", "ordLawsInt",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
 // semiring laws (the proven tier of the v4 hierarchy): the laws value
 // must exist and elaborate against the laws record over semiringWhole.

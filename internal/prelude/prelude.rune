@@ -6591,6 +6591,263 @@ ordLawsWhole : OrdLaws Whole ordWhole is
              end)))))
 end
 
+-- ====================================================================
+-- INT DecEq + Ord INSTANCES (v4). Comparison on the junk-free signed integers
+-- by constructor-case analysis, every case reducing to a Whole leb/eqW lemma.
+-- The one subtlety is the SIGN REVERSAL: negsucc k denotes -(k+1), so on two
+-- negsucc arguments the magnitude comparison FLIPS (ileb (negsucc k)(negsucc j)
+-- = leb j k), and the order laws thread the Whole lemmas with swapped operands.
+-- Mixed signs are decided outright (a nonneg is above every negsucc), so their
+-- impossible law cases are discharged ex falso via boolDiscTF.
+-- ====================================================================
+
+-- ileb: signed <=. nonneg/nonneg compares magnitudes; a nonneg is >= any
+-- negsucc; negsucc/negsucc REVERSES (negsucc k = -(k+1), so -(k+1) <= -(j+1)
+-- iff j <= k). Nested case: outer on the first arg, inner on the second.
+ileb : Int -> Int -> Bool is
+  fn (x : Int) (y : Int) is
+    case x of
+    | nonneg a ->
+        case y of
+        | nonneg b  -> leb a b
+        | negsucc j -> false
+        end
+    | negsucc k ->
+        case y of
+        | nonneg b  -> true
+        | negsucc j -> leb j k
+        end
+    end
+  end
+end
+
+-- ieqb: signed equality by DIRECT constructor case (cleaner soundness than
+-- andB of the two ileb directions). Same-constructor reduces to eqW on the
+-- magnitudes; mixed constructors are unequal outright.
+ieqb : Int -> Int -> Bool is
+  fn (x : Int) (y : Int) is
+    case x of
+    | nonneg a ->
+        case y of
+        | nonneg b  -> eqW a b
+        | negsucc j -> false
+        end
+    | negsucc k ->
+        case y of
+        | nonneg b  -> false
+        | negsucc j -> eqW k j
+        end
+    end
+  end
+end
+
+-- REFLEXIVITY of ileb: each diagonal reduces to `leb m m` (lebRefl).
+ilebReflP : (a : Int) -> Eq Bool (ileb a a) true is
+  fn (a : Int) is
+    IntElim (fn (w : Int) is Eq Bool (ileb w w) true end)
+      (fn (n : Whole) is lebRefl n end)
+      (fn (k : Whole) is lebRefl k end)
+      a
+  end
+end
+
+-- TRANSITIVITY of ileb, split by the first argument's sign. Each half does a
+-- double IntElim (on b then c); the negsucc/negsucc corners thread lebTrans
+-- with SWAPPED operands (the sign reversal), the mixed corners are ex falso.
+ilebTransNonneg : (na : Whole) -> (b : Int) -> (c : Int)
+    -> Eq Bool (ileb (nonneg na) b) true -> Eq Bool (ileb b c) true
+    -> Eq Bool (ileb (nonneg na) c) true is
+  fn (na : Whole) is
+    IntElim (fn (wb : Int) is (c : Int)
+        -> Eq Bool (ileb (nonneg na) wb) true -> Eq Bool (ileb wb c) true
+        -> Eq Bool (ileb (nonneg na) c) true end)
+      (fn (nb : Whole) is
+        IntElim (fn (wc : Int) is
+            Eq Bool (ileb (nonneg na) (nonneg nb)) true -> Eq Bool (ileb (nonneg nb) wc) true
+            -> Eq Bool (ileb (nonneg na) wc) true end)
+          (fn (nc : Whole) (h1 : Eq Bool (leb na nb) true) (h2 : Eq Bool (leb nb nc) true) is
+            lebTrans na nb nc h1 h2 end)
+          (fn (kc : Whole) (h1 : Eq Bool (leb na nb) true) (h2 : Eq Bool false true) is
+            boolDiscTF (Eq Bool (ileb (nonneg na) (negsucc kc)) true)
+              (symEq Bool false true h2) end)
+       end)
+      (fn (kb : Whole) (c : Int) (h1 : Eq Bool false true) (h2 : Eq Bool (ileb (negsucc kb) c) true) is
+        boolDiscTF (Eq Bool (ileb (nonneg na) c) true) (symEq Bool false true h1) end)
+  end
+end
+ilebTransNegsucc : (ka : Whole) -> (b : Int) -> (c : Int)
+    -> Eq Bool (ileb (negsucc ka) b) true -> Eq Bool (ileb b c) true
+    -> Eq Bool (ileb (negsucc ka) c) true is
+  fn (ka : Whole) is
+    IntElim (fn (wb : Int) is (c : Int)
+        -> Eq Bool (ileb (negsucc ka) wb) true -> Eq Bool (ileb wb c) true
+        -> Eq Bool (ileb (negsucc ka) c) true end)
+      (fn (nb : Whole) is
+        IntElim (fn (wc : Int) is
+            Eq Bool (ileb (negsucc ka) (nonneg nb)) true -> Eq Bool (ileb (nonneg nb) wc) true
+            -> Eq Bool (ileb (negsucc ka) wc) true end)
+          (fn (nc : Whole) (h1 : Eq Bool true true) (h2 : Eq Bool (leb nb nc) true) is refl true end)
+          (fn (kc : Whole) (h1 : Eq Bool true true) (h2 : Eq Bool false true) is
+            boolDiscTF (Eq Bool (ileb (negsucc ka) (negsucc kc)) true)
+              (symEq Bool false true h2) end)
+       end)
+      (fn (kb : Whole) is
+        IntElim (fn (wc : Int) is
+            Eq Bool (ileb (negsucc ka) (negsucc kb)) true -> Eq Bool (ileb (negsucc kb) wc) true
+            -> Eq Bool (ileb (negsucc ka) wc) true end)
+          (fn (nc : Whole) (h1 : Eq Bool (leb kb ka) true) (h2 : Eq Bool true true) is refl true end)
+          (fn (kc : Whole) (h1 : Eq Bool (leb kb ka) true) (h2 : Eq Bool (leb kc kb) true) is
+            lebTrans kc kb ka h2 h1 end)
+       end)
+  end
+end
+ilebTransP : (a : Int) -> (b : Int) -> (c : Int)
+    -> Eq Bool (ileb a b) true -> Eq Bool (ileb b c) true -> Eq Bool (ileb a c) true is
+  fn (a : Int) is
+    IntElim (fn (wa : Int) is (b : Int) -> (c : Int)
+        -> Eq Bool (ileb wa b) true -> Eq Bool (ileb b c) true -> Eq Bool (ileb wa c) true end)
+      (fn (na : Whole) is ilebTransNonneg na end)
+      (fn (ka : Whole) is ilebTransNegsucc ka end)
+      a
+  end
+end
+
+-- ANTISYMMETRY of ileb. Same-constructor reduces to Whole lteAntisym (negsucc
+-- SWAPS operands, then a symEq + congNegsucc rebuilds Eq Int); mixed cases are
+-- ex falso (one direction is false).
+ilebAntisymP : (a : Int) -> (b : Int)
+    -> Eq Bool (ileb a b) true -> Eq Bool (ileb b a) true -> Eq Int a b is
+  fn (a : Int) is
+    IntElim (fn (wa : Int) is (b : Int)
+        -> Eq Bool (ileb wa b) true -> Eq Bool (ileb b wa) true -> Eq Int wa b end)
+      (fn (na : Whole) is
+        IntElim (fn (wb : Int) is
+            Eq Bool (ileb (nonneg na) wb) true -> Eq Bool (ileb wb (nonneg na)) true
+            -> Eq Int (nonneg na) wb end)
+          (fn (nb : Whole) (h1 : Eq Bool (leb na nb) true) (h2 : Eq Bool (leb nb na) true) is
+            congNonneg na nb (lteAntisym na nb h1 h2) end)
+          (fn (kb : Whole) (h1 : Eq Bool false true) (h2 : Eq Bool true true) is
+            boolDiscTF (Eq Int (nonneg na) (negsucc kb)) (symEq Bool false true h1) end)
+       end)
+      (fn (ka : Whole) is
+        IntElim (fn (wb : Int) is
+            Eq Bool (ileb (negsucc ka) wb) true -> Eq Bool (ileb wb (negsucc ka)) true
+            -> Eq Int (negsucc ka) wb end)
+          (fn (nb : Whole) (h1 : Eq Bool true true) (h2 : Eq Bool false true) is
+            boolDiscTF (Eq Int (negsucc ka) (nonneg nb)) (symEq Bool false true h2) end)
+          (fn (kb : Whole) (h1 : Eq Bool (leb kb ka) true) (h2 : Eq Bool (leb ka kb) true) is
+            congNegsucc ka kb (symEq Whole kb ka (lteAntisym kb ka h1 h2)) end)
+       end)
+      a
+  end
+end
+
+-- TOTALITY of ileb. Same-constructor reduces to leTotalWhole (negsucc SWAPS);
+-- mixed cases are one ileb=true so `or` short-circuits to true by refl.
+ilebTotalP : (a : Int) -> (b : Int) -> Eq Bool (or (ileb a b) (ileb b a)) true is
+  fn (a : Int) is
+    IntElim (fn (wa : Int) is (b : Int)
+        -> Eq Bool (or (ileb wa b) (ileb b wa)) true end)
+      (fn (na : Whole) is
+        IntElim (fn (wb : Int) is
+            Eq Bool (or (ileb (nonneg na) wb) (ileb wb (nonneg na))) true end)
+          (fn (nb : Whole) is leTotalWhole na nb end)
+          (fn (kb : Whole) is refl true end)
+       end)
+      (fn (ka : Whole) is
+        IntElim (fn (wb : Int) is
+            Eq Bool (or (ileb (negsucc ka) wb) (ileb wb (negsucc ka))) true end)
+          (fn (nb : Whole) is refl true end)
+          (fn (kb : Whole) is leTotalWhole kb ka end)
+       end)
+      a
+  end
+end
+
+-- SOUNDNESS of ieqb: same-constructor reduces to eqWSound + a constructor
+-- congruence; mixed is ex falso.
+ieqbSoundP : (a : Int) -> (b : Int) -> Eq Bool (ieqb a b) true -> Eq Int a b is
+  fn (a : Int) is
+    IntElim (fn (wa : Int) is (b : Int) -> Eq Bool (ieqb wa b) true -> Eq Int wa b end)
+      (fn (na : Whole) is
+        IntElim (fn (wb : Int) is Eq Bool (ieqb (nonneg na) wb) true -> Eq Int (nonneg na) wb end)
+          (fn (nb : Whole) (h : Eq Bool (eqW na nb) true) is
+            congNonneg na nb (eqWSound na nb h) end)
+          (fn (kb : Whole) (h : Eq Bool false true) is
+            boolDiscTF (Eq Int (nonneg na) (negsucc kb)) (symEq Bool false true h) end)
+       end)
+      (fn (ka : Whole) is
+        IntElim (fn (wb : Int) is Eq Bool (ieqb (negsucc ka) wb) true -> Eq Int (negsucc ka) wb end)
+          (fn (nb : Whole) (h : Eq Bool false true) is
+            boolDiscTF (Eq Int (negsucc ka) (nonneg nb)) (symEq Bool false true h) end)
+          (fn (kb : Whole) (h : Eq Bool (eqW ka kb) true) is
+            congNegsucc ka kb (eqWSound ka kb h) end)
+       end)
+      a
+  end
+end
+
+-- REFLEXIVITY of ieqb: each diagonal reduces to `eqW m m` (eqWRefl).
+ieqbReflP : (a : Int) -> Eq Bool (ieqb a a) true is
+  fn (a : Int) is
+    IntElim (fn (w : Int) is Eq Bool (ieqb w w) true end)
+      (fn (n : Whole) is eqWRefl n end)
+      (fn (k : Whole) is eqWRefl k end)
+      a
+  end
+end
+
+instance decEqInt : DecEq Int is mkDecEq Int ieqb end
+instance ordInt   : Ord Int   is mkOrd Int ileb (compareFromLe Int ileb) end
+
+-- DecEq laws: soundness = ieqbSoundP, reflexivity = ieqbReflP (eqbOf reduces to
+-- ieqb).
+decEqLawsInt : DecEqLaws Int decEqInt is
+  mkAnd ((a : Int) -> (b : Int) -> Eq Bool (eqbOf Int decEqInt a b) true -> Eq Int a b)
+        ((a : Int) -> Eq Bool (eqbOf Int decEqInt a a) true)
+    ieqbSoundP
+    ieqbReflP
+end
+
+-- Ord laws: the six total-order slots. leRefl/leTrans/leAntisym/leTotal are the
+-- ileb case lemmas (Le computes to the ileb equation); cmpEq/cmpLe reuse the
+-- general compareFromLe characterization (compareFromLeEq feeds ilebAntisymP,
+-- compareFromLeLt gives Le directly).
+ordLawsInt : OrdLaws Int ordInt is
+  mkAnd ((a : Int) -> Le Int ordInt a a)
+    (And ((a : Int) -> (b : Int) -> (c : Int) -> Le Int ordInt a b -> Le Int ordInt b c -> Le Int ordInt a c)
+    (And ((a : Int) -> (b : Int) -> Le Int ordInt a b -> Le Int ordInt b a -> Eq Int a b)
+    (And ((a : Int) -> (b : Int) -> Eq Bool (or (leOf Int ordInt a b) (leOf Int ordInt b a)) true)
+    (And ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) eq -> Eq Int a b)
+         ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) lt -> Le Int ordInt a b)))))
+    ilebReflP
+    (mkAnd ((a : Int) -> (b : Int) -> (c : Int) -> Le Int ordInt a b -> Le Int ordInt b c -> Le Int ordInt a c)
+      (And ((a : Int) -> (b : Int) -> Le Int ordInt a b -> Le Int ordInt b a -> Eq Int a b)
+      (And ((a : Int) -> (b : Int) -> Eq Bool (or (leOf Int ordInt a b) (leOf Int ordInt b a)) true)
+      (And ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) eq -> Eq Int a b)
+           ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) lt -> Le Int ordInt a b))))
+      ilebTransP
+      (mkAnd ((a : Int) -> (b : Int) -> Le Int ordInt a b -> Le Int ordInt b a -> Eq Int a b)
+        (And ((a : Int) -> (b : Int) -> Eq Bool (or (leOf Int ordInt a b) (leOf Int ordInt b a)) true)
+        (And ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) eq -> Eq Int a b)
+             ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) lt -> Le Int ordInt a b)))
+        ilebAntisymP
+        (mkAnd ((a : Int) -> (b : Int) -> Eq Bool (or (leOf Int ordInt a b) (leOf Int ordInt b a)) true)
+          (And ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) eq -> Eq Int a b)
+               ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) lt -> Le Int ordInt a b))
+          ilebTotalP
+          (mkAnd ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) eq -> Eq Int a b)
+                 ((a : Int) -> (b : Int) -> Eq Ordering (compareOf Int ordInt a b) lt -> Le Int ordInt a b)
+            (fn (a : Int) (b : Int) (h : Eq Ordering (compareOf Int ordInt a b) eq) is
+               let pr : And (Eq Bool (ileb a b) true) (Eq Bool (ileb b a) true) =
+                 compareFromLeEq Int ileb a b h in
+               ilebAntisymP a b (pr.1) (pr.2)
+             end)
+            (fn (a : Int) (b : Int) (h : Eq Ordering (compareOf Int ordInt a b) lt) is
+               compareFromLeLt Int ileb a b h
+             end)))))
+end
+
 -- Boolean conjunction:  and true b = b, and false b = false.
 
 and : Bool -> Bool -> Bool is
