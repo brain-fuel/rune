@@ -8727,6 +8727,53 @@ module Std.Float is
   foreign parseFloat : Whole -> Option Float end
   foreign getFloat : IO Float end
   foreign printFloat : Float -> IO Float end
+
+  -- Comparison primitive (baked 9-way in codegen/ioprims.go): 1 if a <= b else 0.
+  -- NaN yields 0 (the IEEE partial order: NaN is <= nothing), so it is NOT a total
+  -- order - the reason Float has Ord OPS but no OrdLaws.
+  foreign fleqN : Float -> Float -> Whole end
+
+  -- ============================================================
+  -- FLOAT GUARDED TIER (v4). IEEE754 f64 has OPS but no LAWS on BOTH axes:
+  -- order (NaN <= NaN is false, so fle is not reflexive, not total) and
+  -- algebra (float + is not associative). So Float instantiates the ops
+  -- classes WITHOUT any laws record. All comparison/equality/NaN below
+  -- derive from the single fleqN - no new primitives.
+  -- ============================================================
+
+  -- Bool le from fleqN (1/0). fleqN a b = 1 -> isZero 1 = false -> notB -> true.
+  fle : Float -> Float -> Bool is fn (a : Float) (b : Float) is notB (isZero (fleqN a b)) end end
+
+  -- IEEE == : a == b iff a <= b and b <= a. Gives -0 == +0 (both hold) and
+  -- NaN != NaN (fle NaN NaN is false). This is the guarded DecEq (no refl law).
+  feq : Float -> Float -> Bool is fn (a : Float) (b : Float) is and (fle a b) (fle b a) end end
+
+  -- A NaN is the only f64 not <= itself.
+  isNaN : Float -> Bool is fn (x : Float) is notB (fle x x) end end
+
+  -- A NaN-last TOTAL order for sorting: both-NaN -> eq, one-NaN -> NaN is
+  -- greatest, else the numeric compare. Reflexive/antisymmetric/total. Pragmatic:
+  -- does NOT distinguish -0 from +0; not the full IEEE754 bit-level totalOrder.
+  -- NOTE: case arms are listed true-then-false to match `data Bool` ctor order
+  -- (true : Bool | false : Bool), as compareFromLe above does.
+  totalCompare : Float -> Float -> Ordering is
+    fn (a : Float) (b : Float) is
+      case fle a a of
+      | true  -> case fle b b of | true -> compareFromLe Float fle a b | false -> lt end
+      | false -> case fle b b of | true -> gt | false -> eq end
+      end
+    end
+  end
+
+  -- Guarded-tier instances: ops present, NO laws records.
+  -- + and * (float + is non-ASSOCIATIVE, so NO SemiringLaws Float):
+  instance semiringFloat : Semiring Float is mkSemiring Float fadd (fromNat zero) fmul (fromNat (succ zero)) end
+  -- - (subtraction promotes A - A to A; NO laws):
+  instance subRFloat : SubR Float Float is fsub end
+  -- le / compare (NaN breaks reflexivity + totality, so NO OrdLaws Float):
+  instance ordFloat : Ord Float is mkOrd Float fle (compareFromLe Float fle) end
+  -- eqb (NaN != NaN, -0 = +0, so NO DecEq law for Float):
+  instance decEqFloat : DecEq Float is mkDecEq Float feq end
 end
 
 -- ====================================================================
