@@ -9609,3 +9609,210 @@ orderedRingLawsInt : OrderedRingLaws Int ringInt ordInt is
   mkAnd (RingLaws Int ringInt) (OrderedSemiringLaws Int (ringInt.1) ordInt)
     ringLawsInt orderedSemiringLawsInt
 end
+
+-- ====================================================================
+-- Frac ordered-field instance (v4 Ord Plan B, Task 4 - THE deliverable:
+-- the first ordered field). Frac is a DivRing (a field), so its top
+-- ordered-algebra rung is the ordered FIELD: an ordered comm ring over the
+-- DivRing. The two compat laws (addMono, mulNonneg) are lifted out of the
+-- quotient Frac by qind to representatives, where leF is the Int
+-- cross-comparison and addF/mulF add/multiply cross terms; the monotonicity
+-- reduces to the Int facts addMonoInt / mulNonnegInt (Task 3) plus
+-- ilebMulPosR to align the positive denominators. Pure positive-scaling
+-- monotonicity, NO multiplicative cancellation (mirrors the Plan A leResp /
+-- crossTransP choreography). The representative motives are Props (the
+-- unfolded `Eq Bool (leF ..) true` shape; `Le` stays only at the top type).
+-- ====================================================================
+
+-- Representative-level product-nonnegativity: at reps p, q the hypotheses
+-- say qnum p, qnum q are >= 0 (each scaled by the fracOf-zero denominator
+-- nonneg 1, stripped by imulOneR), so mulNonnegInt gives qnum p * qnum q >= 0,
+-- and rescaling by nonneg 1 (imulOneR back) matches the product's cross term.
+mulNonnegP : (p : QPair) -> (q : QPair)
+    -> Eq Bool (ileb (nonneg zero) (imul (qnum p) (nonneg (succ zero)))) true
+    -> Eq Bool (ileb (nonneg zero) (imul (qnum q) (nonneg (succ zero)))) true
+    -> Eq Bool (ileb (nonneg zero) (imul (imul (qnum p) (qnum q)) (nonneg (succ zero)))) true is
+  fn (p : QPair) (q : QPair)
+     (hx : Eq Bool (ileb (nonneg zero) (imul (qnum p) (nonneg (succ zero)))) true)
+     (hy : Eq Bool (ileb (nonneg zero) (imul (qnum q) (nonneg (succ zero)))) true) is
+    let hp : Eq Bool (ileb (nonneg zero) (qnum p)) true =
+      subst Int (imul (qnum p) (nonneg (succ zero))) (qnum p) (imulOneR (qnum p))
+        (fn (z : Int) is Eq Bool (ileb (nonneg zero) z) true end) hx in
+    let hq : Eq Bool (ileb (nonneg zero) (qnum q)) true =
+      subst Int (imul (qnum q) (nonneg (succ zero))) (qnum q) (imulOneR (qnum q))
+        (fn (z : Int) is Eq Bool (ileb (nonneg zero) z) true end) hy in
+    let hpq : Eq Bool (ileb (nonneg zero) (imul (qnum p) (qnum q))) true =
+      mulNonnegInt (qnum p) (qnum q) hp hq in
+    subst Int (imul (qnum p) (qnum q)) (imul (imul (qnum p) (qnum q)) (nonneg (succ zero)))
+      (symEq Int (imul (imul (qnum p) (qnum q)) (nonneg (succ zero))) (imul (qnum p) (qnum q))
+         (imulOneR (imul (qnum p) (qnum q))))
+      (fn (z : Int) is Eq Bool (ileb (nonneg zero) z) true end) hpq
+  end
+end
+
+-- mulNonnegF: product of two nonnegative Fracs is nonnegative. Double qind
+-- to representatives (motive a Prop: the unfolded `Eq Bool (leF (fracOf zero)
+-- ..) true`), where the goal reduces to mulNonnegP on the numerators.
+mulNonnegF : MulNonnegT Frac ordFrac mulF (fracOf zero) is
+  fn (a : Frac) (b : Frac) is
+    qind QPair QRel
+      (fn (wa : Frac) is (yy : Frac) -> Eq Bool (leF (fracOf zero) wa) true -> Eq Bool (leF (fracOf zero) yy) true -> Eq Bool (leF (fracOf zero) (mulF wa yy)) true end)
+      (fn (p : QPair) is
+        fn (yy : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is Eq Bool (leF (fracOf zero) (qin QPair QRel p)) true -> Eq Bool (leF (fracOf zero) wy) true -> Eq Bool (leF (fracOf zero) (mulF (qin QPair QRel p) wy)) true end)
+            (fn (q : QPair) is
+              fn (hx : Eq Bool (leF (fracOf zero) (qin QPair QRel p)) true)
+                 (hy : Eq Bool (leF (fracOf zero) (qin QPair QRel q)) true) is
+                mulNonnegP p q hx hy
+              end
+             end)
+            yy
+        end
+      end)
+      a b
+  end
+end
+
+-- crossAddMonoP: representative-level additive monotonicity - the campaign's
+-- real quotient-lift work. From np*dq <= nq*dp (p <= q as reps), conclude the
+-- sum-cross-comparison for (p+r) <= (q+r). Choreography (all positive scaling +
+-- addition, NO cancellation): (1) align both sum denominators to imul (qden)(qden)
+-- via qdenMul; (2) distribute each sum numerator over the denominator (idistribR),
+-- splitting into a p/q-term and a shared r-term; (3) the r-terms are equal by
+-- regrouping (imulInterchange); the p/q-terms are (np*dq) and (nq*dp) each scaled
+-- by the positive dr*dr, so ilebMulPosR reduces them to the hypothesis; (4)
+-- re-attach the shared r-term with addMonoInt (Task 3, Int additive monotonicity),
+-- then rewrite the products back to the goal's shape (imulInterchange).
+crossAddMonoP : (p : QPair) -> (q : QPair) -> (r : QPair)
+    -> Eq Bool (leF (qin QPair QRel p) (qin QPair QRel q)) true
+    -> Eq Bool (leF (addF (qin QPair QRel p) (qin QPair QRel r))
+                    (addF (qin QPair QRel q) (qin QPair QRel r))) true is
+  fn (p : QPair) (q : QPair) (r : QPair)
+     (h : Eq Bool (ileb (imul (qnum p) (qden q)) (imul (qnum q) (qden p))) true) is
+    let np : Int = qnum p in
+    let dp : Int = qden p in
+    let nq : Int = qnum q in
+    let dq : Int = qden q in
+    let nr : Int = qnum r in
+    let dr : Int = qden r in
+    let dri : Whole = qdpred r in
+    let npr : Int = iadd (imul np dr) (imul nr dp) in
+    let nqr : Int = iadd (imul nq dr) (imul nr dq) in
+    let bigA : Int = imul (imul np dq) (imul dr dr) in
+    let bigB : Int = imul (imul nq dp) (imul dr dr) in
+    let y1 : Int = imul (imul nr dp) (imul dq dr) in
+    let x1 : Int = imul (imul np dr) (imul dq dr) in
+    let x2 : Int = imul (imul nq dr) (imul dp dr) in
+    let y2 : Int = imul (imul nr dq) (imul dp dr) in
+    let drdrEq : Eq Int (imul dr dr) (nonneg (succ (dmul dri dri))) =
+      congNonneg (mulW (succ dri) (succ dri)) (succ (dmul dri dri)) (dmulSucc dri dri) in
+    let scaledHyp0 : Eq Bool (ileb (imul (imul np dq) (nonneg (succ (dmul dri dri))))
+                                   (imul (imul nq dp) (nonneg (succ (dmul dri dri))))) true =
+      transEq Bool (ileb (imul (imul np dq) (nonneg (succ (dmul dri dri))))
+                         (imul (imul nq dp) (nonneg (succ (dmul dri dri)))))
+                   (ileb (imul np dq) (imul nq dp)) true
+        (ilebMulPosR (imul np dq) (imul nq dp) (dmul dri dri))
+        h in
+    let scaledHyp : Eq Bool (ileb bigA bigB) true =
+      transEq Bool (ileb bigA bigB)
+                   (ileb (imul (imul np dq) (nonneg (succ (dmul dri dri))))
+                         (imul (imul nq dp) (nonneg (succ (dmul dri dri))))) true
+        (congIleb2 bigA (imul (imul np dq) (nonneg (succ (dmul dri dri))))
+                   bigB (imul (imul nq dp) (nonneg (succ (dmul dri dri))))
+           (congImulR (imul np dq) (imul dr dr) (nonneg (succ (dmul dri dri))) drdrEq)
+           (congImulR (imul nq dp) (imul dr dr) (nonneg (succ (dmul dri dri))) drdrEq))
+        scaledHyp0 in
+    let distGoal : Eq Bool (ileb (iadd x1 y1) (iadd x2 y2)) true =
+      transEq Bool (ileb (iadd x1 y1) (iadd x2 y2)) (ileb (iadd bigA y1) (iadd bigB y1)) true
+        (congIleb2 (iadd x1 y1) (iadd bigA y1) (iadd x2 y2) (iadd bigB y1)
+           (congIaddL x1 bigA y1 (imulInterchange np dr dq dr))
+           (congIadd2 x2 bigB y2 y1 (imulInterchange nq dr dp dr) (imulInterchange nr dq dp dr)))
+        (addMonoInt bigA bigB y1 scaledHyp) in
+    transEq Bool
+      (ileb (imul npr (nonneg (succ (dmul (qdpred q) dri))))
+            (imul nqr (nonneg (succ (dmul (qdpred p) dri)))))
+      (ileb (imul npr (imul dq dr)) (imul nqr (imul dp dr))) true
+      (congIleb2 (imul npr (nonneg (succ (dmul (qdpred q) dri)))) (imul npr (imul dq dr))
+                 (imul nqr (nonneg (succ (dmul (qdpred p) dri)))) (imul nqr (imul dp dr))
+         (congImulR npr (nonneg (succ (dmul (qdpred q) dri))) (imul dq dr) (qdenMul q r))
+         (congImulR nqr (nonneg (succ (dmul (qdpred p) dri))) (imul dp dr) (qdenMul p r)))
+      (transEq Bool (ileb (imul npr (imul dq dr)) (imul nqr (imul dp dr)))
+                    (ileb (iadd x1 y1) (iadd x2 y2)) true
+        (congIleb2 (imul npr (imul dq dr)) (iadd x1 y1) (imul nqr (imul dp dr)) (iadd x2 y2)
+           (idistribR (imul np dr) (imul nr dp) (imul dq dr))
+           (idistribR (imul nq dr) (imul nr dq) (imul dp dr)))
+        distGoal)
+  end
+end
+
+-- addMonoF: addition is monotone on the right over the quotient Frac. Triple
+-- qind to representatives (motives Props: the unfolded `Eq Bool (leF ..) true`),
+-- where addF (qin p)(qin r) computes to qin (rawAdd p r) and the goal is exactly
+-- crossAddMonoP's conclusion.
+addMonoF : AddMonoT Frac ordFrac addF is
+  fn (a : Frac) (b : Frac) (c : Frac) is
+    qind QPair QRel
+      (fn (wa : Frac) is (yy : Frac) -> (zz : Frac) -> Eq Bool (leF wa yy) true
+         -> Eq Bool (leF (addF wa zz) (addF yy zz)) true end)
+      (fn (p : QPair) is
+        fn (yy : Frac) is
+          qind QPair QRel
+            (fn (wy : Frac) is (zz : Frac) -> Eq Bool (leF (qin QPair QRel p) wy) true
+               -> Eq Bool (leF (addF (qin QPair QRel p) zz) (addF wy zz)) true end)
+            (fn (q : QPair) is
+              fn (zz : Frac) is
+                qind QPair QRel
+                  (fn (wz : Frac) is Eq Bool (leF (qin QPair QRel p) (qin QPair QRel q)) true
+                     -> Eq Bool (leF (addF (qin QPair QRel p) wz) (addF (qin QPair QRel q) wz)) true end)
+                  (fn (r : QPair) is
+                    fn (hpq : Eq Bool (leF (qin QPair QRel p) (qin QPair QRel q)) true) is
+                      crossAddMonoP p q r hpq
+                    end
+                   end)
+                  zz
+              end
+            end)
+            yy
+        end
+      end)
+      a b c
+  end
+end
+
+-- The assembled ordered-semiring laws for Frac's embedded semiring
+-- (divRingFrac.1.1): the 4-slot right-nested And of semiringLawsFrac,
+-- ordLawsFrac, addMonoF, mulNonnegF. The ops-slot annotations spell addF/mulF/
+-- (fracOf zero) - the .1/.2.2.1/.2.1 projections of divRingFrac.1.1. Named so
+-- the OrderedRing/Field assemblies (and ch575) can mirror it.
+orderedSemiringLawsFrac : OrderedSemiringLaws Frac (divRingFrac.1.1) ordFrac is
+  mkAnd (SemiringLaws Frac (divRingFrac.1.1))
+    (And (OrdLaws Frac ordFrac)
+    (And (AddMonoT Frac ordFrac addF)
+         (MulNonnegT Frac ordFrac mulF (fracOf zero))))
+    semiringLawsFrac
+    (mkAnd (OrdLaws Frac ordFrac)
+      (And (AddMonoT Frac ordFrac addF)
+           (MulNonnegT Frac ordFrac mulF (fracOf zero)))
+      ordLawsFrac
+      (mkAnd (AddMonoT Frac ordFrac addF)
+             (MulNonnegT Frac ordFrac mulF (fracOf zero))
+        addMonoF
+        mulNonnegF))
+end
+
+-- Frac's ordered-ring laws: RingLaws carried alongside the ordered-semiring
+-- part over the embedded semiring (divRingFrac.1), the ladder-bridge doctrine.
+orderedRingLawsFrac : OrderedRingLaws Frac (divRingFrac.1) ordFrac is
+  mkAnd (RingLaws Frac (divRingFrac.1)) (OrderedSemiringLaws Frac (divRingFrac.1.1) ordFrac)
+    ringLawsFrac orderedSemiringLawsFrac
+end
+
+-- orderedFieldLawsFrac - THE DELIVERABLE: the first ordered field. An ordered
+-- comm ring over the Frac DivRing (the ordered-ring laws over divRingFrac.1 +
+-- commutativity over divRingFrac.1.1). Composes with fieldLawsFrac for the full
+-- ordered-field story (the field/recip laws stay in FieldLaws, per the split).
+orderedFieldLawsFrac : OrderedFieldLaws Frac divRingFrac ordFrac nzFrac is
+  mkAnd (OrderedRingLaws Frac (divRingFrac.1) ordFrac) (CommLaws Frac (divRingFrac.1.1))
+    orderedRingLawsFrac commLawsFrac
+end

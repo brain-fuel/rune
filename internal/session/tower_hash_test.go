@@ -180,6 +180,31 @@ func TestIntOrderedRingPresent(t *testing.T) {
 	}
 }
 
+// TestFracOrderedFieldPresent pins Task 4 of the v4 Ord campaign Plan B - THE
+// deliverable: Frac's ordered-field instance (the first ordered field).
+// addMonoF proves addition is monotone on the right over the quotient Frac
+// (lifted by qind to representatives, where it reduces to addMonoInt on the
+// cross-multiplied numerators + ilebMulPosR to align the positive denominators);
+// mulNonnegF proves the product of two nonnegative Fracs is nonnegative (lifted
+// by qind, reducing to mulNonnegInt on the numerators); orderedSemiringLawsFrac
+// / orderedRingLawsFrac assemble over Frac's embedded semiring/ring, and
+// orderedFieldLawsFrac is the ordered comm ring over the DivRing. Elaboration
+// is the proof check.
+func TestFracOrderedFieldPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"addMonoF", "mulNonnegF",
+		"orderedSemiringLawsFrac", "orderedRingLawsFrac", "orderedFieldLawsFrac",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
 // semiring laws (the proven tier of the v4 hierarchy): the laws value
 // must exist and elaborate against the laws record over semiringWhole.
