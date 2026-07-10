@@ -9290,3 +9290,322 @@ orderedSemiringLawsWhole : OrderedSemiringLaws Whole semiringWhole ordWhole is
         addMonoWhole
         mulNonnegWhole))
 end
+
+-- ====================================================================
+-- Int ordered-ring instance (v4 Ord Plan B, Task 3). Int IS a Ring (it
+-- has negation), so its ordered-algebra rung is the ordered RING, built
+-- (per the ladder-bridge doctrine) over Int's embedded semiring `ringInt.1`
+-- via orderedSemiringLawsInt. The substantial slot is addMonoInt: addition
+-- monotone on the right over the signed Int, proven by a sign-case tree on
+-- the constructors of a, b, c (iadd's cases interact with ileb's cases).
+-- Every REACHABLE case has a goal of the form `... = true`; the impossible
+-- sign combinations (where the hypothesis a<=b is false) are ex-falso via
+-- boolDiscTF. The mixed-sign iadd cases produce `wsub` (whole-minus-whole
+-- as a signed Int), handled by four small Int/Whole helper lemmas below.
+-- ====================================================================
+
+-- Whole helper: leb is monotone under `pred` (x<=y implies pred x <= pred y).
+-- The zero-minuend case is vacuous (leb zero _ = true); the succ/succ case
+-- peels both preds to the arguments; leb (succ x) zero = false is ex-falso.
+lebPred : (x : Whole) -> (y : Whole) -> Eq Bool (leb x y) true
+    -> Eq Bool (leb (pred x) (pred y)) true is
+  fn (x : Whole) is
+    case x of
+    | zero -> fn (y : Whole) (h : Eq Bool true true) is refl true end
+    | succ x2 -> fn (y : Whole) is
+        case y of
+        | zero -> fn (h : Eq Bool false true) is
+            boolDiscTF (Eq Bool (leb (pred (succ x2)) (pred zero)) true)
+              (symEq Bool false true h) end
+        | succ y2 -> fn (h : Eq Bool (leb x2 y2) true) is h end
+        end
+      end
+    end
+  end
+end
+
+-- Whole helper: truncated subtraction is monotone in its MINUEND under a
+-- common subtrahend (m<=n implies m-s <= n-s). Induction on s: the zero case
+-- is the hypothesis; the succ case peels one `pred` off each side (subW
+-- recurses on its 2nd argument) and closes by lebPred on the IH. (The dual,
+-- antitone-in-subtrahend, is the existing monusLeMono2.)
+monusLeMono1 : (s : Whole) -> (m : Whole) -> (n : Whole)
+    -> Eq Bool (leb m n) true -> Eq Bool (leb (subW m s) (subW n s)) true is
+  fn (s : Whole) is
+    case s of
+    | zero -> fn (m : Whole) (n : Whole) (h : Eq Bool (leb m n) true) is h end
+    | succ s2 with ih -> fn (m : Whole) (n : Whole) (h : Eq Bool (leb m n) true) is
+        lebPred (subW m s2) (subW n s2) (ih m n h) end
+    end
+  end
+end
+
+-- Helper A: `wsub` monotone in the minuend under a common subtrahend s
+-- (m<=n implies wsub m s <= wsub n s as signed Ints). Case on leb s m and
+-- leb s n (with their equations, via boolCaseEq + wsubTrue/wsubFalse to
+-- rewrite each wsub). (true,true): both nonneg, reduces to monusLeMono1.
+-- (true,false): impossible (lebTrans forces leb s n = true). (false,true):
+-- a negsucc below a nonneg, ileb = true. (false,false): both negsucc, ileb
+-- reads the SIGN-REVERSED leb, closed by monusLeMono2 on the shifted bounds.
+ilebWsubMinuendMono : (s : Whole) -> (m : Whole) -> (n : Whole)
+    -> Eq Bool (leb m n) true -> Eq Bool (ileb (wsub m s) (wsub n s)) true is
+  fn (s : Whole) (m : Whole) (n : Whole) (h : Eq Bool (leb m n) true) is
+    boolCaseEq (leb s m)
+      (fn (g1 : Bool) is Eq Bool (ileb (wsub m s) (wsub n s)) true end)
+      (fn (e1 : Eq Bool (leb s m) true) is
+         boolCaseEq (leb s n)
+           (fn (g2 : Bool) is Eq Bool (ileb (wsub m s) (wsub n s)) true end)
+           (fn (e2 : Eq Bool (leb s n) true) is
+              transEq Bool (ileb (wsub m s) (wsub n s))
+                (ileb (nonneg (subW m s)) (nonneg (subW n s))) true
+                (congIleb2 (wsub m s) (nonneg (subW m s)) (wsub n s) (nonneg (subW n s))
+                   (wsubTrue m s e1) (wsubTrue n s e2))
+                (monusLeMono1 s m n h)
+            end)
+           (fn (e2 : Eq Bool (leb s n) false) is
+              boolDiscTF (Eq Bool (ileb (wsub m s) (wsub n s)) true)
+                (transEq Bool true (leb s n) false
+                   (symEq Bool (leb s n) true (lebTrans s m n e1 h)) e2)
+            end)
+       end)
+      (fn (e1 : Eq Bool (leb s m) false) is
+         boolCaseEq (leb s n)
+           (fn (g2 : Bool) is Eq Bool (ileb (wsub m s) (wsub n s)) true end)
+           (fn (e2 : Eq Bool (leb s n) true) is
+              transEq Bool (ileb (wsub m s) (wsub n s))
+                (ileb (negsucc (subW s (succ m))) (nonneg (subW n s))) true
+                (congIleb2 (wsub m s) (negsucc (subW s (succ m))) (wsub n s) (nonneg (subW n s))
+                   (wsubFalse m s e1) (wsubTrue n s e2))
+                (refl true)
+            end)
+           (fn (e2 : Eq Bool (leb s n) false) is
+              transEq Bool (ileb (wsub m s) (wsub n s))
+                (ileb (negsucc (subW s (succ m))) (negsucc (subW s (succ n)))) true
+                (congIleb2 (wsub m s) (negsucc (subW s (succ m))) (wsub n s) (negsucc (subW s (succ n)))
+                   (wsubFalse m s e1) (wsubFalse n s e2))
+                (monusLeMono2 s (succ m) (succ n) h)
+            end)
+       end)
+  end
+end
+
+-- Helper B: `wsub` monotone in the SUBTRAHEND under a common minuend p
+-- (a bigger subtrahend gives a smaller/equal difference: sj<=sk implies
+-- wsub p sk <= wsub p sj). Dual case split to Helper A. (true,true): both
+-- nonneg, reduces to monusLeMono2. (true,false): impossible (lebTrans).
+-- (false,true): negsucc below nonneg. (false,false): both negsucc, the
+-- sign-reversed leb closed by monusLeMono1 on the shifted bounds.
+ilebWsubSubtrahendMono : (p : Whole) -> (sk : Whole) -> (sj : Whole)
+    -> Eq Bool (leb sj sk) true -> Eq Bool (ileb (wsub p sk) (wsub p sj)) true is
+  fn (p : Whole) (sk : Whole) (sj : Whole) (h : Eq Bool (leb sj sk) true) is
+    boolCaseEq (leb sk p)
+      (fn (g1 : Bool) is Eq Bool (ileb (wsub p sk) (wsub p sj)) true end)
+      (fn (e1 : Eq Bool (leb sk p) true) is
+         boolCaseEq (leb sj p)
+           (fn (g2 : Bool) is Eq Bool (ileb (wsub p sk) (wsub p sj)) true end)
+           (fn (e2 : Eq Bool (leb sj p) true) is
+              transEq Bool (ileb (wsub p sk) (wsub p sj))
+                (ileb (nonneg (subW p sk)) (nonneg (subW p sj))) true
+                (congIleb2 (wsub p sk) (nonneg (subW p sk)) (wsub p sj) (nonneg (subW p sj))
+                   (wsubTrue p sk e1) (wsubTrue p sj e2))
+                (monusLeMono2 p sj sk h)
+            end)
+           (fn (e2 : Eq Bool (leb sj p) false) is
+              boolDiscTF (Eq Bool (ileb (wsub p sk) (wsub p sj)) true)
+                (transEq Bool true (leb sj p) false
+                   (symEq Bool (leb sj p) true (lebTrans sj sk p h e1)) e2)
+            end)
+       end)
+      (fn (e1 : Eq Bool (leb sk p) false) is
+         boolCaseEq (leb sj p)
+           (fn (g2 : Bool) is Eq Bool (ileb (wsub p sk) (wsub p sj)) true end)
+           (fn (e2 : Eq Bool (leb sj p) true) is
+              transEq Bool (ileb (wsub p sk) (wsub p sj))
+                (ileb (negsucc (subW sk (succ p))) (nonneg (subW p sj))) true
+                (congIleb2 (wsub p sk) (negsucc (subW sk (succ p))) (wsub p sj) (nonneg (subW p sj))
+                   (wsubFalse p sk e1) (wsubTrue p sj e2))
+                (refl true)
+            end)
+           (fn (e2 : Eq Bool (leb sj p) false) is
+              transEq Bool (ileb (wsub p sk) (wsub p sj))
+                (ileb (negsucc (subW sk (succ p))) (negsucc (subW sj (succ p)))) true
+                (congIleb2 (wsub p sk) (negsucc (subW sk (succ p))) (wsub p sj) (negsucc (subW sj (succ p)))
+                   (wsubFalse p sk e1) (wsubFalse p sj e2))
+                (monusLeMono1 (succ p) sj sk h)
+            end)
+       end)
+  end
+end
+
+-- Helper C1: a negative-plus-nonneg on the left is <= a nonneg-plus-nonneg
+-- (the mixed a=negsucc, b=nonneg, c=nonneg leaf). wsub p (succ k) is either
+-- negative (below every nonneg, ileb = true) or nonneg (subW p (succ k)),
+-- which is <= p <= n+p (monusLe then lteAddL).
+ilebWsubNonnegR : (k : Whole) -> (n : Whole) -> (p : Whole)
+    -> Eq Bool (ileb (wsub p (succ k)) (nonneg (addW n p))) true is
+  fn (k : Whole) (n : Whole) (p : Whole) is
+    boolCaseEq (leb (succ k) p)
+      (fn (g1 : Bool) is Eq Bool (ileb (wsub p (succ k)) (nonneg (addW n p))) true end)
+      (fn (e1 : Eq Bool (leb (succ k) p) true) is
+         transEq Bool (ileb (wsub p (succ k)) (nonneg (addW n p)))
+           (ileb (nonneg (subW p (succ k))) (nonneg (addW n p))) true
+           (congIleb2 (wsub p (succ k)) (nonneg (subW p (succ k))) (nonneg (addW n p)) (nonneg (addW n p))
+              (wsubTrue p (succ k) e1) (refl (nonneg (addW n p))))
+           (lebTrans (subW p (succ k)) p (addW n p) (monusLe p (succ k)) (lteAddL n p))
+       end)
+      (fn (e1 : Eq Bool (leb (succ k) p) false) is
+         transEq Bool (ileb (wsub p (succ k)) (nonneg (addW n p)))
+           (ileb (negsucc (subW (succ k) (succ p))) (nonneg (addW n p))) true
+           (congIleb2 (wsub p (succ k)) (negsucc (subW (succ k) (succ p))) (nonneg (addW n p)) (nonneg (addW n p))
+              (wsubFalse p (succ k) e1) (refl (nonneg (addW n p))))
+           (refl true)
+       end)
+  end
+end
+
+-- Helper C2: a negsucc-headed value is <= a nonneg-plus-negsucc (the mixed
+-- a=negsucc, b=nonneg, c=negsucc leaf). wsub n (succ q) is either nonneg
+-- (above every negsucc) or negsucc (subW (succ q)(succ n) = subW q n), and
+-- subW q n <= q <= k+q < succ (k+q), so the sign-reversed leb holds.
+ilebNegsuccWsub : (k : Whole) -> (n : Whole) -> (q : Whole)
+    -> Eq Bool (ileb (negsucc (succ (addW k q))) (wsub n (succ q))) true is
+  fn (k : Whole) (n : Whole) (q : Whole) is
+    boolCaseEq (leb (succ q) n)
+      (fn (g1 : Bool) is Eq Bool (ileb (negsucc (succ (addW k q))) (wsub n (succ q))) true end)
+      (fn (e1 : Eq Bool (leb (succ q) n) true) is
+         transEq Bool (ileb (negsucc (succ (addW k q))) (wsub n (succ q)))
+           (ileb (negsucc (succ (addW k q))) (nonneg (subW n (succ q)))) true
+           (congIleb2 (negsucc (succ (addW k q))) (negsucc (succ (addW k q)))
+              (wsub n (succ q)) (nonneg (subW n (succ q)))
+              (refl (negsucc (succ (addW k q)))) (wsubTrue n (succ q) e1))
+           (refl true)
+       end)
+      (fn (e1 : Eq Bool (leb (succ q) n) false) is
+         transEq Bool (ileb (negsucc (succ (addW k q))) (wsub n (succ q)))
+           (ileb (negsucc (succ (addW k q))) (negsucc (subW (succ q) (succ n)))) true
+           (congIleb2 (negsucc (succ (addW k q))) (negsucc (succ (addW k q)))
+              (wsub n (succ q)) (negsucc (subW (succ q) (succ n)))
+              (refl (negsucc (succ (addW k q)))) (wsubFalse n (succ q) e1))
+           (subst Whole (subW q n) (subW (succ q) (succ n))
+              (symEq Whole (subW (succ q) (succ n)) (subW q n) (subWSucc q n))
+              (fn (t : Whole) is Eq Bool (leb t (succ (addW k q))) true end)
+              (lebTrans (subW q n) q (succ (addW k q))
+                 (monusLe q n)
+                 (lebTrans q (addW k q) (succ (addW k q)) (lteAddL k q) (lebSuccSelf (addW k q)))))
+       end)
+  end
+end
+
+-- addMonoInt: addition is monotone on the RIGHT over Int. Triple sign-case
+-- via nested IntElim (the hypothesis a<=b lives in the motive so it reduces
+-- as a, b specialize). The four (a-sign, b-sign) leaves: (nonneg,nonneg) the
+-- Whole additive-mono facts (addMonoWhole / Helper A); (nonneg,negsucc) is
+-- ex-falso (ileb nonneg negsucc = false, so a<=b is impossible); (negsucc,
+-- nonneg) uses Helpers C1/C2; (negsucc,negsucc) uses Helper B / addMonoWhole
+-- on the successor magnitudes. c is eliminated inside each leaf.
+addMonoInt : AddMonoT Int ordInt iadd is
+  fn (a : Int) (b : Int) (c : Int) is
+    IntElim
+      (fn (wa : Int) is (wb : Int) -> Le Int ordInt wa wb
+         -> Le Int ordInt (iadd wa c) (iadd wb c) end)
+      (fn (m : Whole) is fn (wb : Int) is
+         IntElim
+           (fn (wb2 : Int) is Le Int ordInt (nonneg m) wb2
+              -> Le Int ordInt (iadd (nonneg m) c) (iadd wb2 c) end)
+           (fn (n : Whole) (h : Le Int ordInt (nonneg m) (nonneg n)) is
+              IntElim
+                (fn (wc : Int) is Le Int ordInt (iadd (nonneg m) wc) (iadd (nonneg n) wc) end)
+                (fn (p : Whole) is addMonoWhole m n p h end)
+                (fn (q : Whole) is ilebWsubMinuendMono (succ q) m n h end)
+                c
+            end)
+           (fn (j : Whole) (h : Le Int ordInt (nonneg m) (negsucc j)) is
+              boolDiscTF (Le Int ordInt (iadd (nonneg m) c) (iadd (negsucc j) c))
+                (symEq Bool false true h)
+            end)
+           wb
+       end end)
+      (fn (k : Whole) is fn (wb : Int) is
+         IntElim
+           (fn (wb2 : Int) is Le Int ordInt (negsucc k) wb2
+              -> Le Int ordInt (iadd (negsucc k) c) (iadd wb2 c) end)
+           (fn (n : Whole) (h : Le Int ordInt (negsucc k) (nonneg n)) is
+              IntElim
+                (fn (wc : Int) is Le Int ordInt (iadd (negsucc k) wc) (iadd (nonneg n) wc) end)
+                (fn (p : Whole) is ilebWsubNonnegR k n p end)
+                (fn (q : Whole) is ilebNegsuccWsub k n q end)
+                c
+            end)
+           (fn (j : Whole) (h : Le Int ordInt (negsucc k) (negsucc j)) is
+              IntElim
+                (fn (wc : Int) is Le Int ordInt (iadd (negsucc k) wc) (iadd (negsucc j) wc) end)
+                (fn (p : Whole) is ilebWsubSubtrahendMono p (succ k) (succ j) h end)
+                (fn (q : Whole) is addMonoWhole j k q h end)
+                c
+            end)
+           wb
+       end end)
+      a
+      b
+  end
+end
+
+-- mulNonnegInt: the product of two nonnegative Ints is nonnegative. Under
+-- the hypotheses a,b are forced nonneg (a = negsucc _ makes `ileb (nonneg
+-- zero)(negsucc _)` = false, an ex-falso hypothesis). Then imul (nonneg x)
+-- (nonneg y) = nonneg (mulW x y) and `ileb (nonneg zero)(nonneg _)` =
+-- `leb zero _` = true, so the surviving case is refl true.
+mulNonnegInt : MulNonnegT Int ordInt imul (nonneg zero) is
+  fn (a : Int) (b : Int) is
+    IntElim
+      (fn (wa : Int) is Le Int ordInt (nonneg zero) wa
+         -> Le Int ordInt (nonneg zero) b -> Le Int ordInt (nonneg zero) (imul wa b) end)
+      (fn (x : Whole) is fn (hx : Le Int ordInt (nonneg zero) (nonneg x)) is
+         IntElim
+           (fn (wb : Int) is Le Int ordInt (nonneg zero) wb
+              -> Le Int ordInt (nonneg zero) (imul (nonneg x) wb) end)
+           (fn (y : Whole) (hy : Le Int ordInt (nonneg zero) (nonneg y)) is refl true end)
+           (fn (j : Whole) (hy : Le Int ordInt (nonneg zero) (negsucc j)) is
+              boolDiscTF (Le Int ordInt (nonneg zero) (imul (nonneg x) (negsucc j)))
+                (symEq Bool false true hy)
+            end)
+           b
+       end end)
+      (fn (k : Whole) is fn (hx : Le Int ordInt (nonneg zero) (negsucc k)) is
+         fn (hy : Le Int ordInt (nonneg zero) b) is
+           boolDiscTF (Le Int ordInt (nonneg zero) (imul (negsucc k) b))
+             (symEq Bool false true hx)
+         end
+       end end)
+      a
+  end
+end
+
+-- The assembled ordered-semiring laws for Int's embedded semiring
+-- `ringInt.1`: the 4-slot right-nested And of semiringLawsInt, ordLawsInt,
+-- addMonoInt, mulNonnegInt (the And-type annotations spell iadd/imul/(nonneg
+-- zero), which are ringInt.1's .1/.2.2.1/.2.1 projections). Named so the
+-- OrderedRing assembly (and ch575) can mirror it.
+orderedSemiringLawsInt : OrderedSemiringLaws Int (ringInt.1) ordInt is
+  mkAnd (SemiringLaws Int (ringInt.1))
+    (And (OrdLaws Int ordInt)
+    (And (AddMonoT Int ordInt iadd)
+         (MulNonnegT Int ordInt imul (nonneg zero))))
+    semiringLawsInt
+    (mkAnd (OrdLaws Int ordInt)
+      (And (AddMonoT Int ordInt iadd)
+           (MulNonnegT Int ordInt imul (nonneg zero)))
+      ordLawsInt
+      (mkAnd (AddMonoT Int ordInt iadd)
+             (MulNonnegT Int ordInt imul (nonneg zero))
+        addMonoInt
+        mulNonnegInt))
+end
+
+-- Int's ordered-ring laws: RingLaws carried alongside the ordered-semiring
+-- part over the embedded semiring (the ladder-bridge doctrine, mirroring
+-- commRingLawsInt's shape).
+orderedRingLawsInt : OrderedRingLaws Int ringInt ordInt is
+  mkAnd (RingLaws Int ringInt) (OrderedSemiringLaws Int (ringInt.1) ordInt)
+    ringLawsInt orderedSemiringLawsInt
+end

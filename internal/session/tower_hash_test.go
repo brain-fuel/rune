@@ -156,6 +156,30 @@ func TestWholeOrderedSemiringPresent(t *testing.T) {
 	}
 }
 
+// TestIntOrderedRingPresent pins Task 3 of the v4 Ord campaign Plan B: Int's
+// ordered-ring instance. addMonoInt proves addition is monotone on the right
+// over Int by a sign-case tree (each sign combination reduces to a Whole
+// monotonicity fact or is ex-falso); mulNonnegInt proves the product of two
+// nonnegative Ints is nonnegative (the hypotheses force both factors nonneg,
+// then the product is nonneg (mulW ..) and leb zero _ = true);
+// orderedSemiringLawsInt assembles them over Int's embedded semiring
+// (ringInt.1) and orderedRingLawsInt carries RingLaws alongside. Elaboration
+// is the proof check.
+func TestIntOrderedRingPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"addMonoInt", "mulNonnegInt",
+		"orderedSemiringLawsInt", "orderedRingLawsInt",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
 // semiring laws (the proven tier of the v4 hierarchy): the laws value
 // must exist and elaborate against the laws record over semiringWhole.
