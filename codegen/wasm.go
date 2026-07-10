@@ -173,6 +173,12 @@ var wasmSupportedForeign = map[string]bool{
 	"parseFloat": true,
 	"getFloat":   true,
 	"printFloat": true,
+	// Float Track A: the remaining arithmetic (native IEEE-754 f64.add/f64.sub/f64.div,
+	// no special-casing needed) + comparison (fleqN, a Whole 1/0 via f64.le) ops.
+	"fadd":  true,
+	"fsub":  true,
+	"fdiv":  true,
+	"fleqN": true,
 }
 
 // wasmCheckSupported walks the program's IR and returns a clear error for any form the
@@ -1217,6 +1223,20 @@ func (em *wasmEmitter) emitForeignPrimsWasm(b *strings.Builder, p Program) {
 	}
 	if usesForeign(p, "fmul") {
 		em.emitFmulWasm(b)
+	}
+	// Float Track A: the remaining arithmetic (fadd/fsub/fdiv) + comparison (fleqN) ops,
+	// gated the same way as fmul above (each only baked when the program actually uses it).
+	if usesForeign(p, "fadd") {
+		em.emitFaddWasm(b)
+	}
+	if usesForeign(p, "fsub") {
+		em.emitFsubWasm(b)
+	}
+	if usesForeign(p, "fdiv") {
+		em.emitFdivWasm(b)
+	}
+	if usesForeign(p, "fleqN") {
+		em.emitFleqNWasm(b)
 	}
 	if usesForeign(p, "parseFloat") {
 		em.emitParseFloatWasm(b)

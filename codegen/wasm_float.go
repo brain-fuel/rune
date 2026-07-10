@@ -362,7 +362,12 @@ const wasmFloatRuntime = `
 // usesFloatWasm reports whether p references any machine-float host op (so the K_FLOAT
 // box + validate/atof/format runtime is baked exactly once).
 func usesFloatWasm(p Program) bool {
-	for _, op := range []string{"Float", "fromNat", "fmul", "parseFloat", "getFloat", "printFloat"} {
+	for _, op := range []string{
+		"Float", "fromNat", "fmul", "parseFloat", "getFloat", "printFloat",
+		// Track A: the remaining arithmetic (fadd/fsub/fdiv) + comparison (fleqN) ops --
+		// same K_FLOAT box, same $rt_float_val reader.
+		"fadd", "fsub", "fdiv", "fleqN",
+	} {
 		if usesForeign(p, op) {
 			return true
 		}
@@ -416,6 +421,114 @@ func (em *wasmEmitter) emitFmulWasm(b *strings.Builder) {
 	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
 	b.WriteString("    (local.get $c))\n")
 	em.emitCachedThunk(b, "fmul", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitFaddWasm bakes `fadd : Float -> Float -> Float` -- add two boxed doubles. Structurally
+// identical to emitFmulWasm (PURE 2-arg curried: accessor -> c1(x->env) -> c2(y->result),
+// c2 reads env[0] (x) BORROWED and the owned $arg (y) which it consumes), only the WAT op
+// (f64.add) and the closure names differ. Argument order: fadd x y = x + y, so this is
+// commutative and the env[0]/$arg placement is not load-bearing here -- but it still
+// matches the fmul convention (first curried arg -> env[0], second -> $arg) for uniformity.
+func (em *wasmEmitter) emitFaddWasm(b *strings.Builder) {
+	c1 := em.codeRef("fadd_c1")
+	c2 := em.codeRef("fadd_c2")
+	b.WriteString("  (func $fadd_c2 (param $arg i32) (param $env i32) (result i32) (local $r i32)\n")
+	b.WriteString("    (local.set $r (call $rt_mkfloat (f64.add\n")
+	b.WriteString("      (call $rt_float_val (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("      (call $rt_float_val (local.get $arg)))))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	fmt.Fprintf(b, "  (func $fadd_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "fadd", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitFsubWasm bakes `fsub : Float -> Float -> Float` -- subtract two boxed doubles.
+// NON-COMMUTATIVE: fsub x y = x - y, and (matching emitFmulWasm's convention) the first
+// curried argument x lands in env[0] and the second argument y arrives as $arg, so the
+// WAT must compute f64.sub(env[0], $arg) -- x - y, NOT $arg - env[0].
+func (em *wasmEmitter) emitFsubWasm(b *strings.Builder) {
+	c1 := em.codeRef("fsub_c1")
+	c2 := em.codeRef("fsub_c2")
+	b.WriteString("  (func $fsub_c2 (param $arg i32) (param $env i32) (result i32) (local $r i32)\n")
+	b.WriteString("    (local.set $r (call $rt_mkfloat (f64.sub\n")
+	b.WriteString("      (call $rt_float_val (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("      (call $rt_float_val (local.get $arg)))))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	fmt.Fprintf(b, "  (func $fsub_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "fsub", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitFdivWasm bakes `fdiv : Float -> Float -> Float` -- divide two boxed doubles.
+// NON-COMMUTATIVE: fdiv x y = x / y, first curried arg x in env[0], second arg y as $arg,
+// so f64.div(env[0], $arg) -- x / y. WASM's f64.div is native IEEE-754: 0.0/0.0 is NaN,
+// x/0.0 is +-inf, with no special-casing needed (unlike the Python/Erlang backends).
+func (em *wasmEmitter) emitFdivWasm(b *strings.Builder) {
+	c1 := em.codeRef("fdiv_c1")
+	c2 := em.codeRef("fdiv_c2")
+	b.WriteString("  (func $fdiv_c2 (param $arg i32) (param $env i32) (result i32) (local $r i32)\n")
+	b.WriteString("    (local.set $r (call $rt_mkfloat (f64.div\n")
+	b.WriteString("      (call $rt_float_val (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("      (call $rt_float_val (local.get $arg)))))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	fmt.Fprintf(b, "  (func $fdiv_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "fdiv", func(f *wasmFunc, bb *strings.Builder) string {
+		r := f.fresh()
+		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
+		return "(local.get " + r + ")"
+	})
+}
+
+// emitFleqNWasm bakes `fleqN : Float -> Float -> Whole` -- a<=b as a Whole/Nat literal (1
+// if true, 0 if false), the guarded-tier primitive Std.Float.fle/feq/isNaN derive from
+// (internal/prelude/prelude.rune ~8734). Same 2-arg curried shape as the arithmetic ops
+// (first curried arg x in env[0], second arg y as $arg), but the RESULT is not a K_FLOAT:
+// f64.le(env[0], $arg) yields an i32 0/1 directly, wrapped into a genuine K_BIG Whole via
+// $rt_big_from_long -- the SAME builtin-nat constructor emitNatFold uses to seed its loop
+// counter at 0 (wasm.go's emitNatFold). This matters: Whole/Nat is the compiler's builtin
+// bignum type (codegen/ir.go's Nat field), and every consumer that pattern-matches a Whole
+// (isZero's `case n of zero | succ`, which lowers to the WholeElim/NatElim spine and
+// compares via $rt_big_cmp/$big_nlimbs) expects a REAL K_BIG box, not the separate
+// immediate-int tag ($rt_mkint, reserved for the unrelated FFI LitInt path) -- $rt_big_cmp
+// reads word[1] as nlimbs unconditionally and does not understand that tag. f64.le(NaN, x)
+// is 0 for any x (including NaN itself), matching every other backend's "NaN is not <= to
+// anything" semantics with no extra NaN check required.
+func (em *wasmEmitter) emitFleqNWasm(b *strings.Builder) {
+	c1 := em.codeRef("fleqN_c1")
+	c2 := em.codeRef("fleqN_c2")
+	b.WriteString("  (func $fleqN_c2 (param $arg i32) (param $env i32) (result i32) (local $r i32)\n")
+	b.WriteString("    (local.set $r (call $rt_big_from_long (f64.le\n")
+	b.WriteString("      (call $rt_float_val (call $rt_env (local.get $env) (i32.const 0)))\n")
+	b.WriteString("      (call $rt_float_val (local.get $arg)))))\n")
+	b.WriteString("    (call $rt_release (local.get $arg))\n")
+	b.WriteString("    (local.get $r))\n")
+	fmt.Fprintf(b, "  (func $fleqN_c1 (param $arg i32) (param $env i32) (result i32) (local $c i32)\n")
+	fmt.Fprintf(b, "    (local.set $c (call $rt_mkclo (i32.const %d) (i32.const 1)))\n", c2)
+	b.WriteString("    (call $rt_clo_set (local.get $c) (i32.const 0) (local.get $arg))\n")
+	b.WriteString("    (local.get $c))\n")
+	em.emitCachedThunk(b, "fleqN", func(f *wasmFunc, bb *strings.Builder) string {
 		r := f.fresh()
 		fmt.Fprintf(bb, "    (local.set %s (call $rt_mkclo (i32.const %d) (i32.const 0)))\n", r, c1)
 		return "(local.get " + r + ")"
