@@ -452,6 +452,51 @@ func TestListingsRun(t *testing.T) {
 		// the two functions equal - not because the redirect touched this path.
 		normalizesTo(t, s, `main`, "true")
 	})
+	// ch577 is DELIBERATELY not pinned here with normalizesTo: its Float
+	// comparisons bottom out in `fleqN`, a `foreign` (bodiless) axiom, so the
+	// kernel normalizer can only reduce `main` to a stuck neutral term, never
+	// to `true`. See TestListingsRunFloatGuarded below, which verifies `main`
+	// the only way a host-opaque type allows: a real compiled run.
+}
+
+// TestListingsRunFloatGuarded is ch577's run-check (v4 Float Track A, Task
+// 3). Float is host-opaque in the kernel -- `fleqN` is a `foreign` axiom with
+// no body, so NbE never reduces a Float comparison to a value and
+// `normalizesTo` cannot verify this chapter's `main` the way it verifies
+// every other listing in TestListingsRun. This test mirrors
+// internal/session/float_guarded_test.go's TestFloatGuardedTierComputes
+// (same EmitProgram + codegen.Go{}.Emit + write-file + `go run` shape) to get
+// a genuine computed value: `main` folds every arithmetic/comparison/NaN
+// check plus the non-associativity refutation witness into one Bool, so a
+// single printed "true" proves all of them at once.
+func TestListingsRunFloatGuarded(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go not in PATH")
+	}
+	s := loadListing(t, "ch577_float_guarded.rune")
+	p, err := s.EmitProgram("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := codegen.Go{}.Emit(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := filepath.Join(t.TempDir(), "main.go")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := exec.Command("go", "run", f).Output()
+	if err != nil {
+		stderr := ""
+		if ee, ok := err.(*exec.ExitError); ok {
+			stderr = string(ee.Stderr)
+		}
+		t.Fatalf("go run failed: %v\n%s\n--- emitted ---\n%s", err, stderr, src)
+	}
+	if want := "true"; strings.TrimSpace(string(got)) != want {
+		t.Fatalf("ch577 main printed %q, want %q", got, want)
+	}
 }
 
 // TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant

@@ -1,0 +1,248 @@
+-- Chapter 577: THE FLOAT GUARDED TIER -- IEEE754 f64 gets `+ - *`, `<=`,
+-- `compare`, and `eqb` through the SAME ops-class shape every other numeric
+-- type in the book uses (a decidable-equality class and an order class,
+-- exactly as ch574 builds them for Whole/Int/Frac), by way of four instances
+-- shipped in the shared prelude's `Std.Float` module: `semiringFloat`,
+-- `subRFloat`, `ordFloat`, `decEqFloat`. Like every numbered chapter from
+-- ch569 on, this one is SELF-CONTAINED (its own Bool/Ordering/DecEq/Ord/Nat,
+-- restated at listing scale, exactly as ch576 restates the lowering registry
+-- inline) -- so what follows is a faithful, standalone copy of the prelude's
+-- ACTUAL guarded-tier derivation (`internal/prelude/prelude.rune`'s
+-- `Std.Float` module), not a fresh design.
+--
+-- GUARDED TIER MEANS OPS WITHOUT LAWS. Every other instance of these classes
+-- in the book (Whole/Int/Frac) also carries a laws record proving the
+-- class's axioms -- associativity, reflexivity, totality, and so on. Float
+-- does NOT: there is no `SemiringLaws Float`, no `OrdLaws Float`, no DecEq
+-- law for Float, anywhere in the prelude, and this chapter does not add one.
+-- That absence is not an oversight; it is the point. Two real IEEE754 facts
+-- break the axioms those laws would have to state:
+--
+--   - ORDER: a NaN is not `<=` anything, not even itself. So `fle` is not
+--     reflexive, and the partial order it induces is not total. `totalCompare`
+--     below patches this into a genuine total order for SORTING PURPOSES
+--     only (NaN is defined to compare last), but that is a separate, weaker,
+--     derived fact -- not a proof that `fle` itself is total.
+--   - ALGEBRA: float addition is not associative. Rounding at the precision
+--     boundary means `(a + b) + c` and `a + (b + c)` can land on two
+--     different representable doubles for the SAME a, b, c. `assocFails`
+--     near the end of this chapter is a concrete witness of exactly that,
+--     built with no float literal -- only `fromNat` and `fadd`/`fsub`.
+--
+-- HOST-OPAQUE, NOT KERNEL-COMPUTED. `fleqN` (the one primitive every name
+-- below derives from) is a `foreign` axiom: it has no body in the kernel,
+-- only per-backend runtime implementations. The elaborator can type-check
+-- every expression in this chapter, but the kernel's normalizer can never
+-- reduce a Float comparison to a concrete `true`/`false`/`lt` the way it
+-- reduces `Nat` arithmetic -- a Float value stays a stuck neutral term until
+-- a real backend runs it. That is why `main` below is verified by a
+-- COMPILED run (harness/listings_test.go emits this chapter to Go and
+-- executes it), never by in-kernel normalization, and why the REPL pins for
+-- this chapter (internal/repl/repl_test.go) assert only that these
+-- expressions ELABORATE and show their TYPE, not that they evaluate to a
+-- printed value.
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+data Ordering : U is
+  lt : Ordering
+| eq : Ordering
+| gt : Ordering
+end
+
+data Nat : U is
+  zero : Nat
+| succ : Nat -> Nat
+end
+builtin nat Nat zero succ
+
+notB : Bool -> Bool is
+  fn (b : Bool) is case b of | true -> false | false -> true end end
+end
+
+and : Bool -> Bool -> Bool is
+  fn (a : Bool) (b : Bool) is case a of | true -> b | false -> false end end
+end
+
+isZero : Nat -> Bool is
+  fn (n : Nat) is case n of | zero -> true | succ k -> false end end
+end
+
+-- The two ops classes this chapter needs, exactly as ch574 builds them: a
+-- decidable-equality class (`DecEq`) and an order class (`Ord`), each a
+-- Sigma-record of operations with NO laws slot. A laws record for either
+-- would be a SEPARATE And-chain type on the side (ch574's `DecEqLaws` /
+-- `OrdLaws`); Float instantiates the ops below without ever building one.
+DecEq : U -> U is
+  fn (A : U) is Sig (A -> A -> Bool) (fn (_e : A -> A -> Bool) is Bool end) end
+end
+mkDecEq : (A : U) -> (A -> A -> Bool) -> DecEq A is
+  fn (A : U) (e : A -> A -> Bool) is
+    Pair (A -> A -> Bool) (fn (_e : A -> A -> Bool) is Bool end) e true
+  end
+end
+eqbOf : (A : U) -> DecEq A -> A -> A -> Bool is
+  fn (A : U) (d : DecEq A) is d.1 end
+end
+
+Ord : U -> U is
+  fn (A : U) is Sig (A -> A -> Bool) (fn (_le : A -> A -> Bool) is A -> A -> Ordering end) end
+end
+mkOrd : (A : U) -> (A -> A -> Bool) -> (A -> A -> Ordering) -> Ord A is
+  fn (A : U) (le : A -> A -> Bool) (cmp : A -> A -> Ordering) is
+    Pair (A -> A -> Bool) (fn (_le : A -> A -> Bool) is A -> A -> Ordering end) le cmp
+  end
+end
+leOf : (A : U) -> Ord A -> A -> A -> Bool is
+  fn (A : U) (o : Ord A) is o.1 end
+end
+compareOf : (A : U) -> Ord A -> A -> A -> Ordering is
+  fn (A : U) (o : Ord A) is o.2 end
+end
+compareFromLe : (A : U) -> (A -> A -> Bool) -> A -> A -> Ordering is
+  fn (A : U) (le : A -> A -> Bool) (a : A) (b : A) is
+    let lab : Bool = le a b in
+    let lba : Bool = le b a in
+    case lab of
+    | true  -> case lba of | true -> eq | false -> lt end
+    | false -> gt
+    end
+  end
+end
+
+-- The machine-float type (host-foreign, exactly ch217's shape) and its
+-- arithmetic kernels -- baked host bodies per backend, values built only from
+-- `fromNat` and these ops (no float literal syntax exists in the surface).
+foreign Float   : U end
+foreign fromNat : Nat -> Float end
+foreign fadd    : Float -> Float -> Float end
+foreign fsub    : Float -> Float -> Float end
+foreign fmul    : Float -> Float -> Float end
+foreign fdiv    : Float -> Float -> Float end
+
+-- Comparison primitive (baked 9-way in codegen/ioprims.go): 1 if a <= b else
+-- 0. NaN yields 0 (the IEEE partial order: NaN is <= nothing), so it is NOT
+-- a total order -- the reason Float has Ord OPS but no OrdLaws.
+foreign fleqN : Float -> Float -> Nat end
+
+-- ============================================================
+-- FLOAT GUARDED TIER, restated verbatim from the shipped prelude's
+-- Std.Float module (internal/prelude/prelude.rune). Every name below
+-- derives from the single fleqN -- no new primitives.
+-- ============================================================
+
+-- Bool le from fleqN (1/0). fleqN a b = 1 -> isZero 1 = false -> notB -> true.
+fle : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is notB (isZero (fleqN a b)) end
+end
+
+-- IEEE == : a == b iff a <= b and b <= a. Gives -0 == +0 (both hold) and NaN
+-- != NaN (fle NaN NaN is false). This is the guarded DecEq (no refl law).
+feq : Float -> Float -> Bool is
+  fn (a : Float) (b : Float) is and (fle a b) (fle b a) end
+end
+
+-- A NaN is the only f64 not <= itself.
+isNaN : Float -> Bool is
+  fn (x : Float) is notB (fle x x) end
+end
+
+-- A NaN-last TOTAL order for sorting: both-NaN -> eq, one-NaN -> NaN is
+-- greatest, else the numeric compare. Reflexive/antisymmetric/total on this
+-- chapter's terms -- NOT the full IEEE754 bit-level totalOrder (it does not
+-- distinguish -0 from +0).
+totalCompare : Float -> Float -> Ordering is
+  fn (a : Float) (b : Float) is
+    case fle a a of
+    | true  -> case fle b b of | true -> compareFromLe Float fle a b | false -> lt end
+    | false -> case fle b b of | true -> gt | false -> eq end
+    end
+  end
+end
+
+-- Guarded-tier instances: ops present, NO laws records. (le / compare: NaN
+-- breaks reflexivity + totality, so no OrdLaws Float. eqb: NaN != NaN and
+-- -0 = +0, so no DecEq law for Float. The shipped prelude also carries
+-- `semiringFloat`/`subRFloat` -- the `+ - *` instances -- omitted here only
+-- because this chapter checks arithmetic directly through `fadd`/`fsub`/
+-- `fmul`, not through the Semiring accessor; float `+` is non-associative,
+-- which is exactly why no SemiringLaws Float exists either.)
+instance ordFloat   : Ord Float   is mkOrd Float fle (compareFromLe Float fle) end
+instance decEqFloat : DecEq Float is mkDecEq Float feq end
+
+-- Three floats built from `fromNat`; no Float literal syntax exists (and
+-- none is added here -- `3.14` still denotes an exact `Frac` everywhere else
+-- in the book).
+one   : Float is fromNat (succ zero) end
+two   : Float is fromNat (succ (succ zero)) end
+three : Float is fromNat (succ (succ (succ zero))) end
+
+-- `+ - *` on Float, each checked by `feq` (never by printing a float --
+-- display parity for Float is separate, later work; this chapter verifies
+-- arithmetic by COMPARISON, the same discipline the 9-backend numeric-tower
+-- parity gate uses).
+addWorks : Bool is feq (fadd one two) three end
+subWorks : Bool is feq (fsub three one) two end
+mulWorks : Bool is feq (fmul one two) two end
+
+-- `fle` directly, and the same comparison through the `Ord`/`DecEq`
+-- operator classes (`compareOf`/`eqbOf`), exactly as Whole/Int/Frac use them.
+leWorks : Bool is fle one two end
+compareIsLt : Bool is
+  case compareOf Float ordFloat one two of
+  | lt -> true
+  | eq -> false
+  | gt -> false
+  end
+end
+eqbWorks : Bool is eqbOf Float decEqFloat one one end
+
+-- A NaN, built with no special syntax: 0.0 / 0.0. `isNaN` recognizes it (the
+-- ONE float not `<=` itself), and the NaN-last `totalCompare` puts it after
+-- every ordinary number.
+nanV : Float is fdiv (fromNat zero) (fromNat zero) end
+nanRecognized : Bool is isNaN nanV end
+nanSortsLast : Bool is
+  case totalCompare one nanV of
+  | lt -> true
+  | eq -> false
+  | gt -> false
+  end
+end
+
+-- THE REFUTATION WITNESS: float addition is genuinely not associative. `big`
+-- sits exactly at 2^53, the float64 precision boundary -- above it, adjacent
+-- representable doubles are 2 apart instead of 1. `big + one` therefore
+-- rounds (ties-to-even) back down to `big` itself, so grouping the same
+-- three values two different ways gives two different answers:
+--
+--   (big + one) + negOne  =  big - 1   (the +1 above was already lost)
+--   big + (one + negOne)  =  big + 0   =  big
+--
+-- No Float literal is used to build any of the three values -- `big` is
+-- `fromNat` on a plain Nat digit literal, and `negOne` is `0.0 - 1.0` via
+-- `fsub`. This is exactly why there is no `SemiringLaws Float` anywhere in
+-- the prelude: the law does not hold, and here is a specific triple that
+-- breaks it.
+big    : Float is fromNat 9007199254740992 end -- 2^53
+negOne : Float is fsub (fromNat zero) one end
+assocFails : Bool is
+  notB (feq (fadd (fadd big one) negOne) (fadd big (fadd one negOne)))
+end
+
+-- Every check folded into one Bool. A compiled run of `main` (never in-
+-- kernel normalization -- see the header note) is this chapter's acceptance:
+-- it must print `true`.
+main : Bool is
+  and addWorks
+  (and subWorks
+  (and mulWorks
+  (and leWorks
+  (and compareIsLt
+  (and eqbWorks
+  (and nanRecognized
+  (and nanSortsLast assocFails)))))))
+end

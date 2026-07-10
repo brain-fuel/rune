@@ -1254,3 +1254,61 @@ func TestREPLTowerComparisonPins(t *testing.T) {
 		t.Errorf("expected exactly 5 'true : Bool' lines, got %d\n--- full output ---\n%s", n, got)
 	}
 }
+
+// TestREPLFloatGuardedPins is the v4 Float Track A, Task 3 REPL acceptance
+// for the guarded-tier Float surface (feq/fle/isNaN/totalCompare plus the
+// ordFloat/decEqFloat operator instances, all shipped in the prelude's
+// Std.Float module).
+//
+// This pin is HONEST about what a host-opaque type can prove at the prompt.
+// `Std.Float.fleqN` -- the one primitive every name below derives from -- is
+// a `foreign` axiom with no kernel body, so the NbE normalizer can never
+// reduce a Float comparison to a concrete `true`/`false`/`lt`: every
+// expression below normalizes to a STUCK NEUTRAL TERM (confirmed by
+// manually driving the REPL before writing these assertions -- see the
+// Track A Task 3 report). What the REPL genuinely gives is ELABORATION and
+// the resulting TYPE annotation printed after the term (` : Bool` or
+// ` : Ordering`), so that is what this test pins, NOT the computed value.
+// The computed VALUES are proved elsewhere: the compiled run of ch577's
+// `main` (harness/listings_test.go's TestListingsRunFloatGuarded) and the
+// 9-backend numeric-tower parity gate (harness/numeric_parity_test.go).
+//
+// `import Std.Float` is not accepted as a bare REPL line (imports are a
+// LoadSource/session-file directive, not a standalone expression the
+// prompt's read-eval-print loop parses), so every name is qualified
+// `Std.Float.<name>` instead, exactly as `internal/session/float_guarded_test.go`
+// does at the session level.
+func TestREPLFloatGuardedPins(t *testing.T) {
+	script := []string{
+		// 1 + 2 == 3, checked via feq -- elaborates, type is Bool.
+		"Std.Float.feq (Std.Float.fadd (Std.Float.fromNat (succ zero)) (Std.Float.fromNat (succ (succ zero)))) (Std.Float.fromNat (succ (succ (succ zero))))",
+		// 1 <= 2 via fle directly -- elaborates, type is Bool.
+		"Std.Float.fle (Std.Float.fromNat (succ zero)) (Std.Float.fromNat (succ (succ zero)))",
+		// the Ord operator-class accessor -- elaborates, type is Ordering.
+		"compareOf Std.Float.Float Std.Float.ordFloat (Std.Float.fromNat (succ zero)) (Std.Float.fromNat (succ (succ zero)))",
+		// isNaN on a genuine NaN (0.0 / 0.0) -- elaborates, type is Bool.
+		"Std.Float.isNaN (Std.Float.fdiv (Std.Float.fromNat zero) (Std.Float.fromNat zero))",
+		// totalCompare, the NaN-last total order -- elaborates, type is Ordering.
+		"Std.Float.totalCompare (Std.Float.fromNat (succ zero)) (Std.Float.fromNat (succ zero))",
+		// the DecEq operator-class accessor -- elaborates, type is Bool.
+		"eqbOf Std.Float.Float Std.Float.decEqFloat (Std.Float.fromNat (succ zero)) (Std.Float.fromNat (succ zero))",
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "error") {
+		t.Errorf("unexpected error in Float guarded-tier REPL pins\n--- full output ---\n%s", got)
+	}
+	// feq / fle / isNaN / eqbOf: 4 expressions typed Bool.
+	if n := strings.Count(got, " : Bool"); n != 4 {
+		t.Errorf("expected exactly 4 ' : Bool' type annotations, got %d\n--- full output ---\n%s", n, got)
+	}
+	// compareOf / totalCompare: 2 expressions typed Ordering.
+	if n := strings.Count(got, " : Ordering"); n != 2 {
+		t.Errorf("expected exactly 2 ' : Ordering' type annotations, got %d\n--- full output ---\n%s", n, got)
+	}
+}
