@@ -230,7 +230,23 @@ func (Py) Emit(p Program) (TargetSource, error) {
 		b.WriteString("def fmul():\n    return lambda a: lambda b: a * b\n")
 	}
 	if usesForeign(p, "fdiv") {
-		b.WriteString("def fdiv():\n    return lambda a: lambda b: a / b\n")
+		// Python's `a / b` raises ZeroDivisionError on b == 0.0, unlike every
+		// other rune backend (js/go/rust/c/ll), which follow IEEE754:
+		// 0.0/0.0 -> NaN, x/0.0 -> +Infinity (x>0) or -Infinity (x<0), with
+		// the sign also flipped by a negative-zero denominator. math.copysign
+		// recovers that sign flip; the a != a check catches a NaN numerator
+		// (NaN/0 -> NaN, not +-Infinity).
+		b.WriteString("def fdiv():\n" +
+			"    import math\n" +
+			"    def d(a):\n" +
+			"        def e(b):\n" +
+			"            if b == 0.0:\n" +
+			"                if a == 0.0 or a != a:\n" +
+			"                    return math.nan\n" +
+			"                return math.copysign(math.inf, a) * math.copysign(1.0, b)\n" +
+			"            return a / b\n" +
+			"        return e\n" +
+			"    return d\n")
 	}
 	if usesForeign(p, "fabsP") {
 		b.WriteString("def fabsP():\n    return lambda x: abs(x)\n")
