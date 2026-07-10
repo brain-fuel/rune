@@ -443,6 +443,15 @@ func TestListingsRun(t *testing.T) {
 		// results to a NatLit digit, but a literal `zero` stays `zero`).
 		normalizesTo(t, s, `blamedValue`, "zero")
 	})
+	t.Run("ch576", func(t *testing.T) {
+		s := loadListing(t, "ch576_lowering.rune")
+		// The proof-shaped `myLeb` still normalizes correctly at the kernel
+		// level (2 <= 3 is true); the redirect to the speed-shaped `myLeW`
+		// fires only at codegen (the shared Erase choke point), so this
+		// in-kernel check and a compiled run agree because myLebEquiv proves
+		// the two functions equal - not because the redirect touched this path.
+		normalizesTo(t, s, `main`, "true")
+	})
 }
 
 // TestInnerLayerDoesNotDeploy: the v3 release criterion for the fibrant

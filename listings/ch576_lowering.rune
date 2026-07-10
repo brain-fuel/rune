@@ -1,0 +1,210 @@
+-- Chapter 576: THE LOWERING REGISTRY -- how a proof-shaped definition and its
+-- speed-shaped twin can BOTH be the truth, with the compiler picking the fast
+-- one only after checking a proof that they agree.
+--
+-- THE PROOF-SHAPED / SPEED-SHAPED PAIRING. `myLeb` below decides `m <= n` by
+-- structural recursion on `m`: zero is smallest, and `succ k` compares against
+-- `n`'s predecessor by asking the induction hypothesis. This is the PROOF-
+-- SHAPED definition -- its recursion is exactly the one theorems induct over,
+-- so lemmas about `<=` read as ordinary structural inductions. But it is also
+-- the SLOW shape: naive codegen for a proof-shaped comparison on a packed
+-- bignum-sized `Whole` walks `m` step by step, an O(m) succ-chain a compiled
+-- program should never materialise. `myLeW` is the SPEED-SHAPED twin: `isZero
+-- (myMonus a b)` -- "a <= b iff a truncated-minus b is zero" -- built entirely
+-- from `myMonus`, which rides the `natMonus` host acceleration (O(1) on
+-- bignums), plus the depth-1 constructor test `isZero`. `myLeW` is fast but
+-- opaque to induction: nobody wants to reprove associativity-style lemmas
+-- against a subtraction encoding.
+--
+-- THE PROOF GATE. Neither definition is asked to give up its shape. Instead
+-- `myLebEquiv` proves the two AGREE pointwise --
+--
+--   myLebEquiv : (a : Whole) -> (b : Whole) -> Eq Bool (myLeb a b) (myLeW a b)
+--
+-- -- and the directive
+--
+--   lower myLeb to myLeW by myLebEquiv
+--
+-- asks the session to register the redirect `myLeb -> myLeW`. `AddLowering`
+-- (internal/session) does not trust the registrant: it peels `myLebEquiv`'s
+-- stored Pi telescope, requires the codomain to be exactly `Eq _ (myLeb
+-- $... ) (myLeW $...)` at matching arity, and REJECTS a directive whose proof
+-- proves some other fact, has the wrong arity, or is not an `Eq` at all (v4
+-- Ord Plan C, Task 2's rejection suite pins all three failure shapes). Only a
+-- proof of the STATED equivalence is accepted, so an unsound redirect cannot
+-- enter codegen.
+--
+-- THE SINGLE CHOKE POINT. The redirect itself lives in exactly one place:
+-- `codegen.Erase` (the shared IR-lowering pass every one of the nine backends
+-- calls). Erase looks up a top-level reference's hash in the lowering table
+-- BEFORE naming it; if `myLeb`'s hash is a registered key, Erase names the
+-- reference `myLeW` instead. Tree-shaking runs after Erase, so the now-
+-- unreferenced `myLeb` definition drops out of the emitted program entirely --
+-- no per-backend special case, no dead code left behind. This is the same
+-- discipline the prelude uses for the tower's own comparison: `lower leb to
+-- leW by lebEquiv` (internal/prelude/prelude.rune) makes EVERY compiled use of
+-- `<=` on `Whole`/`Int`/`Frac` run the O(1) native path while every proof in
+-- the book stays stated over `leb`. This chapter is the prelude's redirect,
+-- restated at listing scale so the mechanism is visible end to end in one
+-- self-contained file.
+--
+-- PROOFS UNTOUCHED. Nothing above `myLebEquiv` in this file needed to change
+-- shape to make the redirect possible, and nothing about `myLeb` changes after
+-- the `lower` directive fires -- it is still the same structurally-recursive
+-- definition, still available to any induction that wants it. Only the
+-- COMPILED reference moves. `main` below still calls `myLeb` by name; the
+-- redirect is invisible at the source level and fires only at codegen.
+
+data Whole : U is
+  zero : Whole
+| succ : Whole -> Whole
+end
+
+builtin nat Whole zero succ
+
+-- `pred` and `myMonus` mirror the prelude's `pred`/`subW`: truncated
+-- subtraction, recursing on the SECOND argument, with `myMonus` accelerated
+-- by the host so it runs O(1) on a packed bignum instead of walking `n`.
+pred : Whole -> Whole is
+  fn (n : Whole) is
+    case n of
+    | zero -> zero
+    | succ k -> k
+    end
+  end
+end
+
+myMonus : Whole -> Whole -> Whole is
+  fn (m : Whole) (n : Whole) is
+    case n of
+    | zero -> m
+    | succ k with ih -> pred ih
+    end
+  end
+end
+
+builtin natMonus myMonus
+
+data Bool : U is
+  true : Bool
+| false : Bool
+end
+
+-- `isZero` is the depth-1 zero test: one constructor dispatch, no eliminator
+-- loop, so it stays O(1) under the accel.
+isZero : Whole -> Bool is
+  fn (n : Whole) is case n of | zero -> true | succ k -> false end end
+end
+
+-- The Leibniz plumbing (`subst` is the sole ambient primitive) the induction
+-- below rewrites under a context with.
+symEq : (A : U) -> (x : A) -> (y : A) -> Eq A x y -> Eq A y x is
+  fn (A : U) (x : A) (y : A) (p : Eq A x y) is
+    subst A x y p (fn (z : A) is Eq A z x end) (refl x)
+  end
+end
+transEq : (A : U) -> (x : A) -> (y : A) -> (z : A) -> Eq A x y -> Eq A y z -> Eq A x z is
+  fn (A : U) (x : A) (y : A) (z : A) (p : Eq A x y) (q : Eq A y z) is
+    subst A y z q (fn (w : A) is Eq A x w end) p
+  end
+end
+
+-- `myLeb`: the PROOF-SHAPED comparison. Recursion on `m` produces the
+-- comparison FUNCTION, so the induction hypothesis is "compare against k"
+-- awaiting its argument -- exactly the prelude's `leb`.
+myLeb : Whole -> Whole -> Bool is
+  fn (m : Whole) is
+    case m of
+    | zero -> fn (n : Whole) is true end
+    | succ k with ih -> fn (n : Whole) is
+        case n of
+        | zero -> false
+        | succ j -> ih j
+        end
+      end
+    end
+  end
+end
+
+-- `myMonus` order lemmas (by induction; `myMonus` recurses on its SECOND
+-- arg), needed to carry `myLebEquiv` through -- the prelude's `subWZeroL` /
+-- `subWSucc`, renamed.
+myMonusZeroL : (b : Whole) -> Eq Whole (myMonus zero b) zero is
+  fn (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (myMonus zero x) zero end)
+      (refl zero)
+      (fn (k : Whole) (ih : Eq Whole (myMonus zero k) zero) is
+         subst Whole (myMonus zero k) zero ih
+           (fn (z : Whole) is Eq Whole (myMonus zero (succ k)) (pred z) end)
+           (refl (myMonus zero (succ k)))
+       end)
+      b
+  end
+end
+myMonusSucc : (a : Whole) -> (b : Whole) -> Eq Whole (myMonus (succ a) (succ b)) (myMonus a b) is
+  fn (a : Whole) (b : Whole) is
+    WholeElim (fn (x : Whole) is Eq Whole (myMonus (succ a) (succ x)) (myMonus a x) end)
+      (refl a)
+      (fn (k : Whole) (ih : Eq Whole (myMonus (succ a) (succ k)) (myMonus a k)) is
+         subst Whole (myMonus (succ a) (succ k)) (myMonus a k) ih
+           (fn (z : Whole) is Eq Whole (myMonus (succ a) (succ (succ k))) (pred z) end)
+           (refl (myMonus (succ a) (succ (succ k))))
+       end)
+      b
+  end
+end
+
+-- `myLeW`: the SPEED-SHAPED twin. `myMonus` is the kernel-accelerated native
+-- truncated subtract (O(1) on bignums) and `isZero` is depth-1, so `myLeW a
+-- b` is O(1) in COMPILED code where `myLeb a b` is O(a).
+myLeW : Whole -> Whole -> Bool is
+  fn (a : Whole) (b : Whole) is isZero (myMonus a b) end
+end
+
+-- ...and the certificate that the redirect is sound: `myLeW` agrees with
+-- `myLeb` pointwise (double induction; `myLeb` recurses on the first arg,
+-- `myMonus` on the second) -- character-for-character the prelude's
+-- `lebEquiv`, renamed to this chapter's names.
+myLebEquiv : (a : Whole) -> (b : Whole) -> Eq Bool (myLeb a b) (myLeW a b) is
+  fn (a : Whole) is
+    WholeElim (fn (x : Whole) is (b : Whole) -> Eq Bool (myLeb x b) (isZero (myMonus x b)) end)
+      (fn (b : Whole) is
+         symEq Bool (isZero (myMonus zero b)) true
+           (subst Whole zero (myMonus zero b) (symEq Whole (myMonus zero b) zero (myMonusZeroL b))
+              (fn (z : Whole) is Eq Bool (isZero z) true end)
+              (refl true))
+       end)
+      (fn (k : Whole) (ih : (b : Whole) -> Eq Bool (myLeb k b) (isZero (myMonus k b))) is
+         fn (b : Whole) is
+           WholeElim (fn (x : Whole) is Eq Bool (myLeb (succ k) x) (isZero (myMonus (succ k) x)) end)
+             (refl false)
+             (fn (j : Whole) (ihb : Eq Bool (myLeb (succ k) j) (isZero (myMonus (succ k) j))) is
+                transEq Bool (myLeb k j) (isZero (myMonus k j)) (isZero (myMonus (succ k) (succ j)))
+                  (ih j)
+                  (symEq Bool (isZero (myMonus (succ k) (succ j))) (isZero (myMonus k j))
+                     (subst Whole (myMonus (succ k) (succ j)) (myMonus k j) (myMonusSucc k j)
+                        (fn (z : Whole) is Eq Bool (isZero (myMonus (succ k) (succ j))) (isZero z) end)
+                        (refl (isZero (myMonus (succ k) (succ j))))))
+             end)
+             b
+         end
+       end)
+      a
+  end
+end
+
+-- THE DIRECTIVE. Accepted only because `myLebEquiv`'s stored type is exactly
+-- `(a : Whole) -> (b : Whole) -> Eq Bool (myLeb a b) (myLeW a b)`: the proof
+-- gate peels the two-binder telescope, finds an `Eq` codomain, and matches
+-- both ref-spines against `myLeb`/`myLeW` applied to `a` then `b`. From here
+-- on, any COMPILED reference to `myLeb` is redirected to `myLeW` at the
+-- shared Erase choke point; `myLeb` itself is untouched, and every proof
+-- above (and any future one) still inducts over it directly.
+lower myLeb to myLeW by myLebEquiv
+
+-- `main` calls `myLeb` by its proof-shaped name -- 2 <= 3 -- and the source
+-- never mentions `myLeW`. The redirect fires only when this chapter is
+-- COMPILED (codegen/session emit), not in this in-kernel normalisation; the
+-- kernel-level result is the same `true` either way, since `myLebEquiv`
+-- proves the two functions equal.
+main : Bool is myLeb (succ (succ zero)) (succ (succ (succ zero))) end
