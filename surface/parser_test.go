@@ -537,3 +537,50 @@ func TestCalcParsing(t *testing.T) {
 		t.Errorf("unterminated calc: want ErrIncomplete, got %v", err)
 	}
 }
+
+// TestParseLowerDirective pins the v4 Ord Plan C surface directive:
+// `lower SLOW to FAST by PROOF`.
+func TestParseLowerDirective(t *testing.T) {
+	src := "lower leb to leW by lebEquiv\n"
+	prog, err := surface.ParseProgram(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(prog) != 1 {
+		t.Fatalf("want 1 item, got %d", len(prog))
+	}
+	ld, ok := prog[0].(surface.LowerDef)
+	if !ok {
+		t.Fatalf("want LowerDef, got %T", prog[0])
+	}
+	if ld.Slow != "leb" || ld.Fast != "leW" || ld.Proof != "lebEquiv" {
+		t.Fatalf("got %+v", ld)
+	}
+}
+
+// TestLowerNotReserved pins that `lower` remains usable as an ordinary
+// identifier (a contextual keyword, never a reserved lexer token).
+func TestLowerNotReserved(t *testing.T) {
+	src := "lower : Whole -> Whole is fn (x : Whole) is x end end\n"
+	prog, err := surface.ParseProgram(src)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	d, ok := prog[0].(surface.Def)
+	if !ok || d.Name != "lower" {
+		t.Fatalf("want Def named lower, got %T %+v", prog[0], prog[0])
+	}
+}
+
+// TestLowerPrettyRoundTrip pins parse . PrettyItem = id for LowerDef.
+func TestLowerPrettyRoundTrip(t *testing.T) {
+	orig := surface.LowerDef{Slow: "leb", Fast: "leW", Proof: "lebEquiv"}
+	out := surface.PrettyItem(orig)
+	prog, err := surface.ParseProgram(out + "\n")
+	if err != nil {
+		t.Fatalf("reparse %q: %v", out, err)
+	}
+	if got, ok := prog[0].(surface.LowerDef); !ok || got != orig {
+		t.Fatalf("round-trip got %T %+v from %q", prog[0], prog[0], out)
+	}
+}

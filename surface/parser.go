@@ -537,6 +537,11 @@ func (p *parser) parseModule() ([]Item, error) {
 			d.TyName = qualLocal(d.TyName)
 			d.InjName = qualLocal(d.InjName)
 			out = append(out, d)
+		case LowerDef:
+			d.Slow = qualLocal(d.Slow)
+			d.Fast = qualLocal(d.Fast)
+			d.Proof = qualLocal(d.Proof)
+			out = append(out, d)
 		default:
 			out = append(out, it)
 		}
@@ -558,8 +563,48 @@ func (p *parser) parseItem() (Item, error) {
 	case tMutual:
 		return p.parseMutual()
 	default:
+		if p.peek().kind == tIdent && p.peek().text == "lower" && p.looksLikeLower() {
+			return p.parseLower()
+		}
 		return p.parseDef()
 	}
+}
+
+// looksLikeLower reports whether the upcoming tokens are `lower IDENT to ...`
+// (the LowerDef shape) rather than a definition named `lower`. It peeks without
+// consuming: positions 0='lower', 1=slow ident, 2 must be the ident `to`.
+func (p *parser) looksLikeLower() bool {
+	return p.peekAt(1).kind == tIdent &&
+		p.peekAt(2).kind == tIdent && p.peekAt(2).text == "to"
+}
+
+// parseLower parses `lower SLOW to FAST by PROOF` (v4 Ord Plan C). `to` is a
+// contextual ident matched by text (like `builtin`'s kind word); `by` is
+// already the reserved token `tBy` used by `calc`'s step justification, so it
+// is matched by kind, not text.
+func (p *parser) parseLower() (Item, error) {
+	p.next() // 'lower' (an ident, matched contextually)
+	slow, err := p.expect(tIdent)
+	if err != nil {
+		return nil, err
+	}
+	if kw, err := p.expect(tIdent); err != nil {
+		return nil, err
+	} else if kw.text != "to" {
+		return nil, fmt.Errorf("lower %s: expected `to`, got %q at offset %d", slow.text, kw.text, kw.pos)
+	}
+	fast, err := p.expect(tIdent)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.expect(tBy); err != nil {
+		return nil, err
+	}
+	proof, err := p.expect(tIdent)
+	if err != nil {
+		return nil, err
+	}
+	return LowerDef{Slow: slow.text, Fast: fast.text, Proof: proof.text}, nil
 }
 
 // parseMutual parses a mutually-recursive group block:

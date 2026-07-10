@@ -1,6 +1,7 @@
 package surface
 
 import (
+	"fmt"
 	"math/big"
 	"strconv"
 	"strings"
@@ -41,6 +42,19 @@ func opPrec(name string) int {
 // the Semigroup/Monoid concat); the rest are left-associative (GRAMMAR §3).
 func opRightAssoc(name string) bool {
 	return name == "++"
+}
+
+// PrettyItem pretty-prints a top-level surface.Item back to source syntax. It
+// exists so a directive with no store/core representation (e.g. LowerDef) can
+// still be round-tripped: parse . PrettyItem = id. Only the item kinds that need
+// this round-trip are handled; extend the switch as more need it.
+func PrettyItem(it Item) string {
+	switch v := it.(type) {
+	case LowerDef:
+		return "lower " + v.Slow + " to " + v.Fast + " by " + v.Proof
+	default:
+		panic(fmt.Sprintf("PrettyItem: unsupported item type %T", it))
+	}
 }
 
 // Pretty turns a core term back into named surface syntax. This is the inverse

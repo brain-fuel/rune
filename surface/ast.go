@@ -262,6 +262,22 @@ type BuiltinNumInj struct {
 	InjName string
 }
 
+// LowerDef is a proof-gated lowering directive (v4 Ord Plan C):
+//
+//	lower leb to leW by lebEquiv
+//
+// It tags the SLOW def's content hash to be redirected to the FAST def's hash at
+// codegen (the shared Erase choke point), so emitted code calls the O(1) native
+// twin while the proofs stay stated over the slow def. Registration is accepted
+// ONLY if PROOF kernel-checks at `(x...) -> Eq _ (SLOW x...)(FAST x...)`, so the
+// redirect cannot miscompile. `lower` is a CONTEXTUAL keyword (still a valid
+// identifier). Session state only; nothing enters the store.
+type LowerDef struct {
+	Slow  string
+	Fast  string
+	Proof string
+}
+
 // ENum is a numeral literal, carried unexpanded (a parser cannot know which
 // type it means). Pos is its source offset, for error messages. It is lowered
 // by NumConfig: the resolver to the unary default, the elaborator by the
@@ -336,6 +352,7 @@ func (BuiltinNatOp) isItem()  {}
 func (BuiltinNumInj) isItem() {}
 func (Import) isItem()        {}
 func (Alias) isItem()         {}
+func (LowerDef) isItem()      {}
 
 func (ESubst) isExp() {}
 func (ECase) isExp()  {}
