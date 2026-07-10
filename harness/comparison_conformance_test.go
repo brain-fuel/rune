@@ -13,7 +13,7 @@ import (
 
 // comparisonCorpusSrc is the v4 Ord Plan C, Task 5 acceptance corpus. It is
 // loaded ON TOP OF the REAL shared prelude (prelude.Source(), the same source
-// the REPL and the CLI load — see internal/repl/prelude.go), so it exercises
+// the REPL and the CLI load - see internal/repl/prelude.go), so it exercises
 // the SHIPPED `lower leb to leW by lebEquiv` directive (Task 4) exactly as
 // deployed code sees it: `ordWhole`'s `le` slot is `leb`, and any top-level
 // reference to `leb` reachable from `main` is redirected to `leW` at the
@@ -22,17 +22,17 @@ import (
 // It exercises all three Ord/DecEq views (le, compare, eqb) across the tower:
 //   - Whole: boundary (0<=0), interior (3<=5), reverse (5<=3, expect false),
 //     a 10^18-scale comparison (the case an unredirected recursive leb would
-//     make O(n) — a ~10^18-deep succ recursion — instead of O(1) via leW's
+//     make O(n) - a ~10^18-deep succ recursion - instead of O(1) via leW's
 //     natMonus-accelerated subW), one `compare` (Ordering) call, one `eqb`
 //     (DecEq) call.
 //   - Int: a negative/nonneg cross comparison (negsucc vs nonneg).
 //   - Frac: two NON-CANONICAL representatives of the same rational (1/2 and
 //     2/4, built directly from QPair so no reduction happens before the
-//     comparison), checked with both `le` and `eqb` — the quotient descent
+//     comparison), checked with both `le` and `eqb` - the quotient descent
 //     must agree regardless of representative.
 //
 // Every sub-check is folded into one Bool (`and`-chain) so the byte-identical
-// assertion across backends is a single "true" — any backend that diverges on
+// assertion across backends is a single "true" - any backend that diverges on
 // ANY sub-check fails the whole gate. `ordCompareRaw` additionally prints the
 // raw Ordering constructor directly (want "lt"), so a backend-specific bug in
 // showing a 3-constructor enum (as opposed to Bool's 2) would also be caught.
@@ -42,14 +42,14 @@ import (
 // bibleBackends() list, WASM included. The Frac non-canonical checks
 // (`mainFrac`) are asserted separately, EXCLUDING wasm: the WASM backend has
 // no Quot/qlift support at all today (codegen/wasm.go has no `qlift` runtime
-// primitive, unlike every other backend — see js.go/py.go/golang.go/rust.go/
+// primitive, unlike every other backend - see js.go/py.go/golang.go/rust.go/
 // beam.go/jvm.go/c.go/ll_runtime.go, which each emit one). This is a
 // pre-existing gap (confirmed: codegen/wasm.go is untouched by this branch's
 // Tasks 1-4, `git log 90b5797..HEAD -- codegen/wasm.go` is empty) predating
 // Plan C entirely and unrelated to the leb->leW redirect; ANY Frac
 // equality/order program would fail the same way on WASM today, with or
 // without this feature. Excluding wasm from mainFrac's assertion is not a
-// weakening of THIS gate — Plan C touches only `leb`, never `Quot`/`qlift`.
+// weakening of THIS gate - Plan C touches only `leb`, never `Quot`/`qlift`.
 const comparisonCorpusSrc = `
 wholeBoundary : Bool is leOf Whole ordWhole 0 0 end
 wholeInterior : Bool is leOf Whole ordWhole 3 5 end
@@ -88,7 +88,7 @@ mainFrac : Bool is and fracNonCanonicalLe fracNonCanonicalEqb end
 // runComparisonBackend emits+runs mainName on one backend in dir (cwd=dir),
 // loading the corpus on top of the shared prelude. Mirrors runBibleBackend's
 // shape (bible_conformance_test.go) but the session source is
-// prelude.Source()+comparisonCorpusSrc, not a listing file loaded raw — the
+// prelude.Source()+comparisonCorpusSrc, not a listing file loaded raw - the
 // point of this gate is the LIVE prelude redirect, not a self-contained
 // mirror of it. Skips (ok=false) if the backend's toolchain is absent.
 func runComparisonBackend(t *testing.T, bk bibleBackend, mainName, dir string) (string, bool) {
@@ -143,9 +143,9 @@ func runComparisonBackend(t *testing.T, bk bibleBackend, mainName, dir string) (
 
 // assertComparisonAgree runs mainName on every backend (bibleBackends(), the
 // existing 9-backend list: js/go/py/rs/erl + jvm/c/ll/wasm each gated on its
-// own toolchain — see bible_conformance_test.go) in its own temp dir and
+// own toolchain - see bible_conformance_test.go) in its own temp dir and
 // asserts they all produce `want`. A missing toolchain is reported via
-// t.Skipf (not a false pass), naming which backend(s) were unavailable — the
+// t.Skipf (not a false pass), naming which backend(s) were unavailable - the
 // SAME convention TestBibleConformance* already uses; this does not add a
 // new skip convention.
 func assertComparisonAgree(t *testing.T, mainName, want string) {
@@ -155,7 +155,7 @@ func assertComparisonAgree(t *testing.T, mainName, want string) {
 
 // assertComparisonAgreeExcept is assertComparisonAgree but skips any backend
 // named in exclude outright (logged, not counted as a missing-toolchain
-// skip) — used only for the documented pre-existing WASM Quot/qlift gap
+// skip) - used only for the documented pre-existing WASM Quot/qlift gap
 // (see the comparisonCorpusSrc doc comment above `mainFrac`), never to paper
 // over an actual divergence introduced by this feature.
 func assertComparisonAgreeExcept(t *testing.T, mainName, want string, exclude map[string]bool) {
@@ -187,7 +187,7 @@ func assertComparisonAgreeExcept(t *testing.T, mainName, want string, exclude ma
 // must agree byte-for-byte across every available backend of the 9
 // (js/py/go/rs/erl/jvm/c/ll/wasm) for the Whole/Int checks that the redirect
 // actually targets, and across the 8 non-WASM backends for the Frac
-// non-canonical checks (WASM has no Quot/qlift support — see the doc comment
+// non-canonical checks (WASM has no Quot/qlift support - see the doc comment
 // on comparisonCorpusSrc).
 func TestComparisonConformance(t *testing.T) {
 	assertComparisonAgree(t, "main", "true")
