@@ -982,6 +982,7 @@ func jsName(n string) string {
 		}
 	}
 	n = strings.ReplaceAll(n, "'", "$")
+	n = strings.ReplaceAll(n, ".", "$")
 	if n == "" {
 		n = "$x"
 	}
