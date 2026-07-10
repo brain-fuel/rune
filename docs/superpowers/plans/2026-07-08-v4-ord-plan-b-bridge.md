@@ -56,10 +56,10 @@
   - `OrderedFieldLaws : (A : U) -> DivRing A -> Ord A -> (A -> U) -> U` = `And (OrderedRingLaws A (d.1) o) (CommLaws A (d.1.1))` (ordered comm ring over the DivRing's ring; the field/recip laws live in FieldLaws separately, composed by the consumer - matching how the algebra hierarchy kept CommLaws split). CONFIRM d.1 is the DivRing's Ring and d.1.1 its Semiring against divRingFrac's mkDivRing shape.
 - IMPORTANT: verify every projection (s.1/s.2.1/s.2.2.1, r.1, d.1/d.1.1) computes to the intended op/identity by a REPL probe or by reading mkSemiring/mkRing/mkDivRing, BEFORE writing the records; a wrong projection depth makes the whole task's assemblies fail cryptically.
 
-- [ ] **Step 1:** Presence test `TestOrderedAlgebraRecordsPresent` (AddMonoT, MulNonnegT, OrderedSemiringLaws, OrderedRingLaws, OrderedFieldLaws). Run `go test ./internal/session/ -run TestOrderedAlgebraRecordsPresent -count=1` - FAIL.
-- [ ] **Step 2:** Add the two formers + three records in the ORDERED ALGEBRA banner section. Prelude loads (`go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` as a load check).
-- [ ] **Step 3:** Presence PASS; `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 4:** Commit: `git commit -m "feat(prelude): ordered-algebra law records (OrderedSemiring/Ring/Field + addMono/mulNonneg formers)"` (explicit pathspecs).
+- [x] **Step 1:** Presence test `TestOrderedAlgebraRecordsPresent` (AddMonoT, MulNonnegT, OrderedSemiringLaws, OrderedRingLaws, OrderedFieldLaws). Run `go test ./internal/session/ -run TestOrderedAlgebraRecordsPresent -count=1` - FAIL.
+- [x] **Step 2:** Add the two formers + three records in the ORDERED ALGEBRA banner section. Prelude loads (`go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` as a load check).
+- [x] **Step 3:** Presence PASS; `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 4:** Commit: `git commit -m "feat(prelude): ordered-algebra law records (OrderedSemiring/Ring/Field + addMono/mulNonneg formers)"` (explicit pathspecs).
 
 ---
 
@@ -76,11 +76,11 @@
   - `mulNonnegWhole : MulNonnegT Whole ordWhole mulW zero` - `0<=a -> 0<=b -> 0<=a*b`. `Le Whole ordWhole zero (mulW a b)` = `Eq Bool (leb zero (mulW a b)) true`, and `leb zero _` reduces to `true`, so this is `refl true` (the hypotheses are unused; that is fine - Whole nonnegativity is universal).
   - `orderedSemiringLawsWhole : OrderedSemiringLaws Whole semiringWhole ordWhole` = the And-chain mkAnd of semiringLawsWhole, ordLawsWhole, addMonoWhole, mulNonnegWhole (following the record's nesting; transcribe the And-type annotations carefully).
 
-- [ ] **Step 1:** Presence test `TestWholeOrderedSemiringPresent` (addMonoWhole, mulNonnegWhole, orderedSemiringLawsWhole). FAIL.
-- [ ] **Step 2:** Prove addMonoWhole + mulNonnegWhole. Prelude loads. REPL probe: type-check that they inhabit AddMonoT/MulNonnegT (a `defined addMonoWhole` shows the type).
-- [ ] **Step 3:** Assemble orderedSemiringLawsWhole. Prelude loads. Presence PASS.
-- [ ] **Step 4:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 5:** Commit: `git commit -m "feat(prelude): Whole ordered-semiring instance (addMono from lebAddMono, mulNonneg definitional)"`
+- [x] **Step 1:** Presence test `TestWholeOrderedSemiringPresent` (addMonoWhole, mulNonnegWhole, orderedSemiringLawsWhole). FAIL.
+- [x] **Step 2:** Prove addMonoWhole + mulNonnegWhole. Prelude loads. REPL probe: type-check that they inhabit AddMonoT/MulNonnegT (a `defined addMonoWhole` shows the type).
+- [x] **Step 3:** Assemble orderedSemiringLawsWhole. Prelude loads. Presence PASS.
+- [x] **Step 4:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 5:** Commit: `git commit -m "feat(prelude): Whole ordered-semiring instance (addMono from lebAddMono, mulNonneg definitional)"`
 
 ---
 
@@ -97,11 +97,11 @@
   - `mulNonnegInt : MulNonnegT Int ordInt imul (nonneg zero)` - `0<=a -> 0<=b -> 0<=a*b`. `Le Int ordInt (nonneg zero) a` with a = nonneg n means `ileb (nonneg zero)(nonneg n)` = `leb zero n` = true (always), and a = negsucc _ makes the hypothesis `ileb (nonneg zero)(negsucc _)` = false, so that branch is ex-falso (boolDiscTF). So under the hypotheses both a,b are nonneg; `imul (nonneg a)(nonneg b) = nonneg (mulW a b)`, and `ileb (nonneg zero)(nonneg (mulW a b))` = `leb zero _` = true. Clean.
   - `orderedRingLawsInt : OrderedRingLaws Int ringInt ordInt` = `mkAnd (RingLaws Int ringInt) (OrderedSemiringLaws Int (ringInt.1) ordInt) ringLawsInt orderedSemiringPartInt` where the OrderedSemiring part is a local `mkAnd (SemiringLaws Int (ringInt.1)) ... semiringLawsInt ordLawsInt addMonoInt mulNonnegInt`. (Build the OrderedSemiringLaws value for Int's embedded semiring inline or as a named `orderedSemiringLawsInt`; naming it is cleaner and lets ch575 mirror it.)
 
-- [ ] **Step 1:** Presence test `TestIntOrderedRingPresent` (addMonoInt, mulNonnegInt, orderedSemiringLawsInt, orderedRingLawsInt). FAIL.
-- [ ] **Step 2:** Prove addMonoInt (case tree) + mulNonnegInt. Prelude loads. REPL probe a few: e.g. that `addMonoInt` applied to a witness `Le Int ordInt (negsucc 0)(nonneg 0)` at c=nonneg 1 yields `Le Int ordInt (iadd (negsucc 0)(nonneg 1))(iadd (nonneg 0)(nonneg 1))` = `Le .. (nonneg 0)(nonneg 1)` (0<=1, true).
-- [ ] **Step 3:** Assemble orderedSemiringLawsInt + orderedRingLawsInt. Prelude loads. Presence PASS.
-- [ ] **Step 4:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 5:** Commit: `git commit -m "feat(prelude): Int ordered-ring instance (sign-case addMono, nonneg-product mulNonneg)"`
+- [x] **Step 1:** Presence test `TestIntOrderedRingPresent` (addMonoInt, mulNonnegInt, orderedSemiringLawsInt, orderedRingLawsInt). FAIL.
+- [x] **Step 2:** Prove addMonoInt (case tree) + mulNonnegInt. Prelude loads. REPL probe a few: e.g. that `addMonoInt` applied to a witness `Le Int ordInt (negsucc 0)(nonneg 0)` at c=nonneg 1 yields `Le Int ordInt (iadd (negsucc 0)(nonneg 1))(iadd (nonneg 0)(nonneg 1))` = `Le .. (nonneg 0)(nonneg 1)` (0<=1, true).
+- [x] **Step 3:** Assemble orderedSemiringLawsInt + orderedRingLawsInt. Prelude loads. Presence PASS.
+- [x] **Step 4:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 5:** Commit: `git commit -m "feat(prelude): Int ordered-ring instance (sign-case addMono, nonneg-product mulNonneg)"`
 
 ---
 
@@ -121,12 +121,12 @@
   - `orderedFieldLawsFrac : OrderedFieldLaws Frac divRingFrac ordFrac nzFrac` = mkAnd orderedRingLawsFrac commLawsFrac - THE DELIVERABLE (the first ordered field: an ordered comm ring over the DivRing, composing with fieldLawsFrac for the full ordered-field story).
 - CONFIRM the projection targets: OrderedFieldLaws A (d) (o) (nz) uses d.1 (Ring) and d.1.1 (Semiring); with d = divRingFrac these must be the Frac Ring/Semiring. Probe before assembling.
 
-- [ ] **Step 1:** Presence test `TestFracOrderedFieldPresent` (addMonoF, mulNonnegF, orderedSemiringLawsFrac, orderedRingLawsFrac, orderedFieldLawsFrac). FAIL.
-- [ ] **Step 2:** REPL-probe the representative cross computations first. Prove addMonoF (qind lift + Int addMono + scaling). Prelude loads.
-- [ ] **Step 3:** Prove mulNonnegF (qind lift + Int mulNonneg). Prelude loads.
-- [ ] **Step 4:** Assemble the three ordered-algebra values. Prelude loads. Presence PASS. REPL sanity: addMonoF/mulNonnegF inhabit their types; a concrete witness like `0 <= 1/3 -> 0 <= (1/3)*(1/2)` via mulNonnegF checks.
-- [ ] **Step 5:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
-- [ ] **Step 6:** Commit: `git commit -m "feat(prelude): Frac ordered-field instance - the ladder's first ordered field (addMono/mulNonneg over the quotient)"`
+- [x] **Step 1:** Presence test `TestFracOrderedFieldPresent` (addMonoF, mulNonnegF, orderedSemiringLawsFrac, orderedRingLawsFrac, orderedFieldLawsFrac). FAIL.
+- [x] **Step 2:** REPL-probe the representative cross computations first. Prove addMonoF (qind lift + Int addMono + scaling). Prelude loads.
+- [x] **Step 3:** Prove mulNonnegF (qind lift + Int mulNonneg). Prelude loads.
+- [x] **Step 4:** Assemble the three ordered-algebra values. Prelude loads. Presence PASS. REPL sanity: addMonoF/mulNonnegF inhabit their types; a concrete witness like `0 <= 1/3 -> 0 <= (1/3)*(1/2)` via mulNonnegF checks.
+- [x] **Step 5:** `go test ./internal/session/ ./internal/repl/ -count=1 -timeout 15m` green.
+- [x] **Step 6:** Commit: `git commit -m "feat(prelude): Frac ordered-field instance - the ladder's first ordered field (addMono/mulNonneg over the quotient)"`
 
 ---
 
@@ -142,11 +142,11 @@
 - Produces: ch575, a self-contained byte-identical MIRROR of the prelude's ORDERED ALGEBRA section with book narration (the ch574 pattern; chapters load with NO prelude, so ch575 imports the transitive closure verbatim - it will pull the full Ord layer + algebra hierarchy + Int-ring + quotient-Frac, the deepest chapter yet; follow ch574's faithful-verbatim-extraction convention, no divergent copies). Narration covers: the ordered-algebra bridge (ordered ring = ring + order + compat), addMono/mulNonneg as the compat laws, the ladder-bridge reuse (OrderedRing through OrderedSemiring), and the ordered-field deliverable. Every definition byte-identical to its prelude twin; narration in comments only.
 - Hash audit: add the three new record formers to the TestTowerClassHashesDistinct names slice; confirm no collision.
 
-- [ ] **Step 1:** Extend TestTowerClassHashesDistinct with OrderedSemiringLaws/OrderedRingLaws/OrderedFieldLaws. Run `go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` - PASS (if a collision, resolve and re-run).
-- [ ] **Step 2:** Read ch574's header/structure as the template. Write ch575 (self-contained mirror + narration; no em-dashes). Run the listings gate for ch575 (`go test ./harness -run 'TestListingsElaborateAndCheck/ch575' -count=1 -timeout 20m`, or the discovered gate name) - PASS.
-- [ ] **Step 3:** Full `go test -timeout 30m ./...` - ALL PASS (run detached, poll the log file; do not foreground-wait or pgrep your own command string). Measure single cold `rune repl` prelude load (build ./cmd/rune once, three `echo "1/3 + 2/3" | rune repl` runs; 3s budget).
-- [ ] **Step 4:** Bookkeeping: spec Status -> Plan B COMPLETE (commits + load vs budget; note the ordered-field deliverable); roadmap Ord line -> Plan B done, Plan C (native lowering) next; check this plan's boxes. Em-dash grep on all changed files (added lines): zero.
-- [ ] **Step 5:** Commit: `git commit -m "docs(listings): ch575 ordered-algebra chapter + hash audit + Plan B close"` (explicit pathspecs).
+- [x] **Step 1:** Extend TestTowerClassHashesDistinct with OrderedSemiringLaws/OrderedRingLaws/OrderedFieldLaws. Run `go test ./internal/session/ -run TestTowerClassHashesDistinct -count=1` - PASS (if a collision, resolve and re-run).
+- [x] **Step 2:** Read ch574's header/structure as the template. Write ch575 (self-contained mirror + narration; no em-dashes). Run the listings gate for ch575 (`go test ./harness -run 'TestListingsElaborateAndCheck/ch575' -count=1 -timeout 20m`, or the discovered gate name) - PASS.
+- [x] **Step 3:** Full `go test -timeout 30m ./...` - ALL PASS (run detached, poll the log file; do not foreground-wait or pgrep your own command string). Measure single cold `rune repl` prelude load (build ./cmd/rune once, three `echo "1/3 + 2/3" | rune repl` runs; 3s budget).
+- [x] **Step 4:** Bookkeeping: spec Status -> Plan B COMPLETE (commits + load vs budget; note the ordered-field deliverable); roadmap Ord line -> Plan B done, Plan C (native lowering) next; check this plan's boxes. Em-dash grep on all changed files (added lines): zero.
+- [x] **Step 5:** Commit: `git commit -m "docs(listings): ch575 ordered-algebra chapter + hash audit + Plan B close"` (explicit pathspecs).
 
 ---
 

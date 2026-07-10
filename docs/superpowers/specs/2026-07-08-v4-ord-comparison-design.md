@@ -1,8 +1,8 @@
 # v4 Ord + comparison: DecEq / Ord classes, ordered-algebra bridge, host-native lowering: Design
 
 Date: 2026-07-08
-Status: PLAN A COMPLETE (2026-07-09). Full scope: tower instances + ordered-algebra
-bridge + all-backend lowering. Plan A (the classes + tower DecEq/Ord instances,
+Status: PLAN A + PLAN B COMPLETE (2026-07-10). Full scope: tower instances +
+ordered-algebra bridge + all-backend lowering. Plan A (the classes + tower DecEq/Ord instances,
 Decisions 1-4 + 7) landed on feat/ord-classes across five commits: d369e9b (Task 1:
 Ordering type + DecEq/Ord ops classes + laws records + comparison defaults),
 35039f5 (Task 2: Whole DecEq/Ord instances from the leb corpus), 6950fee (Task 3:
@@ -18,8 +18,32 @@ principled standalone class (Bool-marker Sig, distinct hash confirmed by the
 audit). The campaign's real content is that the Frac quotient order is proven to
 respect the relation by POSITIVE-SCALING MONOTONICITY (ilebMulPosR / lebMulPosR),
 never by multiplicative cancellation and never by any gcd / lowest-terms fact -
-the hard line of the spec held. Plan B (the ordered-algebra bridge, Decision 5)
-and Plan C (all-backend native lowering, Decision 6) are next.
+the hard line of the spec held.
+
+Plan B (the ordered-algebra bridge, Decision 5) landed on feat/ord-bridge across
+five commits: d23455c (Task 1: the two order-compat statement formers AddMonoT/
+MulNonnegT + the three law records OrderedSemiringLaws/OrderedRingLaws/
+OrderedFieldLaws, the OrderedRing-through-OrderedSemiring ladder-bridge reuse over
+r.1), 23c62d0 (Task 2: Whole ordered-semiring instance - addMono from lebAddMono
+via addWComm, mulNonneg definitional), 443d13a (Task 3: Int ordered-ring instance -
+sign-case addMonoInt + wsub monotonicity helpers, nonneg-product mulNonnegInt),
+f73ab02 (Task 4: Frac ordered-field instance - addMonoF/mulNonnegF lifted over the
+quotient by qind, closed by addMonoInt/mulNonnegInt + ilebMulPosR positive scaling),
+and Task 5 (ch575 doctrine chapter + the OrderedSemiring/Ring/Field hash-collision
+audit + Plan B close). Cold `rune repl` prelude load 0.4-1.1s vs the 3s budget
+(Plan A was ~0.5s; the ordered-algebra section is proofs-only, negligible load cost).
+
+Plan B OUTCOME. `orderedFieldLawsFrac` is THE DELIVERABLE and the tower's FIRST
+ordered field - an ordered comm ring over the Frac DivRing, composing with
+fieldLawsFrac for the full ordered-field story. The bridge is laws-only (no new ops
+shape): the two compat facts addMono/mulNonneg are stated once at the semiring rung
+and a ring reuses them over its embedded semiring, exactly the ladder-bridge doctrine
+the algebra hierarchy already runs. The Frac quotient lifts held to the campaign's
+hard line - positive-scaling monotonicity (ilebMulPosR / addMonoInt), never
+multiplicative cancellation, never gcd or lowest terms (the STOP contingency never
+triggered). The three new record formers hash distinctly against the whole tower
+(TestTowerClassHashesDistinct extended). Plan C (all-backend native lowering,
+Decision 6) is next.
 Parent: docs/superpowers/plans/2026-07-06-three-majors-roadmap.md (v4 numerics;
 Ord is the named prerequisite for Real/IEEE754/Decimal).
 Consumes: the v4 algebra hierarchy (Semiring/Ring/DivRing ops + laws split,

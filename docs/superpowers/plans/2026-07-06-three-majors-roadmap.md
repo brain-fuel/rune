@@ -69,8 +69,12 @@ literals, REPL compiled-eval, Ord. Ord campaign Plan A COMPLETE on
 feat/ord-classes (DecEq/Ord classes + laws records + the three coherent
 views le/compare/Le + PROVEN Whole/Int/Frac DecEq/Ord instances; the Frac
 quotient order proven by positive-scaling monotonicity, no cancellation;
-ch574 doctrine chapter + hash audit; cold load ~0.5s vs 3s budget);
-Plan B (the ordered-algebra bridge) then Plan C (all-backend native
-lowering) next. v5/v6 not yet decomposed. Each
+ch574 doctrine chapter + hash audit; cold load ~0.5s vs 3s budget). Plan B
+(the ordered-algebra bridge) COMPLETE on feat/ord-bridge (OrderedSemiring/
+Ring/Field laws records + the ladder-bridge reuse + PROVEN addMono/mulNonneg
+compat instances for Whole/Int/Frac; orderedFieldLawsFrac the tower's FIRST
+ordered field; ch575 doctrine chapter + hash audit; still no cancellation,
+load 0.4-1.1s vs 3s budget). Plan C (all-backend native lowering) next.
+v5/v6 not yet decomposed. Each
 bump gets its own spec -> plan(s) -> implementation cycles when its turn
 comes.
