@@ -671,3 +671,22 @@ lever is unneeded until a future corpus actually crosses the 3s cold-load
 line. (The Int-campaign +26s repl-SUITE cost above is a test-throughput
 concern, distinct from the cold-load budget, and remains the standing reason
 to revisit caching if the suite time itself becomes the pain.)
+
+## v4 Ord Plan C (lowering registry) - deferred, no consumer
+
+- POSTULATE TRUST BOUNDARY WIDENED. `lower SLOW to FAST by PROOF` accepts any
+  well-typed PROOF of `(x..) -> Eq _ (SLOW x..)(FAST x..)`. A `foreign`/postulated
+  FALSE equality named in a `lower` directive can now reach codegen and miscompile
+  emitted output (previously postulating falsehood only corrupted erased proofs).
+  Standard self-inflicted postulate hazard, not a gate hole; the shipped
+  `lower leb to leW by lebEquiv` is a real checked induction. Doc-note the caveat
+  on AddLowering when convenient.
+- codegen.Erase is now VESTIGIAL: the real emit path drives elaborate.TypedEraser
+  (which carries the load-bearing redirect); codegen.Erase has zero production
+  callers (only its own recursion + one unit test). Rule-5 cleanup candidate -
+  deferred (still backs its unit test; deletion is a separate change).
+- AddLowering rejects (fail-closed) a proof whose telescope has a leading implicit
+  binder not in the SLOW/FAST spine. Correct + safe; a doc-comment note would help
+  future callers. No consumer needs it today.
+- Comparison conformance corpus omits Int-compare/Int-eqb/Frac-compare (plan
+  required only >=1 compare + >=1 eqb, satisfied). Add if a regression ever needs it.
