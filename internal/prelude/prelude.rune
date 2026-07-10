@@ -9178,3 +9178,64 @@ decEqLawsFrac : DecEqLaws Frac decEqFrac is
      end)
     (fn (a : Frac) is andBoth (leF a a) (leF a a) (leReflF a) (leReflF a) end)
 end
+
+-- ====================================================================
+-- ORDERED ALGEBRA (v4 Ord Plan B, the ordered-algebra bridge). Wires the
+-- Ord class to the algebra hierarchy: an ordered semiring/ring/field is an
+-- ops instance PLUS an Ord PLUS the two order-compat laws. Laws-only, no new
+-- ops shapes. The two compat statements over the erased `Le` view:
+--   AddMonoT   - addition is monotone on the right (a<=b implies a+c<=b+c).
+--   MulNonnegT - a product of nonnegatives is nonnegative (0<=a, 0<=b => 0<=a*b).
+-- The records reuse the ladder-bridge doctrine (like abGroupLawsOfRing):
+-- OrderedRingLaws carries RingLaws alongside OrderedSemiringLaws over the
+-- ring's EMBEDDED semiring (r.1), so addMono/mulNonneg are stated once.
+-- Projections (confirmed against mkSemiring/mkRing/mkDivRing above): a
+-- Semiring's add is s.1, zero s.2.1, mul s.2.2.1; a Ring's semiring is r.1;
+-- a DivRing's ring is d.1, its semiring d.1.1. The class-hash audit
+-- (TestTowerClassHashesDistinct) is extended for these three record formers
+-- in Task 5.
+-- ====================================================================
+
+-- Addition monotone on the right: a<=b implies a+c<=b+c.
+AddMonoT : (A : U) -> Ord A -> (A -> A -> A) -> U is
+  fn (A : U) (o : Ord A) (add : A -> A -> A) is
+    (a : A) -> (b : A) -> (c : A) -> Le A o a b -> Le A o (add a c) (add b c)
+  end
+end
+
+-- Product of nonnegatives is nonnegative: 0<=a and 0<=b imply 0<=a*b.
+MulNonnegT : (A : U) -> Ord A -> (A -> A -> A) -> A -> U is
+  fn (A : U) (o : Ord A) (mul : A -> A -> A) (z : A) is
+    (a : A) -> (b : A) -> Le A o z a -> Le A o z b -> Le A o z (mul a b)
+  end
+end
+
+-- An ordered semiring: the semiring laws + the order laws + the two
+-- order-compat laws (add on s.1, mul on s.2.2.1 with zero s.2.1).
+OrderedSemiringLaws : (A : U) -> Semiring A -> Ord A -> U is
+  fn (A : U) (s : Semiring A) (o : Ord A) is
+    And (SemiringLaws A s)
+    (And (OrdLaws A o)
+    (And (AddMonoT A o (s.1))
+         (MulNonnegT A o (s.2.2.1) (s.2.1))))
+  end
+end
+
+-- An ordered ring: the ring laws + the ordered-semiring laws over the ring's
+-- embedded semiring (r.1). The order-compat of a ring IS its semiring's, so
+-- addMono/mulNonneg are not restated (the ladder-bridge doctrine).
+OrderedRingLaws : (A : U) -> Ring A -> Ord A -> U is
+  fn (A : U) (r : Ring A) (o : Ord A) is
+    And (RingLaws A r) (OrderedSemiringLaws A (r.1) o)
+  end
+end
+
+-- An ordered field: the ordered-ring laws over the DivRing's ring (d.1) +
+-- commutativity over its semiring (d.1.1). The field/recip laws live in
+-- FieldLaws separately (composed by the consumer), matching how the algebra
+-- hierarchy kept CommLaws split from DivRingLaws.
+OrderedFieldLaws : (A : U) -> DivRing A -> Ord A -> (A -> U) -> U is
+  fn (A : U) (d : DivRing A) (o : Ord A) (nz : A -> U) is
+    And (OrderedRingLaws A (d.1) o) (CommLaws A (d.1.1))
+  end
+end

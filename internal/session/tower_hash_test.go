@@ -114,6 +114,28 @@ func TestFracOrdInstancesPresent(t *testing.T) {
 	}
 }
 
+// TestOrderedAlgebraRecordsPresent pins Task 1 of the v4 Ord campaign Plan B
+// (ordered-algebra bridge): the two order-compat statement formers (AddMonoT =
+// addition monotone on the right; MulNonnegT = product of nonnegatives is
+// nonnegative) and the three ordered-algebra law records (OrderedSemiringLaws,
+// OrderedRingLaws, OrderedFieldLaws). Elaboration is the proof check, so their
+// presence means the records project the Semiring/Ring/DivRing ops at the
+// intended depths and are well-formed.
+func TestOrderedAlgebraRecordsPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"AddMonoT", "MulNonnegT",
+		"OrderedSemiringLaws", "OrderedRingLaws", "OrderedFieldLaws",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
 // semiring laws (the proven tier of the v4 hierarchy): the laws value
 // must exist and elaborate against the laws record over semiringWhole.
