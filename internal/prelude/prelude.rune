@@ -290,6 +290,12 @@ lebEquiv : (a : Whole) -> (b : Whole) -> Eq Bool (leb a b) (leW a b) is
   end
 end
 
+-- LOWERING (v4 Ord Plan C): compiled/emitted comparison runs the O(1) native
+-- twin `leW` (rides the natMonus accel on all 9 backends) instead of the O(n)
+-- recursive `leb`. The proofs stay stated over `leb`; `lebEquiv` above is the
+-- kernel-checked witness that the redirect is sound. See docs Decision 6.
+lower leb to leW by lebEquiv
+
 -- Division and modulus by repeated subtraction, with the dividend as fuel:
 -- each step removes at least one from the dividend, so the budget suffices
 -- exactly. The flooring quotient of anything by zero is 0; n % 0 is n,

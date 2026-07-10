@@ -3,6 +3,8 @@ package session
 import (
 	"strings"
 	"testing"
+
+	"goforge.dev/rune/v3/internal/prelude"
 )
 
 // A minimal, self-contained program with a slow recursive `sleb` and a fast
@@ -88,5 +90,19 @@ func TestAddLoweringRejectsWrongProof(t *testing.T) {
 				t.Fatalf("error should mention the lower directive, got %v", err)
 			}
 		})
+	}
+}
+
+// The shipped prelude registers leb -> leW (v4 Ord Plan C, Task 4). Loaded
+// the same way tower_hash_test.go loads it: prelude.Source() fed through
+// LoadSource, the same pipeline the REPL and CLI use (prelude.go has no
+// special status, it is ordinary surface rune).
+func TestPreludeLowersLeb(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("prelude load: %v", err)
+	}
+	if len(s.Lowering()) == 0 {
+		t.Fatalf("prelude did not register any lowering")
 	}
 }
