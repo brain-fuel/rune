@@ -230,19 +230,50 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 		b.WriteString("ff_dequeueCode() -> fun(Q) -> fun(_U) -> case erlang:get({q,Q}) of undefined -> 0; [] -> 0; [H|T] -> begin erlang:put({q,Q}, T), H end end end end.\n")
 	}
 	if usesForeign(p, "fromNat") {
+		// fromNat is always finite: float(N) for a Nat never overflows in the corpus,
+		// so it stays a raw Erlang float (a finite rune Float).
 		b.WriteString("ff_fromNat() -> fun(N) -> float(N) end.\n")
 	}
+	// IEEE754 special-value rebox for the BEAM. Erlang's native float() cannot hold
+	// NaN or Infinity (arithmetic that would produce them raises error:badarith), so a
+	// rune Float is EITHER a finite raw float() (unchanged) OR one of three atoms:
+	// nan, pos_inf, neg_inf. Only the ops that produce/propagate/consume specials are
+	// reboxed (fadd/fsub/fmul/fdiv/fleqN + display); finite paths and the BLAS ops are
+	// untouched. These curried ff_f* bodies delegate to the guard-free helpers below.
+	if usesForeign(p, "fadd") || usesForeign(p, "fsub") || usesForeign(p, "fmul") || usesForeign(p, "fdiv") || usesForeign(p, "fleqN") {
+		// fneg: negate a (possibly special) Float.
+		b.WriteString("ff___fneg(nan) -> nan;\nff___fneg(pos_inf) -> neg_inf;\nff___fneg(neg_inf) -> pos_inf;\nff___fneg(F) -> -F.\n")
+		// fsign: +1 for pos_inf and finite >= 0, -1 for neg_inf and finite < 0.
+		b.WriteString("ff___fsign(pos_inf) -> 1;\nff___fsign(neg_inf) -> -1;\nff___fsign(F) -> case F < 0.0 of true -> -1; false -> 1 end.\n")
+		// fadd2: IEEE addition. nan absorbs; opposite infinities -> nan; same-sign or
+		// finite+inf -> that inf; finite+finite overflow -> sign(A) infinity.
+		b.WriteString("ff___fadd2(nan, _) -> nan;\nff___fadd2(_, nan) -> nan;\nff___fadd2(pos_inf, neg_inf) -> nan;\nff___fadd2(neg_inf, pos_inf) -> nan;\nff___fadd2(pos_inf, _) -> pos_inf;\nff___fadd2(_, pos_inf) -> pos_inf;\nff___fadd2(neg_inf, _) -> neg_inf;\nff___fadd2(_, neg_inf) -> neg_inf;\nff___fadd2(A, B) -> try A + B catch error:badarith -> case A >= 0.0 of true -> pos_inf; false -> neg_inf end end.\n")
+		// fsub2: A - B = A + (-B).
+		b.WriteString("ff___fsub2(A, B) -> ff___fadd2(A, ff___fneg(B)).\n")
+		// fmul2: nan absorbs; inf * 0.0 (either order) -> nan; any inf otherwise ->
+		// sign(A)*sign(B) infinity; finite*finite overflow -> sign(A)*sign(B) infinity.
+		b.WriteString("ff___fmul2(nan, _) -> nan;\nff___fmul2(_, nan) -> nan;\nff___fmul2(A, B) when (A =:= pos_inf orelse A =:= neg_inf), is_float(B), B == 0.0 -> nan;\nff___fmul2(A, B) when is_float(A), A == 0.0, (B =:= pos_inf orelse B =:= neg_inf) -> nan;\nff___fmul2(A, B) when (A =:= pos_inf) orelse (A =:= neg_inf) orelse (B =:= pos_inf) orelse (B =:= neg_inf) -> case ff___fsign(A) * ff___fsign(B) of 1 -> pos_inf; _ -> neg_inf end;\nff___fmul2(A, B) -> try A * B catch error:badarith -> case ff___fsign(A) * ff___fsign(B) of 1 -> pos_inf; _ -> neg_inf end end.\n")
+		// fdiv2: nan absorbs; inf/inf -> nan; 0.0/0.0 -> nan; inf/finite -> sign inf;
+		// finite/inf -> 0.0; finite-nonzero/0.0 -> sign inf; finite/finite-nonzero ->
+		// try (badarith here is overflow -> sign inf). A literal 0.0 denominator is
+		// treated as +0 (Erlang cannot distinguish -0.0 by comparison); the parity
+		// corpus never builds a -0.0 denominator, so this is safe.
+		b.WriteString("ff___fdiv2(nan, _) -> nan;\nff___fdiv2(_, nan) -> nan;\nff___fdiv2(A, B) when (A =:= pos_inf orelse A =:= neg_inf), (B =:= pos_inf orelse B =:= neg_inf) -> nan;\nff___fdiv2(A, B) when is_float(A), A == 0.0, is_float(B), B == 0.0 -> nan;\nff___fdiv2(A, B) when (A =:= pos_inf orelse A =:= neg_inf), is_float(B) -> case ff___fsign(A) * ff___fsign(B) of 1 -> pos_inf; _ -> neg_inf end;\nff___fdiv2(A, B) when is_float(A), (B =:= pos_inf orelse B =:= neg_inf) -> 0.0;\nff___fdiv2(A, B) when is_float(A), is_float(B), B == 0.0 -> case ff___fsign(A) * ff___fsign(B) of 1 -> pos_inf; _ -> neg_inf end;\nff___fdiv2(A, B) -> try A / B catch error:badarith -> case ff___fsign(A) * ff___fsign(B) of 1 -> pos_inf; _ -> neg_inf end end.\n")
+		// fleqN2: NaN compares false to everything; else total order neg_inf < finite <
+		// pos_inf. Returns the raw integer 1/0 (a rune Whole); the runtime wraps it.
+		b.WriteString("ff___fleqN2(nan, _) -> 0;\nff___fleqN2(_, nan) -> 0;\nff___fleqN2(neg_inf, _) -> 1;\nff___fleqN2(_, neg_inf) -> 0;\nff___fleqN2(pos_inf, pos_inf) -> 1;\nff___fleqN2(pos_inf, _) -> 0;\nff___fleqN2(_, pos_inf) -> 1;\nff___fleqN2(A, B) -> case A =< B of true -> 1; false -> 0 end.\n")
+	}
 	if usesForeign(p, "fadd") {
-		b.WriteString("ff_fadd() -> fun(A) -> fun(B) -> A + B end end.\n")
+		b.WriteString("ff_fadd() -> fun(A) -> fun(B) -> ff___fadd2(A, B) end end.\n")
 	}
 	if usesForeign(p, "fsub") {
-		b.WriteString("ff_fsub() -> fun(A) -> fun(B) -> A - B end end.\n")
+		b.WriteString("ff_fsub() -> fun(A) -> fun(B) -> ff___fsub2(A, B) end end.\n")
 	}
 	if usesForeign(p, "fmul") {
-		b.WriteString("ff_fmul() -> fun(A) -> fun(B) -> A * B end end.\n")
+		b.WriteString("ff_fmul() -> fun(A) -> fun(B) -> ff___fmul2(A, B) end end.\n")
 	}
 	if usesForeign(p, "fdiv") {
-		b.WriteString("ff_fdiv() -> fun(A) -> fun(B) -> A / B end end.\n")
+		b.WriteString("ff_fdiv() -> fun(A) -> fun(B) -> ff___fdiv2(A, B) end end.\n")
 	}
 	if usesForeign(p, "fabsP") {
 		b.WriteString("ff_fabsP() -> fun(X) -> abs(X) end.\n")
@@ -251,7 +282,7 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 		b.WriteString("ff_floatToNat() -> fun(X) -> trunc(X) end.\n")
 	}
 	if usesForeign(p, "fleqN") {
-		b.WriteString("ff_fleqN() -> fun(A) -> fun(B) -> case A =< B of true -> 1; false -> 0 end end end.\n")
+		b.WriteString("ff_fleqN() -> fun(A) -> fun(B) -> ff___fleqN2(A, B) end end.\n")
 	}
 	if usesForeign(p, "fsqrt") {
 		b.WriteString("ff_fsqrt() -> fun(X) -> math:sqrt(X) end.\n")
@@ -311,9 +342,12 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 		b.WriteString("ff___shortest_sci(AX) -> ff___shortest_sci(AX, 0).\n")
 		b.WriteString("ff___shortest_sci(AX, P) when P > 17 -> binary_to_list(float_to_binary(AX, [{scientific, 17}]));\n")
 		b.WriteString("ff___shortest_sci(AX, P) -> S = binary_to_list(float_to_binary(AX, [{scientific, P}])), try Parsed = list_to_float(ff___make_parseable(S)), if Parsed =:= AX -> S; true -> ff___shortest_sci(AX, P + 1) end catch _:_ -> ff___shortest_sci(AX, P + 1) end.\n")
-		// Erlang floats cannot hold IEEE inf/NaN (arithmetic raises badarith instead),
-		// so no Infinity/NaN branches are emitted. The NaN guard (X =/= X) is ordered
-		// first as a defensive catch; it is unreachable in practice on the BEAM.
+		// IEEE specials are reboxed as atoms (see the float-op helpers above), so the
+		// display path matches on them FIRST (the old X =/= X NaN trick no longer fires,
+		// since our NaN is an atom, not a float). Spellings are ECMAScript
+		// Number::toString: "NaN", "Infinity", "-Infinity". Finite floats fall to the
+		// unchanged precision-search body.
+		b.WriteString("ff___fmtf(nan) -> \"NaN\";\nff___fmtf(pos_inf) -> \"Infinity\";\nff___fmtf(neg_inf) -> \"-Infinity\";\n")
 		b.WriteString("ff___fmtf(X) -> if X =/= X -> \"NaN\"; true -> try if X =:= 0.0 -> \"0\"; true -> Sign = if X < 0.0 -> \"-\"; true -> \"\" end, S = ff___shortest_sci(erlang:abs(X)), ff___fmtf2(S, Sign) end catch _:_ -> float_to_list(X) end end.\n")
 		b.WriteString("ff___fmtf2(S, Sign) -> {M, [$e | E]} = lists:splitwith(fun(C) -> C =/= $e end, S), Exp = case E of [$+ | R] -> list_to_integer(R); [$- | R] -> -list_to_integer(R); _ -> list_to_integer(E) end, K = Exp + 1, Digs0 = [C || C <- M, C =/= $.], Digs = lists:reverse(lists:dropwhile(fun(C) -> C =:= $0 end, lists:reverse(Digs0))), D = case Digs of [] -> \"0\"; _ -> Digs end, N = length(D), Out = if N =< K, K =< 21 -> D ++ lists:duplicate(K - N, $0); K > 0, K =< 21, K < N -> lists:sublist(D, K) ++ \".\" ++ lists:nthtail(K, D); K > -6, K =< 0 -> \"0.\" ++ lists:duplicate(-K, $0) ++ D; true -> Base = if N > 1 -> [hd(D)] ++ \".\" ++ tl(D); true -> D end, Ek = K - 1, if Ek >= 0 -> Base ++ \"e+\" ++ integer_to_list(Ek); true -> Base ++ \"e-\" ++ integer_to_list(-Ek) end end, Sign ++ Out.\n")
 	}
@@ -598,6 +632,9 @@ func emitBeamShow(b interface{ WriteString(string) (int, error) }, withFloat boo
 		// ff___fmtf implements ECMAScript Number::toString (shortest round-trip),
 		// matching JS/Python/Go show output for floats.
 		b.WriteString("    is_float(V) -> ff___fmtf(V);\n")
+		// Reboxed IEEE specials are atoms, not floats, so they need their own show
+		// guard to render as "NaN"/"Infinity"/"-Infinity" rather than the bare atom.
+		b.WriteString("    V =:= nan; V =:= pos_inf; V =:= neg_inf -> ff___fmtf(V);\n")
 	}
 	b.WriteString("    true -> show_t(V)\n  end.\n")
 	b.WriteString(beamShowTail)
