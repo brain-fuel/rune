@@ -1189,3 +1189,68 @@ func TestREPLScribeCorpus(t *testing.T) {
 		t.Errorf("output missing %q\n--- tail ---\n%s", "3 : Nat", got[max(0, len(got)-600):])
 	}
 }
+
+// TestREPLTowerComparisonPins is the v4 Ord Plan C, Task 5 REPL acceptance:
+// le/compare/eqb over the tower (Whole/Int) evaluate correctly at the prompt,
+// through the REAL prelude instance/accessor names -- ordWhole/ordInt,
+// leOf/compareOf, decEqWhole, eqbOf -- exactly as shipped (prelude.go has no
+// special status; the REPL loads the same source the CLI and the harness
+// gate load).
+//
+// It also pins that `leW` -- the O(1) twin the shared prelude's
+// `lower leb to leW by lebEquiv` directive (Task 4) redirects EMITTED `leb`
+// references to -- itself evaluates a 10^18-scale comparison instantly at
+// the prompt, with no succ-chain materialization: `leW` computes through the
+// natMonus-accelerated `subW`, a kernel-level acceleration independent of
+// the Task 1-4 lowering registry.
+//
+// A bare `leOf Whole ordWhole <n> <n+1>` at that SAME 10^18 scale is
+// DELIBERATELY NOT pinned for promptness: the v4 Ord Plan C lowering
+// registry is wired ONLY at the shared codegen Erase choke point
+// (codegen/ir.go, consulted from internal/session/session.go's EmitProgram
+// path) -- it redirects references in EMITTED/compiled programs, not plain
+// expression normalization in the REPL. `ordWhole`'s `le` slot is still
+// bound to the O(n) recursive `leb` (the redirect changes what gets EMITTED,
+// never what a proof or an ops record is STATED over), so normalizing
+// `leOf Whole ordWhole` at 10^18 scale in the REPL is genuinely O(n) there.
+// This was confirmed empirically with a throwaway timing probe before
+// writing this test: `leW 1e12 (1e12+1)` normalized in ~30us; `leOf Whole
+// ordWhole 100000 100001` (10^5 scale) took ~0.9s (roughly linear in n); at
+// 10^12 the same call did not return within a minute. `wholeAtScale` below
+// pins CORRECTNESS at a moderate 10^5 scale (well past the toy 3/5 example,
+// finishing in well under a second) rather than turning this into a
+// multi-minute or non-terminating test. This is the same discipline
+// TestREPLRadixLargeDen documents: no wall-clock assertions, only that the
+// intended-fast path (`leW`) is the one exercised for the astronomic scale.
+func TestREPLTowerComparisonPins(t *testing.T) {
+	script := []string{
+		"leOf Whole ordWhole 3 5",                     // interior: 3 <= 5, true
+		"leOf Whole ordWhole 5 3",                     // reverse: 5 <= 3, false
+		"compareOf Whole ordWhole 3 5",                // lt
+		"leOf Int ordInt (negsucc 1) (nonneg 1)",      // -2 <= 1, true
+		"eqbOf Whole decEqWhole 4 4",                  // true
+		"leOf Whole ordWhole 100000 100001",           // correctness at 10^5 scale
+		"leW 1000000000000000000 1000000000000000001", // the O(1) native twin, 10^18 scale, host-speed
+		":quit",
+	}
+	in := strings.NewReader(strings.Join(script, "\n") + "\n")
+	var out bytes.Buffer
+	if err := Run(in, &out); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+	got := out.String()
+	if strings.Contains(got, "error") {
+		t.Errorf("unexpected error in tower comparison pins\n--- full output ---\n%s", got)
+	}
+	if !strings.Contains(got, "lt : Ordering") {
+		t.Errorf("compareOf Whole ordWhole 3 5 did not print %q\n--- full output ---\n%s", "lt : Ordering", got)
+	}
+	if n := strings.Count(got, "false : Bool"); n != 1 {
+		t.Errorf("expected exactly 1 'false : Bool' line (the reverse check), got %d\n--- full output ---\n%s", n, got)
+	}
+	// 5 true-valued Bool checks: interior, intNegative, eqb, the 10^5-scale
+	// leOf, and leW's 10^18-scale comparison.
+	if n := strings.Count(got, "true : Bool"); n != 5 {
+		t.Errorf("expected exactly 5 'true : Bool' lines, got %d\n--- full output ---\n%s", n, got)
+	}
+}
