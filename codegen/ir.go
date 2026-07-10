@@ -317,6 +317,11 @@ type Program struct {
 // Erase lowers elaborated, meta-free core to the erased IR. names maps a
 // definition hash to its emitted global name; typeRefs holds the hashes that
 // denote types at runtime (datatype formers), which erase to the unit token.
+// lower is the proof-gated lowering table (slow-hash -> fast-hash, v4 Ord Plan
+// C): a top-level reference whose hash appears as a key is redirected to its
+// verified native twin BEFORE the typeRefs/names lookup, so all backends
+// inherit the rewrite from this single choke point. A nil table disables
+// redirection.
 //
 // This is the SYNTACTIC erasure: it sees only the term, so it units the
 // boundaries it can recognize structurally (type formers, the Refl proof).
@@ -325,44 +330,52 @@ type Program struct {
 // literal refl) and 0-quantity argument positions — without that, proofs built
 // from ordinary ω helpers leak the deep numerals their endpoints mention into
 // the shadow (see ref_docs/rune-verified-implementations.md). Erase remains the
-// type-free primitive for contexts without a checker (and its own tests).
-func Erase(t core.Tm, names map[core.Hash]string, typeRefs map[core.Hash]bool) Ir {
+// type-free primitive for contexts without a checker (and its own tests); the
+// TypedEraser carries its own mirrored redirect (elaborate/erase.go) since it
+// is the erasure the session emit path actually drives.
+func Erase(t core.Tm, names map[core.Hash]string, typeRefs map[core.Hash]bool, lower map[core.Hash]core.Hash) Ir {
 	switch tm := t.(type) {
 	case core.Var:
 		return IVar{Idx: tm.Idx}
 	case core.Ref:
-		if typeRefs[tm.Hash] {
+		h := tm.Hash
+		if lower != nil {
+			if to, ok := lower[h]; ok {
+				h = to
+			}
+		}
+		if typeRefs[h] {
 			return IUnit{}
 		}
-		n, ok := names[tm.Hash]
+		n, ok := names[h]
 		if !ok {
-			n = "$" + tm.Hash.Short()
+			n = "$" + h.Short()
 		}
 		return IGlobal{Name: n}
 	case core.Univ, core.Prop, core.Pi, core.Eq, core.Refl:
 		// Types and proofs are build-time discipline; the shadow keeps a unit.
 		return IUnit{}
 	case core.Lam:
-		return ILam{Name: tm.Body.Name, Body: Erase(tm.Body.Body, names, typeRefs)}
+		return ILam{Name: tm.Body.Name, Body: Erase(tm.Body.Body, names, typeRefs, lower)}
 	case core.App:
-		fn := Erase(tm.Fn, names, typeRefs)
+		fn := Erase(tm.Fn, names, typeRefs, lower)
 		if _, isUnit := fn.(IUnit); isUnit {
 			// A unit head is an erased type former (List, Quot, …): the whole
 			// application denotes a type and erases with it.
 			return IUnit{}
 		}
-		return IApp{Fn: fn, Arg: Erase(tm.Arg, names, typeRefs)}
+		return IApp{Fn: fn, Arg: Erase(tm.Arg, names, typeRefs, lower)}
 	case core.Let:
-		return ILet{Name: tm.Body.Name, Val: Erase(tm.Val, names, typeRefs),
-			Body: Erase(tm.Body.Body, names, typeRefs)}
+		return ILet{Name: tm.Body.Name, Val: Erase(tm.Val, names, typeRefs, lower),
+			Body: Erase(tm.Body.Body, names, typeRefs, lower)}
 	case core.Ann:
-		return Erase(tm.Term, names, typeRefs)
+		return Erase(tm.Term, names, typeRefs, lower)
 	case core.Cast:
 		// cast computes on types, which are gone: the shadow is the subject.
-		return Erase(tm.X, names, typeRefs)
+		return Erase(tm.X, names, typeRefs, lower)
 	case core.Subst:
 		// Transport is the identity on its computational payload.
-		return Erase(tm.Px, names, typeRefs)
+		return Erase(tm.Px, names, typeRefs, lower)
 	default:
 		panic("codegen.Erase: unexpected core term (metavariable or unknown constructor)")
 	}

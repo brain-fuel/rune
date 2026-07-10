@@ -33,6 +33,7 @@ type TypedEraser struct {
 	names    map[core.Hash]string
 	typeRefs map[core.Hash]bool
 	foreign  map[core.Hash]bool
+	lower    map[core.Hash]core.Hash
 }
 
 // NewEraser builds a type-directed eraser over el's store, using the same
@@ -44,6 +45,14 @@ func NewEraser(el *Elaborator, names map[core.Hash]string, typeRefs map[core.Has
 // SetForeign marks the hashes that denote `foreign` axioms (R-FFI): a reference
 // to one erases to a codegen.IForeign host accessor, not an emitted IGlobal.
 func (z *TypedEraser) SetForeign(foreign map[core.Hash]bool) { z.foreign = foreign }
+
+// SetLowering installs the proof-gated lowering table (slow-hash -> fast-hash,
+// v4 Ord Plan C): a top-level reference whose hash appears as a key redirects
+// to its verified native twin BEFORE the typeRefs/foreign/names lookup, so
+// every backend inherits the rewrite from this single choke point. This is the
+// erasure the session emit path actually drives (see codegen.Erase's doc
+// comment); a nil or unset table disables redirection.
+func (z *TypedEraser) SetLowering(lower map[core.Hash]core.Hash) { z.lower = lower }
 
 // Def erases a definition body checked against its declared type ty.
 func (z *TypedEraser) Def(ty, body core.Tm) (codegen.Ir, error) {
@@ -73,14 +82,20 @@ func (z *TypedEraser) check(c *Ctx, t core.Tm, want core.Val) (codegen.Ir, error
 	case core.Var:
 		return codegen.IVar{Idx: tm.Idx}, nil
 	case core.Ref:
-		if z.typeRefs[tm.Hash] {
+		h := tm.Hash
+		if z.lower != nil {
+			if to, ok := z.lower[h]; ok {
+				h = to
+			}
+		}
+		if z.typeRefs[h] {
 			return codegen.IUnit{}, nil
 		}
-		n, ok := z.names[tm.Hash]
+		n, ok := z.names[h]
 		if !ok {
-			n = "$" + tm.Hash.Short()
+			n = "$" + h.Short()
 		}
-		if z.foreign[tm.Hash] {
+		if z.foreign[h] {
 			return codegen.IForeign{Name: n}, nil
 		}
 		return codegen.IGlobal{Name: n}, nil

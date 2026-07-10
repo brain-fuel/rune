@@ -1605,6 +1605,12 @@ func (s *Session) emitDefs() (codegen.Program, emitEnv, error) {
 	// arguments erase to the unit token, instead of leaking deep proof-only
 	// numerals into the shadow (ref_docs/rune-verified-implementations.md).
 	eraser := elaborate.NewEraser(s.elaborator(), eraseNames, typeRefs)
+	// Proof-gated lowering (v4 Ord Plan C): a reference to a registered slow
+	// def redirects to its verified fast twin at this single choke point, so
+	// every backend inherits the rewrite. Tree-shaking (below, in
+	// EmitProgram/EmitExpr) runs AFTER this erasure, so the fast twin is kept
+	// reachable and the now-unreferenced slow def is naturally dropped.
+	eraser.SetLowering(s.lower)
 	// `foreign` axioms (R-FFI) erase to IForeign host accessors, not IGlobals -
 	// the host links the implementation under the same accessor on every backend.
 	foreign := map[core.Hash]bool{}
