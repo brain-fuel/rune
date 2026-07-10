@@ -42,8 +42,8 @@ the algebra hierarchy already runs. The Frac quotient lifts held to the campaign
 hard line - positive-scaling monotonicity (ilebMulPosR / addMonoInt), never
 multiplicative cancellation, never gcd or lowest terms (the STOP contingency never
 triggered). The three new record formers hash distinctly against the whole tower
-(TestTowerClassHashesDistinct extended). Plan C (all-backend native lowering,
-Decision 6) is next.
+(TestTowerClassHashesDistinct extended). Plan C (the proof-gated lowering
+registry, Decision 6) is next.
 Parent: docs/superpowers/plans/2026-07-06-three-majors-roadmap.md (v4 numerics;
 Ord is the named prerequisite for Real/IEEE754/Decimal).
 Consumes: the v4 algebra hierarchy (Semiring/Ring/DivRing ops + laws split,
@@ -196,37 +196,56 @@ OrderedFieldLaws A (d : DivRing A) (o : Ord A) (nz : A -> U) = {
   first ordered field). The Int/Frac `addMono`/`mulNonneg` lemmas are the work;
   they reuse ringLawsInt/fieldLawsFrac + the new order lemmas from Plan A.
 
-## Decision 6: host-native lowering, all 9 backends (Plan C)
+## Decision 6: proof-gated lowering registry (Plan C)
 
-The author wants comparison lowered to target-native operations now, not left as
-proven-but-interpreted definitions. This touches the codegen shadow + the accel
-machinery (internal/session), NOT the frozen kernel (core/store/elaborate).
+The author wants comparison lowered to target-native speed now, not left as a
+proven-but-O(n) definition. A pre-implementation investigation changed the
+mechanism from the originally-sketched "Bool-returning accel" to a strictly
+cheaper, more general one. Both the finding and the decision are recorded here.
 
-- The accel machinery today has only ARITHMETIC accel kinds (natAdd/natMul/
-  natMonus/natDiv/natMod) returning Nat; there is NO Bool- or Ordering-returning
-  accel kind (this is why the Frac campaign's eqW had to ride subW). Plan C ADDS
-  a comparison accel kind:
-  - `natLeb` (Bool-returning): fires on closed NatLit pairs, gated by the same
-    differential-soundness check (the def's unfolded peeling must agree with the
-    Go `big.Int` comparison). `leb`/`leW` register against it; `ileb`/`leF`
-    reach it through their Whole-comparison cores.
-  - Ordering-returning `natCompare` is OPTIONAL: if the Bool `natLeb` accel plus
-    a two-call `compareFromLe` already lowers to fast target code, a dedicated
-    Ordering accel buys little (YAGNI). Decision deferred to the Plan C
-    measurement: add `natCompare` only if a one-pass three-way profiles
-    meaningfully faster than two `natLeb` calls on the target.
-- Per-backend host bodies: each of the 9 backends (js/py/go/rust/beam/jvm/c/ll/
-  wasm) gets a baked native comparison for the registered ops, gated by
-  `usesForeign`/the comparison-prim set, mirroring how the arithmetic accels and
-  the D6 host ops are baked (codegen/*.go). The native path is the target's own
-  `<=` on its bignum/integer representation.
+FINDING (verified): the fast native path ALREADY EXISTS on all 9 backends. `leW a
+b = isZero (subW a b)` (prelude), `subW` is `builtin natMonus subW`, and the
+`natMonus` accel emits native `_natMonus` on every backend (js/py/go/rust/beam/
+jvm/c/ll/wasm). So `leW` is O(1)-native everywhere, and `lebEquiv : (a b : Whole)
+-> Eq Bool (leb a b)(leW a b)` already proves it equal to `leb`. The ONLY reason
+compiled comparison is slow is that `ordWhole` (and thus `compareFromLe`) dispatch
+`le` to `leb`, the O(n) recursive eliminator. No new accel kind, no Bool-returning
+eval fold, and no `builtin bool` are needed to get native comparison.
+
+MECHANISM: a proof-gated LOWERING REGISTRY. This generalizes the recurring tower
+shape — a proof-shaped def (recursive, so laws induct on its succ/zero structure:
+`lteAntisym`, `lebAddMono`) paired with a speed-shaped twin (rides an accel, O(1))
+plus a kernel-checked equality proof. `leb`/`leW` is the first pair; `eqW`,
+`ltW`, `geW` are future pairs. Neither def in a pair subsumes the other, so Rule 5
+does not delete either; the compiler unifies them at runtime.
+
+- SURFACE DIRECTIVE `lower SLOW to FAST by PROOF` (author-selected), parsed like
+  the `builtin` directive. In the prelude: `lower leb to leW by lebEquiv`.
+- REGISTRATION GATE: `session.AddLowering(slow, fast, proof)` accepts the entry
+  ONLY if `proof` kernel-checks at `(x…) -> Eq _ (slow x…)(fast x…)` for matching
+  arity — a genuine equality proof, stronger than the accels' sampled
+  differential check. A registry entry therefore cannot introduce miscompilation.
+  The table is `lower map[core.Hash]core.Hash` (slow-hash → fast-hash).
+- APPLIED ONCE, at the shared `Erase` choke point (codegen/ir.go): a top-level ref
+  is redirected `tm.Hash → lower[tm.Hash]` before the name lookup. All 9 backends
+  consume the same erased IR, so they ALL inherit the rewrite with zero
+  per-backend code. Pure shadow (Rule 4): core/store/elaborate untouched, the
+  proofs stay stated over `leb`.
+- PROOFS UNTOUCHED: `ordWhole` keeps `le = leb`; every existing OrdLaws lemma
+  (stated over `leb`) is unchanged. Only the emitted artifact runs `leW`.
 - CONFORMANCE GATE: a comparison corpus (le/compare/eqb on Whole/Int/Frac at
   boundary and interior values, incl. large bignums and negative Ints) observes
   byte-identical results on all 9 backends, mirroring the arithmetic divergence-
-  lock gates. This is Plan C's acceptance.
+  lock gates. Plus a codegen unit test that a `lower`ed program emits the FAST
+  hash (the redirect actually fires). This is Plan C's acceptance.
 - REPL acceptance (mandatory memory rule): `le`, `compare`, `eqb`, and the tower
   instances behave in `rune repl`; large-bignum comparisons are host-speed (no
   succ-chain materialization), exactly as the C7 compressed-numeral arithmetic.
+  NOTE: the REPL evaluates via the kernel NbE (not `Erase`), where `leb` still
+  reduces by its eliminator; `lebEquiv` + the `leW` fast path keep even the
+  interpreted route from materializing a succ-chain (`leW` rides the natMonus
+  accel in NbE too). The registry's runtime win lands in emitted/compiled code;
+  the REPL pins assert correctness and no-succ-chain, not the redirect itself.
 
 ## Decision 7: chapters (doctrine flip)
 
@@ -247,7 +266,8 @@ machinery (internal/session), NOT the frozen kernel (core/store/elaborate).
 - REPL comparison pins (le/compare/eqb on the tower, negative Ints, large
   bignums, quotient Frac non-canonical representatives).
 - Plan C: the 9-backend comparison conformance gate (the real acceptance) +
-  differential-soundness gate on the natLeb accel registration.
+  a codegen redirect unit test (a `lower`ed program emits the FAST hash) +
+  the AddLowering proof-gate rejection test (a wrong `proof` type is refused).
 - Load-budget watch (the Frac campaigns added negligible load; Ord adds a
   comparable proof corpus - measure single-prelude-load wall time in each plan's
   final task, 3s budget per Decision 5 of the Frac spec).
@@ -259,16 +279,17 @@ machinery (internal/session), NOT the frozen kernel (core/store/elaborate).
   ch574. Tag on green.
 - Plan B (bridge): OrderedSemiring/OrderedRing/OrderedField laws + instances +
   ch575. Tag on green.
-- Plan C (lowering): natLeb accel kind + per-backend native comparison bodies +
-  9-backend conformance gate + REPL host-speed pins. Tag on green.
+- Plan C (lowering): `lower … by …` directive + proof-gated AddLowering registry +
+  Erase redirect + 9-backend conformance gate + REPL host-speed pins. Tag on green.
 
 ## Non-goals
 
 - No new numeric types (Word/Decimal/IEEE754/Real/Complex/Quaternion - later v4
   sub-specs; Ord is their prerequisite, IEEE754 will be the first guarded-tier
   Ord: ops, no OrdLaws).
-- No core kernel change / no hash-format bump (Plan C touches codegen + session
-  accel machinery only, the mutable shadow per Rule 4).
+- No core kernel change / no hash-format bump (Plan C touches surface parsing +
+  session lowering registry + the codegen Erase redirect, the mutable shadow per
+  Rule 4). The `lower` directive resolves names but adds NO core constructor.
 - No migration of the existing ad-hoc equalities (eqW/eqNat/isZeroInt) to DecEq
   - a deferred Rule-5 sweep once DecEq has settled and a consumer motivates it.
 - No sorting / Set / Map / balanced-tree consumers (Ord is the prerequisite;
