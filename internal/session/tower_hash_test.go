@@ -136,6 +136,26 @@ func TestOrderedAlgebraRecordsPresent(t *testing.T) {
 	}
 }
 
+// TestWholeOrderedSemiringPresent pins Task 2 of the v4 Ord campaign Plan B:
+// Whole's ordered-semiring instance. addMonoWhole proves addition is monotone
+// on the right (from lebAddMono + addWComm to reach add-on-right); mulNonnegWhole
+// is definitional (leb zero _ reduces to true, so Whole nonnegativity is
+// universal); orderedSemiringLawsWhole assembles them with semiringLawsWhole +
+// ordLawsWhole into the OrderedSemiringLaws record. Elaboration is the proof.
+func TestWholeOrderedSemiringPresent(t *testing.T) {
+	s := New()
+	if _, err := s.LoadSource(prelude.Source()); err != nil {
+		t.Fatalf("loading prelude: %v", err)
+	}
+	for _, n := range []string{
+		"addMonoWhole", "mulNonnegWhole", "orderedSemiringLawsWhole",
+	} {
+		if _, ok := s.Lookup(n); !ok {
+			t.Fatalf("%s not found in prelude", n)
+		}
+	}
+}
+
 // TestWholeSemiringLawsPresent pins that the prelude PROVES Whole's
 // semiring laws (the proven tier of the v4 hierarchy): the laws value
 // must exist and elaborate against the laws record over semiringWhole.

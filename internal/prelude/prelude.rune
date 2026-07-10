@@ -9239,3 +9239,54 @@ OrderedFieldLaws : (A : U) -> DivRing A -> Ord A -> (A -> U) -> U is
     And (OrderedRingLaws A (d.1) o) (CommLaws A (d.1.1))
   end
 end
+
+-- ====================================================================
+-- Whole ordered-semiring instance (v4 Ord Plan B, Task 2). Whole is a
+-- Semiring (not a Ring - no negation), so its highest ordered-algebra rung
+-- is the ordered SEMIRING. Both compat laws come out of the existing Whole
+-- order corpus: addMono from lebAddMono, mulNonneg definitionally.
+-- ====================================================================
+
+-- Addition is monotone on the RIGHT: a<=b implies a+c<=b+c. `lebAddMono`
+-- (5508) proves monotonicity for addition on the LEFT (leb (addW c a)(addW c b));
+-- we transport its two sides across addWComm (addW c a = addW a c, addW c b =
+-- addW b c) to reach the right-addition form the AddMonoT statement asks for.
+addMonoWhole : AddMonoT Whole ordWhole addW is
+  fn (a : Whole) (b : Whole) (c : Whole) (h : Le Whole ordWhole a b) is
+    subst Whole (addW c b) (addW b c) (addWComm c b)
+      (fn (t : Whole) is Eq Bool (leb (addW a c) t) true end)
+      (subst Whole (addW c a) (addW a c) (addWComm c a)
+        (fn (s : Whole) is Eq Bool (leb s (addW c b)) true end)
+        (lebAddMono c a b h))
+  end
+end
+
+-- Product of nonnegatives is nonnegative. `leb zero n` reduces to `true` for
+-- ANY n (leb recurses on its first argument, and the zero case returns true),
+-- so `Le Whole ordWhole zero (mulW a b)` = `Eq Bool true true` and the proof is
+-- `refl true` - the hypotheses are unused (Whole nonnegativity is universal).
+mulNonnegWhole : MulNonnegT Whole ordWhole mulW zero is
+  fn (a : Whole) (b : Whole) (ha : Le Whole ordWhole zero a) (hb : Le Whole ordWhole zero b) is
+    refl true
+  end
+end
+
+-- The assembled ordered-semiring laws for Whole: the 4-slot right-nested And of
+-- semiringLawsWhole, ordLawsWhole, addMonoWhole, mulNonnegWhole (the And-type
+-- annotations mirror OrderedSemiringLaws' nesting; semiringWhole's projections
+-- .1/.2.2.1/.2.1 compute to addW/mulW/zero so the ops slots line up).
+orderedSemiringLawsWhole : OrderedSemiringLaws Whole semiringWhole ordWhole is
+  mkAnd (SemiringLaws Whole semiringWhole)
+    (And (OrdLaws Whole ordWhole)
+    (And (AddMonoT Whole ordWhole (semiringWhole.1))
+         (MulNonnegT Whole ordWhole (semiringWhole.2.2.1) (semiringWhole.2.1))))
+    semiringLawsWhole
+    (mkAnd (OrdLaws Whole ordWhole)
+      (And (AddMonoT Whole ordWhole (semiringWhole.1))
+           (MulNonnegT Whole ordWhole (semiringWhole.2.2.1) (semiringWhole.2.1)))
+      ordLawsWhole
+      (mkAnd (AddMonoT Whole ordWhole (semiringWhole.1))
+             (MulNonnegT Whole ordWhole (semiringWhole.2.2.1) (semiringWhole.2.1))
+        addMonoWhole
+        mulNonnegWhole))
+end
