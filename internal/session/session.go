@@ -89,6 +89,13 @@ type Session struct {
 	// different name must not inherit native-arithmetic emission, because its
 	// data group may compile to constructor records, not native integers.
 	natAccelDecl map[core.Hash]string
+	// lower is the v4 Ord Plan C proof-gated lowering table: slow-hash -> fast-
+	// hash. AddLowering populates it only after kernel-checking that the named
+	// proof literally proves the two defs pointwise equal (see AddLowering).
+	// Consulted by codegen's Erase choke point so every backend redirects a
+	// reference to its slow def to the verified native twin. Session state
+	// only; nothing enters the store.
+	lower map[core.Hash]core.Hash
 	// meta is per-name surface metadata the ledger reads but the store never
 	// hashes (postulate-ness + reason). Keyed by def name; absent => zero value.
 	meta map[string]defMeta
@@ -172,6 +179,7 @@ func (s *Session) resetBuiltins() {
 	s.natCtors = false
 	s.natAccel = map[core.Hash]core.NatOp{}
 	s.natAccelDecl = map[core.Hash]string{}
+	s.lower = map[core.Hash]core.Hash{}
 	s.meta = map[string]defMeta{}
 	s.surfaceDefs = map[string]surface.Def{}
 	hs := s.st.AddQuot()
@@ -603,6 +611,10 @@ func (s *Session) LoadSource(src string) ([]string, error) {
 			if err := s.AddBuiltinNumInj(d); err != nil {
 				return added, err
 			}
+		case surface.LowerDef:
+			if err := s.AddLowering(d); err != nil {
+				return added, err
+			}
 		}
 	}
 	return added, nil
@@ -800,6 +812,84 @@ func (s *Session) unfoldedNatCall(defName string, a, b int64) (int64, error) {
 	return n, nil
 }
 
+// AddLowering validates and registers a proof-gated lowering directive (v4 Ord
+// Plan C): `lower slow to fast by proof` redirects the slow def's hash to the
+// fast def's hash at codegen, so emitted code calls the O(1) native twin while
+// the proofs stay stated over the slow def.
+//
+// Soundness gate. The redirect is sound iff slow and fast are extensionally
+// equal. Rather than trust the registrant (or sample, as the arithmetic accels
+// do), this CHECKS the supplied proof: its stored type must be, for some arity n,
+//
+//	(x1 : A1) -> ... -> (xn : An) -> Eq B (slow x1 ... xn) (fast x1 ... xn)
+//
+// verified structurally on the de Bruijn core (alpha-invariant, so `slow x...`
+// must appear as the ref-spine `Ref(slowHash) applied to Var(n-1)...Var(0)`).
+// A wrong proof (a different equality, wrong arity, or a non-Eq codomain) is
+// REJECTED here, so no unsound redirect can enter codegen. Session state only.
+func (s *Session) AddLowering(d surface.LowerDef) error {
+	slowH, ok := s.refs[d.Slow]
+	if !ok {
+		return fmt.Errorf("lower %s to %s: unknown name %q", d.Slow, d.Fast, d.Slow)
+	}
+	fastH, ok := s.refs[d.Fast]
+	if !ok {
+		return fmt.Errorf("lower %s to %s: unknown name %q", d.Slow, d.Fast, d.Fast)
+	}
+	proofH, ok := s.refs[d.Proof]
+	if !ok {
+		return fmt.Errorf("lower %s to %s by %s: unknown proof %q", d.Slow, d.Fast, d.Proof, d.Proof)
+	}
+	pd, ok := s.byHash[proofH]
+	if !ok {
+		return fmt.Errorf("lower %s to %s by %s: proof has no stored type", d.Slow, d.Fast, d.Proof)
+	}
+	// Peel the proof type's Pi telescope: collect arity n, land on the codomain.
+	n := 0
+	ty := pd.Ty
+	for {
+		pi, isPi := ty.(core.Pi)
+		if !isPi {
+			break
+		}
+		n++
+		ty = pi.Cod.Body
+	}
+	eq, isEq := ty.(core.Eq)
+	if !isEq {
+		return fmt.Errorf("lower %s to %s by %s: proof codomain is %T, not an `Eq` between %s and %s", d.Slow, d.Fast, d.Proof, ty, d.Slow, d.Fast)
+	}
+	// The proof must equate the ref-spines `slow $n-1 ... $0` and `fast $...`.
+	if !isRefSpine(eq.L, slowH, n) {
+		return fmt.Errorf("lower %s to %s by %s: proof LHS is not `%s` applied to all %d arguments", d.Slow, d.Fast, d.Proof, d.Slow, n)
+	}
+	if !isRefSpine(eq.R, fastH, n) {
+		return fmt.Errorf("lower %s to %s by %s: proof RHS is not `%s` applied to all %d arguments", d.Slow, d.Fast, d.Proof, d.Fast, n)
+	}
+	s.lower[slowH] = fastH
+	return nil
+}
+
+// isRefSpine reports whether t is `Ref(h)` applied to exactly the n telescope
+// variables in order: under n binders the first bound variable has de Bruijn
+// index n-1 and the last has index 0, so the spine is
+// `App(...App(Ref(h), Var(n-1))..., Var(0))`.
+func isRefSpine(t core.Tm, h core.Hash, n int) bool {
+	for i := 0; i < n; i++ {
+		app, ok := t.(core.App)
+		if !ok {
+			return false
+		}
+		v, ok := app.Arg.(core.Var)
+		if !ok || v.Idx != i { // outermost App peeled first: its Arg is Var{Idx:0} (i=0)
+			return false
+		}
+		t = app.Fn
+	}
+	ref, ok := t.(core.Ref)
+	return ok && ref.Hash == h
+}
+
 // natLitValueOf reads a normalized nat term back as an int64: either a compressed
 // NatLit, or a saturated succ-chain over zero (the generalized `builtin nat`
 // form, which does not lower to NatLit). Returns ok=false on anything else.
@@ -911,6 +1001,11 @@ func (s *Session) Defs() []Def {
 // RefNames returns the hash->name map for rendering references; callers must not
 // mutate it.
 func (s *Session) RefNames() map[core.Hash]string { return s.refNames }
+
+// Lowering returns the proof-gated lowering table (slow-hash -> fast-hash) used
+// by codegen to redirect a reference to its verified native twin (v4 Ord Plan
+// C). Never nil once the session is initialized; callers must not mutate it.
+func (s *Session) Lowering() map[core.Hash]core.Hash { return s.lower }
 
 // elaborator returns a fresh per-run Elaborator over the session store.
 func (s *Session) elaborator() *elaborate.Elaborator {
