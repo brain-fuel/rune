@@ -556,6 +556,11 @@ func emitStreamPrimsLL(b *strings.Builder, p Program) {
 // Emitted AFTER emitStreamPrimsLL because parseFloat calls d6_s2h. Mirrors
 // emitFloatIOPrimsC with rt_-prefixed mkclo/clo_set/mkcon/con_set and external
 // linkage on thunk entry points (the .ll auto-declares them via foreignNames).
+// printFloat_c2 formats via __fmtf (ECMAScript Number::toString shortest
+// round-trip), which now lives in the always-emitted base runtime (llRuntimeC),
+// not here, so show()'s K_FLOAT case can reach it too (Track B Task 2, the LL
+// mirror of Task 1's c.go move). d6_validate_float is a DFA for the float
+// literal grammar used by parseFloat.
 func emitFloatIOPrimsLL(b *strings.Builder, p Program) {
 	usesFloatIO := usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat")
 	if !usesFloatIO {
@@ -564,7 +569,6 @@ func emitFloatIOPrimsLL(b *strings.Builder, p Program) {
 	// locale.h required for setlocale(LC_NUMERIC, "C") called from the float main.
 	b.WriteString("#include <locale.h>\n")
 	b.WriteString("static int d6_validate_float(const unsigned char* s, size_t len) { if (len == 0) return 0; size_t i = 0; if (s[i] == '+' || s[i] == '-') i++; int has_digit = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } if (i < len && s[i] == '.') { i++; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } } if (!has_digit) return 0; if (i < len && (s[i] == 'e' || s[i] == 'E')) { i++; if (i < len && (s[i] == '+' || s[i] == '-')) i++; int hd = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { hd = 1; i++; } if (!hd) return 0; } return i == (size_t)len; }\n")
-	b.WriteString("static void __fmtf(double x, char* out) { if (x != x) { strcpy(out, \"NaN\"); return; } if (x > 1.7976931348623157e308) { strcpy(out, \"Infinity\"); return; } if (x < -1.7976931348623157e308) { strcpy(out, \"-Infinity\"); return; } if (x == 0.0) { strcpy(out, \"0\"); return; } int neg = (x < 0); if (neg) x = -x; char buf[40]; int p; for (p = 1; p <= 17; p++) { snprintf(buf, sizeof buf, \"%.*e\", p - 1, x); if (strtod(buf, NULL) == x) break; } char* ep = strchr(buf, 'e'); int n = atoi(ep + 1) + 1; int k = p; char s[20]; s[0] = buf[0]; int si = 1; if (p > 1) { int ii; for (ii = 2; ii < p + 1; ii++) s[si++] = buf[ii]; } s[si] = '\\0'; char* o = out; if (neg) *o++ = '-'; if (k <= n && n <= 21) { memcpy(o, s, k); o += k; int ii; for (ii = k; ii < n; ii++) *o++ = '0'; } else if (n > 0 && n < k) { memcpy(o, s, n); o += n; *o++ = '.'; memcpy(o, s + n, k - n); o += k - n; } else if (n >= -5 && n <= 0) { *o++ = '0'; *o++ = '.'; int ii; for (ii = 0; ii < -n; ii++) *o++ = '0'; memcpy(o, s, k); o += k; } else { *o++ = s[0]; if (k > 1) { *o++ = '.'; memcpy(o, s + 1, k - 1); o += k - 1; } *o++ = 'e'; int en = n - 1; o += sprintf(o, en >= 0 ? \"+%d\" : \"%d\", en); } *o = '\\0'; }\n")
 	if usesForeign(p, "parseFloat") {
 		b.WriteString("static Value parseFloat_c(Value code, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(code, &len); if (!d6_validate_float(buf, len)) { free(buf); rt_release(code); Value none = rt_mkcon(0, \"none\", 1); rt_con_set(none, 0, UNIT); return none; } char* tmp = (char*)malloc(len + 1); memcpy(tmp, buf, len); tmp[len] = 0; double d = strtod(tmp, NULL); free(tmp); free(buf); rt_release(code); Value some = rt_mkcon(1, \"some\", 2); rt_con_set(some, 0, UNIT); rt_con_set(some, 1, mkfloat(d)); return some; }\n")
 		b.WriteString("Value parseFloat(void) { return rt_mkclo(&parseFloat_c, 0); }\n")

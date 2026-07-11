@@ -481,6 +481,19 @@ Value rt_nat_mod(Value a, Value b) { return big_mod(a, b); }
 
 void rt_abort(void) { fprintf(stderr, "rune-ll: impossible (unmatched constructor tag)\n"); exit(1); }
 
+/* __fmtf (ECMAScript Number::toString shortest-round-trip formatting) is defined
+   unconditionally here in the base runtime (depends only on stdio/string/stdlib,
+   already included above) so show()'s K_FLOAT case can always reach it, not just
+   when a program uses float IO (parseFloat/getFloat/printFloat) -- mirrors c.go's
+   base-runtime placement (Track B Task 1). Precision search: p=1..17 significant
+   digits; stop when strtod round-trips. Dressing cases (k=digit count, n=exponent
+   s.t. value = s[0..k-1] * 10^(n-k)):
+     1. k<=n<=21:  digits + trailing zeros
+     2. 0<n<k:     digits[0..n-1] + "." + digits[n..k-1]
+     3. -5<=n<=0:  "0." + (-n) zeros + digits
+     4. else:      d[0][.d[1..]]e+/-(|n-1|) */
+static void __fmtf(double x, char* out) { if (x != x) { strcpy(out, "NaN"); return; } if (x > 1.7976931348623157e308) { strcpy(out, "Infinity"); return; } if (x < -1.7976931348623157e308) { strcpy(out, "-Infinity"); return; } if (x == 0.0) { strcpy(out, "0"); return; } int neg = (x < 0); if (neg) x = -x; char buf[40]; int p; for (p = 1; p <= 17; p++) { snprintf(buf, sizeof buf, "%.*e", p - 1, x); if (strtod(buf, NULL) == x) break; } char* ep = strchr(buf, 'e'); int n = atoi(ep + 1) + 1; int k = p; char s[20]; s[0] = buf[0]; int si = 1; if (p > 1) { int ii; for (ii = 2; ii < p + 1; ii++) s[si++] = buf[ii]; } s[si] = '\0'; char* o = out; if (neg) *o++ = '-'; if (k <= n && n <= 21) { memcpy(o, s, k); o += k; int ii; for (ii = k; ii < n; ii++) *o++ = '0'; } else if (n > 0 && n < k) { memcpy(o, s, n); o += n; *o++ = '.'; memcpy(o, s + n, k - n); o += k - n; } else if (n >= -5 && n <= 0) { *o++ = '0'; *o++ = '.'; int ii; for (ii = 0; ii < -n; ii++) *o++ = '0'; memcpy(o, s, k); o += k; } else { *o++ = s[0]; if (k > 1) { *o++ = '.'; memcpy(o, s + 1, k - 1); o += k - 1; } *o++ = 'e'; int en = n - 1; o += sprintf(o, en >= 0 ? "+%d" : "%d", en); } *o = '\0'; }
+
 /* show: byte-identical to the C backend's show (same surface rendering). */
 static void show(Value v);
 static void show_paren(Value v) {
@@ -498,7 +511,7 @@ static void show(Value v) {
   switch (o->kind) {
     case K_BIG: big_print(v); return;
     case K_BYTES: { int bn = bytes_len(v); putchar('"'); for (int bi = 0; bi < bn; bi++) { int bx = bytes_at(v, bi); if (bx >= 0x20 && bx < 0x7f && bx != 0x22 && bx != 0x5c) putchar(bx); else printf("\\x%02x", bx); } putchar('"'); return; }
-    case K_FLOAT: printf("%g", o->dval); return;
+    case K_FLOAT: { char __fb[64]; __fmtf(o->dval, __fb); printf("%s", __fb); return; }
     case K_CLO: printf("<function>"); return;
     case K_PTR: printf("<ptr>"); return;
     case K_STR: printf("%s", o->str); return;
