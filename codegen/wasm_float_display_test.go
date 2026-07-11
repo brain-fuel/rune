@@ -397,6 +397,424 @@ func atofSlowModule(s string) string {
 	return b.String()
 }
 
+// ---- Task 4 (format half): the executable Go spec of the exact Dragon4 formatter ----
+//
+// dragon4Digits is the Steele-White FPP2 free-format shortest algorithm the WAT $flt_dragon4
+// port implements. It works over exact bignum rationals R/S with high/low margins Mp/Mm and
+// emits the fewest decimal digits that round back to x, correctly rounded (ties to even). It
+// composes ONLY the operations the WASM runtime provides: multiply ($rt_nat_mul), add
+// ($big_add), compare ($big_cmp), subtract-when-not-smaller (mirrors $rt_nat_monus, used for
+// the per-digit quotient by REPEATED SUBTRACTION -- there is no general bignum division in
+// the runtime), and power-of-two shift ($flt_shl2 / $flt_pow2big). It does NOT delegate to
+// strconv. It returns the shortest significant DIGITS and the position n where the value is
+// digits * 10^(n - len(digits)).
+//
+// fmtSweepSeed is the fixed PRNG seed for the format sweep (sandbox forbids nondeterministic
+// entropy, so the >=50000-double differential is reproducible run-to-run).
+const fmtSweepSeed = 0x5eed4d16
+
+// dragon4Digits: |x| = f * 2^e decomposed from its IEEE mantissa/exponent (mant the 52-bit
+// fraction, expo the 11-bit biased exponent). Returns the shortest decimal digit string and
+// the decimal position n (value = digits * 10^(n-len)).
+func dragon4Digits(mant uint64, expo int) (string, int) {
+	one := big.NewInt(1)
+	ten := big.NewInt(10)
+	var f *big.Int
+	var e int
+	if expo == 0 { // subnormal: f = mant, e = -1074
+		f = new(big.Int).SetUint64(mant)
+		e = -1074
+	} else { // normal: f = mant | 2^52, e = expo - 1075
+		f = new(big.Int).SetUint64(mant | (uint64(1) << 52))
+		e = expo - 1075
+	}
+	even := mant&1 == 0                  // f's low bit == mant's low bit (2^52 is even)
+	isBoundary := expo != 0 && mant == 0 // f == 2^52: unequal gaps at the power-of-two boundary
+
+	R := new(big.Int)
+	S := new(big.Int)
+	Mp := new(big.Int)
+	Mm := new(big.Int)
+	if e >= 0 {
+		be := new(big.Int).Lsh(one, uint(e)) // 2^e
+		if !isBoundary {
+			R.Mul(f, be)
+			R.Lsh(R, 1) // R = f*be*2
+			S.SetInt64(2)
+			Mp.Set(be)
+			Mm.Set(be)
+		} else {
+			R.Mul(f, be)
+			R.Lsh(R, 2) // R = f*be*4
+			S.SetInt64(4)
+			Mp.Lsh(be, 1) // Mp = be*2
+			Mm.Set(be)
+		}
+	} else {
+		if expo <= 1 || !isBoundary {
+			R.Lsh(f, 1)             // R = f*2
+			S.Lsh(one, uint(1-e))   // S = 2^(1-e)
+			Mp.SetInt64(1)
+			Mm.SetInt64(1)
+		} else {
+			R.Lsh(f, 2)             // R = f*4
+			S.Lsh(one, uint(2-e))   // S = 2^(2-e)
+			Mp.SetInt64(2)
+			Mm.SetInt64(1)
+		}
+	}
+
+	// scale: choose k so the first emitted digit is in [1,9] and value = 0.d1d2... * 10^k.
+	k := 0
+	for {
+		rpm := new(big.Int).Add(R, Mp)
+		c := rpm.Cmp(S)
+		if !(c > 0 || (even && c == 0)) { // R+Mp <= S (or < S when even)
+			break
+		}
+		S.Mul(S, ten)
+		k++
+	}
+	for {
+		rpm := new(big.Int).Add(R, Mp)
+		rpm.Mul(rpm, ten)
+		c := rpm.Cmp(S)
+		if !(c < 0 || (even && c == 0)) { // (R+Mp)*10 >= S
+			break
+		}
+		R.Mul(R, ten)
+		Mp.Mul(Mp, ten)
+		Mm.Mul(Mm, ten)
+		k--
+	}
+
+	// generate: emit digits until within a margin of a neighbouring representable value.
+	var digs []int
+	for {
+		R.Mul(R, ten)
+		Mp.Mul(Mp, ten)
+		Mm.Mul(Mm, ten)
+		d := 0 // d = floor(R/S) in 0..9 by repeated subtraction (no general division)
+		for R.Cmp(S) >= 0 {
+			R.Sub(R, S)
+			d++
+		}
+		cLow := R.Cmp(Mm)
+		low := cLow < 0 || (even && cLow == 0)
+		rpm := new(big.Int).Add(R, Mp)
+		cHigh := rpm.Cmp(S)
+		high := cHigh > 0 || (even && cHigh == 0)
+		if !low && !high {
+			digs = append(digs, d)
+			continue
+		}
+		roundUp := false
+		switch {
+		case low && !high:
+			roundUp = false
+		case high && !low:
+			roundUp = true
+		default: // both margins reached: pick the nearer, ties to even
+			twoR := new(big.Int).Lsh(R, 1)
+			c := twoR.Cmp(S)
+			switch {
+			case c < 0:
+				roundUp = false
+			case c > 0:
+				roundUp = true
+			default:
+				roundUp = d&1 == 1 // exact tie -> even digit
+			}
+		}
+		digs = append(digs, d)
+		if roundUp {
+			i := len(digs) - 1
+			for i >= 0 {
+				digs[i]++
+				if digs[i] < 10 {
+					break
+				}
+				digs[i] = 0
+				i--
+			}
+			if i < 0 { // full carry: 0.99..9 * 10^k rounded to 1.0 * 10^k = 0.1 * 10^(k+1)
+				digs = []int{1}
+				k++
+			}
+		}
+		break
+	}
+	// strip trailing zeros (only a round-up carry can introduce them; shortest never needs them)
+	for len(digs) > 1 && digs[len(digs)-1] == 0 {
+		digs = digs[:len(digs)-1]
+	}
+	buf := make([]byte, len(digs))
+	for i, d := range digs {
+		buf[i] = byte('0' + d)
+	}
+	return string(buf), k
+}
+
+// dragon4Ref renders x exactly as ECMAScript Number::toString(10) would, deriving the digits
+// from dragon4Digits (NOT strconv) and dressing them with the four shared ECMAScript cases.
+func dragon4Ref(x float64) string {
+	if x != x {
+		return "NaN"
+	}
+	if math.IsInf(x, 1) {
+		return "Infinity"
+	}
+	if math.IsInf(x, -1) {
+		return "-Infinity"
+	}
+	if x == 0 {
+		return "0"
+	}
+	neg := math.Signbit(x)
+	if neg {
+		x = -x
+	}
+	bits := math.Float64bits(x)
+	mant := bits & ((uint64(1) << 52) - 1)
+	expo := int((bits >> 52) & 0x7ff)
+	digits, n := dragon4Digits(mant, expo)
+	out := dressEcma(digits, n)
+	if neg {
+		out = "-" + out
+	}
+	return out
+}
+
+// ecmaFloat is the INDEPENDENT oracle: it takes Go's shortest DIGITS (strconv 'e',-1) and
+// applies the same four ECMAScript dressing cases. dragon4Ref and ecmaFloat agreeing over a
+// 50000-double sweep is the correctness proof of the Dragon4 digit generation.
+func ecmaFloat(x float64) string {
+	if x != x {
+		return "NaN"
+	}
+	if math.IsInf(x, 1) {
+		return "Infinity"
+	}
+	if math.IsInf(x, -1) {
+		return "-Infinity"
+	}
+	if x == 0 {
+		return "0" // ECMAScript: -0 renders "0"
+	}
+	neg := math.Signbit(x)
+	if neg {
+		x = -x
+	}
+	s, n := parseEcmaDigits(strconv.AppendFloat(nil, x, 'e', -1, 64))
+	out := dressEcma(s, n)
+	if neg {
+		out = "-" + out
+	}
+	return out
+}
+
+// parseEcmaDigits reads strconv's 'e' shortest form ("d.ddde+NN" / "de+NN") and returns the
+// digit string (point removed) plus the position n where value = digits * 10^(n-len). Because
+// the 'e' form always has exactly one digit before the point, n = exp+1 regardless of length.
+func parseEcmaDigits(b []byte) (string, int) {
+	s := string(b)
+	ei := strings.IndexAny(s, "eE")
+	exp, _ := strconv.Atoi(s[ei+1:])
+	mant := strings.Replace(s[:ei], ".", "", 1)
+	return mant, exp + 1
+}
+
+// dressEcma applies the four ECMAScript Number::toString dressing cases to a shortest digit
+// string s and position n (value = s * 10^(n-len(s))). This is the SHARED dressing the WAT
+// $flt_fmt performs; it must match byte-for-byte.
+func dressEcma(s string, n int) string {
+	p := len(s)
+	switch {
+	case p <= n && n <= 21: // integer: digits then (n-p) trailing zeros
+		return s + strings.Repeat("0", n-p)
+	case 0 < n && n < p: // point inside: digits[:n] "." digits[n:]
+		return s[:n] + "." + s[n:]
+	case -5 <= n && n <= 0: // leading zeros: "0." (-n) zeros then digits
+		return "0." + strings.Repeat("0", -n) + s
+	default: // exponential: d1 ["." d2..dp] "e" sign(n-1) |n-1|
+		var b strings.Builder
+		b.WriteByte(s[0])
+		if p > 1 {
+			b.WriteByte('.')
+			b.WriteString(s[1:])
+		}
+		b.WriteByte('e')
+		en := n - 1
+		if en >= 0 {
+			b.WriteByte('+')
+		} else {
+			b.WriteByte('-')
+			en = -en
+		}
+		b.WriteString(strconv.Itoa(en))
+		return b.String()
+	}
+}
+
+// TestEcmaFloatKnown pins the oracle (and thus the dressing) against ECMAScript ground truth
+// so a shared dressEcma bug cannot silently agree with dragon4Ref.
+func TestEcmaFloatKnown(t *testing.T) {
+	cases := []struct {
+		x    float64
+		want string
+	}{
+		{1234567, "1234567"},
+		{100, "100"},
+		{1000000, "1000000"},
+		{0.1, "0.1"},
+		{0.5, "0.5"},
+		{1e21, "1e+21"},
+		{1e-7, "1e-7"},
+		{1e-6, "0.000001"},
+		{5e-324, "5e-324"},
+		{1.7976931348623157e308, "1.7976931348623157e+308"},
+		{0.30000000000000004, "0.30000000000000004"},
+		{123456789012345680, "123456789012345680"},
+		{-1234567, "-1234567"},
+		{math.Copysign(0, -1), "0"},
+	}
+	for _, c := range cases {
+		if got := ecmaFloat(c.x); got != c.want {
+			t.Errorf("ecmaFloat(%v)=%q want %q", c.x, got, c.want)
+		}
+	}
+}
+
+// TestDragon4MatchesEcma is the executable spec of the Dragon4 formatter: dragon4Ref (the
+// algorithm the WAT implements) must equal ecmaFloat (the strconv-digit oracle) over the
+// plan's edge cases plus a deterministic 50000-double sweep spanning the full range incl
+// subnormals. A green run pins the algorithm before it is transcribed into WAT.
+func TestDragon4MatchesEcma(t *testing.T) {
+	edge := []float64{
+		1234567, 100, 1000000, 1e21, 1e-7, 1e-6, 5e-324, 2.2250738585072014e-308,
+		9007199254740992, 9007199254740994, 9007199254740993, 0.1, 0.2, 0.3,
+		1.0 / 3.0, 2.0 / 3.0, 1.7976931348623157e308, 123456789012345.6,
+		0.30000000000000004, 0.5, 2.5, 1.5, 1e308, 1e-308, 1e-323, 1e-322,
+		123456789012345680, 1e100, 1e-100, 9999999999999998, 12345678901234567,
+		1.0000000000000002, 0.9999999999999999, 4.9e-324, 3e-323, 9.5, 99.5,
+	}
+	for _, x := range edge {
+		if got, want := dragon4Ref(x), ecmaFloat(x); got != want {
+			t.Fatalf("dragon4Ref(%v [%016x])=%q want %q", x, math.Float64bits(x), got, want)
+		}
+	}
+	r := rand.New(rand.NewSource(fmtSweepSeed))
+	const target = 50000
+	tested := 0
+	for tested < target {
+		bits := r.Uint64()
+		x := math.Float64frombits(bits)
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			continue
+		}
+		if got, want := dragon4Ref(x), ecmaFloat(x); got != want {
+			t.Fatalf("sweep dragon4Ref(%016x)=%q want %q", bits, got, want)
+		}
+		tested++
+	}
+	t.Logf("dragon4Ref matched ecmaFloat on %d edge + %d swept doubles (seed %#x)",
+		len(edge), tested, fmtSweepSeed)
+}
+
+// ---- WAT-level acceptance: the $flt_fmt / $flt_dragon4 port under wasmtime ----
+
+// fmtModule wraps the base + float WAT runtimes and a $_start that, for each f64 bit pattern,
+// calls $flt_fmt into the float scratch window and prints the rendered string + '\n'. One
+// wasmtime run emits every value newline-separated, exercising the ACTUAL WAT digit generator
+// (not just the Go ref) at 16/17-digit + subnormal magnitudes.
+func fmtModule(bitsList []uint64) string {
+	var b strings.Builder
+	b.WriteString("(module\n")
+	b.WriteString("  (type $codety (func (param i32 i32) (result i32)))\n")
+	b.WriteString(WasmRuntime())
+	b.WriteString(wasmFloatRuntime)
+	b.WriteString("  (global $fn_msg i32 (i32.const 32))\n")
+	b.WriteString("  (global $abort_msg i32 (i32.const 32))\n")
+	b.WriteString("  (global $abort_len i32 (i32.const 0))\n")
+	b.WriteString("  (global $unit_name i32 (i32.const 32))\n")
+	b.WriteString("  (table 1 funcref)\n")
+	b.WriteString("  (func $_start (export \"_start\")\n")
+	b.WriteString("    (local $x f64) (local $len i32) (local $buf i32)\n")
+	b.WriteString("    (global.set $UNIT (call $rt_mkcon (i32.const 0) (i32.const 32) (i32.const 0)))\n")
+	b.WriteString("    (local.set $buf (i32.add (global.get $D6FLT) (i32.const 60000)))\n")
+	for _, bits := range bitsList {
+		fmt.Fprintf(&b, "    (local.set $x (f64.reinterpret_i64 (i64.const %d)))\n", int64(bits))
+		b.WriteString("    (local.set $len (call $flt_fmt (local.get $x) (local.get $buf)))\n")
+		b.WriteString("    (i32.store8 (i32.add (local.get $buf) (local.get $len)) (i32.const 10))\n")
+		b.WriteString("    (call $puts (i32.const 1) (local.get $buf) (i32.add (local.get $len) (i32.const 1)))\n")
+	}
+	b.WriteString("  )\n)\n")
+	return b.String()
+}
+
+// TestFltFmtWatMatchesEcma proves the compiled WAT $flt_fmt renders byte-for-byte the same as
+// ecmaFloat over a broad value set incl 16/17-significant-digit values, subnormals, the
+// over/underflow boundaries, negatives, and specials -- so the actual WAT (not only the Go
+// ref) is verified at the magnitudes that used to lose precision. Skips without wasmtime.
+func TestFltFmtWatMatchesEcma(t *testing.T) {
+	wt := wasmtimeForTest()
+	if wt == "" {
+		t.Skip("wasmtime not found")
+	}
+	vals := []float64{
+		// dressing-branch + boundary witnesses
+		1234567, 100, 1000000, 1e21, 1e-7, 1e-6, 0.1, 0.2, 0.3, 0.5, 2.5, 1.5,
+		1.0 / 3.0, 2.0 / 3.0, 0.30000000000000004, 123456789012345.6, 123456789012345680,
+		// 16/17 significant digits (the (f64)N precision-loss regime the port removes)
+		9007199254740992, 9007199254740993, 9007199254740994, 12345678901234567,
+		1.0000000000000002, 0.9999999999999999, 9999999999999998,
+		// subnormals + min/max magnitude boundaries
+		5e-324, 4.9e-324, 3e-323, 1e-323, 1e-322, 2.2250738585072014e-308,
+		1e308, 1.7976931348623157e308, 1e-308, 1e100, 1e-100, 9.5, 99.5,
+		// negatives + specials
+		-1234567, -0.1, -5e-324, math.Copysign(0, -1),
+		math.Inf(1), math.Inf(-1), math.NaN(),
+	}
+	r := rand.New(rand.NewSource(fmtSweepSeed ^ 0x1))
+	for len(vals) < 1200 {
+		x := math.Float64frombits(r.Uint64())
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			continue
+		}
+		vals = append(vals, x)
+	}
+	bitsList := make([]uint64, len(vals))
+	for i, x := range vals {
+		bitsList[i] = math.Float64bits(x)
+	}
+	dir := t.TempDir()
+	f := filepath.Join(dir, "fmt.wat")
+	if err := os.WriteFile(f, []byte(fmtModule(bitsList)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command(wt, "run", f).CombinedOutput()
+	if err != nil {
+		t.Fatalf("wasmtime: %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) != len(vals) {
+		t.Fatalf("got %d output lines, want %d", len(lines), len(vals))
+	}
+	mismatch := 0
+	for i, x := range vals {
+		want := ecmaFloat(x)
+		if lines[i] != want {
+			mismatch++
+			if mismatch <= 20 {
+				t.Errorf("flt_fmt(%016x)=%q want %q", math.Float64bits(x), lines[i], want)
+			}
+		}
+	}
+	if mismatch == 0 {
+		t.Logf("WAT $flt_fmt matched ecmaFloat on all %d values", len(vals))
+	}
+}
+
 // TestFltAtofSlowWatBits proves the WAT $flt_atof_slow port produces bit-for-bit the same
 // f64 as strconv.ParseFloat over a range of slow-path inputs (large exponents, subnormals,
 // near-2^53, overflow to inf). It reads the raw result BITS, so it is independent of the

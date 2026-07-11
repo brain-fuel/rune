@@ -19,28 +19,26 @@ import (
 // ($alloc/$sw/$w/$big_nlimbs/$big_limb/$is_int/$puts/$fd_read) plus, for parseFloat, the
 // codec ($d6_s2h_to/$D6BUF, pulled in by adding parseFloat to usesBibleCodec).
 //
-// FORMAT (f64 -> shortest decimal): the precision-search route the C __fmtf uses, but
-// with WAT-native digit extraction: for p = 1..17, extract the p leading decimal digits
-// (scale by 10^(E-p+1), f64.nearest to an integer significand N), reconstruct N * 10^k
-// and compare to x; the first p that round-trips is the shortest. Then the four
-// ECMAScript Number::toString dressing cases. All corpus values round-trip at p <= 3, so
-// N stays well under 2^53 and every scale is an exact power of ten -- the reconstruction
-// equals the fast-path atof of the same digits, so the round-trip test is exact and the
-// output byte-identical to the other eight backends. (For p >= 16 -- never reached by the
-// corpus -- (f64)N loses precision; documented, no consumer.)
+// FORMAT (f64 -> shortest decimal): EXACT Dragon4 (Steele-White FPP2 free-format) over the
+// base-1e9 limb bignums ($flt_dragon4). It sets up the rational R/S with high/low margins per
+// the four IEEE boundary cases and emits the shortest digit string that rounds back to x,
+// correctly rounded (ties to even), for EVERY finite double incl subnormals and 16/17-sig-digit
+// values -- there is no (f64)N reconstruction, so no p>=16 precision loss. The per-digit
+// quotient (0..9) is computed by repeated subtraction (the runtime has no general bignum
+// division). Then the same four ECMAScript Number::toString dressing cases place the point.
 //
 // PARSE (decimal string -> f64): the strtod fast path -- accumulate the significand D
 // (<= 18 digits) into an i64, track the decimal exponent k, then x = (f64)D * 10^k (or
 // / 10^-k) via an exact power-of-ten multiply. Correctly rounded for |k| <= 22 and
-// D < 2^53, which covers every corpus value, so parseFloat's double == strtod's on the
-// other backends. Huge exponents overflow to inf / underflow to 0 (sane, untested).
+// D < 2^53; anything wider routes to the correctly-rounded bignum slow path ($flt_atof_slow).
 //
 // MEMORY: the float ops use a dedicated 64 KiB scratch window $D6FLT at [1968128,2033664)
 // (the reserved-region top, above the Task-6 foldDir windows). $hp is bumped to 2033664 in
 // wasm_runtime.go so the heap never overwrites it (new windows above existing ones, bump
 // $hp, document -- the ledger convention). Sub-layout within $D6FLT: [+0,+12) getFloat
 // fd_read iovec+nread cells, [+16,+59016) getFloat stdin line buffer, [+60000,...)
-// printFloat format-output buffer, [+61000,...) the format's internal digit string.
+// printFloat format-output buffer, [+61000,+61024) the Dragon4 digit string, [+61024,+61028)
+// the Dragon4 decimal-position (n) cell. Bignums allocate transiently on the heap (above $hp).
 
 // wasmFloatWindow is $D6FLT's base (documented in wasm_runtime.go's heap-layout comment).
 const wasmFloatWindow = 1968128
@@ -88,16 +86,6 @@ const wasmFloatRuntime = `
       (local.set $k (i32.sub (local.get $k) (i32.const 1)))
       (br $l)))
     (local.get $r))
-  ;; $flt_pow10i: 10^k as i64 (k in [0,18]; 10^18 < 2^63).
-  (func $flt_pow10i (param $k i32) (result i64)
-    (local $r i64)
-    (local.set $r (i64.const 1))
-    (block $b (loop $l (br_if $b (i32.le_s (local.get $k) (i32.const 0)))
-      (local.set $r (i64.mul (local.get $r) (i64.const 10)))
-      (local.set $k (i32.sub (local.get $k) (i32.const 1)))
-      (br $l)))
-    (local.get $r))
-
   ;; $flt_wr_uint: write a non-negative i32 in decimal at out[o..]; returns the new cursor.
   (func $flt_wr_uint (param $out i32) (param $o i32) (param $a i32) (result i32)
     (if (i32.ge_u (local.get $a) (i32.const 10))
@@ -451,13 +439,170 @@ const wasmFloatRuntime = `
     (if (local.get $neg) (then (local.set $x (f64.neg (local.get $x)))))
     (local.get $x))
 
+  ;; $flt_dragon4: the EXACT Steele-White FPP2 free-format shortest formatter over the base-1e9
+  ;; limb bignums -- a faithful port of dragon4Digits in wasm_float_display_test.go (pinned to
+  ;; strconv over 50000+ doubles). It writes the shortest significant decimal digits (ASCII,
+  ;; MSD first) of the finite nonzero positive $x into $sd, stores the decimal position n at
+  ;; [$np] (value = digits * 10^(n - p)), and returns the digit count p. No (f64)N step, so no
+  ;; p>=16 precision loss. The per-digit quotient d (always 0..9) is computed by REPEATED
+  ;; SUBTRACTION ($rt_nat_monus) since the runtime has no general bignum/bignum division; all
+  ;; other steps use $rt_nat_mul / $big_add / $big_cmp / $flt_shl2 / $flt_pow2big. Every
+  ;; transient bignum is released (ARC discipline), so the formatter is leak-free.
+  (func $flt_dragon4 (param $x f64) (param $sd i32) (param $np i32) (result i32)
+    (local $bits i64) (local $mant i64) (local $expo i32) (local $e i32) (local $even i32) (local $isbnd i32)
+    (local $f i32) (local $be i32) (local $R i32) (local $S i32) (local $Mp i32) (local $Mm i32) (local $ten i32)
+    (local $k i32) (local $p i32) (local $d i32) (local $rpm i32) (local $t1 i32)
+    (local $c i32) (local $cLow i32) (local $cHigh i32) (local $low i32) (local $high i32) (local $roundup i32)
+    (local $i i32) (local $ch i32)
+    ;; decompose |x| = f * 2^e from the IEEE bits.
+    (local.set $bits (i64.reinterpret_f64 (local.get $x)))
+    (local.set $mant (i64.and (local.get $bits) (i64.const 4503599627370495)))     ;; 2^52 - 1
+    (local.set $expo (i32.wrap_i64 (i64.and (i64.shr_u (local.get $bits) (i64.const 52)) (i64.const 2047))))
+    (if (i32.eqz (local.get $expo))
+      (then                                                                        ;; subnormal
+        (local.set $f (call $rt_big_from_i64 (local.get $mant)))
+        (local.set $e (i32.const -1074)))
+      (else                                                                        ;; normal
+        (local.set $f (call $rt_big_from_i64 (i64.or (local.get $mant) (i64.shl (i64.const 1) (i64.const 52)))))
+        (local.set $e (i32.sub (local.get $expo) (i32.const 1075)))))
+    (local.set $even (i32.eqz (i32.and (i32.wrap_i64 (local.get $mant)) (i32.const 1))))
+    (local.set $isbnd (i32.and (i32.ne (local.get $expo) (i32.const 0)) (i64.eqz (local.get $mant))))
+    (local.set $ten (call $rt_big_from_long (i32.const 10)))
+    ;; R/S with high/low margins Mp/Mm (the four Dragon4 boundary cases).
+    (if (i32.ge_s (local.get $e) (i32.const 0))
+      (then
+        (local.set $be (call $flt_pow2big (local.get $e)))                          ;; 2^e
+        (if (i32.eqz (local.get $isbnd))
+          (then                                                                     ;; equal gaps
+            (local.set $t1 (call $rt_nat_mul (local.get $f) (local.get $be)))
+            (local.set $R (call $flt_shl2 (local.get $t1) (i32.const 1)))           ;; R = f*be*2
+            (call $rt_release (local.get $t1))
+            (local.set $S (call $rt_big_from_long (i32.const 2)))
+            (local.set $Mp (call $flt_shl2 (local.get $be) (i32.const 0)))
+            (local.set $Mm (call $flt_shl2 (local.get $be) (i32.const 0))))
+          (else                                                                     ;; unequal gaps (2^n boundary)
+            (local.set $t1 (call $rt_nat_mul (local.get $f) (local.get $be)))
+            (local.set $R (call $flt_shl2 (local.get $t1) (i32.const 2)))           ;; R = f*be*4
+            (call $rt_release (local.get $t1))
+            (local.set $S (call $rt_big_from_long (i32.const 4)))
+            (local.set $Mp (call $flt_shl2 (local.get $be) (i32.const 1)))         ;; Mp = be*2
+            (local.set $Mm (call $flt_shl2 (local.get $be) (i32.const 0)))))
+        (call $rt_release (local.get $be)))
+      (else
+        (if (i32.or (i32.le_s (local.get $expo) (i32.const 1)) (i32.eqz (local.get $isbnd)))
+          (then                                                                     ;; equal gaps
+            (local.set $R (call $flt_shl2 (local.get $f) (i32.const 1)))           ;; R = f*2
+            (local.set $S (call $flt_pow2big (i32.sub (i32.const 1) (local.get $e)))) ;; S = 2^(1-e)
+            (local.set $Mp (call $rt_big_from_long (i32.const 1)))
+            (local.set $Mm (call $rt_big_from_long (i32.const 1))))
+          (else                                                                     ;; unequal gaps
+            (local.set $R (call $flt_shl2 (local.get $f) (i32.const 2)))           ;; R = f*4
+            (local.set $S (call $flt_pow2big (i32.sub (i32.const 2) (local.get $e)))) ;; S = 2^(2-e)
+            (local.set $Mp (call $rt_big_from_long (i32.const 2)))
+            (local.set $Mm (call $rt_big_from_long (i32.const 1)))))))
+    (call $rt_release (local.get $f))
+    ;; scale: bump S up (k++) then R,Mp,Mm up (k--) so value = 0.d1d2... * 10^k, first digit 1..9.
+    (local.set $k (i32.const 0))
+    (block $hb (loop $hl
+      (local.set $rpm (call $big_add (local.get $R) (local.get $Mp)))
+      (local.set $c (call $big_cmp (local.get $rpm) (local.get $S)))
+      (call $rt_release (local.get $rpm))
+      (br_if $hb (i32.eqz (i32.or (i32.gt_s (local.get $c) (i32.const 0))
+                                  (i32.and (local.get $even) (i32.eqz (local.get $c))))))
+      (local.set $t1 (call $rt_nat_mul (local.get $S) (local.get $ten)))
+      (call $rt_release (local.get $S)) (local.set $S (local.get $t1))
+      (local.set $k (i32.add (local.get $k) (i32.const 1)))
+      (br $hl)))
+    (block $lb (loop $ll
+      (local.set $rpm (call $big_add (local.get $R) (local.get $Mp)))
+      (local.set $t1 (call $rt_nat_mul (local.get $rpm) (local.get $ten)))
+      (call $rt_release (local.get $rpm))
+      (local.set $c (call $big_cmp (local.get $t1) (local.get $S)))
+      (call $rt_release (local.get $t1))
+      (br_if $lb (i32.eqz (i32.or (i32.lt_s (local.get $c) (i32.const 0))
+                                  (i32.and (local.get $even) (i32.eqz (local.get $c))))))
+      (local.set $t1 (call $rt_nat_mul (local.get $R) (local.get $ten))) (call $rt_release (local.get $R)) (local.set $R (local.get $t1))
+      (local.set $t1 (call $rt_nat_mul (local.get $Mp) (local.get $ten))) (call $rt_release (local.get $Mp)) (local.set $Mp (local.get $t1))
+      (local.set $t1 (call $rt_nat_mul (local.get $Mm) (local.get $ten))) (call $rt_release (local.get $Mm)) (local.set $Mm (local.get $t1))
+      (local.set $k (i32.sub (local.get $k) (i32.const 1)))
+      (br $ll)))
+    ;; generate: emit digits until within a neighbour's margin, then round.
+    (local.set $p (i32.const 0))
+    (block $gb (loop $gl
+      (local.set $t1 (call $rt_nat_mul (local.get $R) (local.get $ten))) (call $rt_release (local.get $R)) (local.set $R (local.get $t1))
+      (local.set $t1 (call $rt_nat_mul (local.get $Mp) (local.get $ten))) (call $rt_release (local.get $Mp)) (local.set $Mp (local.get $t1))
+      (local.set $t1 (call $rt_nat_mul (local.get $Mm) (local.get $ten))) (call $rt_release (local.get $Mm)) (local.set $Mm (local.get $t1))
+      ;; d = floor(R/S) in 0..9 by repeated subtraction; R becomes R mod S.
+      (local.set $d (i32.const 0))
+      (block $sb (loop $sl
+        (br_if $sb (i32.lt_s (call $big_cmp (local.get $R) (local.get $S)) (i32.const 0)))
+        (local.set $t1 (call $rt_nat_monus (local.get $R) (local.get $S))) (call $rt_release (local.get $R)) (local.set $R (local.get $t1))
+        (local.set $d (i32.add (local.get $d) (i32.const 1)))
+        (br $sl)))
+      (local.set $cLow (call $big_cmp (local.get $R) (local.get $Mm)))
+      (local.set $low (i32.or (i32.lt_s (local.get $cLow) (i32.const 0))
+                              (i32.and (local.get $even) (i32.eqz (local.get $cLow)))))
+      (local.set $rpm (call $big_add (local.get $R) (local.get $Mp)))
+      (local.set $cHigh (call $big_cmp (local.get $rpm) (local.get $S)))
+      (call $rt_release (local.get $rpm))
+      (local.set $high (i32.or (i32.gt_s (local.get $cHigh) (i32.const 0))
+                               (i32.and (local.get $even) (i32.eqz (local.get $cHigh)))))
+      (if (i32.and (i32.eqz (local.get $low)) (i32.eqz (local.get $high)))
+        (then
+          (i32.store8 (i32.add (local.get $sd) (local.get $p)) (i32.add (local.get $d) (i32.const 48)))
+          (local.set $p (i32.add (local.get $p) (i32.const 1)))
+          (br $gl)))
+      ;; terminal digit: decide whether to round up.
+      (local.set $roundup (i32.const 0))
+      (if (i32.and (local.get $high) (i32.eqz (local.get $low)))
+        (then (local.set $roundup (i32.const 1)))
+        (else (if (i32.and (local.get $low) (local.get $high))
+          (then                                                                     ;; both margins: nearer, ties to even
+            (local.set $rpm (call $big_add (local.get $R) (local.get $R)))         ;; 2R
+            (local.set $c (call $big_cmp (local.get $rpm) (local.get $S)))
+            (call $rt_release (local.get $rpm))
+            (if (i32.gt_s (local.get $c) (i32.const 0))
+              (then (local.set $roundup (i32.const 1)))
+              (else (if (i32.eqz (local.get $c))
+                (then (local.set $roundup (i32.and (local.get $d) (i32.const 1))))))))))) ;; tie -> even digit
+      (i32.store8 (i32.add (local.get $sd) (local.get $p)) (i32.add (local.get $d) (i32.const 48)))
+      (local.set $p (i32.add (local.get $p) (i32.const 1)))
+      (if (local.get $roundup)
+        (then
+          (local.set $i (i32.sub (local.get $p) (i32.const 1)))
+          (block $cb (loop $cl
+            (br_if $cb (i32.lt_s (local.get $i) (i32.const 0)))
+            (local.set $ch (i32.add (i32.load8_u (i32.add (local.get $sd) (local.get $i))) (i32.const 1)))
+            (i32.store8 (i32.add (local.get $sd) (local.get $i)) (local.get $ch))
+            (br_if $cb (i32.ne (local.get $ch) (i32.const 58)))                    ;; no overflow past '9' -> done
+            (i32.store8 (i32.add (local.get $sd) (local.get $i)) (i32.const 48))   ;; carry: this digit -> '0'
+            (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+            (br $cl)))
+          (if (i32.lt_s (local.get $i) (i32.const 0))
+            (then                                                                   ;; full carry: 0.99..9 -> 1.0, digits "1", k++
+              (i32.store8 (local.get $sd) (i32.const 49))
+              (local.set $p (i32.const 1))
+              (local.set $k (i32.add (local.get $k) (i32.const 1)))))))))
+    ;; strip trailing zeros (only a round-up carry can create them; shortest never needs them).
+    (block $tb (loop $tl
+      (br_if $tb (i32.le_s (local.get $p) (i32.const 1)))
+      (br_if $tb (i32.ne (i32.load8_u (i32.add (local.get $sd) (i32.sub (local.get $p) (i32.const 1)))) (i32.const 48)))
+      (local.set $p (i32.sub (local.get $p) (i32.const 1)))
+      (br $tl)))
+    (call $rt_release (local.get $R))
+    (call $rt_release (local.get $S))
+    (call $rt_release (local.get $Mp))
+    (call $rt_release (local.get $Mm))
+    (call $rt_release (local.get $ten))
+    (i32.store (local.get $np) (local.get $k))
+    (local.get $p))
+
   ;; $flt_fmt: write the ECMAScript Number::toString(10) shortest-round-trip rendering of
-  ;; $x into $out (no trailing NUL); returns the byte length. The precision search finds
-  ;; the fewest digits that round-trip, then the four dressing cases dress them.
+  ;; $x into $out (no trailing NUL); returns the byte length. Digits come from the EXACT
+  ;; Dragon4 formatter ($flt_dragon4); the four dressing cases place the decimal point.
   (func $flt_fmt (param $x f64) (param $out i32) (result i32)
-    (local $neg i32) (local $E i32) (local $p i32) (local $N i64) (local $j i32)
-    (local $y f64) (local $recon f64) (local $t f64) (local $o i32) (local $i i32)
-    (local $sdig i32) (local $n i32) (local $div i64) (local $en i32) (local $found i32)
+    (local $neg i32) (local $p i32) (local $o i32) (local $i i32)
+    (local $sdig i32) (local $n i32) (local $en i32)
     ;; NaN
     (if (f64.ne (local.get $x) (local.get $x))
       (then
@@ -477,52 +622,12 @@ const wasmFloatRuntime = `
       (then (i32.store8 (local.get $out) (i32.const 48)) (return (i32.const 1))))
     (local.set $neg (i32.const 0))
     (if (f64.lt (local.get $x) (f64.const 0)) (then (local.set $neg (i32.const 1)) (local.set $x (f64.neg (local.get $x)))))
+    ;; EXACT Dragon4 digit generation (no (f64)N reconstruction): fills $sdig with $p shortest
+    ;; digits and stores the decimal position n at [$D6FLT+61024]. $x is finite nonzero positive.
     (local.set $sdig (i32.add (global.get $D6FLT) (i32.const 61000)))
-    (local.set $p (i32.const 1)) (local.set $found (i32.const 0))
-    (block $pb (loop $pl
-      (br_if $pb (i32.gt_s (local.get $p) (i32.const 17)))
-      ;; E = floor(log10(x)) via an incremental exact power of ten
-      (local.set $E (i32.const 0)) (local.set $t (f64.const 1))
-      (if (f64.ge (local.get $x) (f64.const 1))
-        (then (block $eb1 (loop $el1
-          (br_if $eb1 (f64.gt (f64.mul (local.get $t) (f64.const 10)) (local.get $x)))
-          (local.set $t (f64.mul (local.get $t) (f64.const 10)))
-          (local.set $E (i32.add (local.get $E) (i32.const 1)))
-          (br $el1))))
-        (else (block $eb2 (loop $el2
-          (br_if $eb2 (f64.le (local.get $t) (local.get $x)))
-          (local.set $t (f64.div (local.get $t) (f64.const 10)))
-          (local.set $E (i32.sub (local.get $E) (i32.const 1)))
-          (br $el2)))))
-      (local.set $j (i32.add (i32.sub (local.get $E) (local.get $p)) (i32.const 1)))
-      (if (i32.ge_s (local.get $j) (i32.const 0))
-        (then (local.set $y (f64.div (local.get $x) (call $flt_pow10 (local.get $j)))))
-        (else (local.set $y (f64.mul (local.get $x) (call $flt_pow10 (i32.sub (i32.const 0) (local.get $j)))))))
-      (local.set $N (i64.trunc_f64_s (f64.nearest (local.get $y))))
-      (if (i64.ge_s (local.get $N) (call $flt_pow10i (local.get $p)))
-        (then
-          (local.set $N (i64.div_s (local.get $N) (i64.const 10)))
-          (local.set $E (i32.add (local.get $E) (i32.const 1)))
-          (local.set $j (i32.add (i32.sub (local.get $E) (local.get $p)) (i32.const 1)))))
-      (local.set $recon (f64.convert_i64_s (local.get $N)))
-      (if (i32.ge_s (local.get $j) (i32.const 0))
-        (then (local.set $recon (f64.mul (local.get $recon) (call $flt_pow10 (local.get $j)))))
-        (else (local.set $recon (f64.div (local.get $recon) (call $flt_pow10 (i32.sub (i32.const 0) (local.get $j)))))))
-      (if (f64.eq (local.get $recon) (local.get $x)) (then (local.set $found (i32.const 1)) (br $pb)))
-      (local.set $p (i32.add (local.get $p) (i32.const 1)))
-      (br $pl)))
-    (if (i32.eqz (local.get $found)) (then (local.set $p (i32.const 17))))
-    ;; extract p decimal digits of N (MSD first) into sdig
-    (local.set $div (call $flt_pow10i (i32.sub (local.get $p) (i32.const 1))))
-    (local.set $i (i32.const 0))
-    (block $db (loop $dl
-      (br_if $db (i32.ge_s (local.get $i) (local.get $p)))
-      (i32.store8 (i32.add (local.get $sdig) (local.get $i))
-        (i32.add (i32.wrap_i64 (i64.rem_u (i64.div_u (local.get $N) (local.get $div)) (i64.const 10))) (i32.const 48)))
-      (local.set $div (i64.div_u (local.get $div) (i64.const 10)))
-      (local.set $i (i32.add (local.get $i) (i32.const 1)))
-      (br $dl)))
-    (local.set $n (i32.add (local.get $E) (i32.const 1)))
+    (local.set $p (call $flt_dragon4 (local.get $x) (local.get $sdig)
+      (i32.add (global.get $D6FLT) (i32.const 61024))))
+    (local.set $n (i32.load (i32.add (global.get $D6FLT) (i32.const 61024))))
     (local.set $o (i32.const 0))
     (if (local.get $neg) (then (i32.store8 (local.get $out) (i32.const 45)) (local.set $o (i32.const 1))))
     (if (i32.and (i32.le_s (local.get $p) (local.get $n)) (i32.le_s (local.get $n) (i32.const 21)))
