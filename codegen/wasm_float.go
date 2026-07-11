@@ -209,10 +209,245 @@ const wasmFloatRuntime = `
               (local.set $i (i32.add (local.get $i) (i32.const 1)))
               (br $el)))))))
     (local.set $k (i32.sub (i32.mul (local.get $esign) (local.get $eval)) (local.get $frac)))
+    ;; Fast path only when the i64 significand is EXACT (<= 15 accumulated digits, so
+    ;; D < 10^15 < 2^53) AND the power of ten is exact (|k| <= 22): then (f64)D * 10^k is
+    ;; correctly rounded (the classic single-rounding result). Anything wider double-rounds,
+    ;; so route it to the correctly-rounded bignum slow path (Task 3).
+    (if (i32.eqz (i32.and (i32.and (i32.le_s (local.get $ndig) (i32.const 15))
+                                   (i32.ge_s (local.get $k) (i32.const -22)))
+                          (i32.le_s (local.get $k) (i32.const 22))))
+      (then (return (call $flt_atof_slow (local.get $buf) (local.get $len)))))
     (local.set $x (f64.convert_i64_u (local.get $D)))
     (if (i32.ge_s (local.get $k) (i32.const 0))
       (then (local.set $x (f64.mul (local.get $x) (call $flt_pow10 (local.get $k)))))
       (else (local.set $x (f64.div (local.get $x) (call $flt_pow10 (i32.sub (i32.const 0) (local.get $k)))))))
+    (if (local.get $neg) (then (local.set $x (f64.neg (local.get $x)))))
+    (local.get $x))
+
+  ;; ---- Task-3 correctly-rounded bignum atof slow path (|k| > 22 or > 15 sig digits) ----
+  ;; A faithful port of atofRef in wasm_float_display_test.go (the executable spec pinned
+  ;; bit-for-bit to strconv.ParseFloat over 20000+ inputs). It composes ONLY the base-1e9
+  ;; bignum ops already in wasm_runtime.go ($big_alloc/$big_setlimb/$big_nlimbs/$big_add/
+  ;; $big_cmp/$rt_nat_mul/$rt_nat_monus/$rt_big_from_long/$rt_big_from_i64/$rt_release) --
+  ;; no bignum/bignum division and no new runtime primitive. Every helper returns a FRESH
+  ;; owned bignum and releases its transient temporaries (ARC discipline), so the slow path
+  ;; is leak-free.
+
+  ;; $flt_pow10big: 10^k as a base-1e9 bignum (k >= 0). 10^k = 10^(9*a+b) is the number
+  ;; whose limb[a] = 10^b (< 1e9) and all lower limbs are zero -- one direct limb write.
+  (func $flt_pow10big (param $k i32) (result i32)
+    (local $a i32) (local $b i32) (local $v i32) (local $p i32)
+    (local.set $a (i32.div_u (local.get $k) (i32.const 9)))
+    (local.set $b (i32.rem_u (local.get $k) (i32.const 9)))
+    (local.set $v (call $big_alloc (i32.add (local.get $a) (i32.const 1))))
+    (local.set $p (i32.const 1))
+    (block $pb (loop $pl (br_if $pb (i32.le_s (local.get $b) (i32.const 0)))
+      (local.set $p (i32.mul (local.get $p) (i32.const 10)))
+      (local.set $b (i32.sub (local.get $b) (i32.const 1)))
+      (br $pl)))
+    (call $big_setlimb (local.get $v) (local.get $a) (local.get $p))
+    (local.get $v))
+
+  ;; $flt_pow2big: 2^s as a base-1e9 bignum (s >= 0) by repeated doubling (r = r + r).
+  (func $flt_pow2big (param $s i32) (result i32)
+    (local $r i32) (local $old i32)
+    (local.set $r (call $rt_big_from_long (i32.const 1)))
+    (block $b (loop $l (br_if $b (i32.le_s (local.get $s) (i32.const 0)))
+      (local.set $old (local.get $r))
+      (local.set $r (call $big_add (local.get $old) (local.get $old)))
+      (call $rt_release (local.get $old))
+      (local.set $s (i32.sub (local.get $s) (i32.const 1)))
+      (br $l)))
+    (local.get $r))
+
+  ;; $flt_shl2: a FRESH bignum equal to x * 2^s (s >= 0). s = 0 returns a fresh copy of x
+  ;; (via x + 0) so callers can uniformly release the result.
+  (func $flt_shl2 (param $x i32) (param $s i32) (result i32)
+    (local $p i32) (local $r i32) (local $z i32)
+    (if (i32.le_s (local.get $s) (i32.const 0))
+      (then
+        (local.set $z (call $big_alloc (i32.const 0)))
+        (local.set $r (call $big_add (local.get $x) (local.get $z)))
+        (call $rt_release (local.get $z))
+        (return (local.get $r))))
+    (local.set $p (call $flt_pow2big (local.get $s)))
+    (local.set $r (call $rt_nat_mul (local.get $x) (local.get $p)))
+    (call $rt_release (local.get $p))
+    (local.get $r))
+
+  ;; $flt_ge: is num/den / 2^e2 >= 2^p ? i.e. num >= 2^(p+e2) * den, checked with a single
+  ;; power-of-two shift on whichever side keeps both operands integral. Borrows num/den.
+  (func $flt_ge (param $num i32) (param $den i32) (param $e2 i32) (param $p i32) (result i32)
+    (local $sh i32) (local $l i32) (local $r i32) (local $res i32) (local $lo i32) (local $ro i32)
+    (local.set $sh (i32.add (local.get $p) (local.get $e2)))
+    (if (i32.ge_s (local.get $sh) (i32.const 0))
+      (then
+        (local.set $l (local.get $num)) (local.set $lo (i32.const 0))
+        (local.set $r (call $flt_shl2 (local.get $den) (local.get $sh))) (local.set $ro (i32.const 1)))
+      (else
+        (local.set $l (call $flt_shl2 (local.get $num) (i32.sub (i32.const 0) (local.get $sh)))) (local.set $lo (i32.const 1))
+        (local.set $r (local.get $den)) (local.set $ro (i32.const 0))))
+    (local.set $res (i32.ge_s (call $big_cmp (local.get $l) (local.get $r)) (i32.const 0)))
+    (if (local.get $lo) (then (call $rt_release (local.get $l))))
+    (if (local.get $ro) (then (call $rt_release (local.get $r))))
+    (local.get $res))
+
+  ;; $flt_round: the f64 nearest num/den (round to nearest, ties to even), num,den > 0.
+  ;; $binexp is a cheap estimate of floor(log2(num/den)) from the decimal exponent, used
+  ;; only to seed the search and to screen clear over/underflow; the exact path decides all
+  ;; boundary cases. Mirrors atofRoundBits. Borrows num/den.
+  (func $flt_round (param $num i32) (param $den i32) (param $binexp i32) (result f64)
+    (local $e2 i32) (local $a i32) (local $b i32) (local $q i64) (local $j i32)
+    (local $cand i64) (local $cb i32) (local $t i32) (local $qb i32) (local $rem i32)
+    (local $tworem i32) (local $cmp i32) (local $E i32) (local $bits i64)
+    ;; clear-overflow / clear-underflow screens (safe margins over the +-1 estimate error).
+    (if (i32.ge_s (local.get $binexp) (i32.const 1026)) (then (return (f64.const inf))))
+    (if (i32.le_s (local.get $binexp) (i32.const -1082)) (then (return (f64.const 0))))
+    ;; find e2 with 2^52 <= (num/den)/2^e2 < 2^53
+    (local.set $e2 (i32.sub (local.get $binexp) (i32.const 53)))
+    (block $b1 (loop $l1
+      (br_if $b1 (i32.eqz (call $flt_ge (local.get $num) (local.get $den) (local.get $e2) (i32.const 53))))
+      (local.set $e2 (i32.add (local.get $e2) (i32.const 1)))
+      (br $l1)))
+    (block $b2 (loop $l2
+      (br_if $b2 (call $flt_ge (local.get $num) (local.get $den) (local.get $e2) (i32.const 52)))
+      (local.set $e2 (i32.sub (local.get $e2) (i32.const 1)))
+      (br $l2)))
+    (if (i32.lt_s (local.get $e2) (i32.const -1074)) (then (local.set $e2 (i32.const -1074))))
+    ;; A = num << max(0,-e2), B = den << max(0,e2)
+    (if (i32.ge_s (local.get $e2) (i32.const 0))
+      (then
+        (local.set $a (call $flt_shl2 (local.get $num) (i32.const 0)))
+        (local.set $b (call $flt_shl2 (local.get $den) (local.get $e2))))
+      (else
+        (local.set $a (call $flt_shl2 (local.get $num) (i32.sub (i32.const 0) (local.get $e2))))
+        (local.set $b (call $flt_shl2 (local.get $den) (i32.const 0)))))
+    ;; q = floor(A/B), built MSB-first: keep bit j iff (q | 2^j) * B <= A. 0 <= q < 2^53.
+    (local.set $q (i64.const 0))
+    (local.set $j (i32.const 52))
+    (block $bj (loop $lj (br_if $bj (i32.lt_s (local.get $j) (i32.const 0)))
+      (local.set $cand (i64.or (local.get $q) (i64.shl (i64.const 1) (i64.extend_i32_s (local.get $j)))))
+      (local.set $cb (call $rt_big_from_i64 (local.get $cand)))
+      (local.set $t (call $rt_nat_mul (local.get $cb) (local.get $b)))
+      (if (i32.le_s (call $big_cmp (local.get $t) (local.get $a)) (i32.const 0))
+        (then (local.set $q (local.get $cand))))
+      (call $rt_release (local.get $cb))
+      (call $rt_release (local.get $t))
+      (local.set $j (i32.sub (local.get $j) (i32.const 1)))
+      (br $lj)))
+    ;; round to nearest even from the exact remainder: compare 2*rem to B.
+    (local.set $cb (call $rt_big_from_i64 (local.get $q)))
+    (local.set $qb (call $rt_nat_mul (local.get $cb) (local.get $b)))
+    (call $rt_release (local.get $cb))
+    (local.set $rem (call $rt_nat_monus (local.get $a) (local.get $qb)))
+    (local.set $tworem (call $big_add (local.get $rem) (local.get $rem)))
+    (local.set $cmp (call $big_cmp (local.get $tworem) (local.get $b)))
+    (call $rt_release (local.get $qb))
+    (call $rt_release (local.get $rem))
+    (call $rt_release (local.get $tworem))
+    (call $rt_release (local.get $a))
+    (call $rt_release (local.get $b))
+    (if (i32.or (i32.gt_s (local.get $cmp) (i32.const 0))
+                (i32.and (i32.eqz (local.get $cmp)) (i32.and (i32.wrap_i64 (local.get $q)) (i32.const 1))))
+      (then (local.set $q (i64.add (local.get $q) (i64.const 1)))))
+    ;; rounding carry out of the 53-bit significand bumps the exponent.
+    (if (i64.eq (local.get $q) (i64.shl (i64.const 1) (i64.const 53)))
+      (then (local.set $q (i64.shl (i64.const 1) (i64.const 52))) (local.set $e2 (i32.add (local.get $e2) (i32.const 1)))))
+    (if (i64.eqz (local.get $q)) (then (return (f64.const 0))))
+    (if (i64.ge_u (local.get $q) (i64.shl (i64.const 1) (i64.const 52)))
+      (then
+        (local.set $E (i32.add (local.get $e2) (i32.const 1075)))
+        (if (i32.ge_s (local.get $E) (i32.const 2047)) (then (return (f64.const inf))))
+        (local.set $bits (i64.or (i64.shl (i64.extend_i32_u (local.get $E)) (i64.const 52))
+                                 (i64.sub (local.get $q) (i64.shl (i64.const 1) (i64.const 52)))))
+        (return (f64.reinterpret_i64 (local.get $bits)))))
+    ;; subnormal: biased exponent 0, q is the 52-bit fraction directly.
+    (f64.reinterpret_i64 (local.get $q)))
+
+  ;; $flt_atof_slow: the fully signed correctly-rounded parse of a VALIDATED literal
+  ;; [buf,buf+len). It re-scans the buffer to build the exact integer significand Dfull as
+  ;; a bignum (all mantissa digits) and the net decimal exponent k so |value| = Dfull*10^k,
+  ;; forms the exact rational num/den, and rounds via $flt_round. Sign is applied here.
+  (func $flt_atof_slow (param $buf i32) (param $len i32) (result f64)
+    (local $i i32) (local $c i32) (local $neg i32) (local $dot i32) (local $frac i32)
+    (local $nd i32) (local $seen i32) (local $D i32) (local $ten i32) (local $old i32)
+    (local $mid i32) (local $dig i32) (local $esign i32) (local $eval i32) (local $k i32)
+    (local $d10 i32) (local $binexp i32) (local $num i32) (local $den i32) (local $tmp i32) (local $x f64)
+    (local.set $i (i32.const 0)) (local.set $neg (i32.const 0))
+    (if (i32.lt_s (local.get $i) (local.get $len))
+      (then
+        (local.set $c (i32.load8_u (local.get $buf)))
+        (if (i32.eq (local.get $c) (i32.const 45)) (then (local.set $neg (i32.const 1)) (local.set $i (i32.const 1))))
+        (if (i32.eq (local.get $c) (i32.const 43)) (then (local.set $i (i32.const 1))))))
+    ;; mantissa -> Dfull bignum; frac counts ALL fractional digits, nd counts SIGNIFICANT
+    ;; digits (those from the first nonzero on) for the magnitude estimate.
+    (local.set $D (call $big_alloc (i32.const 0)))
+    (local.set $ten (call $rt_big_from_long (i32.const 10)))
+    (block $mb (loop $ml
+      (br_if $mb (i32.ge_s (local.get $i) (local.get $len)))
+      (local.set $c (i32.load8_u (i32.add (local.get $buf) (local.get $i))))
+      (if (i32.and (i32.ge_u (local.get $c) (i32.const 48)) (i32.le_u (local.get $c) (i32.const 57)))
+        (then
+          (local.set $old (local.get $D))
+          (local.set $mid (call $rt_nat_mul (local.get $old) (local.get $ten)))
+          (local.set $dig (call $rt_big_from_long (i32.sub (local.get $c) (i32.const 48))))
+          (local.set $D (call $big_add (local.get $mid) (local.get $dig)))
+          (call $rt_release (local.get $old))
+          (call $rt_release (local.get $mid))
+          (call $rt_release (local.get $dig))
+          (if (i32.ne (local.get $c) (i32.const 48)) (then (local.set $seen (i32.const 1))))
+          (if (local.get $seen) (then (local.set $nd (i32.add (local.get $nd) (i32.const 1)))))
+          (if (local.get $dot) (then (local.set $frac (i32.add (local.get $frac) (i32.const 1)))))
+          (local.set $i (i32.add (local.get $i) (i32.const 1)))
+          (br $ml)))
+      (if (i32.eq (local.get $c) (i32.const 46))
+        (then (local.set $dot (i32.const 1)) (local.set $i (i32.add (local.get $i) (i32.const 1))) (br $ml)))
+      (br $mb)))
+    (call $rt_release (local.get $ten))
+    ;; exponent
+    (local.set $esign (i32.const 1)) (local.set $eval (i32.const 0))
+    (if (i32.lt_s (local.get $i) (local.get $len))
+      (then
+        (local.set $c (i32.load8_u (i32.add (local.get $buf) (local.get $i))))
+        (if (i32.or (i32.eq (local.get $c) (i32.const 101)) (i32.eq (local.get $c) (i32.const 69)))
+          (then
+            (local.set $i (i32.add (local.get $i) (i32.const 1)))
+            (if (i32.lt_s (local.get $i) (local.get $len))
+              (then
+                (local.set $c (i32.load8_u (i32.add (local.get $buf) (local.get $i))))
+                (if (i32.eq (local.get $c) (i32.const 45)) (then (local.set $esign (i32.const -1)) (local.set $i (i32.add (local.get $i) (i32.const 1)))))
+                (if (i32.eq (local.get $c) (i32.const 43)) (then (local.set $i (i32.add (local.get $i) (i32.const 1)))))))
+            (block $eb (loop $el
+              (br_if $eb (i32.ge_s (local.get $i) (local.get $len)))
+              (local.set $c (i32.load8_u (i32.add (local.get $buf) (local.get $i))))
+              (br_if $eb (i32.or (i32.lt_u (local.get $c) (i32.const 48)) (i32.gt_u (local.get $c) (i32.const 57))))
+              (local.set $eval (i32.add (i32.mul (local.get $eval) (i32.const 10)) (i32.sub (local.get $c) (i32.const 48))))
+              (local.set $i (i32.add (local.get $i) (i32.const 1)))
+              (br $el)))))))
+    (local.set $k (i32.sub (i32.mul (local.get $esign) (local.get $eval)) (local.get $frac)))
+    ;; zero mantissa -> signed zero
+    (if (i32.eqz (call $big_nlimbs (local.get $D)))
+      (then
+        (call $rt_release (local.get $D))
+        (if (local.get $neg) (then (return (f64.neg (f64.const 0)))))
+        (return (f64.const 0))))
+    ;; num/den: k>=0 -> num = Dfull*10^k, den = 1; k<0 -> num = Dfull, den = 10^-k.
+    (if (i32.ge_s (local.get $k) (i32.const 0))
+      (then
+        (local.set $tmp (call $flt_pow10big (local.get $k)))
+        (local.set $num (call $rt_nat_mul (local.get $D) (local.get $tmp)))
+        (call $rt_release (local.get $tmp))
+        (local.set $den (call $rt_big_from_long (i32.const 1))))
+      (else
+        (local.set $num (call $flt_shl2 (local.get $D) (i32.const 0)))
+        (local.set $den (call $flt_pow10big (i32.sub (i32.const 0) (local.get $k))))))
+    (call $rt_release (local.get $D))
+    ;; binexp ~= floor((nd-1+k) * log2(10)); 217706/65536 = 3.3219299 approximates log2(10).
+    (local.set $d10 (i32.add (i32.sub (local.get $nd) (i32.const 1)) (local.get $k)))
+    (local.set $binexp (i32.shr_s (i32.mul (local.get $d10) (i32.const 217706)) (i32.const 16)))
+    (local.set $x (call $flt_round (local.get $num) (local.get $den) (local.get $binexp)))
+    (call $rt_release (local.get $num))
+    (call $rt_release (local.get $den))
     (if (local.get $neg) (then (local.set $x (f64.neg (local.get $x)))))
     (local.get $x))
 
