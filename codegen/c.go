@@ -1090,8 +1090,10 @@ func emitStreamPrimsC(b *strings.Builder, p Program) {
 // emitFloatIOPrimsC bakes parseFloat (Nat -> Option Float), getFloat (IO Float),
 // and printFloat (Float -> IO Float) on the C native backend. Emitted AFTER
 // emitStreamPrimsC because parseFloat calls d6_s2h (the packed-string decoder).
-// The __fmtf helper implements ECMAScript Number::toString (shortest round-trip).
-// d6_validate_float is a DFA for the float literal grammar used by parseFloat.
+// printFloat_c2 formats via __fmtf (ECMAScript Number::toString shortest
+// round-trip), which now lives in the always-emitted base runtime (cRuntime),
+// not here, so show()'s K_FLOAT case can reach it too. d6_validate_float is a
+// DFA for the float literal grammar used by parseFloat.
 func emitFloatIOPrimsC(b *strings.Builder, p Program) {
 	usesFloatIO := usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat")
 	if !usesFloatIO {
@@ -1101,14 +1103,10 @@ func emitFloatIOPrimsC(b *strings.Builder, p Program) {
 	b.WriteString("#include <locale.h>\n")
 	// DFA validator: [+-]? ( \d+ (\.\d*)? | \.\d+ ) ([eE][+-]?\d+)?
 	b.WriteString("static int d6_validate_float(const unsigned char* s, size_t len) { if (len == 0) return 0; size_t i = 0; if (s[i] == '+' || s[i] == '-') i++; int has_digit = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } if (i < len && s[i] == '.') { i++; while (i < len && s[i] >= '0' && s[i] <= '9') { has_digit = 1; i++; } } if (!has_digit) return 0; if (i < len && (s[i] == 'e' || s[i] == 'E')) { i++; if (i < len && (s[i] == '+' || s[i] == '-')) i++; int hd = 0; while (i < len && s[i] >= '0' && s[i] <= '9') { hd = 1; i++; } if (!hd) return 0; } return i == (size_t)len; }\n")
-	// __fmtf: ECMAScript Number::toString shortest-round-trip formatting.
-	// Precision search: p=1..17 significant digits; stop when strtod round-trips.
-	// Dressing cases (k=digit count, n=exponent s.t. value = s[0..k-1] * 10^(n-k)):
-	//   1. k<=n<=21:  digits + trailing zeros
-	//   2. 0<n<k:     digits[0..n-1] + "." + digits[n..k-1]
-	//   3. -5<=n<=0:  "0." + (-n) zeros + digits
-	//   4. else:      d[0][.d[1..]]e+/-(|n-1|)
-	b.WriteString("static void __fmtf(double x, char* out) { if (x != x) { strcpy(out, \"NaN\"); return; } if (x > 1.7976931348623157e308) { strcpy(out, \"Infinity\"); return; } if (x < -1.7976931348623157e308) { strcpy(out, \"-Infinity\"); return; } if (x == 0.0) { strcpy(out, \"0\"); return; } int neg = (x < 0); if (neg) x = -x; char buf[40]; int p; for (p = 1; p <= 17; p++) { snprintf(buf, sizeof buf, \"%.*e\", p - 1, x); if (strtod(buf, NULL) == x) break; } char* ep = strchr(buf, 'e'); int n = atoi(ep + 1) + 1; int k = p; char s[20]; s[0] = buf[0]; int si = 1; if (p > 1) { int ii; for (ii = 2; ii < p + 1; ii++) s[si++] = buf[ii]; } s[si] = '\\0'; char* o = out; if (neg) *o++ = '-'; if (k <= n && n <= 21) { memcpy(o, s, k); o += k; int ii; for (ii = k; ii < n; ii++) *o++ = '0'; } else if (n > 0 && n < k) { memcpy(o, s, n); o += n; *o++ = '.'; memcpy(o, s + n, k - n); o += k - n; } else if (n >= -5 && n <= 0) { *o++ = '0'; *o++ = '.'; int ii; for (ii = 0; ii < -n; ii++) *o++ = '0'; memcpy(o, s, k); o += k; } else { *o++ = s[0]; if (k > 1) { *o++ = '.'; memcpy(o, s + 1, k - 1); o += k - 1; } *o++ = 'e'; int en = n - 1; o += sprintf(o, en >= 0 ? \"+%d\" : \"%d\", en); } *o = '\\0'; }\n")
+	// __fmtf (ECMAScript Number::toString shortest-round-trip formatting) now
+	// lives in the base runtime (cRuntime, unconditionally emitted) so show()'s
+	// K_FLOAT case can reach it even without float IO. printFloat_c2 below still
+	// calls it -- there is exactly one __fmtf definition in the emitted program.
 	if usesForeign(p, "parseFloat") {
 		b.WriteString("static Value parseFloat_c(Value code, Value* env) { (void)env; size_t len; unsigned char* buf = d6_s2h(code, &len); if (!d6_validate_float(buf, len)) { free(buf); rt_release(code); Value none = mkcon(0, \"none\", 1); con_set(none, 0, UNIT); return none; } char* tmp = (char*)malloc(len + 1); memcpy(tmp, buf, len); tmp[len] = 0; double d = strtod(tmp, NULL); free(tmp); free(buf); rt_release(code); Value some = mkcon(1, \"some\", 2); con_set(some, 0, UNIT); con_set(some, 1, mkfloat(d)); return some; }\n")
 		b.WriteString("static Value parseFloat(void) { return mkclo(&parseFloat_c, 0); }\n")
@@ -1948,6 +1946,18 @@ static Value nat_mod(Value a, Value b) { return big_mod(a, b); }
 
 static void rt_abort(void) { fprintf(stderr, "rune-c: impossible (unmatched constructor tag)\n"); exit(1); }
 
+/* __fmtf: ECMAScript Number::toString shortest-round-trip formatting. Defined
+   unconditionally in the base runtime (depends only on stdio/string/stdlib,
+   already included above) so show()'s K_FLOAT case can always reach it, not
+   just when a program uses float IO (parseFloat/getFloat/printFloat).
+   Precision search: p=1..17 significant digits; stop when strtod round-trips.
+   Dressing cases (k=digit count, n=exponent s.t. value = s[0..k-1] * 10^(n-k)):
+     1. k<=n<=21:  digits + trailing zeros
+     2. 0<n<k:     digits[0..n-1] + "." + digits[n..k-1]
+     3. -5<=n<=0:  "0." + (-n) zeros + digits
+     4. else:      d[0][.d[1..]]e+/-(|n-1|) */
+static void __fmtf(double x, char* out) { if (x != x) { strcpy(out, "NaN"); return; } if (x > 1.7976931348623157e308) { strcpy(out, "Infinity"); return; } if (x < -1.7976931348623157e308) { strcpy(out, "-Infinity"); return; } if (x == 0.0) { strcpy(out, "0"); return; } int neg = (x < 0); if (neg) x = -x; char buf[40]; int p; for (p = 1; p <= 17; p++) { snprintf(buf, sizeof buf, "%.*e", p - 1, x); if (strtod(buf, NULL) == x) break; } char* ep = strchr(buf, 'e'); int n = atoi(ep + 1) + 1; int k = p; char s[20]; s[0] = buf[0]; int si = 1; if (p > 1) { int ii; for (ii = 2; ii < p + 1; ii++) s[si++] = buf[ii]; } s[si] = '\0'; char* o = out; if (neg) *o++ = '-'; if (k <= n && n <= 21) { memcpy(o, s, k); o += k; int ii; for (ii = k; ii < n; ii++) *o++ = '0'; } else if (n > 0 && n < k) { memcpy(o, s, n); o += n; *o++ = '.'; memcpy(o, s + n, k - n); o += k - n; } else if (n >= -5 && n <= 0) { *o++ = '0'; *o++ = '.'; int ii; for (ii = 0; ii < -n; ii++) *o++ = '0'; memcpy(o, s, k); o += k; } else { *o++ = s[0]; if (k > 1) { *o++ = '.'; memcpy(o, s + 1, k - 1); o += k - 1; } *o++ = 'e'; int en = n - 1; o += sprintf(o, en >= 0 ? "+%d" : "%d", en); } *o = '\0'; }
+
 /* show: render a value in surface style, byte-identical to the other backends.
    () for unit, the digit for an int, the constructor name + show'd non-unit
    fields (parenthesised when they contain a space), <ptr> for an opaque handle. */
@@ -1969,7 +1979,7 @@ static void show(Value v) {
   switch (o->kind) {
     case K_BIG: big_print(v); return;
     case K_BYTES: { int bn = bytes_len(v); putchar('"'); for (int bi = 0; bi < bn; bi++) { int bx = bytes_at(v, bi); if (bx >= 0x20 && bx < 0x7f && bx != 0x22 && bx != 0x5c) putchar(bx); else printf("\\x%02x", bx); } putchar('"'); return; }
-    case K_FLOAT: printf("%g", o->dval); return;
+    case K_FLOAT: { char __fb[64]; __fmtf(o->dval, __fb); printf("%s", __fb); return; }
     case K_CLO: printf("<function>"); return;
     case K_PTR: printf("<ptr>"); return;
     case K_STR: printf("%s", o->str); return;
