@@ -34,6 +34,38 @@ func (Py) Emit(p Program) (TargetSource, error) {
 	// The prelude defines `data Int : U is int : … end`, emitting `int = lambda …`
 	// which shadows Python's built-in `int` type (used by isinstance in _show).
 	b.WriteString("__py_int = int\n")
+	// __fmtf (ECMAScript Number::toString shortest-round-trip formatting) is ALWAYS
+	// emitted (not just under float IO) so _show's float branch can reach it too --
+	// mirrors the native C/LL fix (Track B Tasks 1/2/5). printFloat below still calls
+	// it; there is exactly one __fmtf definition in the emitted program.
+	b.WriteString("def __fmtf(x):\n" +
+		"    import math\n" +
+		"    if math.isnan(x): return 'NaN'\n" +
+		"    if math.isinf(x): return 'Infinity' if x > 0 else '-Infinity'\n" +
+		"    if x == 0: return '0'\n" +
+		"    s = repr(abs(x))\n" +
+		"    if 'e' in s or 'E' in s:\n" +
+		"        m, _, e = s.lower().partition('e')\n" +
+		"        k = int(e) + 1\n" +
+		"    else:\n" +
+		"        m = s; k = 0\n" +
+		"        if '.' in m:\n" +
+		"            i, _, f = m.partition('.')\n" +
+		"            if i == '0':\n" +
+		"                f2 = f.lstrip('0'); k = -(len(f) - len(f2)); m = f2\n" +
+		"            else:\n" +
+		"                k = len(i); m = i + f\n" +
+		"        else:\n" +
+		"            k = len(m)\n" +
+		"    d = m.replace('.', '').rstrip('0') or '0'\n" +
+		"    n = len(d)\n" +
+		"    sign = '-' if x < 0 else ''\n" +
+		"    if n <= k <= 21: out = d + '0' * (k - n)\n" +
+		"    elif 0 < k <= 21: out = d[:k] + '.' + d[k:]\n" +
+		"    elif -6 < k <= 0: out = '0.' + '0' * (-k) + d\n" +
+		"    else:\n" +
+		"        out = d[0] + ('.' + d[1:] if n > 1 else '') + 'e' + ('+' if k - 1 >= 0 else '-') + str(abs(k - 1))\n" +
+		"    return sign + out\n")
 	b.WriteString(pyNatElimRuntime)
 	if usesQuot(p) {
 		b.WriteString(pyQuotRuntime)
@@ -264,38 +296,11 @@ func (Py) Emit(p Program) (TargetSource, error) {
 		b.WriteString("def fpow():\n    import math\n    return lambda b: lambda e: math.pow(b, e)\n")
 	}
 	// Float IO: parseFloat/getFloat/printFloat — ECMAScript Number::toString on py.
-	// __fmtf implements the canonical format; __parsef_re validates before host parse.
-	// __s2h is also needed by parseFloat; the codec guard below covers it.
+	// __fmtf (moved above, unconditional) implements the canonical format;
+	// __parsef_re validates before host parse. __s2h is also needed by parseFloat;
+	// the codec guard below covers it.
 	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
 		b.WriteString("import re as __re\n__parsef_re = __re.compile(r'^[+-]?((\\d+(\\.\\d*)?)|(\\.\\d+))([eE][+-]?\\d+)?$')\n")
-		b.WriteString("def __fmtf(x):\n" +
-			"    import math\n" +
-			"    if math.isnan(x): return 'NaN'\n" +
-			"    if math.isinf(x): return 'Infinity' if x > 0 else '-Infinity'\n" +
-			"    if x == 0: return '0'\n" +
-			"    s = repr(abs(x))\n" +
-			"    if 'e' in s or 'E' in s:\n" +
-			"        m, _, e = s.lower().partition('e')\n" +
-			"        k = int(e) + 1\n" +
-			"    else:\n" +
-			"        m = s; k = 0\n" +
-			"        if '.' in m:\n" +
-			"            i, _, f = m.partition('.')\n" +
-			"            if i == '0':\n" +
-			"                f2 = f.lstrip('0'); k = -(len(f) - len(f2)); m = f2\n" +
-			"            else:\n" +
-			"                k = len(i); m = i + f\n" +
-			"        else:\n" +
-			"            k = len(m)\n" +
-			"    d = m.replace('.', '').rstrip('0') or '0'\n" +
-			"    n = len(d)\n" +
-			"    sign = '-' if x < 0 else ''\n" +
-			"    if n <= k <= 21: out = d + '0' * (k - n)\n" +
-			"    elif 0 < k <= 21: out = d[:k] + '.' + d[k:]\n" +
-			"    elif -6 < k <= 0: out = '0.' + '0' * (-k) + d\n" +
-			"    else:\n" +
-			"        out = d[0] + ('.' + d[1:] if n > 1 else '') + 'e' + ('+' if k - 1 >= 0 else '-') + str(abs(k - 1))\n" +
-			"    return sign + out\n")
 	}
 	if usesForeign(p, "parseFloat") {
 		// parseFloat takes a packed-Nat string code; __s2h decodes it.
@@ -706,6 +711,8 @@ const pyShowRuntime = `def _show(v):
         return "true" if v else "false"
     if isinstance(v, __py_int):
         return str(v)
+    if isinstance(v, float):
+        return __fmtf(v)
     if isinstance(v, tuple):
         return "(" + ", ".join(_show(x) for x in v) + ")"
     if isinstance(v, dict) and "ptr" in v:

@@ -146,11 +146,12 @@ func (JVM) Emit(p Program) (TargetSource, error) {
 		b.WriteString("  static V dot2() { return fun(a0 -> fun(a1 -> fun(b0 -> fun(b1 -> new VFloat(_float(a0)*_float(b0) + _float(a1)*_float(b1)))))); }\n")
 	}
 	// D5 float IO: parseFloat/getFloat/printFloat with canonical ECMAScript Number::toString
-	// dressing. Double.toString gives shortest round-trip digits; __fmtf re-dresses them.
-	// __parfloatPat validates; __s2h decodes the packed-String Nat arg for parseFloat.
-	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
+	// dressing. Double.toString gives shortest round-trip digits; __fmtf (moved to
+	// jvmRuntime, unconditional, so _show's VFloat branch can reach it too -- Track B
+	// Task 5) re-dresses them. __parfloatPat validates (only needed by parseFloat/
+	// getFloat); __s2h decodes the packed-String Nat arg for parseFloat.
+	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") {
 		b.WriteString("  static java.util.regex.Pattern __parfloatPat = java.util.regex.Pattern.compile(\"^[+-]?((\\\\d+(\\\\.\\\\d*)?)|(\\\\.\\\\d+))([eE][+-]?\\\\d+)?$\");\n")
-		b.WriteString("  static String __fmtf(double x) { if (Double.isNaN(x)) return \"NaN\"; if (Double.isInfinite(x)) return x > 0 ? \"Infinity\" : \"-Infinity\"; if (x == 0.0) return \"0\"; String sign = x < 0 ? \"-\" : \"\"; double ax = Math.abs(x); String s = Double.toString(ax); int ei = s.indexOf('E'); String rawDigits; int k; if (ei >= 0) { k = Integer.parseInt(s.substring(ei + 1)) + 1; rawDigits = s.substring(0, ei).replace(\".\", \"\"); } else { int di = s.indexOf('.'); if (di < 0) { k = s.length(); rawDigits = s; } else { String ipt = s.substring(0, di), frac = s.substring(di + 1); if (ipt.equals(\"0\")) { int lz = 0; while (lz < frac.length() && frac.charAt(lz) == '0') lz++; k = -lz; rawDigits = frac.substring(lz); } else { k = ipt.length(); rawDigits = ipt + frac; } } } String d = rawDigits.replaceAll(\"0+$\", \"\"); if (d.isEmpty()) d = \"0\"; int n = d.length(); String out; if (n <= k && k <= 21) { out = d + \"0\".repeat(k - n); } else if (k > 0 && k <= 21) { out = d.substring(0, k) + \".\" + d.substring(k); } else if (k > -6 && k <= 0) { out = \"0.\" + \"0\".repeat(-k) + d; } else { String base = n > 1 ? \"\" + d.charAt(0) + \".\" + d.substring(1) : d; int ek = k - 1; out = base + (ek >= 0 ? \"e+\" + ek : \"e-\" + (-ek)); } return sign + out; }\n")
 	}
 	if usesForeign(p, "parseFloat") {
 		b.WriteString("  static V parseFloat() { return fun(s -> { String v = __s2h(s); if (__parfloatPat.matcher(v).matches()) { return new VCtor(1, \"some\", new V[]{unit(), new VFloat(Double.parseDouble(v))}); } return new VCtor(0, \"none\", new V[]{unit()}); }); }\n")
@@ -637,12 +638,17 @@ const jvmHelpers = `  static final V UNIT = new VUnit();
     java.math.BigInteger x = _nat(a), y = _nat(b);
     return new VNat(y.signum() == 0 ? x : x.mod(y));
   }
+  // __fmtf (ECMAScript Number::toString shortest-round-trip formatting) is ALWAYS
+  // emitted (not just under float IO) so _show's VFloat branch can reach it too --
+  // mirrors the native C/LL fix (Track B Tasks 1/2/5). printFloat still calls it;
+  // there is exactly one __fmtf definition in the emitted program.
+  static String __fmtf(double x) { if (Double.isNaN(x)) return "NaN"; if (Double.isInfinite(x)) return x > 0 ? "Infinity" : "-Infinity"; if (x == 0.0) return "0"; String sign = x < 0 ? "-" : ""; double ax = Math.abs(x); String s = Double.toString(ax); int ei = s.indexOf('E'); String rawDigits; int k; if (ei >= 0) { k = Integer.parseInt(s.substring(ei + 1)) + 1; rawDigits = s.substring(0, ei).replace(".", ""); } else { int di = s.indexOf('.'); if (di < 0) { k = s.length(); rawDigits = s; } else { String ipt = s.substring(0, di), frac = s.substring(di + 1); if (ipt.equals("0")) { int lz = 0; while (lz < frac.length() && frac.charAt(lz) == '0') lz++; k = -lz; rawDigits = frac.substring(lz); } else { k = ipt.length(); rawDigits = ipt + frac; } } } String d = rawDigits.replaceAll("0+$", ""); if (d.isEmpty()) d = "0"; int n = d.length(); String out; if (n <= k && k <= 21) { out = d + "0".repeat(k - n); } else if (k > 0 && k <= 21) { out = d.substring(0, k) + "." + d.substring(k); } else if (k > -6 && k <= 0) { out = "0." + "0".repeat(-k) + d; } else { String base = n > 1 ? "" + d.charAt(0) + "." + d.substring(1) : d; int ek = k - 1; out = base + (ek >= 0 ? "e+" + ek : "e-" + (-ek)); } return sign + out; }
   static String _show(V v) {
     return switch (v) {
       case VUnit u -> "()";
       case VInt i -> Long.toString(i.n());
       case VNat i -> i.n().toString();
-      case VFloat f -> Double.toString(f.d());
+      case VFloat f -> __fmtf(f.d());
       case VProc p -> "<proc>";
       case VBounce b -> _show(trampoline(b)); // defensive: drivers resolve first
       case VStr s -> s.s();

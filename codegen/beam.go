@@ -330,27 +330,30 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	if usesForeign(p, "npMatSum") {
 		b.WriteString("ff_npMatSum() -> fun(M) -> fun(K) -> fun(N) -> fun(A) -> fun(B) -> Col = fun C(L) -> case L of {c, 1, _, [X, Xr]} -> [X | C(Xr)]; _ -> [] end end, AL = Col(A), BL = Col(B), lists:sum([ lists:nth(I * K + P + 1, AL) * lists:nth(P * N + J + 1, BL) || I <- lists:seq(0, M - 1), J <- lists:seq(0, N - 1), P <- lists:seq(0, K - 1) ]) end end end end end.\n")
 	}
-	// D5 float IO: parseFloat/getFloat/printFloat with canonical ECMAScript Number::toString
-	// dressing. OTP 24 lacks float_to_binary([short]), so we use a precision-search loop
-	// (P=0..17 via {scientific, P}) to find shortest round-trip digits, then re-dress.
+	// ff___fmtf (ECMAScript Number::toString shortest-round-trip formatting) + its
+	// helpers (make_parseable/shortest_sci/fmtf2) are ALWAYS emitted (not just under
+	// float IO) so show/show_t's float branch can reach it too -- mirrors the native
+	// C/LL fix (Track B Tasks 1/2/5). They depend only on stdlib erlang (lists, re
+	// is NOT used here), so baking them unconditionally is dependency-free, exactly
+	// like the native C/LL __fmtf move. OTP 24 lacks float_to_binary([short]), so we
+	// use a precision-search loop (P=0..17 via {scientific, P}) to find shortest
+	// round-trip digits, then re-dress.
+	// Helpers: make_parseable inserts ".0" before 'e' so list_to_float accepts
+	// no-decimal scientific strings (e.g. "1e+07"); shortest_sci finds min P;
+	// fmtf/fmtf2 apply canonical dressing.
+	b.WriteString("ff___make_parseable(S) -> case lists:member($., S) of true -> S; false -> case lists:splitwith(fun(C) -> C =/= $e end, S) of {I, [$e | E]} -> I ++ \".0e\" ++ E; {I, []} -> I ++ \".0\" end end.\n")
+	b.WriteString("ff___shortest_sci(AX) -> ff___shortest_sci(AX, 0).\n")
+	b.WriteString("ff___shortest_sci(AX, P) when P > 17 -> binary_to_list(float_to_binary(AX, [{scientific, 17}]));\n")
+	b.WriteString("ff___shortest_sci(AX, P) -> S = binary_to_list(float_to_binary(AX, [{scientific, P}])), try Parsed = list_to_float(ff___make_parseable(S)), if Parsed =:= AX -> S; true -> ff___shortest_sci(AX, P + 1) end catch _:_ -> ff___shortest_sci(AX, P + 1) end.\n")
+	// IEEE specials are reboxed as atoms (see the float-op helpers above), so the
+	// display path matches on them FIRST (the old X =/= X NaN trick no longer fires,
+	// since our NaN is an atom, not a float). Spellings are ECMAScript
+	// Number::toString: "NaN", "Infinity", "-Infinity". Finite floats fall to the
+	// unchanged precision-search body.
+	b.WriteString("ff___fmtf(nan) -> \"NaN\";\nff___fmtf(pos_inf) -> \"Infinity\";\nff___fmtf(neg_inf) -> \"-Infinity\";\n")
+	b.WriteString("ff___fmtf(X) -> if X =/= X -> \"NaN\"; true -> try if X =:= 0.0 -> \"0\"; true -> Sign = if X < 0.0 -> \"-\"; true -> \"\" end, S = ff___shortest_sci(erlang:abs(X)), ff___fmtf2(S, Sign) end catch _:_ -> float_to_list(X) end end.\n")
+	b.WriteString("ff___fmtf2(S, Sign) -> {M, [$e | E]} = lists:splitwith(fun(C) -> C =/= $e end, S), Exp = case E of [$+ | R] -> list_to_integer(R); [$- | R] -> -list_to_integer(R); _ -> list_to_integer(E) end, K = Exp + 1, Digs0 = [C || C <- M, C =/= $.], Digs = lists:reverse(lists:dropwhile(fun(C) -> C =:= $0 end, lists:reverse(Digs0))), D = case Digs of [] -> \"0\"; _ -> Digs end, N = length(D), Out = if N =< K, K =< 21 -> D ++ lists:duplicate(K - N, $0); K > 0, K =< 21, K < N -> lists:sublist(D, K) ++ \".\" ++ lists:nthtail(K, D); K > -6, K =< 0 -> \"0.\" ++ lists:duplicate(-K, $0) ++ D; true -> Base = if N > 1 -> [hd(D)] ++ \".\" ++ tl(D); true -> D end, Ek = K - 1, if Ek >= 0 -> Base ++ \"e+\" ++ integer_to_list(Ek); true -> Base ++ \"e-\" ++ integer_to_list(-Ek) end end, Sign ++ Out.\n")
 	// d6unpack decodes the packed-String Nat arg for parseFloat (same codec as D6 ops).
-	if usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat") {
-		// Helpers: make_parseable inserts ".0" before 'e' so list_to_float accepts
-		// no-decimal scientific strings (e.g. "1e+07"); shortest_sci finds min P;
-		// fmtf/fmtf2 apply canonical dressing.
-		b.WriteString("ff___make_parseable(S) -> case lists:member($., S) of true -> S; false -> case lists:splitwith(fun(C) -> C =/= $e end, S) of {I, [$e | E]} -> I ++ \".0e\" ++ E; {I, []} -> I ++ \".0\" end end.\n")
-		b.WriteString("ff___shortest_sci(AX) -> ff___shortest_sci(AX, 0).\n")
-		b.WriteString("ff___shortest_sci(AX, P) when P > 17 -> binary_to_list(float_to_binary(AX, [{scientific, 17}]));\n")
-		b.WriteString("ff___shortest_sci(AX, P) -> S = binary_to_list(float_to_binary(AX, [{scientific, P}])), try Parsed = list_to_float(ff___make_parseable(S)), if Parsed =:= AX -> S; true -> ff___shortest_sci(AX, P + 1) end catch _:_ -> ff___shortest_sci(AX, P + 1) end.\n")
-		// IEEE specials are reboxed as atoms (see the float-op helpers above), so the
-		// display path matches on them FIRST (the old X =/= X NaN trick no longer fires,
-		// since our NaN is an atom, not a float). Spellings are ECMAScript
-		// Number::toString: "NaN", "Infinity", "-Infinity". Finite floats fall to the
-		// unchanged precision-search body.
-		b.WriteString("ff___fmtf(nan) -> \"NaN\";\nff___fmtf(pos_inf) -> \"Infinity\";\nff___fmtf(neg_inf) -> \"-Infinity\";\n")
-		b.WriteString("ff___fmtf(X) -> if X =/= X -> \"NaN\"; true -> try if X =:= 0.0 -> \"0\"; true -> Sign = if X < 0.0 -> \"-\"; true -> \"\" end, S = ff___shortest_sci(erlang:abs(X)), ff___fmtf2(S, Sign) end catch _:_ -> float_to_list(X) end end.\n")
-		b.WriteString("ff___fmtf2(S, Sign) -> {M, [$e | E]} = lists:splitwith(fun(C) -> C =/= $e end, S), Exp = case E of [$+ | R] -> list_to_integer(R); [$- | R] -> -list_to_integer(R); _ -> list_to_integer(E) end, K = Exp + 1, Digs0 = [C || C <- M, C =/= $.], Digs = lists:reverse(lists:dropwhile(fun(C) -> C =:= $0 end, lists:reverse(Digs0))), D = case Digs of [] -> \"0\"; _ -> Digs end, N = length(D), Out = if N =< K, K =< 21 -> D ++ lists:duplicate(K - N, $0); K > 0, K =< 21, K < N -> lists:sublist(D, K) ++ \".\" ++ lists:nthtail(K, D); K > -6, K =< 0 -> \"0.\" ++ lists:duplicate(-K, $0) ++ D; true -> Base = if N > 1 -> [hd(D)] ++ \".\" ++ tl(D); true -> D end, Ek = K - 1, if Ek >= 0 -> Base ++ \"e+\" ++ integer_to_list(Ek); true -> Base ++ \"e-\" ++ integer_to_list(-Ek) end end, Sign ++ Out.\n")
-	}
 	if usesForeign(p, "parseFloat") {
 		b.WriteString("ff_parseFloat() -> fun(S) -> V = d6unpack(S), Pat = \"^[+-]?((\\\\d+(\\\\.\\\\d*)?)|(\\\\.\\\\d+))([eE][+-]?\\\\d+)?$\", case re:run(V, Pat, [{capture, none}]) of match -> try {c,1,some,[unit,list_to_float(ff___make_parseable(V))]} catch _:_ -> try {c,1,some,[unit,float(list_to_integer(V))]} catch _:_ -> {c,0,none,[unit]} end end; _ -> {c,0,none,[unit]} end end.\n")
 	}
@@ -360,10 +363,11 @@ ff_fsMkdir() -> fun(Path) -> fun(_U) -> case filelib:ensure_dir(Path ++ "/x") of
 	if usesForeign(p, "printFloat") {
 		b.WriteString("ff_printFloat() -> fun(X) -> fun(_U) -> io:format(\"~s~n\", [ff___fmtf(X)]), X end end.\n")
 	}
-	// show/show_t: include the float case when ff___fmtf is in scope, so that
-	// raw Erlang floats (e.g. the return value of printFloat : Float -> IO Float)
-	// are shown identically to JS/Python/Go.
-	emitBeamShow(&b, usesForeign(p, "parseFloat") || usesForeign(p, "getFloat") || usesForeign(p, "printFloat"))
+	// show/show_t: ff___fmtf is now always in scope (see above), so the float case
+	// is always included -- a bare shown Float (Track B Task 5's show path) and the
+	// return value of printFloat : Float -> IO Float both display identically to
+	// JS/Python/Go.
+	emitBeamShow(&b, true)
 	if usesOTP(p) {
 		b.WriteString(beamOTPRuntime)
 	}
