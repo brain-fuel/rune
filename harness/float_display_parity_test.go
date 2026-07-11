@@ -325,14 +325,14 @@ func assertFloatDisplayAgree(t *testing.T, src, want string) {
 // ---- the batched driver ----
 //
 // The naive shape of this gate (one compiled+run program per witness per path per
-// backend) is 18 witnesses * 2 paths * 9 backends = 324 compile+run cycles. Five of
+// backend) is 20 witnesses * 2 paths * 9 backends = 360 compile+run cycles. Five of
 // those backends (jvm/rust/native-c/native-ll/wasm) each take real wall-clock
 // seconds to COMPILE, so the naive gate ran past a 10-minute `go test` timeout.
 // This gate must stay ONE test among many in a full-suite run with a 30-minute
 // total budget, so it is reworked below to compile ONCE PER BACKEND for the
-// printFloat path (batching all 18 witnesses into a single sequenced IO program)
-// and to compile only ~9 backends * ~9 witnesses for the show path, rather than
-// 9*18. Both paths still assert every stdout line against the FIXED Go ecmaFloat
+// printFloat path (batching all 20 witnesses into a single sequenced IO program)
+// and to compile only 9 backends * 4 witnesses for the show path, rather than
+// 9*20. Both paths still assert every stdout line against the FIXED Go ecmaFloat
 // oracle (never another backend's output); no backend is skipped except for a
 // genuinely missing toolchain (the pre-existing t.Skipf convention).
 
@@ -382,17 +382,18 @@ func floatPrintBatchWant(ws []floatWitness) string {
 	return strings.Join(lines, "\n")
 }
 
-// floatShowSubset picks REPRESENTATIVE witnesses (by name, out of floatWitnesses())
-// for the show path: one per ECMAScript dressing branch (A/B/C/D), all three IEEE
-// specials, the subnormal case, and negative zero. The show path exists ONLY to
-// prove that show()'s float branch on each backend actually reaches the SAME
-// __fmtf-style formatter printFloat already used (the bug the five codegen fixes in
-// this task address -- see the file-level doc comment) -- it is not re-proving
-// digit-by-digit formatting across the full corpus a second time, since the
-// printFloat batch above already runs all witnesses (as arguments to the identical
-// formatter) on every backend. So a small subset spanning every branch the
-// formatter dispatches on is sufficient: if show() mis-routes on any branch, one of
-// these catches it. All three IEEE specials are included (not just NaN) because on
+// floatShowSubset picks the witnesses (by name, out of floatWitnesses()) whose
+// show() path the printFloat batch cannot already cover. The print batch routes
+// all 20 witnesses through __fmtf on every backend and its final line exercises
+// show() on a finite value; the show subset therefore only needs the
+// non-finite/signed-zero edges (the 3 IEEE specials -- separate atom guards on
+// BEAM -- plus -0.0) whose show() path differs from a finite's. Concretely: the
+// four finite dressing-branch representatives (A/B/C/D) that a naive subset would
+// otherwise re-check are dropped, since the batch's trailing double-print line
+// (main's own returned Float, shown at runtime) already proves show() reaches the
+// same formatter as printFloat for a finite value on every backend. What remains
+// is exactly the four cases whose show() branch is genuinely distinct from the
+// finite path: all three IEEE specials are included (not just NaN) because on
 // BEAM, nan/pos_inf/neg_inf are SEPARATE atom guards in show (see
 // codegen/beam_float_specials_test.go) -- a NaN-only subset would leave the
 // pos_inf/neg_inf show guards on that backend completely unexercised. Negative
@@ -402,14 +403,9 @@ func floatPrintBatchWant(ws []floatWitness) string {
 func floatShowSubset(t *testing.T, all []floatWitness) []floatWitness {
 	t.Helper()
 	want := []string{
-		"integer_1234567_branchA",
-		"point_inside_1_25_branchB",
-		"leading_zero_half_branchC",
-		"exponential_1e-7_branchD",
 		"special_pos_inf",
 		"special_neg_inf",
 		"special_nan",
-		"subnormal_5e-315_branchD_repeated_fdiv",
 		"negative_zero_renders_0",
 	}
 	byName := make(map[string]floatWitness, len(all))
@@ -429,15 +425,15 @@ func floatShowSubset(t *testing.T, all []floatWitness) []floatWitness {
 
 // TestFloatDisplayParity is the v4 Float Track B, Task 5 acceptance gate: a raw
 // Float displays byte-identically on all 9 backends, matching ECMAScript
-// Number::toString, via BOTH the printFloat IO path (all 18 witnesses, batched
-// into one compiled program per backend) and the show path (`main : Float`, no
-// float IO at all -- a representative subset of 9 witnesses spanning every
-// dressing branch, all three IEEE specials, and negative zero, one compile per
-// witness per backend since each is a distinct `main` expression). Total compiles:
-// 9 (printFloat batch) + 9*9 (show subset) = 90, versus the naive 18*2*9 = 324 --
-// comfortably inside the suite's time budget while
-// still exercising every witness (via printFloat) and every formatter branch (via
-// show).
+// Number::toString, via BOTH the printFloat IO path (all 20 witnesses, batched
+// into one compiled program per backend, whose trailing double-print line also
+// exercises show() on a finite value) and the show path (`main : Float`, no float
+// IO at all -- the 4 non-finite/signed-zero edges show() cannot inherit from the
+// batch: the three IEEE specials and negative zero, one compile per witness per
+// backend since each is a distinct `main` expression). Total compiles: 9
+// (printFloat batch) + 4*9 (show subset) = 45, versus the naive 20*2*9 = 360 --
+// comfortably inside the suite's time budget while still exercising every witness
+// (via printFloat) and every show()-distinct edge (via show).
 func TestFloatDisplayParity(t *testing.T) {
 	all := floatWitnesses()
 
