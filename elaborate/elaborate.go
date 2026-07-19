@@ -63,7 +63,7 @@ type Elaborator struct {
 	// per-binder usage observed so far, keyed by de Bruijn level. Variable
 	// occurrences are recorded scaled by mult; at each binder exit the usage
 	// is compared against mult·declared.
-	sr   quantity.Semiring
+	sr   quantity.Semiring[core.Qty]
 	mult core.Qty
 	uses map[int]core.Qty
 

@@ -1,0 +1,105 @@
+// Package quantity is the QUANTITY STRATUM: the usage semiring that the
+// quantitative type theory threads through binders (Phase 5), kept as a
+// swappable module — as of v3.383.0 a G++ CLASS, so the semiring algebra is
+// not prose: every instance gets generated rapid law tests (the stratum's
+// first tests ever).
+//
+// The annotation DOMAIN lives in core (core.Qty: 0, 1, ω) because annotations
+// are part of a term's identity and are hashed; this package supplies the
+// RULES — how usages add across occurrences and multiply through nesting —
+// and the compatibility judgment the elaborator's usage checker applies at
+// each binder. The 0-fragment is the erasure boundary the codegen stratum
+// reads.
+package quantity
+
+import (
+	"reflect"
+
+	"goforge.dev/rune/v3/core"
+)
+
+// Semiring abstracts the usage arithmetic: an additive commutative monoid
+// (Zero, Add) for combining usages of distinct occurrences, and a
+// multiplicative monoid (One, Mul) for composing usage through nested
+// positions, with Mul annihilated by Zero and distributing over Add — the
+// laws below state exactly that, and every instance is tested against them.
+type Semiring[Q any] class {
+	Zero() Q
+	One() Q
+	Add(a, b Q) Q
+	Mul(a, b Q) Q
+	// Compatible reports whether an observed usage satisfies a declared
+	// annotation (0 requires unused; 1 requires exactly once; ω accepts any).
+	Compatible(declared, used Q) bool
+
+	law AddAssoc(a, b, c Q) {
+		return reflect.DeepEqual(Add(Add(a, b), c), Add(a, Add(b, c)))
+	}
+	law AddComm(a, b Q) {
+		return reflect.DeepEqual(Add(a, b), Add(b, a))
+	}
+	law AddZero(a Q) {
+		return reflect.DeepEqual(Add(Zero(), a), a) && reflect.DeepEqual(Add(a, Zero()), a)
+	}
+	law MulAssoc(a, b, c Q) {
+		return reflect.DeepEqual(Mul(Mul(a, b), c), Mul(a, Mul(b, c)))
+	}
+	law MulOne(a Q) {
+		return reflect.DeepEqual(Mul(One(), a), a) && reflect.DeepEqual(Mul(a, One()), a)
+	}
+	law MulAnnihilates(a Q) {
+		return reflect.DeepEqual(Mul(Zero(), a), Zero()) && reflect.DeepEqual(Mul(a, Zero()), Zero())
+	}
+	law Distrib(a, b, c Q) {
+		return reflect.DeepEqual(Mul(a, Add(b, c)), Add(Mul(a, b), Mul(a, c))) &&
+			reflect.DeepEqual(Mul(Add(a, b), c), Add(Mul(a, c), Mul(b, c)))
+	}
+}
+
+// ZeroOneOmega is the default usage semiring: Atkey's 0/1/ω lattice. Zero
+// means erased, One linear, Omega unrestricted. Addition saturates: two
+// nonzero usages make ω. Multiplication is annihilated by 0 and saturates to
+// ω unless an operand is 1.
+//
+//gpp:laws gen=GenQty
+instance ZeroOneOmega Semiring[core.Qty] {
+	Zero() core.Qty { return core.QZero }
+	One() core.Qty { return core.QOne }
+	Add(a, b core.Qty) core.Qty {
+		if a == core.QZero {
+			return b
+		}
+		if b == core.QZero {
+			return a
+		}
+		return core.QMany
+	}
+	Mul(a, b core.Qty) core.Qty {
+		if a == core.QZero || b == core.QZero {
+			return core.QZero
+		}
+		if a == core.QOne {
+			return b
+		}
+		if b == core.QOne {
+			return a
+		}
+		return core.QMany
+	}
+	Compatible(declared, used core.Qty) bool {
+		switch declared {
+		case core.QMany:
+			return true
+		case core.QZero:
+			return used == core.QZero
+		case core.QOne:
+			return used == core.QOne
+		default:
+			return false
+		}
+	}
+}
+
+// Default returns the 0/1/ω semiring witness, Rune v1's sole
+// quantity-stratum implementation.
+func Default() Semiring[core.Qty] { return ZeroOneOmega }
