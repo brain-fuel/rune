@@ -1,3 +1,4 @@
+//go:generate go run goforge.dev/gpp/cmd/gpp@v0.11.0 gen .
 package core
 
 import (
@@ -59,115 +60,9 @@ const (
 	tagNatLit
 )
 
-// HashTerm computes the structural Merkle hash of a core term.
-//
-// THE STANDING RULE (CLAUDE.md): hashing operates structurally on the core term and
-// MUST NEVER call eval, normalize, or a future conversion routine. A definition's
-// identity is its SYNTAX, never its meaning modulo conversion. Because the core is de
-// Bruijn, alpha-equivalent terms are literally equal here and therefore hash equal;
-// Scope.Name is a pretty-printing hint and is deliberately not fed to the digest.
-func HashTerm(t Tm) Hash {
-	h := newHasher()
-	h.Write([]byte{hashFormatVersion})
-	writeTerm(h, t)
-	var out Hash
-	copy(out[:], h.Sum(nil))
-	return out
-}
-
-func writeTerm(h hash.Hash, t Tm) {
-	switch tm := t.(type) {
-	case Var:
-		h.Write([]byte{tagVar})
-		writeInt(h, tm.Idx)
-	case Ref:
-		h.Write([]byte{tagRef})
-		h.Write(tm.Hash[:])
-	case Univ:
-		h.Write([]byte{tagUniv})
-		writeInt(h, tm.Lvl)
-	case Pi:
-		h.Write([]byte{tagPi, byte(tm.Icit), byte(tm.Qty)})
-		writeTerm(h, tm.Dom)
-		writeScope(h, tm.Cod)
-	case Lam:
-		h.Write([]byte{tagLam, byte(tm.Icit), byte(tm.Qty)})
-		writeScope(h, tm.Body)
-	case App:
-		h.Write([]byte{tagApp, byte(tm.Icit)})
-		writeTerm(h, tm.Fn)
-		writeTerm(h, tm.Arg)
-	case Let:
-		h.Write([]byte{tagLet})
-		writeOptTerm(h, tm.Ty)
-		writeTerm(h, tm.Val)
-		writeScope(h, tm.Body)
-	case Ann:
-		h.Write([]byte{tagAnn})
-		writeTerm(h, tm.Term)
-		writeTerm(h, tm.Ty)
-	case Prop:
-		h.Write([]byte{tagProp})
-	case Eq:
-		h.Write([]byte{tagEq})
-		writeTerm(h, tm.Ty)
-		writeTerm(h, tm.L)
-		writeTerm(h, tm.R)
-	case Refl:
-		h.Write([]byte{tagRefl})
-		writeTerm(h, tm.Tm)
-	case Cast:
-		h.Write([]byte{tagCast})
-		writeTerm(h, tm.A)
-		writeTerm(h, tm.B)
-		writeTerm(h, tm.P)
-		writeTerm(h, tm.X)
-	case Subst:
-		h.Write([]byte{tagSubst})
-		writeTerm(h, tm.A)
-		writeTerm(h, tm.X)
-		writeTerm(h, tm.Y)
-		writeTerm(h, tm.Prf)
-		writeTerm(h, tm.P)
-		writeTerm(h, tm.Px)
-	case Sig:
-		h.Write([]byte{tagSig, byte(tm.Qty)})
-		writeTerm(h, tm.Dom)
-		writeScope(h, tm.Cod)
-	case Pair:
-		h.Write([]byte{tagPair})
-		writeTerm(h, tm.Dom)
-		writeScope(h, tm.Cod)
-		writeTerm(h, tm.A)
-		writeTerm(h, tm.B)
-	case Fst:
-		h.Write([]byte{tagFst})
-		writeTerm(h, tm.P)
-	case Snd:
-		h.Write([]byte{tagSnd})
-		writeTerm(h, tm.P)
-	case NatLit:
-		// A compressed numeral hashes its number (canonical big-endian, sign-free
-		// for Nat) framed by an explicit length, plus the nat binding's zero/succ
-		// constructor hashes (a literal is RELATIVE to a particular nat, so two
-		// bindings give distinct terms). Structural and eval-free, per the
-		// standing rule. tagNatLit is append-only. As of C7 / R-NUM the default
-		// numeral lowering emits NatLit, so numeral-bearing defs re-hash — the
-		// deliberate event the hashFormatVersion 0x06 bump records.
-		h.Write([]byte{tagNatLit})
-		b := tm.N.Bytes() // big-endian magnitude; empty for 0
-		writeInt(h, len(b))
-		h.Write(b)
-		h.Write(tm.Zero[:])
-		h.Write(tm.Succ[:])
-	case Meta:
-		// A metavariable has no content identity. Reaching one here means a
-		// definition was stored before being zonked — a checker bug, not data.
-		panic("core.HashTerm: metavariable in hashable core (unzonked term)")
-	default:
-		panic("core.HashTerm: unknown Tm constructor")
-	}
-}
+// HashTerm and writeTerm live in hash.gpp: writeTerm is a match over the Tm
+// enum. The preimage layout they produce is FROZEN — byte-for-byte what the
+// pre-gpp switch wrote (cmd/hashdump is the gate).
 
 // writeScope hashes a binder body. Scope.Name is NOT written: it is a display hint,
 // not identity. This is what makes alpha-equivalent terms hash equal.
