@@ -1,6 +1,8 @@
 package core
 
-// Phase 1: definitional conversion over the glued Val domain.
+// Phase 1: definitional conversion over the glued Val domain. Authored in G++
+// (v3.383.0): the Val/Neutral case analyses are matches — an added variant is
+// an exhaustiveness error at generation time, not a runtime panic.
 //
 // The glued fast path: two neutrals are compared SPINE-FIRST — syntactically, no
 // unfolding, no dependency logged. Only on mismatch does conversion force the lazy
@@ -94,45 +96,46 @@ func (m *Machine) Conv(lvl int, a, b Val) bool {
 		return r
 	}
 
-	switch x := a.(type) {
-	case VU:
+	match a {
+	case VU(alvl):
 		if y, ok := b.(VU); ok {
-			return x.Lvl == y.Lvl
+			return alvl == y.Lvl
 		}
 	case VProp:
 		if _, ok := b.(VProp); ok {
 			return true
 		}
-	case VEq:
+	case VEq(ty, l, r):
 		if y, ok := b.(VEq); ok {
-			return m.Conv(lvl, x.Ty, y.Ty) && m.Conv(lvl, x.L, y.L) && m.Conv(lvl, x.R, y.R)
+			return m.Conv(lvl, ty, y.Ty) && m.Conv(lvl, l, y.L) && m.Conv(lvl, r, y.R)
 		}
-	case VRefl:
+	case VRefl(_):
 		// Proof irrelevance at the canonical level: any two refl proofs are
 		// definitionally equal regardless of payload.
 		if _, ok := b.(VRefl); ok {
 			return true
 		}
-	case VPi:
+	case VPi(_, icit, qty, _, dom, cod):
 		if y, ok := b.(VPi); ok {
-			if x.Icit != y.Icit || x.Qty != y.Qty {
+			if icit != y.Icit || qty != y.Qty {
 				return false
 			}
 			v := VVar(lvl)
-			return m.Conv(lvl, x.Dom, y.Dom) && m.Conv(lvl+1, x.Cod(v), y.Cod(v))
+			return m.Conv(lvl, dom, y.Dom) && m.Conv(lvl+1, cod(v), y.Cod(v))
 		}
-	case VSig:
+	case VSig(_, qty, dom, cod):
 		if y, ok := b.(VSig); ok {
-			if x.Qty != y.Qty {
+			if qty != y.Qty {
 				return false
 			}
 			v := VVar(lvl)
-			return m.Conv(lvl, x.Dom, y.Dom) && m.Conv(lvl+1, x.Cod(v), y.Cod(v))
+			return m.Conv(lvl, dom, y.Dom) && m.Conv(lvl+1, cod(v), y.Cod(v))
 		}
-	case VNeu:
-		if y, ok := b.(VNeu); ok && m.convSpine(lvl, x.Spine, y.Spine) {
+	case VNeu(spine, _):
+		if y, ok := b.(VNeu); ok && m.convSpine(lvl, spine, y.Spine) {
 			return true // fast path: spines agree syntactically, nothing forced
 		}
+	case _:
 	}
 
 	// Mismatch: δ-unfold whichever sides can, and retry. If neither can, the
@@ -499,47 +502,45 @@ func (m *Machine) convGlueTop(lvl int, a, b Val) (bool, bool) {
 // variable level, same definition hash); arguments are compared with full Conv,
 // which may itself force inside an argument.
 func (m *Machine) convSpine(lvl int, p, q Neutral) bool {
-	switch x := p.(type) {
-	case NVar:
+	match p {
+	case NVar(plvl):
 		y, ok := q.(NVar)
-		return ok && x.Lvl == y.Lvl
-	case NRef:
+		return ok && plvl == y.Lvl
+	case NRef(ph):
 		y, ok := q.(NRef)
-		return ok && x.Hash == y.Hash
-	case NMeta:
+		return ok && ph == y.Hash
+	case NMeta(id):
 		// Core conversion treats an unsolved meta as rigid: equal only to
 		// itself. Solving-by-unification is elaborate/'s job, not conversion's.
 		y, ok := q.(NMeta)
-		return ok && x.ID == y.ID
-	case NCast:
+		return ok && id == y.ID
+	case NCast(a, cb, _, x):
 		// Casts compare on endpoints and subject; the PROOF is skipped —
 		// definitional proof irrelevance at the cast site.
 		y, ok := q.(NCast)
-		return ok && m.Conv(lvl, x.A, y.A) && m.Conv(lvl, x.B, y.B) && m.Conv(lvl, x.X, y.X)
-	case NSubst:
+		return ok && m.Conv(lvl, a, y.A) && m.Conv(lvl, cb, y.B) && m.Conv(lvl, x, y.X)
+	case NSubst(a, x, sy, _, sp, px):
 		// Likewise: everything but the proof.
 		y, ok := q.(NSubst)
-		return ok && m.Conv(lvl, x.A, y.A) && m.Conv(lvl, x.X, y.X) &&
-			m.Conv(lvl, x.Y, y.Y) && m.Conv(lvl, x.P, y.P) && m.Conv(lvl, x.Px, y.Px)
-	case NApp:
+		return ok && m.Conv(lvl, a, y.A) && m.Conv(lvl, x, y.X) &&
+			m.Conv(lvl, sy, y.Y) && m.Conv(lvl, sp, y.P) && m.Conv(lvl, px, y.Px)
+	case NApp(fn, arg, icit):
 		y, ok := q.(NApp)
-		return ok && x.Icit == y.Icit && m.convSpine(lvl, x.Fn, y.Fn) && m.Conv(lvl, x.Arg, y.Arg)
-	case NFst:
+		return ok && icit == y.Icit && m.convSpine(lvl, fn, y.Fn) && m.Conv(lvl, arg, y.Arg)
+	case NFst(sub):
 		y, ok := q.(NFst)
-		return ok && m.convSpine(lvl, x.P, y.P)
-	case NSnd:
+		return ok && m.convSpine(lvl, sub, y.P)
+	case NSnd(sub):
 		y, ok := q.(NSnd)
-		return ok && m.convSpine(lvl, x.P, y.P)
-	case NNatLit:
+		return ok && m.convSpine(lvl, sub, y.P)
+	case NNatLit(n, zero, succ):
 		// Two compressed numerals are equal iff they denote the same number of
 		// the SAME nat binding — an O(1) big.Int compare, the fast path that
 		// avoids peeling either chain. A literal vs a hand-written succ-chain is
 		// NOT handled here (the spines differ): the main Conv loop forces (peels)
 		// the literal one layer and retries, so the two inter-convert.
 		y, ok := q.(NNatLit)
-		return ok && x.Zero == y.Zero && x.Succ == y.Succ && x.N.Cmp(y.N) == 0
-	default:
-		panic("core.Conv: unknown Neutral constructor")
+		return ok && zero == y.Zero && succ == y.Succ && n.Cmp(y.N) == 0
 	}
 }
 

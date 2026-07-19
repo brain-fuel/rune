@@ -4,6 +4,9 @@ package core
 // term at a de Bruijn level. It does NOT force glued unfoldings: a neutral quotes
 // as its un-unfolded spine, so normal forms keep references the user wrote and
 // errors print near source. QuoteUnfold is the δ-normalizing variant.
+//
+// Authored in G++ (v3.383.0): the Val/Neutral case analyses are matches, so an
+// added variant is an exhaustiveness error here, not a runtime panic.
 
 // RestrictIv is value face-restriction along a single atomic interval constraint
 // (FACE-RESTRICTED-EVAL-DESIGN.md step 2): it returns v with the free interval
@@ -33,34 +36,32 @@ func (m *Machine) RestrictIv(lvl, atLevel int, endpoint, v Val) Val {
 // Quote reads v back into a term. lvl is the number of binders in scope: a free
 // variable at level l quotes to index lvl-1-l.
 func (m *Machine) Quote(lvl int, v Val) Tm {
-	switch x := v.(type) {
-	case VU:
-		return Univ{Lvl: x.Lvl}
+	match v {
+	case VU(ulvl):
+		return Univ(ulvl)
 	case VProp:
-		return Prop{}
-	case VEq:
-		return Eq{Ty: m.Quote(lvl, x.Ty), L: m.Quote(lvl, x.L), R: m.Quote(lvl, x.R)}
-	case VRefl:
-		return Refl{Tm: m.Quote(lvl, x.V)}
-	case VPi:
-		dom := m.Quote(lvl, x.Dom)
-		body := m.Quote(lvl+1, x.Cod(VVar(lvl)))
-		return Pi{Icit: x.Icit, Qty: x.Qty, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
-	case VLam:
-		body := m.Quote(lvl+1, x.Body(VVar(lvl)))
-		return Lam{Icit: x.Icit, Qty: x.Qty, Body: Scope{Name: x.Name, Body: body}}
-	case VSig:
-		dom := m.Quote(lvl, x.Dom)
-		body := m.Quote(lvl+1, x.Cod(VVar(lvl)))
-		return Sig{Qty: x.Qty, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
-	case VPair:
-		body := m.Quote(lvl+1, x.Cod(VVar(lvl)))
-		return Pair{Dom: m.Quote(lvl, x.Dom), Cod: Scope{Name: x.Name, Body: body},
-			A: m.Quote(lvl, x.A), B: m.Quote(lvl, x.B)}
-	case VNeu:
-		return m.quoteSpine(lvl, x.Spine, m.Quote)
-	default:
-		panic("core.Quote: unknown Val constructor")
+		return Prop
+	case VEq(ty, l, r):
+		return Eq(m.Quote(lvl, ty), m.Quote(lvl, l), m.Quote(lvl, r))
+	case VRefl(pv):
+		return Refl(m.Quote(lvl, pv))
+	case VPi(name, icit, qty, _, dom, cod):
+		domT := m.Quote(lvl, dom)
+		body := m.Quote(lvl+1, cod(VVar(lvl)))
+		return Pi(icit, qty, domT, Scope{Name: name, Body: body})
+	case VLam(name, icit, qty, fbody):
+		body := m.Quote(lvl+1, fbody(VVar(lvl)))
+		return Lam(icit, qty, Scope{Name: name, Body: body})
+	case VSig(name, qty, dom, cod):
+		domT := m.Quote(lvl, dom)
+		body := m.Quote(lvl+1, cod(VVar(lvl)))
+		return Sig(qty, domT, Scope{Name: name, Body: body})
+	case VPair(name, dom, cod, a, b):
+		body := m.Quote(lvl+1, cod(VVar(lvl)))
+		return Pair(m.Quote(lvl, dom), Scope{Name: name, Body: body},
+			m.Quote(lvl, a), m.Quote(lvl, b))
+	case VNeu(spine, _):
+		return m.quoteSpine(lvl, spine, m.Quote)
 	}
 }
 
@@ -90,63 +91,60 @@ func (m *Machine) QuoteUnfold(lvl int, v Val) Tm {
 	// peel (NatLit n -> succ (NatLit (n-1))), defeating the compact form and, for
 	// a large n, recursing n deep through QuoteUnfold (the stack blowup).
 	if lit, ok := m.forceToNatLit(v); ok {
-		return NatLit{N: lit.N, Zero: lit.Zero, Succ: lit.Succ}
+		return NatLit(lit.N, lit.Zero, lit.Succ)
 	}
 	v = m.Force(v)
-	switch x := v.(type) {
-	case VU:
-		return Univ{Lvl: x.Lvl}
+	match v {
+	case VU(ulvl):
+		return Univ(ulvl)
 	case VProp:
-		return Prop{}
-	case VEq:
-		return Eq{Ty: m.QuoteUnfold(lvl, x.Ty), L: m.QuoteUnfold(lvl, x.L), R: m.QuoteUnfold(lvl, x.R)}
-	case VRefl:
-		return Refl{Tm: m.QuoteUnfold(lvl, x.V)}
-	case VPi:
-		dom := m.QuoteUnfold(lvl, x.Dom)
-		body := m.QuoteUnfold(lvl+1, x.Cod(VVar(lvl)))
-		return Pi{Icit: x.Icit, Qty: x.Qty, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
-	case VLam:
-		body := m.QuoteUnfold(lvl+1, x.Body(VVar(lvl)))
-		return Lam{Icit: x.Icit, Qty: x.Qty, Body: Scope{Name: x.Name, Body: body}}
-	case VSig:
-		dom := m.QuoteUnfold(lvl, x.Dom)
-		body := m.QuoteUnfold(lvl+1, x.Cod(VVar(lvl)))
-		return Sig{Qty: x.Qty, Dom: dom, Cod: Scope{Name: x.Name, Body: body}}
-	case VPair:
-		body := m.QuoteUnfold(lvl+1, x.Cod(VVar(lvl)))
-		return Pair{Dom: m.QuoteUnfold(lvl, x.Dom), Cod: Scope{Name: x.Name, Body: body},
-			A: m.QuoteUnfold(lvl, x.A), B: m.QuoteUnfold(lvl, x.B)}
-	case VNeu:
-		return m.quoteSpine(lvl, x.Spine, m.QuoteUnfold)
-	default:
-		panic("core.QuoteUnfold: unknown Val constructor")
+		return Prop
+	case VEq(ty, l, r):
+		return Eq(m.QuoteUnfold(lvl, ty), m.QuoteUnfold(lvl, l), m.QuoteUnfold(lvl, r))
+	case VRefl(pv):
+		return Refl(m.QuoteUnfold(lvl, pv))
+	case VPi(name, icit, qty, _, dom, cod):
+		domT := m.QuoteUnfold(lvl, dom)
+		body := m.QuoteUnfold(lvl+1, cod(VVar(lvl)))
+		return Pi(icit, qty, domT, Scope{Name: name, Body: body})
+	case VLam(name, icit, qty, fbody):
+		body := m.QuoteUnfold(lvl+1, fbody(VVar(lvl)))
+		return Lam(icit, qty, Scope{Name: name, Body: body})
+	case VSig(name, qty, dom, cod):
+		domT := m.QuoteUnfold(lvl, dom)
+		body := m.QuoteUnfold(lvl+1, cod(VVar(lvl)))
+		return Sig(qty, domT, Scope{Name: name, Body: body})
+	case VPair(name, dom, cod, a, b):
+		body := m.QuoteUnfold(lvl+1, cod(VVar(lvl)))
+		return Pair(m.QuoteUnfold(lvl, dom), Scope{Name: name, Body: body},
+			m.QuoteUnfold(lvl, a), m.QuoteUnfold(lvl, b))
+	case VNeu(spine, _):
+		return m.quoteSpine(lvl, spine, m.QuoteUnfold)
 	}
 }
 
 // quoteSpine reads a neutral spine back into a term, quoting argument values with
 // quoteVal (Quote or QuoteUnfold, so the two modes stay in sync).
 func (m *Machine) quoteSpine(lvl int, n Neutral, quoteVal func(int, Val) Tm) Tm {
-	switch s := n.(type) {
-	case NVar:
-		return Var{Idx: lvl - 1 - s.Lvl}
-	case NRef:
-		return Ref{Hash: s.Hash}
-	case NMeta:
-		return Meta{ID: s.ID}
-	case NCast:
-		return Cast{A: quoteVal(lvl, s.A), B: quoteVal(lvl, s.B),
-			P: quoteVal(lvl, s.P), X: quoteVal(lvl, s.X)}
-	case NSubst:
-		return Subst{A: quoteVal(lvl, s.A), X: quoteVal(lvl, s.X), Y: quoteVal(lvl, s.Y),
-			Prf: quoteVal(lvl, s.Prf), P: quoteVal(lvl, s.P), Px: quoteVal(lvl, s.Px)}
-	case NApp:
-		return App{Fn: m.quoteSpine(lvl, s.Fn, quoteVal), Arg: quoteVal(lvl, s.Arg), Icit: s.Icit}
-	case NFst:
-		return Fst{P: m.quoteSpine(lvl, s.P, quoteVal)}
-	case NSnd:
-		return Snd{P: m.quoteSpine(lvl, s.P, quoteVal)}
-	case NNatLit:
+	match n {
+	case NVar(nlvl):
+		return Var(lvl - 1 - nlvl)
+	case NRef(h):
+		return Ref(h)
+	case NMeta(id):
+		return Meta(id)
+	case NCast(a, b, p, x):
+		return Cast(quoteVal(lvl, a), quoteVal(lvl, b), quoteVal(lvl, p), quoteVal(lvl, x))
+	case NSubst(a, x, y, prf, p, px):
+		return Subst(quoteVal(lvl, a), quoteVal(lvl, x), quoteVal(lvl, y),
+			quoteVal(lvl, prf), quoteVal(lvl, p), quoteVal(lvl, px))
+	case NApp(fn, arg, icit):
+		return App(m.quoteSpine(lvl, fn, quoteVal), quoteVal(lvl, arg), icit)
+	case NFst(p):
+		return Fst(m.quoteSpine(lvl, p, quoteVal))
+	case NSnd(p):
+		return Snd(m.quoteSpine(lvl, p, quoteVal))
+	case NNatLit(nv, zero, succ):
 		// A compressed numeral quotes back to a NatLit term (not its peeled
 		// chain): Quote keeps the un-forced spine, so a literal stays a literal.
 		// Under QuoteUnfold the canonical top-level literal is caught by the
@@ -155,9 +153,7 @@ func (m *Machine) quoteSpine(lvl int, n Neutral, quoteVal func(int, Val) Tm) Tm 
 		// of a still-neutral spine (e.g. a generalized `builtin nat` chain, or a
 		// literal nested under another neutral). Either way no succ^n chain is
 		// materialised — NormalizeUnfold of a closed literal stays compact.
-		return NatLit{N: s.N, Zero: s.Zero, Succ: s.Succ}
-	default:
-		panic("core.Quote: unknown Neutral constructor")
+		return NatLit(nv, zero, succ)
 	}
 }
 
