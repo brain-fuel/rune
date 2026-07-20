@@ -215,10 +215,13 @@ func serverRoundTrip(t *testing.T, name string, newCmd func() *exec.Cmd) {
 // bin/build-bearssl.sh). bearsslArgs returns the -I include flag and the archive
 // path to append to a native compile; empty if the lib is not built (crypto/TLS
 // native tests then skip via bearsslReady).
-func bearsslDir() string  { d, _ := filepath.Abs(filepath.Join("..", "third_party", "bearssl")); return d }
-func bearsslInc() string  { return filepath.Join(bearsslDir(), "inc") }
-func bearsslLib() string  { return filepath.Join(bearsslDir(), "build", "libbearssl.a") }
-func bearsslReady() bool  { _, err := os.Stat(bearsslLib()); return err == nil }
+func bearsslDir() string {
+	d, _ := filepath.Abs(filepath.Join("..", "third_party", "bearssl"))
+	return d
+}
+func bearsslInc() string { return filepath.Join(bearsslDir(), "inc") }
+func bearsslLib() string { return filepath.Join(bearsslDir(), "build", "libbearssl.a") }
+func bearsslReady() bool { _, err := os.Stat(bearsslLib()); return err == nil }
 func bearsslShim() string {
 	d, _ := filepath.Abs(filepath.Join("..", "third_party", "bearssl_shim", "rune_tls.c"))
 	return d

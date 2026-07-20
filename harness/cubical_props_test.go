@@ -263,6 +263,7 @@ func elemOfNat2(depth int) string {
 //   - transp/transpG over a constant line ~> the element (regularity);
 //   - hcomp/comp with a ⊤ system ~> u i1 htop (= the element, the wall at ⊤);
 //   - hcomp with ⊥ ~> u0; comp over a constant line with ⊥ ~> u0.
+//
 // A green property is direct evidence the closed Kan fragment is canonical.
 func genKan(t *rapid.T, ty *fibTy, depth int) string {
 	elem := genElem(t, ty, depth)

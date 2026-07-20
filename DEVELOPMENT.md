@@ -6,16 +6,16 @@ report what (if anything) still needs a system package. The Go toolchain + `go t
 ./...` alone covers the pure language core; the dependencies below unlock the
 multi-backend conformance gates and the D3/D4/E4 tiers.
 
-## The kernel is authored in G++ (v3.383.0; elaborate/store since v3.384.0)
+## The kernel is authored in Go+ (v3.383.0; elaborate/store since v3.384.0)
 
 `core/`, `quantity/`, `equality/`, `elaborate/`, and `store/` are written in
-[G++](https://goforge.dev/gpp) — the `.gpp` files are the source of
-truth and the committed `*_gpp.go` files are their generated Go, so
+[Go+](https://goforge.dev/goplus) — the `.gp` files are the source of
+truth and the committed `*_gp.go` files are their generated Go, so
 plain `go build`/`go test` needs NO extra toolchain. To EDIT the
-kernel: change the `.gpp` file, then regenerate with
-`go run goforge.dev/gpp/cmd/gpp@v0.14.0 gen .` in that directory (the
+kernel: change the `.gp` file, then regenerate with
+`go run goforge.dev/goplus/cmd/goplus@v0.14.0 gen .` in that directory (the
 pinned `//go:generate` line in `core/hash.go` does the same via
-`go generate ./core/...`). Never edit a `*_gpp.go` file by hand.
+`go generate ./core/...`). Never edit a `*_gp.go` file by hand.
 `cmd/hashdump` is the hash-stability harness: run it before and after
 any kernel change and diff — the content-hash format is frozen and any
 difference is a regression.

@@ -50,7 +50,7 @@ func LoadSet(s *Session, sources []NamedSource) error {
 	//   (b) i declares `import M` or `alias M …` and j defines at least one
 	//       name with the prefix "M." (module-qualified defs).
 	// In both cases self-edges (j == i) and duplicates are skipped.
-	adj := make([][]int, len(ps))   // adj[j] = files that depend on j
+	adj := make([][]int, len(ps)) // adj[j] = files that depend on j
 	indeg := make([]int, len(ps))
 	for i, p := range ps {
 		seen := map[int]bool{}

@@ -198,9 +198,9 @@ main : Nat -> Nat is applyTwice idFun end
 //
 // STEADY-STATE: $rt_live must be flat after run 1. Each run allocates:
 //
-//   K_CLO_g      -- fn (g : Nat->Nat) is g end  (passed to applyTwice)
-//   K_CLO_unused -- fn (y : Nat)      is y end  (dead let-binding, CDrop'd)
-//   K_CLO_z      -- fn (z : Nat)      is z end  (argument to f, result)
+//	K_CLO_g      -- fn (g : Nat->Nat) is g end  (passed to applyTwice)
+//	K_CLO_unused -- fn (y : Nat)      is y end  (dead let-binding, CDrop'd)
+//	K_CLO_z      -- fn (z : Nat)      is z end  (argument to f, result)
 //
 // All three are allocated fresh each run and released before the loop
 // advances: K_CLO_unused by CDrop, K_CLO_g by the two CLet+CDrop wrappers
@@ -852,7 +852,7 @@ func TestPerceusRealisticFlat(t *testing.T) {
 	// no CBounce) -- a guard that the predicate actually admits this realistic shape.
 	p := mustProgram(t, perceusRealisticSrc, "mainReal")
 	if !cg.PerceusBalanceable(p) {
-		t.Fatalf("realistic program should be PerceusBalanceable (literal + ctor + inline "+
+		t.Fatalf("realistic program should be PerceusBalanceable (literal + ctor + inline " +
 			"non-recursive eliminator + succ arithmetic, no builtin-nat fold)")
 	}
 	// Steady-flat: zero per-run increment across runs 2..5.
@@ -1293,8 +1293,9 @@ func TestPerceusBareRebindUsesBoth(t *testing.T) {
 //	(local.get $t1)                        ;; return h (rc=1, alive)
 //
 // ASSERTION: the emitted WAT must NOT contain "(call $rt_release (local.get $arg))".
-//   Pre-fix:  FAILS -- the release is present (catches the regression).
-//   Post-fix: PASSES -- the release is absent (validates the fix).
+//
+//	Pre-fix:  FAILS -- the release is present (catches the regression).
+//	Post-fix: PASSES -- the release is absent (validates the fix).
 //
 // This is the EXACT one-line diff the controller verified against 2f3c027:perceus.go.
 // userClosureWAT returns the concatenated WAT of the emitted USER-closure code
@@ -1336,7 +1337,9 @@ func TestPerceusBareRebindWATGuard(t *testing.T) {
 //
 // The CLet shared-var-dup loop (independent of the FIX 1 bodyOwned arm) inserts
 // CDup{g} because g appears in BOTH Val (CVar{0}) and x.Body (CVar{1} after shift):
-//   CDup{CVar{0}, CLet{"h", CVar{0}, CDrop{CVar{0}, CVar{1}}}}
+//
+//	CDup{CVar{0}, CLet{"h", CVar{0}, CDrop{CVar{0}, CVar{1}}}}
+//
 // Sequence: retain g (rc 1->2); set h=g; CDrop h (rc 2->1); return g (rc=1).
 //
 // Crucially, the WAT for this program is IDENTICAL pre-fix and post-fix (the
@@ -1370,14 +1373,16 @@ func TestPerceusBareRebindReturnSrc(t *testing.T) {
 // a fresh result closure -- neither h nor g appears in the MkClosure body.
 //
 // Post-fix (FIX 1): bodyOwned[1]=false (g not owned in body); only h is dead-dropped
-//   (CDrop{CVar{0}, MkClosure{...}}); g is freed exactly once via h (same pointer).
-//   WAT: (call $rt_release (local.get $t1)) -- releases $t1 (= h = g); no release of $arg.
+//
+//	(CDrop{CVar{0}, MkClosure{...}}); g is freed exactly once via h (same pointer).
+//	WAT: (call $rt_release (local.get $t1)) -- releases $t1 (= h = g); no release of $arg.
 //
 // Pre-fix: bodyOwned=[true,true]; both h (index 0) AND g (index 1) are dead-dropped:
-//   CDrop{CVar{0}, CDrop{CVar{1}, MkClosure{...}}} in the body context where
-//   CVar{1} = $arg -> WAT contains "(call $rt_release (local.get $arg))" (double-free!).
-//   The same WAT guard string TestPerceusBareRebindWATGuard checks covers this shape;
-//   this program has its own structural check below to pin the dead-h invariant.
+//
+//	CDrop{CVar{0}, CDrop{CVar{1}, MkClosure{...}}} in the body context where
+//	CVar{1} = $arg -> WAT contains "(call $rt_release (local.get $arg))" (double-free!).
+//	The same WAT guard string TestPerceusBareRebindWATGuard checks covers this shape;
+//	this program has its own structural check below to pin the dead-h invariant.
 const perceusBareRebindDeadHSrc = `
 data Nat : U is
   zero : Nat
@@ -2057,6 +2062,7 @@ mainReuse : Nat is binAt (extractReuse (binCons 5 binEmpty)) 0 end
 //   - the reuse-window shape (output 9): the pre-guard stale drop frees a REUSED
 //     live block -- a wasmtime table-access trap -- so this asserts the guard
 //     turns a hard corruption into correct, steady-flat execution.
+//
 // Teeth: on main (no cirConsumesArg guard) the reuse case TRAPS and the
 // multi-consume case over-releases; with the guard both are correct and flat.
 func TestPerceusCLetDeadConsumeNoDoubleFree(t *testing.T) {

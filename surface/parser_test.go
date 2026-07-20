@@ -274,8 +274,8 @@ func TestDecimalLiterals(t *testing.T) {
 		{"2.5", div(25, 10, 0)},
 		{"0.75", div(75, 100, 0)},
 		{"3.14", div(314, 100, 0)},
-		{"1.{3}", div(12, 9, 0)},     // = 4/3 after reduce
-		{"0.1{6}", div(15, 90, 0)},   // = 1/6 after reduce
+		{"1.{3}", div(12, 9, 0)},   // = 4/3 after reduce
+		{"0.1{6}", div(15, 90, 0)}, // = 1/6 after reduce
 		{"10.{142857}", div(10*999999+142857, 999999, 0)},
 		{"-2.5", neg(div(25, 10, 1))}, // prefix minus, decimal token at offset 1
 	}

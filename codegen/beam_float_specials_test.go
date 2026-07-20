@@ -72,7 +72,7 @@ func runBeamFloat(t *testing.T, src string) string {
 //   - isNaN (0.0 / 0.0)            -> nan               (fdiv 0/0)
 //   - 1.0 <= (1.0 / 0.0)           -> 1 <= +inf = true  (fle over fleqN, +inf)
 //   - isNaN (+inf + -inf)          -> nan               (fadd, opposite infinities;
-//                                                         -inf built as (0-1)/0)
+//     -inf built as (0-1)/0)
 //   - (1.0 + 2.0) == 3.0           -> finite still works (fadd/feq unchanged path)
 const beamFloatSpecialsCorpus = `
 zeroF : Std.Float.Float is Std.Float.fromNat zero end

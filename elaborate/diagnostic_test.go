@@ -8,11 +8,11 @@ func TestSuggestDidYouMean(t *testing.T) {
 		typo string
 		want string // the first suggestion, or "" for none
 	}{
-		{"strHed", "strHead"},  // one deletion
-		{"codeof", "codeOf"},   // case slip
-		{"byts", "Bytes"},      // tie broken alphabetically (Bytes < bytes)
-		{"strApp", ""},         // exact name is not a suggestion for itself
-		{"zzzqqqxxx", ""},      // nothing close
+		{"strHed", "strHead"}, // one deletion
+		{"codeof", "codeOf"},  // case slip
+		{"byts", "Bytes"},     // tie broken alphabetically (Bytes < bytes)
+		{"strApp", ""},        // exact name is not a suggestion for itself
+		{"zzzqqqxxx", ""},     // nothing close
 	}
 	for _, c := range cases {
 		got := suggest(c.typo, cands)

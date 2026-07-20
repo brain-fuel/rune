@@ -785,7 +785,6 @@ func (p *parser) parseDef() (Def, error) {
 	return d, nil
 }
 
-
 func (p *parser) parseExpr() (Exp, error) {
 	if p.peek().kind == tLet {
 		return p.parseLet()

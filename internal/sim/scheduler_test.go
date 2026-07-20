@@ -126,9 +126,9 @@ func observedAt(run *Run, step, n int) []string {
 func TestGCounterDivergesThenConverges(t *testing.T) {
 	s := loadSession(t, gcounterSrc)
 	rounds := []Round{
-		{Local: map[int]string{0: "inc0"}},                      // step 0: r0 += 1
+		{Local: map[int]string{0: "inc0"}},                          // step 0: r0 += 1
 		{Local: map[int]string{0: "inc0", 1: "inc1"}, Gossip: true}, // step 1: r0 += 1, r1 += 1, gossip PARTITIONED
-		{Gossip: true},                                          // step 2: gossip heals
+		{Gossip: true}, // step 2: gossip heals
 	}
 	pol := FaultPolicy{Partitioned: func(step, i, j int) bool { return step == 1 }}
 
@@ -272,7 +272,7 @@ func TestLWWStaysDivergent(t *testing.T) {
 	s := loadSession(t, lwwSrc)
 	rounds := []Round{
 		{Local: map[int]string{0: "w2", 1: "w1"}}, // r0 writes 2, r1 writes 1
-		{Gossip: true},                             // healthy gossip, but no join
+		{Gossip: true}, // healthy gossip, but no join
 	}
 	run, err := Simulate(s, "lw zero", "mergeLW", "valueLW", 2, rounds, FaultPolicy{})
 	if err != nil {

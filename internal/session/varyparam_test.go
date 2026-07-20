@@ -39,7 +39,9 @@ func TestSuspVaryingParamSouth(t *testing.T) {
 }
 
 // transp (λi. Quotient (Afam i) (Rfam i)) (qinc (Afam i0) (Rfam i0) a)
-//   ~> qinc (Afam i1) (Rfam i1) (transp (λi. Afam i) a)
+//
+//	~> qinc (Afam i1) (Rfam i1) (transp (λi. Afam i) a)
+//
 // The carried element transports along the carrier line; the indices re-index.
 func TestQuotVaryingParamInc(t *testing.T) {
 	s := New()
@@ -59,7 +61,8 @@ func TestQuotVaryingParamInc(t *testing.T) {
 
 // The quotient RELATION point transports both carriers and the witness, then
 // rebuilds qrel: transp (λi. Quotient (A i)(R i)) (qrel … a b r @ k)
-//   ~> qrel (A i1)(R i1) (transp a)(transp b)(transp_R r) @ k.
+//
+//	~> qrel (A i1)(R i1) (transp a)(transp b)(transp_R r) @ k.
 func TestQuotVaryingParamRel(t *testing.T) {
 	s := New()
 	src := `fn (Afam : I -> UF) (Rfam : (i : I) -> El (Afam i) -> El (Afam i) -> UF)

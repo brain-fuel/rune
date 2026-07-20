@@ -147,16 +147,16 @@ type ECase struct {
 	Clauses []CaseClause
 }
 
-func (EVar) isExp()  {}
-func (EHole) isExp() {}
-func (EProp) isExp() {}
-func (EEq) isExp()   {}
-func (ERefl) isExp() {}
-func (ECast) isExp() {}
-func (EUniv) isExp() {}
-func (ELam) isExp()  {}
-func (EApp) isExp()  {}
-func (EPi) isExp()   {}
+func (EVar) isExp()     {}
+func (EHole) isExp()    {}
+func (EProp) isExp()    {}
+func (EEq) isExp()      {}
+func (ERefl) isExp()    {}
+func (ECast) isExp()    {}
+func (EUniv) isExp()    {}
+func (ELam) isExp()     {}
+func (EApp) isExp()     {}
+func (EPi) isExp()      {}
 func (ELet) isExp()     {}
 func (ESeqBind) isExp() {}
 func (EAnn) isExp()     {}
@@ -343,8 +343,8 @@ type Item interface {
 	isItem()
 }
 
-func (Def) isItem()          {}
-func (DataDef) isItem()      {}
+func (Def) isItem()           {}
+func (DataDef) isItem()       {}
 func (DefGroup) isItem()      {}
 func (DataGroup) isItem()     {}
 func (BuiltinNat) isItem()    {}

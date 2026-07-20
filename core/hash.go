@@ -1,4 +1,4 @@
-//go:generate go run goforge.dev/gpp/cmd/gpp@v0.14.0 gen .
+//go:generate go run goforge.dev/goplus/cmd/goplus@v0.14.0 gen .
 package core
 
 import (
@@ -60,9 +60,9 @@ const (
 	tagNatLit
 )
 
-// HashTerm and writeTerm live in hash.gpp: writeTerm is a match over the Tm
+// HashTerm and writeTerm live in hash.gp: writeTerm is a match over the Tm
 // enum. The preimage layout they produce is FROZEN — byte-for-byte what the
-// pre-gpp switch wrote (cmd/hashdump is the gate).
+// pre-goplus switch wrote (cmd/hashdump is the gate).
 
 // writeScope hashes a binder body. Scope.Name is NOT written: it is a display hint,
 // not identity. This is what makes alpha-equivalent terms hash equal.

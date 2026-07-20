@@ -47,11 +47,11 @@ type Provenance struct {
 type Entry struct {
 	Name       string
 	Tier       Tier
-	PropHash   core.Hash  // identity of the CLAIM = content hash of the type
-	ProofHash  core.Hash  // identity of the WITNESS = content hash of the body (zero if bodiless)
-	Why        string     // postulate/assume reason (Task 4)
-	File       string     // source file (Task 6)
-	Line       int        // 1-based source line (Task 6)
+	PropHash   core.Hash // identity of the CLAIM = content hash of the type
+	ProofHash  core.Hash // identity of the WITNESS = content hash of the body (zero if bodiless)
+	Why        string    // postulate/assume reason (Task 4)
+	File       string    // source file (Task 6)
+	Line       int       // 1-based source line (Task 6)
 	Provenance Provenance
 }
 

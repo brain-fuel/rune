@@ -243,7 +243,7 @@ first and forces only on mismatch, so the fast path logs nothing.
   core.KanInfo, mirroring IntervalHash/SysHash) so an ι-rule can CONSTRUCT
   `El`/`transp`/`hcomp` sub-terms. Helper `fibFormer` probes a type-line at the
   freshness sentinel and reads its former. Three `transpFill`-free rules ship
-  (core/eval.gpp; listing ch23):
+  (core/eval.gp; listing ch23):
   - `transp (λi. piF D (Fam i)) f ~> λx. transp (λi. Fam i x) (f x)` — CONSTANT
     domain (the constancy of D is what removes the argument fill).
   - `hcomp (piF P Fam) φ u u0 ~> λx. hcomp (Fam x) φ (λi h. u i h x) (u0 x)` —
@@ -270,7 +270,7 @@ first and forces only on mismatch, so the fast path logs nothing.
   tiered-verified stdlib + OTP; verified process-calculus distributed algebra).
   19 design docs in `ref_docs/wootz/` (`00-INDEX.md`). Landed so far:
   - **A1 / R-FILL** — `transpG` generalized transport (4th Kan member) +
-    `transpFill` + the varying-domain `piF` transport rule (core/eval.gpp,
+    `transpFill` + the varying-domain `piF` transport rule (core/eval.gp,
     store/kan.go; ch23). The cubical-interior keystone.
   - **C1 / R-SUM (core)** — dependent pairs Σ in the OUTER core: Sig/Pair/Fst/Snd
     with β + **definitional η** (the one Thompson-sensitive conv.go edit),
@@ -366,7 +366,7 @@ first and forces only on mismatch, so the fast path logs nothing.
     the path-assembly endpoint coherence is NOT definitional (the lmap-projected
     delayed tail-path stays neutral, so `consG (headG s)(…) ≢ s`), so the converse
     needs Kan endpoint-REPAIR (`hcomp` over `gStr`) — a cubical construction. The
-    REPAIR ENABLER is landed (core/eval.gpp): `hcomp` over a `gfix`-typed value now
+    REPAIR ENABLER is landed (core/eval.gp): `hcomp` over a `gfix`-typed value now
     reduces — `unfoldGfixType` unfolds `gfix k F ≡ F (gfix k F)` (a sigmaF) so the
     structural-Σ Kan rule fires (`hcomp (gStr) φ u u0 ~> pairF …`,
     TestHcompOverGfixUnfolds); ch69 `hcompHeadG`/`hcompTailG` verify the repair is
@@ -432,7 +432,7 @@ first and forces only on mismatch, so the fast path logs nothing.
     global endpoint-repair route needs a NEW KERNEL ENABLER — **Kan-over-Nu** (hcomp/
     transp over a coinductive type computing componentwise through `out`/`unfold`, the
     global-side dual of hcomp-over-gfix); the most tractable unblock for the closed
-    converse. **KAN-OVER-Nu is now LANDED** (core/eval.gpp `tryCoindIota`; ch69
+    converse. **KAN-OVER-Nu is now LANDED** (core/eval.gp `tryCoindIota`; ch69
     `hcompHeadStr`/`hcompTailStr` refl; session `TestOutCommutesWithHcompOverNu`):
     `out` commutes with hcomp over a coinductive type — `out F (hcomp (Nu F) φ u u0)
     ~> hcomp (F (Nu F)) φ (out∘u)(out u0)`. Since `Nu` is negative (not its unfolding;
@@ -450,7 +450,7 @@ first and forces only on mismatch, so the fast path logs nothing.
     constant Str line = id (regularity). REMAINING (both routes converge): the
     interpolant for arbitrary `s`/`t` — a StreamF coalgebra driven by the bisimilarity —
     then `repairEndpointsStr`; the repair + observation machinery beneath it is all
-    landed. **FINAL-COALGEBRA η is now LANDED** (core/eval.gpp `tryUnfoldEta`; ch69
+    landed. **FINAL-COALGEBRA η is now LANDED** (core/eval.gp `tryUnfoldEta`; ch69
     `nuEta` refl; session `TestUnfoldEtaFinalCoalgebra`): `unfold F (Nu F) (out F) s ~>
     s` — the coinductive uniqueness law (anamorphism into the final coalgebra at carrier
     `Nu F` with coalgebra `out` = id), dual to Kan-over-Nu, the negative-type η for

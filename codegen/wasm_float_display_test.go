@@ -452,13 +452,13 @@ func dragon4Digits(mant uint64, expo int) (string, int) {
 		}
 	} else {
 		if expo <= 1 || !isBoundary {
-			R.Lsh(f, 1)             // R = f*2
-			S.Lsh(one, uint(1-e))   // S = 2^(1-e)
+			R.Lsh(f, 1)           // R = f*2
+			S.Lsh(one, uint(1-e)) // S = 2^(1-e)
 			Mp.SetInt64(1)
 			Mm.SetInt64(1)
 		} else {
-			R.Lsh(f, 2)             // R = f*4
-			S.Lsh(one, uint(2-e))   // S = 2^(2-e)
+			R.Lsh(f, 2)           // R = f*4
+			S.Lsh(one, uint(2-e)) // S = 2^(2-e)
 			Mp.SetInt64(2)
 			Mm.SetInt64(1)
 		}

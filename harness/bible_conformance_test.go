@@ -825,7 +825,7 @@ func TestBibleNativeFold(t *testing.T) {
 
 // TestBibleNativePure verifies the 4 pure bible ops (byteLen/splitOn/jsonStrField/sqlQuote)
 // on both native backends (C and LLVM). Expected values match the source-backend gates:
-// strongLen=5 (byteLen of "G0026") and quoteEmbedded=6 (byteLen of "'a''b'").
+// strongLen=5 (byteLen of "G0026") and quoteEmbedded=6 (byteLen of "'a”b'").
 func TestBibleNativePure(t *testing.T) {
 	cases := []struct{ listing, main, cwd, want string }{
 		{"ch551_json_field.rune", "strongLen", "", "5"},
@@ -985,8 +985,10 @@ func TestBibleWasmPure(t *testing.T) {
 // closeWrite/sortFile) on the ninth backend: the WASI file-write helper ($d6_wopen via
 // path_open O_CREAT|O_TRUNC + fd_write) + the $D6WH linear-memory fd handle table run
 // under `wasmtime run --dir=<tmp>` and produce the byte-identical cross-backend results:
-//   ch552 -> 2\n2 (write 2 lines, foldLines counts them)
-//   ch553 -> 5\n5 (write cherry/apple/banana, sortFile, foldLines first-line byteLen)
+//
+//	ch552 -> 2\n2 (write 2 lines, foldLines counts them)
+//	ch553 -> 5\n5 (write cherry/apple/banana, sortFile, foldLines first-line byteLen)
+//
 // Each case gets its own t.TempDir() as the wasmtime preopen/cwd so files created inside
 // the module land in a fresh sandbox. Skips if wasmtime absent.
 func TestBibleWasmWriteStream(t *testing.T) {

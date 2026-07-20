@@ -21,7 +21,7 @@ import (
 //  1. Seeds the immortal UNIT singleton.
 //  2. Loops `runs` times, each iteration:
 //     a. Evaluates the main definition's body DIRECTLY (not through the cached
-//        thunk, so each run freshly executes the body -- see note below).
+//     thunk, so each run freshly executes the body -- see note below).
 //     b. Releases the result with $rt_release.
 //     c. Prints $rt_live (the live-block count) as a decimal integer.
 //     d. Prints a newline.

@@ -42,10 +42,11 @@ func runNatMainNode(t *testing.T, listing, main string) string {
 // list (List Nat), because foreign ops are permanently neutral in the kernel; this
 // test exercises what the theorem cannot:
 //   - `demo`    : the in-language round trip value (decodeGC (encodeGC (gc 2 1))),
-//                 which must observe 3 on js AND wasm.
+//     which must observe 3 on js AND wasm.
 //   - `demoBin` : the SAME round trip driven THROUGH the foreign Bin edge
-//                 (gcFromBin (gcToBin (gc 2 1))) -- the binCons fold + binAt walk
-//                 wrappers the kernel says nothing about -- which must also be 3.
+//     (gcFromBin (gcToBin (gc 2 1))) -- the binCons fold + binAt walk
+//     wrappers the kernel says nothing about -- which must also be 3.
+//
 // js runs under node; wasm under wasmtime (skipped when absent, like the other
 // wasm gates).
 func TestGCCodecRuns(t *testing.T) {

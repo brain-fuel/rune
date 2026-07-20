@@ -106,6 +106,7 @@ func TestMutualJSON(t *testing.T) {
 //     split). Without it these overflow the host stack at this depth.
 //   - erl: BEAM has native TCO, so the bounce is emitted as a direct tail call and the
 //     scheduler flattens it — byte-identical output, the passthrough path of IBounce.
+//
 // Slow (2M iterations × 8 backends + native/JVM compiles), so fingerprint-gated.
 func TestTrampolineDeep(t *testing.T) {
 	if testing.Short() {

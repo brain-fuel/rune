@@ -250,7 +250,9 @@ end
 main : Nat is
   NatElim (fn (x : Nat) is Nat end) zero (fn (k : Nat) (ih : Nat) is step k ih end) %d
 end`
-	sumBelow := func(n int64) string { return new(big.Int).Div(new(big.Int).Mul(big.NewInt(n), big.NewInt(n-1)), big.NewInt(2)).String() }
+	sumBelow := func(n int64) string {
+		return new(big.Int).Div(new(big.Int).Mul(big.NewInt(n), big.NewInt(n-1)), big.NewInt(2)).String()
+	}
 	outSmall, liveSmall := buildAndRunLLWithReport(t, fmt.Sprintf(src, 50), "main")
 	outBig, liveBig := buildAndRunLLWithReport(t, fmt.Sprintf(src, 5000), "main")
 	if outSmall != sumBelow(50) || outBig != sumBelow(5000) {
