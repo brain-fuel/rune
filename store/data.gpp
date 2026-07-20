@@ -223,61 +223,18 @@ func (s *Store) DataDeclOf(h core.Hash) (DataDecl, []core.Hash, core.Hash, bool)
 
 // replaceRef substitutes every Ref to `from` with a Ref to `to`.
 func replaceRef(t core.Tm, from, to core.Hash) core.Tm {
-	switch x := t.(type) {
-	case nil:
+	if t == nil {
 		return nil
-	case core.Var, core.Univ, core.Prop, core.Meta:
-		return t
-	case core.Ref:
-		if x.Hash == from {
-			return core.Ref{Hash: to}
-		}
-		return t
-	case core.Pi:
-		return core.Pi{Icit: x.Icit, Qty: x.Qty, Dom: replaceRef(x.Dom, from, to),
-			Cod: core.Scope{Name: x.Cod.Name, Body: replaceRef(x.Cod.Body, from, to)}}
-	case core.Lam:
-		return core.Lam{Icit: x.Icit, Qty: x.Qty,
-			Body: core.Scope{Name: x.Body.Name, Body: replaceRef(x.Body.Body, from, to)}}
-	case core.App:
-		return core.App{Fn: replaceRef(x.Fn, from, to), Arg: replaceRef(x.Arg, from, to), Icit: x.Icit}
-	case core.Let:
-		var ty core.Tm
-		if x.Ty != nil {
-			ty = replaceRef(x.Ty, from, to)
-		}
-		return core.Let{Ty: ty, Val: replaceRef(x.Val, from, to),
-			Body: core.Scope{Name: x.Body.Name, Body: replaceRef(x.Body.Body, from, to)}}
-	case core.Ann:
-		return core.Ann{Term: replaceRef(x.Term, from, to), Ty: replaceRef(x.Ty, from, to)}
-	case core.Eq:
-		return core.Eq{Ty: replaceRef(x.Ty, from, to), L: replaceRef(x.L, from, to), R: replaceRef(x.R, from, to)}
-	case core.Refl:
-		return core.Refl{Tm: replaceRef(x.Tm, from, to)}
-	case core.Cast:
-		return core.Cast{A: replaceRef(x.A, from, to), B: replaceRef(x.B, from, to),
-			P: replaceRef(x.P, from, to), X: replaceRef(x.X, from, to)}
-	case core.Subst:
-		return core.Subst{A: replaceRef(x.A, from, to), X: replaceRef(x.X, from, to),
-			Y: replaceRef(x.Y, from, to), Prf: replaceRef(x.Prf, from, to),
-			P: replaceRef(x.P, from, to), Px: replaceRef(x.Px, from, to)}
-	case core.Sig:
-		return core.Sig{Qty: x.Qty, Dom: replaceRef(x.Dom, from, to),
-			Cod: core.Scope{Name: x.Cod.Name, Body: replaceRef(x.Cod.Body, from, to)}}
-	case core.Pair:
-		return core.Pair{Dom: replaceRef(x.Dom, from, to),
-			Cod: core.Scope{Name: x.Cod.Name, Body: replaceRef(x.Cod.Body, from, to)},
-			A:   replaceRef(x.A, from, to), B: replaceRef(x.B, from, to)}
-	case core.Fst:
-		return core.Fst{P: replaceRef(x.P, from, to)}
-	case core.Snd:
-		return core.Snd{P: replaceRef(x.P, from, to)}
-	case core.NatLit:
-		// A compressed numeral: its N is a bigint and Zero/Succ are the builtin-nat
-		// ctor hashes, never a group-internal placeholder, so it carries no Ref to
-		// rewrite. (Reachable once a `mutual` group body holds a numeric literal.)
-		return t
-	default:
-		panic("store.replaceRef: unknown core term")
 	}
+	return core.TmTransform(t, func(u core.Tm) core.Tm {
+		match u {
+		case core.Ref(h):
+			if h == from {
+				return core.Ref(to)
+			}
+			return u
+		case _:
+			return u
+		}
+	})
 }
