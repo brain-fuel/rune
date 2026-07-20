@@ -1,4 +1,4 @@
-//go:generate go run goforge.dev/gpp/cmd/gpp@v0.11.0 gen .
+//go:generate go run goforge.dev/gpp/cmd/gpp@v0.14.0 gen .
 package core
 
 import (
