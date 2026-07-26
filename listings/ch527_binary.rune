@@ -101,6 +101,9 @@ modN : Nat -> Nat -> Nat is
   fn (a : Nat) (b : Nat) is monus a (mulN (divN a b) b) end
 end
 
+builtin natAdd addN
+builtin natMul mulN
+builtin natMonus monus
 builtin natDiv divN
 builtin natMod modN
 
